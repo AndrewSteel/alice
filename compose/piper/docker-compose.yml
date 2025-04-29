@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  wyoming-piper:
+    build: .
+    ports:
+      - "10200:10200"
+    command: [ "--voice", "de-thorsten-high" ]
+    container_name: alice-piper
+    restart: unless-stopped

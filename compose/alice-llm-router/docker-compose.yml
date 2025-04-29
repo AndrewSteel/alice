@@ -1,0 +1,13 @@
+services:
+  llm-router:
+    build: .
+    depends_on: [ollama]
+    container_name: alice-llm-router
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports: ["10400:10400"]

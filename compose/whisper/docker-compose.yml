@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  wyoming-whisper:
+    build: .
+    ports:
+      - "10300:10300"
+    command: [ "--model", "large-v2", "--language", "de", "--device", "cuda" ]
+    container_name: alice-whisper
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["compute", "utility", "graphics"]
+    restart: unless-stopped
