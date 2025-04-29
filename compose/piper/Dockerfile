@@ -14,10 +14,10 @@ RUN \
         python3 \
         python3-pip \
     \
-    && python -m pip install --no-cache-dir -U \
+    && python3 -m pip install --no-cache-dir -U \
         setuptools \
         wheel \
-    && python -m pip3 install --no-cache-dir \
+    && python3 -m pip install --no-cache-dir \
         "wyoming-piper @ https://github.com/rhasspy/wyoming-piper/archive/refs/tags/v${WYOMING_PIPER_VERSION}.tar.gz" \
     \
     && curl -L -s \
