@@ -19,7 +19,7 @@ RUN set -eux; \
     python3 -m venv /opt/venv; \
     \
     # 3. Pip & Co. im venv aktualisieren  
-    /opt/venv/bin/pip install --no-cache-dir -U pip setuptools wheel; \
+    /opt/venv/bin/pip install --no-cache-dir -U pip setuptools wheel hf_xet; \
     \
     # 4. Wyoming-Faster-Whisper installieren  
     /opt/venv/bin/pip install --no-cache-dir \
