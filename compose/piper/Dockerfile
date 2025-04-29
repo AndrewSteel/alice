@@ -1,9 +1,5 @@
 FROM debian:stable-slim
 
-# Architektur-Variablen
-ARG TARGETARCH
-ARG TARGETVARIANT
-
 # Versionen
 ARG WYOMING_PIPER_VERSION='1.5.2'
 ARG BINARY_PIPER_VERSION='2023.11.14-2'
@@ -28,7 +24,7 @@ RUN set -eux; \
         "wyoming-piper @ https://github.com/rhasspy/wyoming-piper/archive/refs/tags/v${WYOMING_PIPER_VERSION}.tar.gz"; \
     \
     # 5. Binaries von Piper ausrollen
-    curl -L "https://github.com/rhasspy/piper/releases/download/v${BINARY_PIPER_VERSION}/piper_${TARGETARCH}${TARGETVARIANT}.tar.gz" \
+    curl -L "https://github.com/rhasspy/piper/releases/download/v${BINARY_PIPER_VERSION}/piper_linux_x86_64.tar.gz" \
         | tar -zxvf - -C /usr/share; \
     \
     # 6. Cleanup
