@@ -5,7 +5,7 @@ services:
     build: .
     ports:
       - "10300:10300"
-    command: [ "--model", "large-v2", "--language", "de", "--device", "cuda" ]
+    command: [ "--model", "medium", "--language", "de", "--device", "cuda" ]
     container_name: alice-whisper
     runtime: nvidia
     deploy:

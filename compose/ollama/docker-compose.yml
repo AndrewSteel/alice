@@ -18,3 +18,4 @@ services:
       - ./models:/models
     ports:
       - "11434:11434"
+    restart: unless-stopped

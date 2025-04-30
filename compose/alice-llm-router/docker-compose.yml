@@ -10,4 +10,4 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    ports: ["10400:10400"]
+    ports: ["10500:10500"]
