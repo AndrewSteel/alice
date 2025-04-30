@@ -7,6 +7,8 @@ services:
       - "10300:10300"
     command: [ "--model", "medium", "--language", "de", "--device", "cuda" ]
     container_name: alice-whisper
+    environment:
+      - CT2_VERBOSE=-1
     runtime: nvidia
     deploy:
       resources:
