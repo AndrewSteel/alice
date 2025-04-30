@@ -5,6 +5,8 @@ services:
     build: .
     ports:
       - "10300:10300"
+    volumes:
+      - ./models:/data
     command: [ "--model", "medium", "--language", "de", "--device", "cuda" ]
     container_name: alice-whisper
     environment:
