@@ -385,4 +385,26 @@ All security findings from the initial QA remain unchanged. No new security issu
 </details>
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-02-24
+**Server:** ki.lan
+**Container:** `hassil-parser` (port 8001 internal, Docker networks: `automation`, `backend`)
+
+### Deployment Steps Performed
+
+1. Committed all code (10 files, `feat(PROJ-2)`)
+2. Synced compose files to server via `./sync-compose.sh`
+3. Built Docker image on server: `docker compose -f automations/hassil-parser/compose.yml build --no-cache`
+4. Started container: `docker compose -f automations/hassil-parser/compose.yml up -d`
+5. Verified `GET /health` → `{"status":"healthy"}`
+6. Ran `POST /intents/sync` → `{"inserted":55,"updated":0,"skipped":0,"duration_ms":11129}`
+7. Verified 55 templates written to `alice.ha_intent_templates` with `source='github'`
+
+### Post-Deployment Notes
+
+- `alice_user` password was set to match `.env` during deployment (password not in postgres before)
+- Domain column contains `{domain}_{IntentName}` format (e.g. `light_HassTurnOn`) — PROJ-3 must account for this when querying
+
+### Regression
+
+- PROJ-1 seed data unaffected (different domain+intent+language keys)
