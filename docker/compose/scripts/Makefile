@@ -11,6 +11,7 @@ STACKS ?= \
   infra/kanboard \
   data/database \
   automations/n8n \
+  automations/hassil-parser \
   automations/mqtt \
   automations/weaviate \
   ai/ollama \

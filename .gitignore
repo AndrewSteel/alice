@@ -23,6 +23,7 @@ docker/compose/infra/kanboard/.env
 docker/compose/infra/watchtower/.env
 docker/compose/data/database/.env
 docker/compose/automations/n8n/.env
+docker/compose/automations/hassil-parser/.env
 
 # Home Assistant configuration
 config/*

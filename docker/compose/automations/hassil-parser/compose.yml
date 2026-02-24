@@ -1,0 +1,29 @@
+services:
+  hassil-parser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hassil-parser
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8001/health || exit 1"]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    volumes:
+      - /srv/warm/n8n/inbox:/data_inbox
+    networks:
+      automation:
+        aliases: [hassil-parser]
+      backend:
+        aliases: [hassil-parser]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation
