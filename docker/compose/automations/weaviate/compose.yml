@@ -63,16 +63,15 @@ services:
     restart: unless-stopped
     networks: [app_int]
     environment:
-      # Optional: Auf GPU laufen lassen für schnellere Embeddings
       ENABLE_CUDA: "1"
       # NVIDIA_DISABLE_REQUIRE: "1"  # Falls nötig
-    # Optional: GPU-Zugriff (empfohlen für große Datenmengen)
+    # RTX 3090 (sm_86) — PyTorch im Image benötigt min. sm_70, TITAN X (sm_61) inkompatibel
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
+              device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"] # RTX 3090
               capabilities: ["gpu"]
     volumes:
       - /srv/hot/models/transformers:/root/.cache/huggingface
