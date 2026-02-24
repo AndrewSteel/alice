@@ -200,3 +200,14 @@ cd frontend && npm run build
 ```
 
 Access is restricted to VPN. Production host: `ki.lan`.
+
+---
+
+## Acknowledgements
+
+The development workflow for this project is based on the **[AI Coding Starter Kit](https://github.com/AlexPEClub/ai-coding-starter-kit)** by **Alex Sprogis**, adapted with some modifications for this project.
+
+Created by **Alex Sprogis** – AI Product Engineer & Content Creator.
+
+- [YouTube](https://www.youtube.com/@alex.sprogis)
+- [Website](https://alexsprogis.de)
