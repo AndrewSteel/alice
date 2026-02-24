@@ -43,7 +43,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
+              device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"] # RTX 3090 — TITAN X sm_61 fehlt in PyTorch arch list (sm_50/60/70+)
               capabilities: ["gpu"]
     volumes:
       - /srv/hot/models/clip:/root/.cache/huggingface
