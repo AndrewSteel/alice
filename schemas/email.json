@@ -1,0 +1,181 @@
+{
+  "class": "Email",
+  "description": "Archivierte E-Mails",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "betreff",
+      "description": "Betreff der E-Mail",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "absender",
+      "description": "Absender E-Mail-Adresse",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "absenderName",
+      "description": "Absender Name",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "empfaenger",
+      "description": "Empfänger E-Mail-Adresse(n)",
+      "dataType": ["text[]"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "cc",
+      "description": "CC-Empfänger",
+      "dataType": ["text[]"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "datum",
+      "description": "Datum und Uhrzeit der E-Mail",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "kategorie",
+      "description": "Kategorie: Geschäftlich, Privat, Newsletter, Bestellung, Support, etc.",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "wichtigkeit",
+      "description": "Wichtigkeit: niedrig, normal, hoch",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "hatAnhaenge",
+      "description": "Hat Anhänge",
+      "dataType": ["boolean"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "anhaenge",
+      "description": "Liste der Anhänge als JSON",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "inhalt",
+      "description": "E-Mail-Inhalt (Text)",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "zusammenfassung",
+      "description": "KI-generierte Zusammenfassung",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "threadId",
+      "description": "Thread-ID für Konversationsgruppierung",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "messageId",
+      "description": "Message-ID der E-Mail",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateiname",
+      "description": "Original-Dateiname (wenn als .eml gespeichert)",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateipfad",
+      "description": "Pfad zur archivierten Datei",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateiHash",
+      "description": "SHA256-Hash",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltVon",
+      "description": "User der die E-Mail archiviert hat",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltAm",
+      "description": "Zeitpunkt der Archivierung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    }
+  ]
+}

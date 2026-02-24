@@ -1,0 +1,298 @@
+{
+  "class": "WertpapierAbrechnung",
+  "description": "Wertpapier-Abrechnungen (Kauf, Verkauf, Dividenden, etc.)",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "transaktionsart",
+      "description": "Art: Kauf, Verkauf, Dividende, Ausschüttung, Spin-Off, Split, Einbuchung, Ausbuchung",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "bank",
+      "description": "Depotführende Bank/Broker",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "depotnummer",
+      "description": "Depotnummer (maskiert)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "wertpapierName",
+      "description": "Name des Wertpapiers",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "isin",
+      "description": "ISIN des Wertpapiers",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "wkn",
+      "description": "WKN des Wertpapiers",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "ticker",
+      "description": "Börsenkürzel/Ticker",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "wertpapierTyp",
+      "description": "Typ: Aktie, ETF, Fonds, Anleihe, Zertifikat, Option",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "handelsplatz",
+      "description": "Börse/Handelsplatz",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "transaktionsdatum",
+      "description": "Datum der Transaktion",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "valutadatum",
+      "description": "Valutadatum",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "stueckzahl",
+      "description": "Anzahl der Stücke",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "kurs",
+      "description": "Kurs pro Stück",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "kursWaehrung",
+      "description": "Währung des Kurses",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "kurswert",
+      "description": "Kurswert gesamt (Stück × Kurs)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "provision",
+      "description": "Provision/Ordergebühr",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    },
+    {
+      "name": "gebuehren",
+      "description": "Weitere Gebühren (Börse, etc.)",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    },
+    {
+      "name": "gesamtkosten",
+      "description": "Summe aller Kosten",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "abrechnungsbetrag",
+      "description": "Finaler Abrechnungsbetrag (Belastung/Gutschrift)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "abrechnungsWaehrung",
+      "description": "Währung der Abrechnung",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "wechselkurs",
+      "description": "Wechselkurs bei Fremdwährung",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    },
+    {
+      "name": "steuern",
+      "description": "Steuerdetails als JSON",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "quellensteuer",
+      "description": "Quellensteuer (bei Dividenden)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "kapitalertragsteuer",
+      "description": "Kapitalertragsteuer",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "solidaritaetszuschlag",
+      "description": "Solidaritätszuschlag",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    },
+    {
+      "name": "kirchensteuer",
+      "description": "Kirchensteuer",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    },
+    {
+      "name": "referenznummer",
+      "description": "Referenz-/Auftragsnummer",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "volltext",
+      "description": "Extrahierter Volltext",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "zusammenfassung",
+      "description": "KI-generierte Zusammenfassung",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "dateiname",
+      "description": "Original-Dateiname",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateipfad",
+      "description": "Pfad zur archivierten Datei",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateiHash",
+      "description": "SHA256-Hash der Datei",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltVon",
+      "description": "User der das Dokument hinzugefügt hat",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltAm",
+      "description": "Zeitpunkt der Erfassung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    }
+  ]
+}

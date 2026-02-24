@@ -1,0 +1,38 @@
+services:
+  gpu-jupyter:
+    image: cschranz/gpu-jupyter:v1.9_cuda-12.6_ubuntu-24.04_python-only
+    container_name: jupyter
+    restart: unless-stopped
+    networks:
+      - frontend
+    volumes:
+      - /srv/warm/jupyter:/home/jovyan/work
+      - /srv/hot/models/jupyter:/home/jovyan/.cache/huggingface
+
+    environment:
+      GRANT_SUDO: "no"
+      JUPYTER_ENABLE_LAB: "yes"
+      JUPYTER_TOKEN: "${JP_TOKEN}"
+      NB_UID: "${NB_UID}"
+      NB_GID: "${NB_GID}"
+      JUPYTERHUB_BASE_URL: "/"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # Variante A: alle GPUs
+              # count: all
+              # Variante B: gezielt eine GPU
+              device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"]
+              capabilities: ["gpu"]
+
+    # optional aber oft hilfreich für DL
+    shm_size: "2g"
+
+networks:
+  frontend:
+    external: true
+    name: frontend

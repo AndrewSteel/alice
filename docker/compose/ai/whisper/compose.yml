@@ -1,0 +1,44 @@
+services:
+  wyoming-whisper:
+    build:
+      context: .
+    restart: unless-stopped
+    container_name: wyoming-whisper
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    init: true
+    networks:
+      - frontend
+    ports:
+      - "10300:10300"
+    volumes:
+      - /srv/hot/whisper-models:/data
+    command: ["--model", "large-v3", "--language", "de", "--device", "cuda"]
+    environment:
+      - HF_HOME=/data/hf
+      - TRANSFORMERS_CACHE=/data/hf
+      - XDG_CACHE_HOME=/data/cache
+      - CT2_VERBOSE=-1
+      # ggf. bei Treiber-Gemecker:
+      # - NVIDIA_DISABLE_REQUIRE=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
+              capabilities: ["gpu"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import socket; socket.create_connection((''127.0.0.1'',10300),2).close()"',
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+networks:
+  frontend:
+    external: true
+    name: frontend

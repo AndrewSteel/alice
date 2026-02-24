@@ -1,0 +1,106 @@
+{
+  "class": "HAIntent",
+  "description": "Vectorized HA utterances for semantic intent matching (PROJ-1)",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "utterance",
+      "description": "Natural language phrase to vectorize (e.g. 'Wohnzimmerlicht einschalten')",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": false
+        }
+      }
+    },
+    {
+      "name": "entityId",
+      "description": "HA entity_id this utterance resolves to (e.g. light.wohnzimmer_decke)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "domain",
+      "description": "HA domain (e.g. light, switch, climate)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "service",
+      "description": "HA service to call (e.g. light.turn_on)",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "parameters",
+      "description": "Service call parameters as JSON string",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "language",
+      "description": "Language code of the utterance (e.g. de, en)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "intentTemplate",
+      "description": "Source intent template identifier (domain:intent, e.g. light:turn_on)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "certaintyThreshold",
+      "description": "Minimum cosine similarity required to accept this match",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    }
+  ]
+}

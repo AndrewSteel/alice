@@ -1,0 +1,77 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx
+    networks: [frontend, backend]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+      - /srv/warm/logs/nginx:/var/log/nginx
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /srv/warm/prometheus:/prometheus
+    networks: [frontend]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    restart: unless-stopped
+
+  node_exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node_exporter
+    pid: host
+    network_mode: host
+    volumes:
+      - /run/udev:/run/udev:ro
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /srv/hot/docker-root/:/var/lib/docker:ro
+    ports: ["8085:8080"]
+    restart: unless-stopped
+    networks: [frontend]
+
+  dcgm:
+    image: nvidia/dcgm-exporter:4.4.1-4.6.0-ubuntu22.04
+    container_name: dcgm
+    runtime: nvidia
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - DCGM_EXPORTER_LISTEN=0.0.0.0:9400
+      - DCGM_EXPORTER_COLLECTORS=/etc/dcgm-exporter/counters.csv
+    ports: ["9400:9400"]
+    volumes:
+      - ./dcgm-exporter/custom-counters.csv:/etc/dcgm-exporter/counters.csv:ro
+    restart: unless-stopped
+    networks: [frontend]
+
+networks:
+  frontend:
+    name: frontend
+    external: true
+  backend:
+    name: backend
+    external: true

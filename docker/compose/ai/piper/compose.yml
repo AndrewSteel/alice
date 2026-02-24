@@ -1,0 +1,19 @@
+services:
+  wyoming-piper:
+    build: .
+    container_name: wyoming-piper
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    volumes:
+      - /srv/hot/piper-voices:/data
+    ports:
+      - "10200:10200"
+    command: ["--voice", "de_DE-alice-high"]
+    restart: unless-stopped
+    networks:
+      - frontend
+
+networks:
+  frontend:
+    external: true
+    name: frontend

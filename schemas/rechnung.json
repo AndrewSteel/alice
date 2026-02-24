@@ -1,0 +1,196 @@
+{
+  "class": "Rechnung",
+  "description": "Rechnungen und Belege",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "rechnungsnummer",
+      "description": "Rechnungsnummer des Ausstellers",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "aussteller",
+      "description": "Name des Rechnungsausstellers/Firma",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "empfaenger",
+      "description": "Rechnungsempfänger",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "rechnungsdatum",
+      "description": "Datum der Rechnung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "faelligkeitsdatum",
+      "description": "Fälligkeitsdatum der Zahlung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "betragNetto",
+      "description": "Nettobetrag in EUR",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "betragBrutto",
+      "description": "Bruttobetrag in EUR",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "mwstSatz",
+      "description": "Mehrwertsteuersatz in Prozent",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "mwstBetrag",
+      "description": "Mehrwertsteuerbetrag in EUR",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false
+    },
+    {
+      "name": "waehrung",
+      "description": "Währung (default: EUR)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "kategorie",
+      "description": "Kategorie: Energie, Hardware, Software, Versicherung, Telekommunikation, Haushalt, etc.",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "zahlungsstatus",
+      "description": "Status: offen, bezahlt, storniert",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "zahlungsdatum",
+      "description": "Datum der Zahlung (falls bezahlt)",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "positionen",
+      "description": "Rechnungspositionen als JSON-String",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "volltext",
+      "description": "Extrahierter Volltext des Dokuments",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "zusammenfassung",
+      "description": "KI-generierte Zusammenfassung",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "dateiname",
+      "description": "Original-Dateiname",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateipfad",
+      "description": "Pfad zur archivierten Datei",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateiHash",
+      "description": "SHA256-Hash der Datei",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltVon",
+      "description": "User der das Dokument hinzugefügt hat",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltAm",
+      "description": "Zeitpunkt der Erfassung im System",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "aktualisiertAm",
+      "description": "Letzte Aktualisierung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    }
+  ]
+}

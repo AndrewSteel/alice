@@ -1,0 +1,82 @@
+# artifacts
+__pycache__
+.pytest*
+*.egg-info
+*/build/*
+*/dist/*
+
+# misc
+.coverage
+coverage.xml
+.ruff_cache
+
+# Environment-Dateien mit Secrets
+.env
+.env.local
+.env.production
+.env.n8n
+
+# Docker Compose .env files (contain credentials)
+docker/compose/ai/jupyter/.env
+docker/compose/infra/gotify/.env
+docker/compose/infra/kanboard/.env
+docker/compose/infra/watchtower/.env
+docker/compose/data/database/.env
+docker/compose/automations/n8n/.env
+
+# Home Assistant configuration
+config/*
+!config/configuration.yaml
+
+secrets.yaml
+*.db
+*.db-shm
+*.db-wal
+.storage/
+*.pyc
+
+# ============================================================
+# Alice - .gitignore Ergänzungen
+# ============================================================
+
+# Persönliche Daten / Seed-Files
+sql/seed-users.sql
+seed-users.sql
+
+# Passwort-Dateien
+*.password
+passwords.txt
+docker/compose/automations/mqtt/config/passwordfile
+
+# Build-Artefakte (nginx html)
+docker/compose/infra/nginx/html/finance_upload/
+
+# Lokale Konfigurationen
+config.local.json
+settings.local.yaml
+.mcp.json
+
+# Logs
+logs/
+*.log
+
+# Node.js (Frontend)
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# IDE
+.vscode/
+.claude/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup-Dateien
+*.bak
+*.backup
+*.sql.bak

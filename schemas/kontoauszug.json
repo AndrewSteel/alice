@@ -1,0 +1,206 @@
+{
+  "class": "Kontoauszug",
+  "description": "Bankauszüge und Kontobewegungen",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "bankName",
+      "description": "Name der Bank",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "kontonummer",
+      "description": "Kontonummer (maskiert: ****1234)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "iban",
+      "description": "IBAN (maskiert)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "bic",
+      "description": "BIC der Bank",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "kontoinhaber",
+      "description": "Name des Kontoinhabers",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "auszugsnummer",
+      "description": "Nummer des Auszugs",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "auszugsdatum",
+      "description": "Datum des Auszugs",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "zeitraumVon",
+      "description": "Beginn des Auszugszeitraums",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "zeitraumBis",
+      "description": "Ende des Auszugszeitraums",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "anfangssaldo",
+      "description": "Saldo zu Beginn",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "endsaldo",
+      "description": "Saldo am Ende",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "waehrung",
+      "description": "Währung des Kontos",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "anzahlBuchungen",
+      "description": "Anzahl der Buchungen im Zeitraum",
+      "dataType": ["int"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "summeEingaenge",
+      "description": "Summe aller Eingänge",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "summeAusgaenge",
+      "description": "Summe aller Ausgänge",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "buchungen",
+      "description": "Einzelbuchungen als JSON-Array",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "volltext",
+      "description": "Extrahierter Volltext",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "zusammenfassung",
+      "description": "KI-generierte Zusammenfassung",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "dateiname",
+      "description": "Original-Dateiname",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateipfad",
+      "description": "Pfad zur archivierten Datei",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateiHash",
+      "description": "SHA256-Hash der Datei",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltVon",
+      "description": "User der das Dokument hinzugefügt hat",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltAm",
+      "description": "Zeitpunkt der Erfassung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    }
+  ]
+}

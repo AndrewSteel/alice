@@ -1,0 +1,48 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_SECURE_COOKIE=false
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_METRICS=true
+      - N8N_METRICS_INCLUDE_MESSAGE_EVENT_BUS_METRICS=true
+      - N8N_METRICS_INCLUDE_WORKFLOW_ID_LABEL=true
+      - N8N_METRICS_QUEUE_METRICS_INTERVAL=15
+      - QUEUE_HEALTH_CHECK_ACTIVE=true
+      - N8N_BASIC_AUTH_USER="${USER}"
+      - N8N_BASIC_AUTH_PASSWORD="${PASSWORD}"
+      - WEBHOOK_URL=https://alice.happy-mining.de
+      - NODE_FUNCTION_ALLOW_EXTERNAL=axios
+      # PROJ-1: HA Intent Infrastructure (2026-02-24)
+      - INTENT_MIN_CERTAINTY=0.82
+      - INTENT_MAX_RESULTS=3
+      - OLLAMA_MODEL=qwen3:14b
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    volumes:
+      - /srv/warm/n8n/data:/home/node/.n8n
+      - /srv/warm/n8n/inbox:/data_inbox
+    networks:
+      frontend:
+        aliases: [n8n]
+      backend:
+        aliases: [n8n]
+      automation:
+        aliases: [n8n]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  frontend:
+    external: true
+    name: frontend
+  automation:
+    external: true
+    name: automation

@@ -1,0 +1,96 @@
+services:
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.33.0
+    container_name: weaviate
+    restart: unless-stopped
+    depends_on:
+      - multi2vec-clip
+      - t2v-transformers
+    networks: [app_int, backend, automation]
+    environment:
+      ENABLE_MODULES: "multi2vec-clip,text2vec-transformers"
+
+      CLIP_INFERENCE_API: "http://multi2vec-clip:8080"
+      TRANSFORMERS_INFERENCE_API: "http://t2v-transformers:8080"
+
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      QUERY_DEFAULTS_LIMIT: "25"
+      CLUSTER_HOSTNAME: "node1"
+    volumes:
+      - /srv/warm/weaviate:/var/lib/weaviate
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider http://localhost:8080/v1/.well-known/ready || wget -q --spider http://localhost:8080/v1/meta || exit 1",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  multi2vec-clip:
+    image: cr.weaviate.io/semitechnologies/multi2vec-clip:sentence-transformers-clip-ViT-B-32-multilingual-v1
+    container_name: weaviate-multi2vec
+    restart: unless-stopped
+    networks: [app_int]
+    environment:
+      ENABLE_CUDA: "1"
+      # Wenn der Container wegen Treiber-"Require" meckert, entkommentieren:
+      # NVIDIA_DISABLE_REQUIRE: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
+              capabilities: ["gpu"]
+    volumes:
+      - /srv/hot/models/clip:/root/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import socket; socket.create_connection((''localhost'',8080),2).close()"',
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  t2v-transformers:
+    image: cr.weaviate.io/semitechnologies/transformers-inference:sentence-transformers-paraphrase-multilingual-MiniLM-L12-v2
+    container_name: weaviate-transformers
+    restart: unless-stopped
+    networks: [app_int]
+    environment:
+      # Optional: Auf GPU laufen lassen für schnellere Embeddings
+      ENABLE_CUDA: "1"
+      # NVIDIA_DISABLE_REQUIRE: "1"  # Falls nötig
+    # Optional: GPU-Zugriff (empfohlen für große Datenmengen)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
+              capabilities: ["gpu"]
+    volumes:
+      - /srv/hot/models/transformers:/root/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import socket; socket.create_connection((''localhost'',8080),2).close()"',
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+networks:
+  app_int:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

@@ -1,0 +1,240 @@
+{
+  "class": "Vertrag",
+  "description": "Verträge und vertragliche Dokumente",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "titel",
+      "description": "Titel/Bezeichnung des Vertrags",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "vertragsart",
+      "description": "Art: Mietvertrag, Arbeitsvertrag, Versicherung, Mobilfunk, Internet, Strom, Gas, Abo, Kaufvertrag, etc.",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "vertragspartner",
+      "description": "Vertragspartner/Anbieter",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "vertragsnummer",
+      "description": "Vertragsnummer/Kundennummer",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "vertragsgegenstand",
+      "description": "Gegenstand des Vertrags",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "abschlussdatum",
+      "description": "Datum des Vertragsabschlusses",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "vertragsbeginn",
+      "description": "Beginn der Vertragslaufzeit",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "vertragsende",
+      "description": "Ende der Vertragslaufzeit (oder NULL bei unbefristet)",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "kuendigungsfrist",
+      "description": "Kündigungsfrist in Tagen/Monaten",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "naechsteKuendigungMoeglich",
+      "description": "Nächstmöglicher Kündigungstermin",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "automatischeVerlaengerung",
+      "description": "Automatische Verlängerung aktiv",
+      "dataType": ["boolean"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "verlaengerungszeitraum",
+      "description": "Verlängerungszeitraum (z.B. '12 Monate')",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "monatlicheKosten",
+      "description": "Monatliche Kosten",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "jaehrlicheKosten",
+      "description": "Jährliche Kosten",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "waehrung",
+      "description": "Währung",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "zahlungsrhythmus",
+      "description": "Zahlungsrhythmus: monatlich, quartalsweise, jaehrlich, einmalig",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "zahlungsmethode",
+      "description": "Zahlungsmethode: Lastschrift, Überweisung, Kreditkarte",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "status",
+      "description": "Status: aktiv, gekuendigt, ausgelaufen, ruhend",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "notizen",
+      "description": "Eigene Notizen zum Vertrag",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "volltext",
+      "description": "Extrahierter Volltext",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "zusammenfassung",
+      "description": "KI-generierte Zusammenfassung",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "dateiname",
+      "description": "Original-Dateiname",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateipfad",
+      "description": "Pfad zur archivierten Datei",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "dateiHash",
+      "description": "SHA256-Hash der Datei",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltVon",
+      "description": "User der das Dokument hinzugefügt hat",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "erstelltAm",
+      "description": "Zeitpunkt der Erfassung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "aktualisiertAm",
+      "description": "Letzte Aktualisierung",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    }
+  ]
+}

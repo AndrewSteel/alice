@@ -1,0 +1,18 @@
+services:
+  gotify:
+    image: gotify/server:latest
+    container_name: gotify
+    restart: unless-stopped
+    volumes:
+      - /srv/warm/gotify:/app/data
+    environment:
+      - TZ=Europe/Berlin
+      # Initiale Zugangsdaten (nach erstem Start im Webinterface ändern!)
+      - GOTIFY_DEFAULTUSER_NAME="${GTF_NAME}"
+      - GOTIFY_DEFAULTUSER_PASS="${GTF_PASS}"
+    networks:
+      - backend
+
+networks:
+  backend:
+    external: true

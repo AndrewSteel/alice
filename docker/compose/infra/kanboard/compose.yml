@@ -1,0 +1,52 @@
+services:
+  kanboard:
+    image: kanboard/kanboard:latest
+    container_name: kanboard
+    restart: unless-stopped
+
+    # Kanboard lauscht intern auf Port 80 (kein Port-Mapping nötig, Nginx macht das)
+    networks:
+      frontend:
+        aliases:
+          - kanboard
+      backend:
+        aliases:
+          - kanboard-db-client
+
+    # Persistente Daten (Uploads, Config, Plugins)
+    volumes:
+      - /srv/warm/kanboard/data:/var/www/app/data
+      - /srv/warm/kanboard/plugins:/var/www/app/plugins
+    #  - ./nginx/kanboard-nginx.conf:/etx/nginx/nginx.conf:ro
+
+    tmpfs:
+      - /etc/nginx/ssl:rw,noexec,nosuid,size=10m
+
+    environment:
+      # Öffentliche URL von Kanboard (wird z.B. in Links verwendet)
+      - KANBOARD_URL=https://kanboard.happy-mining.de
+
+      # Plugin-Installation über WebUI erlauben (kannst du auf false setzen, wenn dir unwohl ist)
+      - PLUGIN_INSTALLER=false
+
+      # PostgreSQL-URL – WICHTIG:
+      #  - Nutzer "kanboard" muss in deinem bestehenden Postgres existieren
+      #  - DB "kanboard" muss existieren
+      #  - Host "postgres" muss im backend-Netz auf deinen DB-Container zeigen
+      - DATABASE_URL=postgres://${KANBOARD_DB_USER}:${KANBOARD_DB_PASS}@postgres:5432/${KANBOARD_DB_NAME}
+
+    # Healthcheck direkt am Kanboard-Container
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthcheck.php >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+networks:
+  frontend:
+    external: true
+    name: frontend
+  backend:
+    external: true
+    name: backend
