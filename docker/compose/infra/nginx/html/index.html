@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Services Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .services {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .service-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .service-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+        }
+        
+        .service-card h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+        
+        .service-card p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        
+        .service-card a {
+            display: inline-block;
+            padding: 10px 25px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 25px;
+            transition: opacity 0.3s;
+            font-weight: 500;
+        }
+        
+        .service-card a:hover {
+            opacity: 0.9;
+        }
+        
+        .icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 Services Dashboard</h1>
+        <div class="services">
+            <div class="service-card">
+                <div class="icon">🔄</div>
+                <h2>n8n</h2>
+                <p>Workflow Automation</p>
+                <a href="https://n8n.happy-mining.de">Öffnen</a>
+            </div>
+            
+            <div class="service-card">
+                <div class="icon">🏡</div>
+                <h2>Open WebUI</h2>
+                <p>OpenWebUI</p>
+                <a href="https://openwebui.happy-mining.de">Öffnen</a>
+            </div>
+
+            <div class="service-card">
+                <div class="icon">🏡</div>
+                <h2>Home Assistant</h2>
+                <p>Smart Home</p>
+                <a href="https://homeassistant.happy-mining.de">Öffnen</a>
+            </div>
+
+            <div class="service-card">
+                <div class="icon">🏡</div>
+                <h2>Home Assistant Development</h2>
+                <p>Smart Home Development</p>
+                <a href="https://hassdev.happy-mining.de">Öffnen</a>
+            </div>
+            
+            <!-- Weitere Services hier hinzufügen -->
+            <div class="service-card">
+                <div class="icon">🏡</div>
+                <h2>Kanboard</h2>
+                <p>Kanban Management</p>
+                <a href="https://kanboard.happy-mining.de">Öffnen</a>
+            </div>
+
+            <div class="service-card">
+                <div class="icon">🏡</div>
+                <h2>Jupyter</h2>
+                <p>Jupyter Notebook</p>
+                <a href="https://jupyter.happy-mining.de">Öffnen</a>
+            </div>
+            
+            <div class="service-card">
+                <div class="icon">➕</div>
+                <h2>Finance Upload</h2>
+                <p>Wertpapier PDF hochladen</p>
+                <a href="finance_upload/index.html">Öffnen</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

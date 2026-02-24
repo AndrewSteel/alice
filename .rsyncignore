@@ -1,0 +1,10 @@
+# Secrets
+# .env
+# **/.env
+
+# Runtime / volatile
+infra/nginx/logs/**
+**/*.log
+
+# Server-generated secrets (keep server-side)
+automations/mqtt/config/passwordfile

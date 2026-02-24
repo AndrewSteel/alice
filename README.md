@@ -1,1 +1,2 @@
-# alice
+# ALICE - ArtificiaL Intelligence Communication Engine
+

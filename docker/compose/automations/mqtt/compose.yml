@@ -1,0 +1,25 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config:/mosquitto/config:ro
+      - /srv/warm/mqtt/data:/mosquitto/data
+      - /srv/warm/logs/mqtt:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      backend:
+        aliases: [mqtt]
+      automation:
+        aliases: [mqtt]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

@@ -1,0 +1,13 @@
+networks:
+  frontend:
+    name: frontend
+    driver: bridge
+    attachable: true
+  backend:
+    name: backend
+    driver: bridge
+    attachable: true
+  automation:
+    name: automation
+    driver: bridge
+    attachable: true

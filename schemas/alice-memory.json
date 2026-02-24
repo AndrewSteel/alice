@@ -1,0 +1,110 @@
+{
+  "class": "AliceMemory",
+  "description": "Langzeit-Erinnerungen des Alice-Assistenten (Tier 2 Memory)",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "sessionId",
+      "description": "UUID der ursprünglichen Session",
+      "dataType": ["uuid"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "userId",
+      "description": "Username des Users",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "content",
+      "description": "Inhalt der Nachricht oder Zusammenfassung",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": false
+        }
+      }
+    },
+    {
+      "name": "role",
+      "description": "Rolle: user, assistant, system, summary",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "messageType",
+      "description": "Typ: message, summary, fact, preference",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "importance",
+      "description": "Wichtigkeit 0.0-1.0 (für Priorisierung bei Retrieval)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "topics",
+      "description": "Extrahierte Themen/Tags",
+      "dataType": ["text[]"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+    {
+      "name": "timestamp",
+      "description": "Ursprünglicher Zeitstempel",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "transferredAt",
+      "description": "Zeitpunkt des Transfers von PostgreSQL",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    },
+    {
+      "name": "postgresMessageId",
+      "description": "Original-ID aus PostgreSQL (für Referenz)",
+      "dataType": ["int"],
+      "indexFilterable": true,
+      "indexSearchable": false
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+services:
+  openwebui:
+    build: .
+    container_name: openwebui
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    environment:
+      # Spricht mit deinem Ollama-Container
+      - OLLAMA_BASE_URL=http://ollama-3090:11434
+      # Zeitzone & Basis-Setup
+      - TZ=Europe/Berlin
+      # Optional: Wenn du KEIN OpenAI-Proxy brauchst, false lassen
+      - ENABLE_OPENAI_API=false
+      # (Optional) Name/Branding der Weboberfläche
+      - WEBUI_NAME=OpenWebUI
+    volumes:
+      # Persistente App-Daten (User, Chats, RAG, Settings)
+      - /srv/warm/openwebui:/app/backend/data
+    restart: unless-stopped
+    networks:
+      - frontend
+
+networks:
+  frontend:
+    external: true
+    name: frontend
