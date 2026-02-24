@@ -371,7 +371,7 @@ Three variables are added to n8n's configuration (not to any workflow logic — 
 
 3. **Weaviate HAIntent collection** — Created via `POST /v1/schema` from within weaviate container. Collection verified with `GET /v1/schema/HAIntent`.
 
-4. **AC-6 — Weaviate nearText test** — REST insert succeeded (HTTP 200) but vectorization fails due to pre-existing CUDA incompatibility: `weaviate-transformers` container requires PyTorch sm_70+, TITAN X Pascal is sm_61. This affects all Weaviate collections including `AliceMemory` (pre-existing, not introduced by PROJ-1). **Unblocking action required: upgrade `weaviate-transformers` image to a CPU or sm_61-compatible build (tracked separately).**
+4. **AC-6 — Weaviate nearText test** — `t2v-transformers` container moved from TITAN X (sm_61, incompatible with PyTorch min. sm_70) to RTX 3090 (sm_86). After restart: insert HTTP 200, nearText query returned match with certainty 0.976 — well above the 0.82 threshold. `multi2vec-clip` remains on TITAN X (unaffected). ✅
 
 5. **n8n environment variables** — Added to `/srv/compose/automations/n8n/compose.yml` and container recreated:
    - `INTENT_MIN_CERTAINTY=0.82` ✅
