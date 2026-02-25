@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-02-25T09:40:54.680Z",
+  "updatedAt": "2026-02-25T19:26:00.942Z",
   "createdAt": "2025-10-08T13:43:05.174Z",
   "id": "ZYaMfLlmnkZrX2G5",
   "name": "alice-chat-handler",
@@ -282,7 +282,8 @@
           "id": "postgres-alice",
           "name": "Alice PostgreSQL"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -377,7 +378,8 @@
           "id": "postgres-alice",
           "name": "Alice PostgreSQL"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -505,7 +507,8 @@
           "id": "postgres-alice",
           "name": "Alice PostgreSQL"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -574,7 +577,8 @@
           "id": "postgres-alice",
           "name": "Alice PostgreSQL"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -617,7 +621,8 @@
           "id": "postgres-alice",
           "name": "Alice PostgreSQL"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -660,6 +665,70 @@
           "id": "postgres-alice",
           "name": "Alice PostgreSQL"
         }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "node-mqtt-err-ha",
+      "name": "MQTT Error HA Fast",
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -608
+      ],
+      "credentials": {
+        "mqtt": {
+          "id": "mqtt-local",
+          "name": "mqtt-local"
+        }
+      },
+      "parameters": {
+        "topic": "alice/errors/db",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ path: \"HA_FAST\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
+      }
+    },
+    {
+      "id": "node-mqtt-err-hybrid",
+      "name": "MQTT Error Hybrid",
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -304
+      ],
+      "credentials": {
+        "mqtt": {
+          "id": "mqtt-local",
+          "name": "mqtt-local"
+        }
+      },
+      "parameters": {
+        "topic": "alice/errors/db",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ path: \"HYBRID\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
+      }
+    },
+    {
+      "id": "node-mqtt-err-llm",
+      "name": "MQTT Error LLM",
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -80
+      ],
+      "credentials": {
+        "mqtt": {
+          "id": "mqtt-local",
+          "name": "mqtt-local"
+        }
+      },
+      "parameters": {
+        "topic": "alice/errors/db",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ path: \"LLM_ONLY\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.__sessionId, user_id: $json.__userId, timestamp: Date.now() }) }}"
       }
     }
   ],
@@ -780,6 +849,11 @@
             "node": "Format Response HA Fast",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Insert User Msg HA Fast",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -797,13 +871,7 @@
     },
     "Respond HA Fast": {
       "main": [
-        [
-          {
-            "node": "Insert User Msg HA Fast",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Insert User Msg HA Fast": {
@@ -811,6 +879,13 @@
         [
           {
             "node": "DB Insert HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQTT Error HA Fast",
             "type": "main",
             "index": 0
           }
@@ -832,6 +907,11 @@
       "main": [
         [
           {
+            "node": "Format Response Hybrid",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Insert User Msg Hybrid",
             "type": "main",
             "index": 0
@@ -847,14 +927,22 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "MQTT Error Hybrid",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "DB Insert Hybrid": {
       "main": [
+        [],
         [
           {
-            "node": "Format Response Hybrid",
+            "node": "MQTT Error Hybrid",
             "type": "main",
             "index": 0
           }
@@ -909,6 +997,11 @@
       "main": [
         [
           {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Insert User Msg LLM",
             "type": "main",
             "index": 0
@@ -924,14 +1017,22 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "MQTT Error LLM",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "DB Insert LLM": {
       "main": [
+        [],
         [
           {
-            "node": "Code in JavaScript",
+            "node": "MQTT Error LLM",
             "type": "main",
             "index": 0
           }
@@ -948,6 +1049,28 @@
           }
         ]
       ]
+    },
+    "DB Insert HA Fast": {
+      "main": [
+        [],
+        [
+          {
+            "node": "MQTT Error HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Hybrid": {
+      "main": [
+        []
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
     }
   },
   "settings": {
@@ -960,15 +1083,15 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "b20be636-5b87-4e9f-a5fb-c2c0514b23be",
-  "activeVersionId": "b20be636-5b87-4e9f-a5fb-c2c0514b23be",
-  "versionCounter": 104,
+  "versionId": "02fdef7d-8a59-4f7c-a316-ccb27cc6e74a",
+  "activeVersionId": "02fdef7d-8a59-4f7c-a316-ccb27cc6e74a",
+  "versionCounter": 131,
   "triggerCount": 1,
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-02-25T09:40:54.681Z",
-    "createdAt": "2026-02-25T09:40:54.681Z",
-    "versionId": "b20be636-5b87-4e9f-a5fb-c2c0514b23be",
+    "updatedAt": "2026-02-25T19:26:00.943Z",
+    "createdAt": "2026-02-25T19:26:00.943Z",
+    "versionId": "02fdef7d-8a59-4f7c-a316-ccb27cc6e74a",
     "workflowId": "ZYaMfLlmnkZrX2G5",
     "nodes": [
       {
@@ -1246,7 +1369,8 @@
             "id": "postgres-alice",
             "name": "Alice PostgreSQL"
           }
-        }
+        },
+        "onError": "continueErrorOutput"
       },
       {
         "parameters": {
@@ -1341,7 +1465,8 @@
             "id": "postgres-alice",
             "name": "Alice PostgreSQL"
           }
-        }
+        },
+        "onError": "continueErrorOutput"
       },
       {
         "parameters": {
@@ -1469,7 +1594,8 @@
             "id": "postgres-alice",
             "name": "Alice PostgreSQL"
           }
-        }
+        },
+        "onError": "continueErrorOutput"
       },
       {
         "parameters": {
@@ -1538,7 +1664,8 @@
             "id": "postgres-alice",
             "name": "Alice PostgreSQL"
           }
-        }
+        },
+        "onError": "continueErrorOutput"
       },
       {
         "parameters": {
@@ -1581,7 +1708,8 @@
             "id": "postgres-alice",
             "name": "Alice PostgreSQL"
           }
-        }
+        },
+        "onError": "continueErrorOutput"
       },
       {
         "parameters": {
@@ -1624,6 +1752,70 @@
             "id": "postgres-alice",
             "name": "Alice PostgreSQL"
           }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "id": "node-mqtt-err-ha",
+        "name": "MQTT Error HA Fast",
+        "type": "n8n-nodes-base.mqtt",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          -608
+        ],
+        "credentials": {
+          "mqtt": {
+            "id": "mqtt-local",
+            "name": "mqtt-local"
+          }
+        },
+        "parameters": {
+          "topic": "alice/errors/db",
+          "sendInputData": false,
+          "message": "={{ JSON.stringify({ path: \"HA_FAST\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
+        }
+      },
+      {
+        "id": "node-mqtt-err-hybrid",
+        "name": "MQTT Error Hybrid",
+        "type": "n8n-nodes-base.mqtt",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          -304
+        ],
+        "credentials": {
+          "mqtt": {
+            "id": "mqtt-local",
+            "name": "mqtt-local"
+          }
+        },
+        "parameters": {
+          "topic": "alice/errors/db",
+          "sendInputData": false,
+          "message": "={{ JSON.stringify({ path: \"HYBRID\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
+        }
+      },
+      {
+        "id": "node-mqtt-err-llm",
+        "name": "MQTT Error LLM",
+        "type": "n8n-nodes-base.mqtt",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          -80
+        ],
+        "credentials": {
+          "mqtt": {
+            "id": "mqtt-local",
+            "name": "mqtt-local"
+          }
+        },
+        "parameters": {
+          "topic": "alice/errors/db",
+          "sendInputData": false,
+          "message": "={{ JSON.stringify({ path: \"LLM_ONLY\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.__sessionId, user_id: $json.__userId, timestamp: Date.now() }) }}"
         }
       }
     ],
@@ -1744,6 +1936,11 @@
               "node": "Format Response HA Fast",
               "type": "main",
               "index": 0
+            },
+            {
+              "node": "Insert User Msg HA Fast",
+              "type": "main",
+              "index": 0
             }
           ]
         ]
@@ -1761,13 +1958,7 @@
       },
       "Respond HA Fast": {
         "main": [
-          [
-            {
-              "node": "Insert User Msg HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ]
+          []
         ]
       },
       "Insert User Msg HA Fast": {
@@ -1775,6 +1966,13 @@
           [
             {
               "node": "DB Insert HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "MQTT Error HA Fast",
               "type": "main",
               "index": 0
             }
@@ -1796,6 +1994,11 @@
         "main": [
           [
             {
+              "node": "Format Response Hybrid",
+              "type": "main",
+              "index": 0
+            },
+            {
               "node": "Insert User Msg Hybrid",
               "type": "main",
               "index": 0
@@ -1811,14 +2014,22 @@
               "type": "main",
               "index": 0
             }
+          ],
+          [
+            {
+              "node": "MQTT Error Hybrid",
+              "type": "main",
+              "index": 0
+            }
           ]
         ]
       },
       "DB Insert Hybrid": {
         "main": [
+          [],
           [
             {
-              "node": "Format Response Hybrid",
+              "node": "MQTT Error Hybrid",
               "type": "main",
               "index": 0
             }
@@ -1873,6 +2084,11 @@
         "main": [
           [
             {
+              "node": "Code in JavaScript",
+              "type": "main",
+              "index": 0
+            },
+            {
               "node": "Insert User Msg LLM",
               "type": "main",
               "index": 0
@@ -1888,14 +2104,22 @@
               "type": "main",
               "index": 0
             }
+          ],
+          [
+            {
+              "node": "MQTT Error LLM",
+              "type": "main",
+              "index": 0
+            }
           ]
         ]
       },
       "DB Insert LLM": {
         "main": [
+          [],
           [
             {
-              "node": "Code in JavaScript",
+              "node": "MQTT Error LLM",
               "type": "main",
               "index": 0
             }
@@ -1911,6 +2135,28 @@
               "index": 0
             }
           ]
+        ]
+      },
+      "DB Insert HA Fast": {
+        "main": [
+          [],
+          [
+            {
+              "node": "MQTT Error HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Respond Hybrid": {
+        "main": [
+          []
+        ]
+      },
+      "Respond to Webhook": {
+        "main": [
+          []
         ]
       }
     },
