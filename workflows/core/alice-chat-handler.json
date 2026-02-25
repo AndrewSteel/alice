@@ -1,0 +1,1922 @@
+{
+  "updatedAt": "2026-02-25T09:40:54.680Z",
+  "createdAt": "2025-10-08T13:43:05.174Z",
+  "id": "ZYaMfLlmnkZrX2G5",
+  "name": "alice-chat-handler",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "v1/chat/completions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1340,
+        -192
+      ],
+      "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
+      "name": "Webhook",
+      "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\nconst userId = body.user_id || 'andreas';\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        -192
+      ],
+      "id": "node-input-validator",
+      "name": "Input Validator"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "error-check",
+              "leftValue": "={{ $json.__error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -944,
+        -192
+      ],
+      "id": "node-early-exit",
+      "name": "Empty Input Check"
+    },
+    {
+      "parameters": {
+        "jsCode": "const errorMsg = $json.errorMsg || 'Ungültige Eingabe.';\nconst now = Math.floor(Date.now() / 1000);\nreturn [{ json: {\n  id: 'chatcmpl-err-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice',\n  choices: [{ index: 0, message: { role: 'assistant', content: errorMsg }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        -80
+      ],
+      "id": "node-error-response",
+      "name": "Error Response"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -544,
+        -80
+      ],
+      "id": "node-error-respond",
+      "name": "Respond Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => p.replace(FILLER, '').trim())\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        -304
+      ],
+      "id": "node-sentence-splitter",
+      "name": "Sentence Splitter"
+    },
+    {
+      "parameters": {
+        "jsCode": "const CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = parseFloat($env.INTENT_MIN_CERTAINTY || '0.82');\nconst MAX_RESULTS = parseInt($env.INTENT_MAX_RESULTS || '3');\nconst WEAVIATE_URL = $env.WEAVIATE_URL || 'http://weaviate:8080';\n\nconst parts = $json.parts || [$json.userMessage];\n\nfunction sanitizeForGql(str) {\n  return str.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500);\n}\n\nasync function queryIntent(part) {\n  const concept = sanitizeForGql(part);\n  const gql = `{ Get { HAIntent( nearText: { concepts: [\"${concept}\"] }, limit: ${MAX_RESULTS} ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }`;\n  try {\n    const response = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${WEAVIATE_URL}/v1/graphql`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ query: gql }),\n      timeout: 3000\n    });\n    const data = typeof response === 'string' ? JSON.parse(response) : response;\n    const candidates = data?.data?.Get?.HAIntent || [];\n    const qualified = candidates\n      .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n      .sort((a, b) => {\n        const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n        if (Math.abs(certDiff) > 0.001) return certDiff;\n        return (b.priority || 0) - (a.priority || 0);\n      });\n    const best = qualified[0];\n    if (best) {\n      return {\n        part,\n        matched: true,\n        certainty: best._additional.certainty,\n        entityId: best.entityId,\n        domain: best.domain,\n        service: best.service,\n        parameters: best.parameters ? JSON.parse(best.parameters) : {},\n        intentTemplate: best.intentTemplate,\n        requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n      };\n    }\n    return { part, matched: false, certainty: candidates[0]?._additional?.certainty || 0 };\n  } catch (err) {\n    return { part, matched: false, certainty: 0, weaviateError: true };\n  }\n}\n\nconst results = await Promise.all(parts.map(p => queryIntent(p)));\nconst matchedCount = results.filter(r => r.matched).length;\nconst weaviateDown = results.every(r => r.weaviateError);\n\nlet pathDecision;\nif (weaviateDown || matchedCount === 0) pathDecision = 'LLM_ONLY';\nelse if (matchedCount === results.length) pathDecision = 'HA_FAST';\nelse pathDecision = 'HYBRID';\n\nreturn [{ json: { ...($json), intentResults: results, matchedCount, totalCount: results.length, pathDecision, weaviateDown } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        -304
+      ],
+      "id": "node-intent-lookup",
+      "name": "Intent Lookup"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "leftValue": "",
+                  "rightValue": ""
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "ha-fast-cond",
+                    "leftValue": "={{ $json.pathDecision }}",
+                    "rightValue": "HA_FAST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": "HA_FAST"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "leftValue": "",
+                  "rightValue": ""
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "hybrid-cond",
+                    "leftValue": "={{ $json.pathDecision }}",
+                    "rightValue": "HYBRID",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": "HYBRID"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "leftValue": "",
+                  "rightValue": ""
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "llm-only-cond",
+                    "leftValue": "={{ $json.pathDecision }}",
+                    "rightValue": "LLM_ONLY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": "LLM_ONLY"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -304,
+        -304
+      ],
+      "id": "node-path-router",
+      "name": "Path Router"
+    },
+    {
+      "parameters": {
+        "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst intents = $json.intentResults.filter(r => r.matched);\n\nconst needsConfirmation = intents.filter(i => i.requiresConfirmation);\nconst executableIntents = intents.filter(i => !i.requiresConfirmation);\n\nif (executableIntents.length === 0 && needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  return [{ json: {\n    ...($json),\n    __confirmationRequired: true,\n    haResults: [],\n    responseText: `Bist du sicher? Ich soll ${names} steuern. Bitte bestätige mit \"Ja\".`\n  }}];\n}\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nfunction buildText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const svc = i.service;\n    const action = svc.includes('turn_on') ? 'eingeschaltet'\n      : svc.includes('turn_off') ? 'ausgeschaltet'\n      : svc.includes('open') ? 'geöffnet'\n      : svc.includes('close') ? 'geschlossen'\n      : svc.includes('start') ? 'gestartet'\n      : svc.includes('stop') ? 'gestoppt'\n      : svc.includes('return') ? 'zurückgeschickt'\n      : svc.includes('lock') ? 'gesperrt'\n      : svc.includes('unlock') ? 'entsperrt'\n      : svc.includes('arm') ? 'scharf geschaltet'\n      : svc.includes('disarm') ? 'deaktiviert'\n      : svc.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst haResults = await Promise.all(executableIntents.map(i => callHA(i)));\n\nlet responseText = buildText(haResults);\nif (needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  responseText += ` Für ${names} benötige ich noch deine Bestätigung.`;\n}\n\nreturn [{ json: { ...($json), haResults, __confirmationRequired: needsConfirmation.length > 0, responseText } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -496
+      ],
+      "id": "node-ha-fast-executor",
+      "name": "HA Fast Executor"
+    },
+    {
+      "parameters": {
+        "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HA_FAST',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  latency_ms: latencyMs,\n  confirmation_required: $json.__confirmationRequired || false\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        -496
+      ],
+      "id": "node-ha-fast-save",
+      "name": "Save Message HA Fast"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.sessionId }}",
+            "user_id": "={{ $json.userId }}",
+            "role": "assistant",
+            "content": "={{ $json.responseText }}",
+            "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
+            "tool_results": "={{ JSON.stringify($json.toolResults) }}"
+          }
+        },
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        784,
+        -608
+      ],
+      "id": "node-ha-fast-db",
+      "name": "DB Insert HA Fast",
+      "credentials": {
+        "postgres": {
+          "id": "postgres-alice",
+          "name": "Alice PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-ha-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-ha-fast',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        -496
+      ],
+      "id": "node-ha-fast-format",
+      "name": "Format Response HA Fast"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        592,
+        -496
+      ],
+      "id": "node-ha-fast-respond",
+      "name": "Respond HA Fast"
+    },
+    {
+      "parameters": {
+        "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst OLLAMA_URL = $env.OLLAMA_URL || 'http://ollama:11434';\n\nconst allIntents = $json.intentResults || [];\nconst haIntents = allIntents.filter(r => r.matched && !r.requiresConfirmation);\nconst confirmIntents = allIntents.filter(r => r.matched && r.requiresConfirmation);\nconst llmParts = allIntents.filter(r => !r.matched).map(r => r.part);\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nasync function callOllama(parts) {\n  const userText = parts.join('. ');\n  try {\n    const resp = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${OLLAMA_URL}/api/chat`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        model: $env.OLLAMA_MODEL || 'qwen3:14b',\n        messages: [...($json.allMessages || []), { role: 'user', content: userText }],\n        stream: false\n      }),\n      timeout: 30000\n    });\n    const data = typeof resp === 'string' ? JSON.parse(resp) : resp;\n    return data && data.message ? data.message.content : 'Ich konnte keine Antwort generieren.';\n  } catch {\n    return 'Chat-Anfrage konnte nicht verarbeitet werden.';\n  }\n}\n\nconst [haResults, llmText] = await Promise.all([\n  Promise.all(haIntents.map(i => callHA(i))),\n  llmParts.length > 0 ? callOllama(llmParts) : Promise.resolve(null)\n]);\n\nfunction haText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const action = i.service.includes('turn_on') ? 'eingeschaltet'\n      : i.service.includes('turn_off') ? 'ausgeschaltet'\n      : i.service.includes('open') ? 'geöffnet'\n      : i.service.includes('close') ? 'geschlossen'\n      : i.service.includes('start') ? 'gestartet'\n      : i.service.includes('stop') ? 'gestoppt'\n      : i.service.includes('return') ? 'zurückgeschickt'\n      : i.service.includes('lock') ? 'gesperrt'\n      : i.service.includes('unlock') ? 'entsperrt'\n      : i.service.includes('arm') ? 'scharf geschaltet'\n      : i.service.includes('disarm') ? 'deaktiviert'\n      : i.service.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst confirmText = confirmIntents.length > 0\n  ? `Für ${confirmIntents.map(i => i.entityId || i.domain).join(', ')} benötige ich noch deine Bestätigung.`\n  : '';\n\nconst haPart = haResults.length > 0 ? haText(haResults) : '';\nconst parts2 = [haPart, llmText, confirmText].filter(Boolean);\nconst responseText = parts2.join(' ');\n\nreturn [{ json: { ...($json), haResults, llmText, responseText } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -304
+      ],
+      "id": "node-hybrid-executor",
+      "name": "Hybrid Executor"
+    },
+    {
+      "parameters": {
+        "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HYBRID',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  llm_used: true,\n  latency_ms: latencyMs\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        -304
+      ],
+      "id": "node-hybrid-save",
+      "name": "Save Message Hybrid"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.sessionId }}",
+            "user_id": "={{ $json.userId }}",
+            "role": "assistant",
+            "content": "={{ $json.responseText }}",
+            "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
+            "tool_results": "={{ JSON.stringify($json.toolResults) }}"
+          }
+        },
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        592,
+        -304
+      ],
+      "id": "node-hybrid-db",
+      "name": "DB Insert Hybrid",
+      "credentials": {
+        "postgres": {
+          "id": "postgres-alice",
+          "name": "Alice PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-hy-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-hybrid',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        -304
+      ],
+      "id": "node-hybrid-format",
+      "name": "Format Response Hybrid"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        784,
+        -304
+      ],
+      "id": "node-hybrid-respond",
+      "name": "Respond Hybrid"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -80
+      ],
+      "id": "node-llm-prep",
+      "name": "LLM Only Prep"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        192,
+        -80
+      ],
+      "id": "c5af60f9-ea13-4012-984f-702794af83fe",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:14b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        160,
+        160
+      ],
+      "id": "a1857233-ff63-4d85-b5e5-be6dbb06318f",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-local",
+          "name": "Ollama Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const startMs = $('LLM Only Prep').first().json.__requestStartMs || Date.now();\nconst latencyMs = Date.now() - startMs;\nconst toolResults = { path_taken: 'LLM_ONLY', latency_ms: latencyMs, llm_used: true };\nconst text = $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nconst userMessageRow = {\n  session_id: $('LLM Only Prep').first().json.__sessionId,\n  user_id: $('LLM Only Prep').first().json.__userId,\n  role: 'user',\n  content: $('Input Validator').first().json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: {\n  ...($json),\n  __responseText: text,\n  __toolResults: toolResults,\n  __userId: $('LLM Only Prep').first().json.__userId,\n  __sessionId: $('LLM Only Prep').first().json.__sessionId,\n  __userMessageRow: userMessageRow\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -80
+      ],
+      "id": "node-llm-save",
+      "name": "Save Message LLM"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.__sessionId }}",
+            "user_id": "={{ $json.__userId }}",
+            "role": "assistant",
+            "content": "={{ $json.__responseText }}",
+            "tool_calls": "={{ $json.__toolResults ? JSON.stringify($json.__toolResults.llm_tool_calls || null) : null }}",
+            "tool_results": "={{ JSON.stringify($json.__toolResults) }}"
+          }
+        },
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        864,
+        -80
+      ],
+      "id": "node-llm-db",
+      "name": "DB Insert LLM",
+      "credentials": {
+        "postgres": {
+          "id": "postgres-alice",
+          "name": "Alice PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'qwen2.5:14b',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        -80
+      ],
+      "id": "8b094d72-9dbf-4719-819f-3e0812b4a72b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1280,
+        -80
+      ],
+      "id": "bfa1fcb1-8c8f-48e9-af0c-9ea4b683402a",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.sessionId }}",
+            "user_id": "={{ $json.userId }}",
+            "role": "user",
+            "content": "={{ $json.userMessage }}",
+            "tool_calls": "=",
+            "tool_results": "="
+          }
+        },
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        144,
+        -608
+      ],
+      "id": "node-user-msg-ha",
+      "name": "Insert User Msg HA Fast",
+      "credentials": {
+        "postgres": {
+          "id": "postgres-alice",
+          "name": "Alice PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.sessionId }}",
+            "user_id": "={{ $json.userId }}",
+            "role": "user",
+            "content": "={{ $json.userMessage }}",
+            "tool_calls": "=",
+            "tool_results": "="
+          }
+        },
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        144,
+        -416
+      ],
+      "id": "node-user-msg-hybrid",
+      "name": "Insert User Msg Hybrid",
+      "credentials": {
+        "postgres": {
+          "id": "postgres-alice",
+          "name": "Alice PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.__sessionId }}",
+            "user_id": "={{ $json.__userId }}",
+            "role": "user",
+            "content": "={{ $('Input Validator').first().json.userMessage }}",
+            "tool_calls": "=",
+            "tool_results": "="
+          }
+        },
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        640,
+        -192
+      ],
+      "id": "node-user-msg-llm",
+      "name": "Insert User Msg LLM",
+      "credentials": {
+        "postgres": {
+          "id": "postgres-alice",
+          "name": "Alice PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Input Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Validator": {
+      "main": [
+        [
+          {
+            "node": "Empty Input Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Empty Input Check": {
+      "main": [
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sentence Splitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sentence Splitter": {
+      "main": [
+        [
+          {
+            "node": "Intent Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Lookup": {
+      "main": [
+        [
+          {
+            "node": "Path Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Path Router": {
+      "main": [
+        [
+          {
+            "node": "HA Fast Executor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hybrid Executor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM Only Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HA Fast Executor": {
+      "main": [
+        [
+          {
+            "node": "Save Message HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Message HA Fast": {
+      "main": [
+        [
+          {
+            "node": "Format Response HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response HA Fast": {
+      "main": [
+        [
+          {
+            "node": "Respond HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond HA Fast": {
+      "main": [
+        [
+          {
+            "node": "Insert User Msg HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User Msg HA Fast": {
+      "main": [
+        [
+          {
+            "node": "DB Insert HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hybrid Executor": {
+      "main": [
+        [
+          {
+            "node": "Save Message Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Message Hybrid": {
+      "main": [
+        [
+          {
+            "node": "Insert User Msg Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User Msg Hybrid": {
+      "main": [
+        [
+          {
+            "node": "DB Insert Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Insert Hybrid": {
+      "main": [
+        [
+          {
+            "node": "Format Response Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response Hybrid": {
+      "main": [
+        [
+          {
+            "node": "Respond Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Only Prep": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Save Message LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Message LLM": {
+      "main": [
+        [
+          {
+            "node": "Insert User Msg LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User Msg LLM": {
+      "main": [
+        [
+          {
+            "node": "DB Insert LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Insert LLM": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "b20be636-5b87-4e9f-a5fb-c2c0514b23be",
+  "activeVersionId": "b20be636-5b87-4e9f-a5fb-c2c0514b23be",
+  "versionCounter": 104,
+  "triggerCount": 1,
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-02-25T09:40:54.681Z",
+    "createdAt": "2026-02-25T09:40:54.681Z",
+    "versionId": "b20be636-5b87-4e9f-a5fb-c2c0514b23be",
+    "workflowId": "ZYaMfLlmnkZrX2G5",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "v1/chat/completions",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -1340,
+          -192
+        ],
+        "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
+        "name": "Webhook",
+        "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\nconst userId = body.user_id || 'andreas';\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1136,
+          -192
+        ],
+        "id": "node-input-validator",
+        "name": "Input Validator"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "caseSensitive": true,
+              "typeValidation": "strict",
+              "leftValue": "",
+              "rightValue": ""
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "error-check",
+                "leftValue": "={{ $json.__error }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -944,
+          -192
+        ],
+        "id": "node-early-exit",
+        "name": "Empty Input Check"
+      },
+      {
+        "parameters": {
+          "jsCode": "const errorMsg = $json.errorMsg || 'Ungültige Eingabe.';\nconst now = Math.floor(Date.now() / 1000);\nreturn [{ json: {\n  id: 'chatcmpl-err-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice',\n  choices: [{ index: 0, message: { role: 'assistant', content: errorMsg }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }\n}}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -736,
+          -80
+        ],
+        "id": "node-error-response",
+        "name": "Error Response"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          -544,
+          -80
+        ],
+        "id": "node-error-respond",
+        "name": "Respond Error"
+      },
+      {
+        "parameters": {
+          "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => p.replace(FILLER, '').trim())\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -736,
+          -304
+        ],
+        "id": "node-sentence-splitter",
+        "name": "Sentence Splitter"
+      },
+      {
+        "parameters": {
+          "jsCode": "const CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = parseFloat($env.INTENT_MIN_CERTAINTY || '0.82');\nconst MAX_RESULTS = parseInt($env.INTENT_MAX_RESULTS || '3');\nconst WEAVIATE_URL = $env.WEAVIATE_URL || 'http://weaviate:8080';\n\nconst parts = $json.parts || [$json.userMessage];\n\nfunction sanitizeForGql(str) {\n  return str.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500);\n}\n\nasync function queryIntent(part) {\n  const concept = sanitizeForGql(part);\n  const gql = `{ Get { HAIntent( nearText: { concepts: [\"${concept}\"] }, limit: ${MAX_RESULTS} ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }`;\n  try {\n    const response = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${WEAVIATE_URL}/v1/graphql`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ query: gql }),\n      timeout: 3000\n    });\n    const data = typeof response === 'string' ? JSON.parse(response) : response;\n    const candidates = data?.data?.Get?.HAIntent || [];\n    const qualified = candidates\n      .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n      .sort((a, b) => {\n        const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n        if (Math.abs(certDiff) > 0.001) return certDiff;\n        return (b.priority || 0) - (a.priority || 0);\n      });\n    const best = qualified[0];\n    if (best) {\n      return {\n        part,\n        matched: true,\n        certainty: best._additional.certainty,\n        entityId: best.entityId,\n        domain: best.domain,\n        service: best.service,\n        parameters: best.parameters ? JSON.parse(best.parameters) : {},\n        intentTemplate: best.intentTemplate,\n        requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n      };\n    }\n    return { part, matched: false, certainty: candidates[0]?._additional?.certainty || 0 };\n  } catch (err) {\n    return { part, matched: false, certainty: 0, weaviateError: true };\n  }\n}\n\nconst results = await Promise.all(parts.map(p => queryIntent(p)));\nconst matchedCount = results.filter(r => r.matched).length;\nconst weaviateDown = results.every(r => r.weaviateError);\n\nlet pathDecision;\nif (weaviateDown || matchedCount === 0) pathDecision = 'LLM_ONLY';\nelse if (matchedCount === results.length) pathDecision = 'HA_FAST';\nelse pathDecision = 'HYBRID';\n\nreturn [{ json: { ...($json), intentResults: results, matchedCount, totalCount: results.length, pathDecision, weaviateDown } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -528,
+          -304
+        ],
+        "id": "node-intent-lookup",
+        "name": "Intent Lookup"
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "version": 2,
+                    "caseSensitive": true,
+                    "typeValidation": "strict",
+                    "leftValue": "",
+                    "rightValue": ""
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "id": "ha-fast-cond",
+                      "leftValue": "={{ $json.pathDecision }}",
+                      "rightValue": "HA_FAST",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                },
+                "renameOutput": "HA_FAST"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "version": 2,
+                    "caseSensitive": true,
+                    "typeValidation": "strict",
+                    "leftValue": "",
+                    "rightValue": ""
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "id": "hybrid-cond",
+                      "leftValue": "={{ $json.pathDecision }}",
+                      "rightValue": "HYBRID",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                },
+                "renameOutput": "HYBRID"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "version": 2,
+                    "caseSensitive": true,
+                    "typeValidation": "strict",
+                    "leftValue": "",
+                    "rightValue": ""
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "id": "llm-only-cond",
+                      "leftValue": "={{ $json.pathDecision }}",
+                      "rightValue": "LLM_ONLY",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                },
+                "renameOutput": "LLM_ONLY"
+              }
+            ]
+          },
+          "options": {
+            "fallbackOutput": "none"
+          }
+        },
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          -304,
+          -304
+        ],
+        "id": "node-path-router",
+        "name": "Path Router"
+      },
+      {
+        "parameters": {
+          "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst intents = $json.intentResults.filter(r => r.matched);\n\nconst needsConfirmation = intents.filter(i => i.requiresConfirmation);\nconst executableIntents = intents.filter(i => !i.requiresConfirmation);\n\nif (executableIntents.length === 0 && needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  return [{ json: {\n    ...($json),\n    __confirmationRequired: true,\n    haResults: [],\n    responseText: `Bist du sicher? Ich soll ${names} steuern. Bitte bestätige mit \"Ja\".`\n  }}];\n}\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nfunction buildText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const svc = i.service;\n    const action = svc.includes('turn_on') ? 'eingeschaltet'\n      : svc.includes('turn_off') ? 'ausgeschaltet'\n      : svc.includes('open') ? 'geöffnet'\n      : svc.includes('close') ? 'geschlossen'\n      : svc.includes('start') ? 'gestartet'\n      : svc.includes('stop') ? 'gestoppt'\n      : svc.includes('return') ? 'zurückgeschickt'\n      : svc.includes('lock') ? 'gesperrt'\n      : svc.includes('unlock') ? 'entsperrt'\n      : svc.includes('arm') ? 'scharf geschaltet'\n      : svc.includes('disarm') ? 'deaktiviert'\n      : svc.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst haResults = await Promise.all(executableIntents.map(i => callHA(i)));\n\nlet responseText = buildText(haResults);\nif (needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  responseText += ` Für ${names} benötige ich noch deine Bestätigung.`;\n}\n\nreturn [{ json: { ...($json), haResults, __confirmationRequired: needsConfirmation.length > 0, responseText } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -80,
+          -496
+        ],
+        "id": "node-ha-fast-executor",
+        "name": "HA Fast Executor"
+      },
+      {
+        "parameters": {
+          "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HA_FAST',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  latency_ms: latencyMs,\n  confirmation_required: $json.__confirmationRequired || false\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          144,
+          -496
+        ],
+        "id": "node-ha-fast-save",
+        "name": "Save Message HA Fast"
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": {
+            "__rl": true,
+            "mode": "list",
+            "value": "alice"
+          },
+          "table": {
+            "__rl": true,
+            "mode": "list",
+            "value": "messages"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "session_id": "={{ $json.sessionId }}",
+              "user_id": "={{ $json.userId }}",
+              "role": "assistant",
+              "content": "={{ $json.responseText }}",
+              "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
+              "tool_results": "={{ JSON.stringify($json.toolResults) }}"
+            }
+          },
+          "options": {
+            "onError": "continueRegularOutput"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          784,
+          -608
+        ],
+        "id": "node-ha-fast-db",
+        "name": "DB Insert HA Fast",
+        "credentials": {
+          "postgres": {
+            "id": "postgres-alice",
+            "name": "Alice PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-ha-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-ha-fast',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          368,
+          -496
+        ],
+        "id": "node-ha-fast-format",
+        "name": "Format Response HA Fast"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          592,
+          -496
+        ],
+        "id": "node-ha-fast-respond",
+        "name": "Respond HA Fast"
+      },
+      {
+        "parameters": {
+          "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst OLLAMA_URL = $env.OLLAMA_URL || 'http://ollama:11434';\n\nconst allIntents = $json.intentResults || [];\nconst haIntents = allIntents.filter(r => r.matched && !r.requiresConfirmation);\nconst confirmIntents = allIntents.filter(r => r.matched && r.requiresConfirmation);\nconst llmParts = allIntents.filter(r => !r.matched).map(r => r.part);\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nasync function callOllama(parts) {\n  const userText = parts.join('. ');\n  try {\n    const resp = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${OLLAMA_URL}/api/chat`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        model: $env.OLLAMA_MODEL || 'qwen3:14b',\n        messages: [...($json.allMessages || []), { role: 'user', content: userText }],\n        stream: false\n      }),\n      timeout: 30000\n    });\n    const data = typeof resp === 'string' ? JSON.parse(resp) : resp;\n    return data && data.message ? data.message.content : 'Ich konnte keine Antwort generieren.';\n  } catch {\n    return 'Chat-Anfrage konnte nicht verarbeitet werden.';\n  }\n}\n\nconst [haResults, llmText] = await Promise.all([\n  Promise.all(haIntents.map(i => callHA(i))),\n  llmParts.length > 0 ? callOllama(llmParts) : Promise.resolve(null)\n]);\n\nfunction haText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const action = i.service.includes('turn_on') ? 'eingeschaltet'\n      : i.service.includes('turn_off') ? 'ausgeschaltet'\n      : i.service.includes('open') ? 'geöffnet'\n      : i.service.includes('close') ? 'geschlossen'\n      : i.service.includes('start') ? 'gestartet'\n      : i.service.includes('stop') ? 'gestoppt'\n      : i.service.includes('return') ? 'zurückgeschickt'\n      : i.service.includes('lock') ? 'gesperrt'\n      : i.service.includes('unlock') ? 'entsperrt'\n      : i.service.includes('arm') ? 'scharf geschaltet'\n      : i.service.includes('disarm') ? 'deaktiviert'\n      : i.service.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst confirmText = confirmIntents.length > 0\n  ? `Für ${confirmIntents.map(i => i.entityId || i.domain).join(', ')} benötige ich noch deine Bestätigung.`\n  : '';\n\nconst haPart = haResults.length > 0 ? haText(haResults) : '';\nconst parts2 = [haPart, llmText, confirmText].filter(Boolean);\nconst responseText = parts2.join(' ');\n\nreturn [{ json: { ...($json), haResults, llmText, responseText } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -80,
+          -304
+        ],
+        "id": "node-hybrid-executor",
+        "name": "Hybrid Executor"
+      },
+      {
+        "parameters": {
+          "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HYBRID',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  llm_used: true,\n  latency_ms: latencyMs\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          144,
+          -304
+        ],
+        "id": "node-hybrid-save",
+        "name": "Save Message Hybrid"
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": {
+            "__rl": true,
+            "mode": "list",
+            "value": "alice"
+          },
+          "table": {
+            "__rl": true,
+            "mode": "list",
+            "value": "messages"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "session_id": "={{ $json.sessionId }}",
+              "user_id": "={{ $json.userId }}",
+              "role": "assistant",
+              "content": "={{ $json.responseText }}",
+              "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
+              "tool_results": "={{ JSON.stringify($json.toolResults) }}"
+            }
+          },
+          "options": {
+            "onError": "continueRegularOutput"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          592,
+          -304
+        ],
+        "id": "node-hybrid-db",
+        "name": "DB Insert Hybrid",
+        "credentials": {
+          "postgres": {
+            "id": "postgres-alice",
+            "name": "Alice PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-hy-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-hybrid',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          368,
+          -304
+        ],
+        "id": "node-hybrid-format",
+        "name": "Format Response Hybrid"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          784,
+          -304
+        ],
+        "id": "node-hybrid-respond",
+        "name": "Respond Hybrid"
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: {\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -80,
+          -80
+        ],
+        "id": "node-llm-prep",
+        "name": "LLM Only Prep"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 1.7,
+        "position": [
+          192,
+          -80
+        ],
+        "id": "c5af60f9-ea13-4012-984f-702794af83fe",
+        "name": "AI Agent"
+      },
+      {
+        "parameters": {
+          "model": "qwen2.5:14b",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+        "typeVersion": 1,
+        "position": [
+          160,
+          160
+        ],
+        "id": "a1857233-ff63-4d85-b5e5-be6dbb06318f",
+        "name": "Ollama Chat Model",
+        "credentials": {
+          "ollamaApi": {
+            "id": "ollama-local",
+            "name": "Ollama Local"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const startMs = $('LLM Only Prep').first().json.__requestStartMs || Date.now();\nconst latencyMs = Date.now() - startMs;\nconst toolResults = { path_taken: 'LLM_ONLY', latency_ms: latencyMs, llm_used: true };\nconst text = $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nconst userMessageRow = {\n  session_id: $('LLM Only Prep').first().json.__sessionId,\n  user_id: $('LLM Only Prep').first().json.__userId,\n  role: 'user',\n  content: $('Input Validator').first().json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: {\n  ...($json),\n  __responseText: text,\n  __toolResults: toolResults,\n  __userId: $('LLM Only Prep').first().json.__userId,\n  __sessionId: $('LLM Only Prep').first().json.__sessionId,\n  __userMessageRow: userMessageRow\n}}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          448,
+          -80
+        ],
+        "id": "node-llm-save",
+        "name": "Save Message LLM"
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": {
+            "__rl": true,
+            "mode": "list",
+            "value": "alice"
+          },
+          "table": {
+            "__rl": true,
+            "mode": "list",
+            "value": "messages"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "session_id": "={{ $json.__sessionId }}",
+              "user_id": "={{ $json.__userId }}",
+              "role": "assistant",
+              "content": "={{ $json.__responseText }}",
+              "tool_calls": "={{ $json.__toolResults ? JSON.stringify($json.__toolResults.llm_tool_calls || null) : null }}",
+              "tool_results": "={{ JSON.stringify($json.__toolResults) }}"
+            }
+          },
+          "options": {
+            "onError": "continueRegularOutput"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          864,
+          -80
+        ],
+        "id": "node-llm-db",
+        "name": "DB Insert LLM",
+        "credentials": {
+          "postgres": {
+            "id": "postgres-alice",
+            "name": "Alice PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'qwen2.5:14b',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1072,
+          -80
+        ],
+        "id": "8b094d72-9dbf-4719-819f-3e0812b4a72b",
+        "name": "Code in JavaScript"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1280,
+          -80
+        ],
+        "id": "bfa1fcb1-8c8f-48e9-af0c-9ea4b683402a",
+        "name": "Respond to Webhook"
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": {
+            "__rl": true,
+            "mode": "list",
+            "value": "alice"
+          },
+          "table": {
+            "__rl": true,
+            "mode": "list",
+            "value": "messages"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "session_id": "={{ $json.sessionId }}",
+              "user_id": "={{ $json.userId }}",
+              "role": "user",
+              "content": "={{ $json.userMessage }}",
+              "tool_calls": "=",
+              "tool_results": "="
+            }
+          },
+          "options": {
+            "onError": "continueRegularOutput"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          144,
+          -608
+        ],
+        "id": "node-user-msg-ha",
+        "name": "Insert User Msg HA Fast",
+        "credentials": {
+          "postgres": {
+            "id": "postgres-alice",
+            "name": "Alice PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": {
+            "__rl": true,
+            "mode": "list",
+            "value": "alice"
+          },
+          "table": {
+            "__rl": true,
+            "mode": "list",
+            "value": "messages"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "session_id": "={{ $json.sessionId }}",
+              "user_id": "={{ $json.userId }}",
+              "role": "user",
+              "content": "={{ $json.userMessage }}",
+              "tool_calls": "=",
+              "tool_results": "="
+            }
+          },
+          "options": {
+            "onError": "continueRegularOutput"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          144,
+          -416
+        ],
+        "id": "node-user-msg-hybrid",
+        "name": "Insert User Msg Hybrid",
+        "credentials": {
+          "postgres": {
+            "id": "postgres-alice",
+            "name": "Alice PostgreSQL"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": {
+            "__rl": true,
+            "mode": "list",
+            "value": "alice"
+          },
+          "table": {
+            "__rl": true,
+            "mode": "list",
+            "value": "messages"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "session_id": "={{ $json.__sessionId }}",
+              "user_id": "={{ $json.__userId }}",
+              "role": "user",
+              "content": "={{ $('Input Validator').first().json.userMessage }}",
+              "tool_calls": "=",
+              "tool_results": "="
+            }
+          },
+          "options": {
+            "onError": "continueRegularOutput"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          640,
+          -192
+        ],
+        "id": "node-user-msg-llm",
+        "name": "Insert User Msg LLM",
+        "credentials": {
+          "postgres": {
+            "id": "postgres-alice",
+            "name": "Alice PostgreSQL"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Input Validator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Input Validator": {
+        "main": [
+          [
+            {
+              "node": "Empty Input Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Empty Input Check": {
+        "main": [
+          [
+            {
+              "node": "Error Response",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Sentence Splitter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Error Response": {
+        "main": [
+          [
+            {
+              "node": "Respond Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sentence Splitter": {
+        "main": [
+          [
+            {
+              "node": "Intent Lookup",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Intent Lookup": {
+        "main": [
+          [
+            {
+              "node": "Path Router",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Path Router": {
+        "main": [
+          [
+            {
+              "node": "HA Fast Executor",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Hybrid Executor",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "LLM Only Prep",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HA Fast Executor": {
+        "main": [
+          [
+            {
+              "node": "Save Message HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Save Message HA Fast": {
+        "main": [
+          [
+            {
+              "node": "Format Response HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Response HA Fast": {
+        "main": [
+          [
+            {
+              "node": "Respond HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Respond HA Fast": {
+        "main": [
+          [
+            {
+              "node": "Insert User Msg HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert User Msg HA Fast": {
+        "main": [
+          [
+            {
+              "node": "DB Insert HA Fast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Hybrid Executor": {
+        "main": [
+          [
+            {
+              "node": "Save Message Hybrid",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Save Message Hybrid": {
+        "main": [
+          [
+            {
+              "node": "Insert User Msg Hybrid",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert User Msg Hybrid": {
+        "main": [
+          [
+            {
+              "node": "DB Insert Hybrid",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DB Insert Hybrid": {
+        "main": [
+          [
+            {
+              "node": "Format Response Hybrid",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Response Hybrid": {
+        "main": [
+          [
+            {
+              "node": "Respond Hybrid",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LLM Only Prep": {
+        "main": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ollama Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent": {
+        "main": [
+          [
+            {
+              "node": "Save Message LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Save Message LLM": {
+        "main": [
+          [
+            {
+              "node": "Insert User Msg LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert User Msg LLM": {
+        "main": [
+          [
+            {
+              "node": "DB Insert LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DB Insert LLM": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Andreas Stahlhut",
+    "name": null,
+    "description": null,
+    "autosaved": false
+  }
+}
