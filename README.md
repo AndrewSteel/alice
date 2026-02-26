@@ -6,22 +6,22 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 
 ## Development Status
 
-| Phase         | Status        | Description                                              |
-| ------------- | ------------- | -------------------------------------------------------- |
-| Phase 0       | ✅ Deployed    | Hardware setup, GPU configuration, storage layout        |
-| Phase 1.1     | ✅ Deployed    | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA |
-| **Phase 1.2** | 🔄 In Progress | HA-first intent routing with semantic matching           |
-| Phase 2       | 🗓 Planned     | Speech gateway: Whisper STT + Piper TTS + Speaker-ID     |
-| Phase 3       | 🗓 Planned     | Multi-user, display routing, security hardening          |
+| Phase         | Status     | Description                                              |
+| ------------- | ---------- | -------------------------------------------------------- |
+| Phase 0       | ✅ Deployed | Hardware setup, GPU configuration, storage layout        |
+| Phase 1.1     | ✅ Deployed | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA |
+| **Phase 1.2** | ✅ Deployed | HA-first intent routing with semantic matching           |
+| Phase 2       | 🗓 Planned  | Speech gateway: Whisper STT + Piper TTS + Speaker-ID     |
+| Phase 3       | 🗓 Planned  | Multi-user, display routing, security hardening          |
 
 ### Phase 1.2 Features
 
-| ID     | Feature                                                             | Status     |
-| ------ | ------------------------------------------------------------------- | ---------- |
-| PROJ-1 | HA Intent Infrastructure (DB schema + Weaviate HAIntent collection) | ✅ Deployed |
-| PROJ-2 | FastAPI container + hassil intent expansion                         | ✅ Deployed |
-| PROJ-3 | HA-first chat handler with intent routing                           | ✅ Deployed |
-| PROJ-4 | HA auto-sync (MQTT → n8n → Weaviate)                                | 📋 Planned  |
+| ID     | Feature                                                             | Status      |
+| ------ | ------------------------------------------------------------------- | ----------- |
+| PROJ-1 | HA Intent Infrastructure (DB schema + Weaviate HAIntent collection) | ✅ Deployed  |
+| PROJ-2 | FastAPI container + hassil intent expansion                         | ✅ Deployed  |
+| PROJ-3 | HA-first chat handler with intent routing                           | ✅ Deployed  |
+| PROJ-4 | HA auto-sync (MQTT → n8n → Weaviate)                                | ✅ Deployed  |
 
 ---
 
