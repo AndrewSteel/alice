@@ -19,8 +19,8 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | ID     | Feature                                                             | Status     |
 | ------ | ------------------------------------------------------------------- | ---------- |
 | PROJ-1 | HA Intent Infrastructure (DB schema + Weaviate HAIntent collection) | ✅ Deployed |
-| PROJ-2 | FastAPI container + hassil intent expansion                         | 📋 Planned  |
-| PROJ-3 | HA-first chat handler with intent routing                           | 📋 Planned  |
+| PROJ-2 | FastAPI container + hassil intent expansion                         | ✅ Deployed |
+| PROJ-3 | HA-first chat handler with intent routing                           | ✅ Deployed |
 | PROJ-4 | HA auto-sync (MQTT → n8n → Weaviate)                                | 📋 Planned  |
 
 ---
