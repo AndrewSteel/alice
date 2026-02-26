@@ -68,7 +68,7 @@ frontend/.env
 
 # IDE
 .vscode/
-.claude/
+.claude/settings.local.json
 *.swp
 *.swo
 *~
