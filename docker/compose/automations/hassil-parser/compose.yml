@@ -4,10 +4,16 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: hassil-parser
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=2)\" || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8001/health'', timeout=2)" || exit 1',
+        ]
       interval: 20s
       timeout: 3s
       retries: 10
