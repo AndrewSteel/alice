@@ -100,7 +100,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => p.replace(FILLER, '').trim())\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
+        "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction stripFillers(str) {\n  let prev = '';\n  let result = str;\n  while (result !== prev) {\n    prev = result;\n    result = result.replace(FILLER, '').trim();\n  }\n  return result;\n}\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => stripFillers(p))\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -435,7 +435,7 @@
     },
     {
       "parameters": {
-        "model": "qwen2.5:14b",
+        "model": "qwen3:14b",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
@@ -512,7 +512,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'qwen2.5:14b',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-llm',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -556,8 +556,8 @@
             "user_id": "={{ $json.userId }}",
             "role": "user",
             "content": "={{ $json.userMessage }}",
-            "tool_calls": "=",
-            "tool_results": "="
+            "tool_calls": "={{ null }}",
+            "tool_results": "={{ null }}"
           }
         },
         "options": {
@@ -600,8 +600,8 @@
             "user_id": "={{ $json.userId }}",
             "role": "user",
             "content": "={{ $json.userMessage }}",
-            "tool_calls": "=",
-            "tool_results": "="
+            "tool_calls": "={{ null }}",
+            "tool_results": "={{ null }}"
           }
         },
         "options": {
@@ -644,8 +644,8 @@
             "user_id": "={{ $json.__userId }}",
             "role": "user",
             "content": "={{ $('Input Validator').first().json.userMessage }}",
-            "tool_calls": "=",
-            "tool_results": "="
+            "tool_calls": "={{ null }}",
+            "tool_results": "={{ null }}"
           }
         },
         "options": {
@@ -1187,7 +1187,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => p.replace(FILLER, '').trim())\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
+          "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction stripFillers(str) {\n  let prev = '';\n  let result = str;\n  while (result !== prev) {\n    prev = result;\n    result = result.replace(FILLER, '').trim();\n  }\n  return result;\n}\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => stripFillers(p))\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1522,7 +1522,7 @@
       },
       {
         "parameters": {
-          "model": "qwen2.5:14b",
+          "model": "qwen3:14b",
           "options": {}
         },
         "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
@@ -1599,7 +1599,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'qwen2.5:14b',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
+          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-llm',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1643,8 +1643,8 @@
               "user_id": "={{ $json.userId }}",
               "role": "user",
               "content": "={{ $json.userMessage }}",
-              "tool_calls": "=",
-              "tool_results": "="
+              "tool_calls": "={{ null }}",
+              "tool_results": "={{ null }}"
             }
           },
           "options": {
@@ -1687,8 +1687,8 @@
               "user_id": "={{ $json.userId }}",
               "role": "user",
               "content": "={{ $json.userMessage }}",
-              "tool_calls": "=",
-              "tool_results": "="
+              "tool_calls": "={{ null }}",
+              "tool_results": "={{ null }}"
             }
           },
           "options": {
@@ -1731,8 +1731,8 @@
               "user_id": "={{ $json.__userId }}",
               "role": "user",
               "content": "={{ $('Input Validator').first().json.userMessage }}",
-              "tool_calls": "=",
-              "tool_results": "="
+              "tool_calls": "={{ null }}",
+              "tool_results": "={{ null }}"
             }
           },
           "options": {
