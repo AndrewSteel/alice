@@ -523,7 +523,14 @@ Format Response HA Fast (~5ms) -> Respond HA Fast (~3ms)
 - **Recommendation:** Fix BUG-2, BUG-6, BUG-7 (high severity) first. Then fix BUG-3, BUG-4, BUG-5, BUG-8 (medium). After fixes, run `/qa` again with a live environment test to verify performance targets (AC-9, AC-10).
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-02-26
+**Workflow:** `alice-chat-handler` (id: `ZYaMfLlmnkZrX2G5`)
+**Endpoint:** `POST /webhook/v1/chat/completions` (via nginx → n8n)
+**n8n version deployed:** Updated 2026-02-26T07:34:52Z, 31 nodes, active
+**QA rounds:** 2 (Round 1: 9 bugs found + fixed; Round 2: 4 bugs found + fixed)
+**DB schema verified:** `alice.messages.tool_calls` and `tool_results` are JSONB — BUG-14 fix confirmed critical
+**Pending live verification:** AC-9 (HA_FAST < 200ms) and AC-10 (multi-HA < 400ms) require live performance testing
 
 ## QA Verification Round 2
 
