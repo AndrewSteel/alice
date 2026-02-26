@@ -1,0 +1,32 @@
+# alice_sync_on_entity_removed.yaml
+# Triggers an immediate removal sync when an entity is deleted from HA.
+# No delay needed: the entity is already gone from the registry, so n8n
+# only needs to remove it from Weaviate and mark it inactive in PostgreSQL.
+#
+# Required: MQTT broker integration enabled in HA
+# Topic: alice/ha/sync
+# Consumer: n8n workflow alice-ha-intent-sync (Remove branch)
+
+automation:
+  - id: alice_sync_on_entity_removed
+    alias: "Alice: Sync on Entity Removed"
+    description: >
+      Publishes a removal event immediately when an entity is deleted
+      from the HA entity registry. n8n removes all matching Weaviate
+      HAIntent objects and marks the entity inactive in PostgreSQL.
+    trigger:
+      - platform: event
+        event_type: entity_registry_updated
+        event_data:
+          action: remove
+    condition: []
+    action:
+      - service: mqtt.publish
+        data:
+          topic: alice/ha/sync
+          payload: >
+            {"event": "entity_removed", "entity_id": "{{ trigger.event.data.entity_id }}", "timestamp": "{{ now().isoformat() }}"}
+          qos: 1
+          retain: false
+    mode: queued
+    max: 10

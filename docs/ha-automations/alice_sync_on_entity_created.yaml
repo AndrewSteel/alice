@@ -1,0 +1,34 @@
+# alice_sync_on_entity_created.yaml
+# Triggers an incremental sync 5 seconds after a new entity is added to HA.
+# The 5-second delay allows HA to fully register the entity (area, aliases, etc.)
+# before the sync reads the entity registry.
+#
+# Required: MQTT broker integration enabled in HA
+# Topic: alice/ha/sync
+# Consumer: n8n workflow alice-ha-intent-sync (Incr Sync branch)
+
+automation:
+  - id: alice_sync_on_entity_created
+    alias: "Alice: Sync on Entity Created"
+    description: >
+      Publishes an incremental sync event when a new entity is created
+      in the entity registry. The 5-second delay ensures the entity
+      is fully persisted before n8n reads its configuration.
+    trigger:
+      - platform: event
+        event_type: entity_registry_updated
+        event_data:
+          action: create
+    condition: []
+    action:
+      - delay:
+          seconds: 5
+      - service: mqtt.publish
+        data:
+          topic: alice/ha/sync
+          payload: >
+            {"event": "entity_created", "entity_id": "{{ trigger.event.data.entity_id }}", "timestamp": "{{ now().isoformat() }}"}
+          qos: 1
+          retain: false
+    mode: queued
+    max: 10

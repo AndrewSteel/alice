@@ -1,0 +1,30 @@
+# alice_sync_on_start.yaml
+# Triggers a full HA→Alice sync 30 seconds after Home Assistant starts.
+# This ensures the intent registry is rebuilt after HA updates/restarts.
+#
+# Required: MQTT broker integration enabled in HA (broker: mqtt-alice)
+# Topic: alice/ha/sync
+# Consumer: n8n workflow alice-ha-intent-sync
+
+automation:
+  - id: alice_sync_on_start
+    alias: "Alice: Sync on HA Start"
+    description: >
+      Publishes a full-sync event to MQTT 30 seconds after HA startup.
+      Consumed by n8n workflow alice-ha-intent-sync to rebuild the
+      Weaviate HAIntent collection from the current entity registry.
+    trigger:
+      - platform: homeassistant
+        event: start
+    condition: []
+    action:
+      - delay:
+          seconds: 30
+      - service: mqtt.publish
+        data:
+          topic: alice/ha/sync
+          payload: >
+            {"event": "ha_start", "sync_type": "full", "timestamp": "{{ now().isoformat() }}"}
+          qos: 1
+          retain: false
+    mode: single

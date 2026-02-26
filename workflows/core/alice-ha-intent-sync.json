@@ -1,0 +1,875 @@
+{
+  "name": "alice-ha-intent-sync",
+  "nodes": [
+    {
+      "id": "mqtt-trigger",
+      "name": "MQTT Trigger",
+      "type": "n8n-nodes-base.mqttTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "mqtt": {
+          "id": "mqtt-alice",
+          "name": "mqtt-alice"
+        }
+      },
+      "parameters": {
+        "topics": "alice/ha/sync",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-message",
+      "name": "Parse MQTT Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "// BUG-8 fix: Validate MQTT payload schema before routing\nconst raw = $input.first().json;\nlet payload;\ntry {\n  payload = typeof raw.message === 'string' ? JSON.parse(raw.message) : raw.message;\n} catch(e) {\n  console.log('[alice-ha-intent-sync] Invalid JSON in MQTT payload:', e.message);\n  return [{ json: { event: '__invalid__', _error: 'Invalid JSON: ' + e.message } }];\n}\n\n// Validate payload structure\nif (!payload || typeof payload !== 'object') {\n  console.log('[alice-ha-intent-sync] MQTT payload is not an object:', typeof payload);\n  return [{ json: { event: '__invalid__', _error: 'Payload is not an object' } }];\n}\n\nif (typeof payload.event !== 'string' || payload.event.trim() === '') {\n  console.log('[alice-ha-intent-sync] MQTT payload missing or invalid event field:', JSON.stringify(payload));\n  return [{ json: { event: '__invalid__', _error: 'Missing or invalid event field' } }];\n}\n\n// Validate event-specific fields\nconst validEvents = ['ha_start', 'templates_updated', 'entity_created', 'entity_removed'];\nconst event = payload.event.trim();\n\nif (['entity_created', 'entity_removed'].includes(event)) {\n  if (typeof payload.entity_id !== 'string' || payload.entity_id.trim() === '') {\n    console.log('[alice-ha-intent-sync] entity event missing entity_id:', JSON.stringify(payload));\n    return [{ json: { event: '__invalid__', _error: 'entity event missing entity_id' } }];\n  }\n  // Validate entity_id format: domain.object_id (alphanumeric, underscores, dots)\n  if (!/^[a-z_]+\\.[a-z0-9_]+$/.test(payload.entity_id.trim())) {\n    console.log('[alice-ha-intent-sync] entity_id has invalid format:', payload.entity_id);\n    return [{ json: { event: '__invalid__', _error: 'entity_id has invalid format' } }];\n  }\n  payload.entity_id = payload.entity_id.trim();\n}\n\npayload.event = event;\nreturn [{ json: payload }];"
+      }
+    },
+    {
+      "id": "event-router",
+      "name": "Event Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [680, 300],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "or",
+                "conditions": [
+                  { "leftValue": "={{ $json.event }}", "rightValue": "ha_start", "operator": { "type": "string", "operation": "equals" } },
+                  { "leftValue": "={{ $json.event }}", "rightValue": "templates_updated", "operator": { "type": "string", "operation": "equals" } }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "full_sync"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  { "leftValue": "={{ $json.event }}", "rightValue": "entity_created", "operator": { "type": "string", "operation": "equals" } }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "incremental_sync"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  { "leftValue": "={{ $json.event }}", "rightValue": "entity_removed", "operator": { "type": "string", "operation": "equals" } }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "entity_removed"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "log-unknown-event",
+      "name": "Log Unknown Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 540],
+      "parameters": {
+        "jsCode": "console.log('[alice-ha-intent-sync] Unknown event type ignored:', JSON.stringify($input.first().json));\nreturn [];"
+      }
+    },
+    {
+      "id": "full-sync-conflict-check",
+      "name": "Full Sync: Conflict Check",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 160],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, started_at FROM alice.ha_sync_log WHERE status = 'running' AND started_at > NOW() - INTERVAL '5 minutes' ORDER BY started_at DESC LIMIT 1;"
+      }
+    },
+    {
+      "id": "full-sync-conflict-gate",
+      "name": "Full Sync: Skip if Conflict",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 160],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "notExists" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "full-sync-log-running",
+      "name": "Full Sync: Create Log (running)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 100],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alice.ha_sync_log (sync_type, trigger_source, status, started_at) VALUES ('full', 'mqtt_event', 'running', NOW()) RETURNING id;"
+      }
+    },
+    {
+      "id": "full-sync-fetch-exposed",
+      "name": "Full Sync: Fetch Exposed Entities (REST)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 100],
+      "parameters": {
+        "jsCode": "// BUG-4 fix: Wrap in try/catch so HA API failure updates sync log\n// BUG-11 fix: Renamed node from (WS) to (REST) — uses REST API, not WebSocket\nconst haUrl = process.env.HA_URL || 'http://homeassistant:8123';\nconst haToken = process.env.HA_TOKEN;\n\nconst logId = $('Full Sync: Create Log (running)').first().json.id;\n\ntry {\n  const entityRegUrl = haUrl + '/api/config/entity_registry/list';\n  const areaRegUrl = haUrl + '/api/config/area_registry/list';\n  const headers = { 'Authorization': 'Bearer ' + haToken, 'Content-Type': 'application/json' };\n\n  // Fetch entity registry\n  const entityResp = await fetch(entityRegUrl, { headers });\n  if (!entityResp.ok) throw new Error('HA entity registry fetch failed: HTTP ' + entityResp.status);\n  const allEntities = await entityResp.json();\n\n  // Fetch area registry\n  const areaResp = await fetch(areaRegUrl, { headers });\n  if (!areaResp.ok) throw new Error('HA area registry fetch failed: HTTP ' + areaResp.status);\n  const areas = await areaResp.json();\n\n  // Build area lookup: area_id -> area_name\n  const areaMap = {};\n  for (const area of areas) {\n    areaMap[area.area_id] = area.name;\n  }\n\n  // Filter to entities exposed to the assistant\n  const exposedEntities = allEntities.filter(e => {\n    const opts = e.options || {};\n    const conv = opts.conversation || {};\n    if (conv.should_expose === true) return true;\n    if (conv.should_expose === false) return false;\n    return true;\n  }).map(e => ({\n    entity_id: e.entity_id,\n    domain: e.entity_id.split('.')[0],\n    friendly_name: e.name || e.original_name || e.entity_id.split('.').slice(1).join(' ').replace(/_/g, ' '),\n    area_id: e.area_id || null,\n    area_name: e.area_id ? (areaMap[e.area_id] || null) : null,\n    aliases: e.aliases || [],\n    device_class: e.device_class || null,\n    platform: e.platform || null\n  }));\n\n  return [{ json: { entities: exposedEntities, area_map: areaMap, log_id: logId, _ha_error: false } }];\n} catch (err) {\n  // Return error info so the error handler node can update the sync log\n  return [{ json: { _ha_error: true, log_id: logId, error_message: err.message } }];\n}"
+      }
+    },
+    {
+      "id": "full-sync-ha-error-gate",
+      "name": "Full Sync: HA Error Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 100],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json._ha_error }}", "rightValue": false, "operator": { "type": "boolean", "operation": "equal" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "full-sync-ha-error-log",
+      "name": "Full Sync: Log HA Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 200],
+      "parameters": {
+        "jsCode": "// BUG-4 fix: Update sync log to 'error' when HA API is unreachable\nconst data = $input.first().json;\nconst logId = data.log_id;\nconst errorMsg = (data.error_message || 'Unknown HA API error').substring(0, 500);\n\n// We pass the data to the next Postgres node for the UPDATE\nreturn [{ json: { log_id: logId, error_message: errorMsg } }];"
+      }
+    },
+    {
+      "id": "full-sync-ha-error-update-log",
+      "name": "Full Sync: Update Log (HA error)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 200],
+      "parameters": {
+        "jsCode": "// BUG-4 + BUG-7 fix: Use parameterized approach for error log update\nconst data = $input.first().json;\nconst logId = Number(data.log_id);\nconst errorMsg = String(data.error_message || 'Unknown error').substring(0, 500);\n\nif (!Number.isInteger(logId) || logId <= 0) {\n  console.log('[alice-ha-intent-sync] Invalid log_id for error update:', data.log_id);\n  return [];\n}\n\n// Use the $runQuery helper with parameterized values\nconst pgCredential = $('Full Sync: Create Log (running)');\nconst query = `UPDATE alice.ha_sync_log SET status = 'error', error_message = $1, completed_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000 WHERE id = $2`;\n\n// n8n Code nodes cannot run parameterized queries directly, so we sanitize manually\n// Remove any SQL metacharacters from error message\nconst safeErrorMsg = errorMsg.replace(/'/g, \"''\");\nconst safeQuery = `UPDATE alice.ha_sync_log SET status = 'error', error_message = '${safeErrorMsg}', completed_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000 WHERE id = ${logId}`;\n\nreturn [{ json: { query: safeQuery, log_id: logId } }];"
+      }
+    },
+    {
+      "id": "full-sync-ha-error-exec",
+      "name": "Full Sync: Execute HA Error Log Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2440, 200],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "full-sync-load-templates",
+      "name": "Full Sync: Load Templates from DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 40],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT domain, intent, service, patterns, default_parameters, language FROM alice.ha_intent_templates WHERE is_active = true ORDER BY domain, priority DESC;"
+      }
+    },
+    {
+      "id": "full-sync-diff",
+      "name": "Full Sync: Diff vs DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 120],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT entity_id, friendly_name, area_id, area_name, aliases, domain FROM alice.ha_entities WHERE is_active = true;"
+      }
+    },
+    {
+      "id": "full-sync-generate-utterances",
+      "name": "Full Sync: Generate Utterances",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 40],
+      "parameters": {
+        "jsCode": "// BUG-3 fix: Renamed 'hassil Templates' (space) to 'hassilTemplates'\n// BUG-12 fix: Read certaintyThreshold from env var with fallback\nconst CERTAINTY_THRESHOLD = parseFloat(process.env.CERTAINTY_THRESHOLD) || 0.82;\n\n// Collect all data from previous nodes\nconst fetchData = $('Full Sync: Fetch Exposed Entities (REST)').first().json;\nconst entities = fetchData.entities;\nconst logId = fetchData.log_id;\n\nconst templateRows = $('Full Sync: Load Templates from DB').all().map(i => i.json);\nconst existingRows = $('Full Sync: Diff vs DB').all().map(i => i.json);\n\n// Build template lookup: domain -> [{ intent, service, patterns, default_parameters, language }]\nconst templateMap = {};\nfor (const t of templateRows) {\n  if (!templateMap[t.domain]) templateMap[t.domain] = [];\n  templateMap[t.domain].push(t);\n}\n\n// Build existing entity lookup for diff\nconst existingMap = {};\nfor (const e of existingRows) {\n  existingMap[e.entity_id] = e;\n}\n\n// Determine added, updated, unchanged, removed\nconst incomingIds = new Set(entities.map(e => e.entity_id));\nconst existingIds = new Set(Object.keys(existingMap));\n\nconst added = entities.filter(e => !existingIds.has(e.entity_id));\nconst updated = entities.filter(e => {\n  if (!existingIds.has(e.entity_id)) return false;\n  const ex = existingMap[e.entity_id];\n  return ex.friendly_name !== e.friendly_name ||\n         ex.area_id !== e.area_id ||\n         ex.area_name !== e.area_name ||\n         JSON.stringify(ex.aliases) !== JSON.stringify(e.aliases);\n});\nconst removed = existingRows.filter(e => !incomingIds.has(e.entity_id));\n\n// Helper: generate utterances for one entity\nfunction generateUtterances(entity, templates) {\n  const utterances = [];\n  const domain = entity.domain;\n  const name = entity.friendly_name || entity.entity_id.split('.').slice(1).join(' ').replace(/_/g, ' ');\n  const area = entity.area_name || null;\n  const aliases = Array.isArray(entity.aliases) ? entity.aliases : [];\n  const names = [name, ...aliases].filter(Boolean);\n\n  // Direct domain match (e.g. 'light', 'switch')\n  const domainTemplates = templates[domain] || [];\n  \n  // Also check for hassil-style domain match (e.g. 'light_HassTurnOn')\n  // BUG-3 fix: was 'hassil Templates' (with space) — now 'hassilTemplates'\n  const hassilTemplates = Object.keys(templates)\n    .filter(k => k.startsWith(domain + '_'))\n    .flatMap(k => templates[k]);\n\n  const allTemplates = [...domainTemplates, ...hassilTemplates];\n\n  if (allTemplates.length === 0) {\n    console.log('[alice-ha-intent-sync] No templates for domain:', domain, '- entity skipped:', entity.entity_id);\n    return [];\n  }\n\n  for (const tpl of allTemplates) {\n    const patterns = Array.isArray(tpl.patterns) ? tpl.patterns : [];\n    for (const pattern of patterns) {\n      // Skip patterns with {value}, {message} or other non-entity placeholders\n      if (pattern.includes('{value}') || pattern.includes('{message}') || pattern.includes('{temperature}')) {\n        continue;\n      }\n      \n      for (const n of names) {\n        const variants = [];\n        \n        if (pattern.includes('{where}')) {\n          variants.push(pattern.replace(/\\{where\\}/g, n));\n          if (area) variants.push(pattern.replace(/\\{where\\}/g, area));\n        } else if (pattern.includes('{name}') && pattern.includes('{area}')) {\n          if (area) variants.push(pattern.replace(/\\{name\\}/g, n).replace(/\\{area\\}/g, area));\n        } else if (pattern.includes('{name}')) {\n          variants.push(pattern.replace(/\\{name\\}/g, n));\n        } else if (pattern.includes('{area}')) {\n          if (area) variants.push(pattern.replace(/\\{area\\}/g, area));\n        } else {\n          variants.push(pattern + ' ' + n);\n        }\n        \n        for (const utterance of variants) {\n          if (!utterance || utterance.trim() === '') continue;\n          if (utterances.some(u => u.utterance === utterance.trim())) continue;\n          \n          utterances.push({\n            utterance: utterance.trim(),\n            entityId: entity.entity_id,\n            domain: domain,\n            service: tpl.service,\n            parameters: JSON.stringify(tpl.default_parameters || {}),\n            language: tpl.language || 'de',\n            intentTemplate: domain + ':' + tpl.intent,\n            certaintyThreshold: CERTAINTY_THRESHOLD\n          });\n        }\n      }\n    }\n  }\n  return utterances;\n}\n\n// Generate utterances for added + updated entities\nconst toProcess = [...added, ...updated];\nlet allUtterances = [];\nconst warnings = [];\n\nfor (const entity of toProcess) {\n  const utts = generateUtterances(entity, templateMap);\n  if (utts.length === 0) {\n    warnings.push('No templates for domain: ' + entity.domain + ' (' + entity.entity_id + ')');\n  }\n  allUtterances = allUtterances.concat(utts);\n}\n\nreturn [{\n  json: {\n    log_id: logId,\n    entities_incoming: entities,\n    added: added,\n    updated: updated,\n    removed: removed,\n    utterances: allUtterances,\n    warnings: warnings,\n    stats: {\n      entities_found: entities.length,\n      entities_added: added.length,\n      entities_updated: updated.length,\n      entities_removed: removed.length,\n      intents_generated: allUtterances.length\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "full-sync-delete-weaviate-updated",
+      "name": "Full Sync: Delete Weaviate (updated+removed)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 40],
+      "parameters": {
+        "jsCode": "// BUG-18 fix: Wrap fetch in try/catch for network errors\nconst data = $input.first().json;\nconst weaviateUrl = process.env.WEAVIATE_URL || 'http://weaviate:8080';\n\n// Delete Weaviate objects for updated entities (will re-insert) + removed entities\nconst toDelete = [\n  ...data.updated.map(e => e.entity_id),\n  ...data.removed.map(e => e.entity_id)\n];\n\nlet deletedCount = 0;\nconst errors = [];\n\nfor (const entityId of toDelete) {\n  const deleteBody = {\n    match: {\n      class: 'HAIntent',\n      where: {\n        operator: 'Equal',\n        path: ['entityId'],\n        valueText: entityId\n      }\n    }\n  };\n  \n  try {\n    const resp = await fetch(weaviateUrl + '/v1/batch/objects', {\n      method: 'DELETE',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify(deleteBody)\n    });\n    \n    if (!resp.ok) {\n      errors.push('Delete failed for ' + entityId + ': HTTP ' + resp.status);\n    } else {\n      const result = await resp.json();\n      deletedCount += result.results?.successful || 0;\n    }\n  } catch (e) {\n    errors.push('Delete failed for ' + entityId + ': ' + String(e.message || e).substring(0, 200));\n    console.log('[alice-ha-intent-sync] Full Sync: Weaviate delete error for', entityId, ':', e.message);\n  }\n}\n\nreturn [{ json: { ...data, weaviate_deleted: deletedCount, delete_errors: errors } }];"
+      }
+    },
+    {
+      "id": "full-sync-insert-weaviate",
+      "name": "Full Sync: Batch Insert Weaviate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 40],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst weaviateUrl = process.env.WEAVIATE_URL || 'http://weaviate:8080';\nconst BATCH_SIZE = 100;\n\nconst utterances = data.utterances || [];\nlet totalInserted = 0;\nlet totalFailed = 0;\nconst batchErrors = [];\n\n// Split into batches of max 100\nfor (let i = 0; i < utterances.length; i += BATCH_SIZE) {\n  const batch = utterances.slice(i, i + BATCH_SIZE);\n  \n  const batchBody = {\n    objects: batch.map(u => ({\n      class: 'HAIntent',\n      properties: {\n        utterance: u.utterance,\n        entityId: u.entityId,\n        domain: u.domain,\n        service: u.service,\n        parameters: u.parameters,\n        language: u.language,\n        intentTemplate: u.intentTemplate,\n        certaintyThreshold: u.certaintyThreshold\n      }\n    }))\n  };\n  \n  // BUG-18 fix: Wrap fetch in try/catch for network errors\n  try {\n    const resp = await fetch(weaviateUrl + '/v1/batch/objects', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify(batchBody)\n    });\n    \n    if (!resp.ok) {\n      batchErrors.push('Batch ' + Math.floor(i/BATCH_SIZE) + ' failed: HTTP ' + resp.status);\n      totalFailed += batch.length;\n    } else {\n      const result = await resp.json();\n      const failed = result.filter(r => r.result?.errors).length;\n      const succeeded = batch.length - failed;\n      totalInserted += succeeded;\n      totalFailed += failed;\n      if (failed > 0) {\n        batchErrors.push('Batch ' + Math.floor(i/BATCH_SIZE) + ': ' + failed + ' objects failed');\n      }\n    }\n  } catch (e) {\n    batchErrors.push('Batch ' + Math.floor(i/BATCH_SIZE) + ' network error: ' + String(e.message || e).substring(0, 200));\n    totalFailed += batch.length;\n    console.log('[alice-ha-intent-sync] Full Sync: Weaviate batch insert error:', e.message);\n  }\n}\n\nconst status = batchErrors.length === 0 ? 'success' : (totalInserted > 0 ? 'partial' : 'error');\n\nreturn [{ json: { \n  ...data,\n  weaviate_inserted: totalInserted,\n  weaviate_failed: totalFailed,\n  batch_errors: batchErrors,\n  final_status: status\n} }];"
+      }
+    },
+    {
+      "id": "full-sync-upsert-entities",
+      "name": "Full Sync: Upsert ha_entities",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 40],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build parameterized SQL safely in code node\nconst data = $input.first().json;\n\nconst toUpsert = [...(data.added || []), ...(data.updated || [])];\nconst toDeactivate = (data.removed || []).map(e => e.entity_id);\n\n// Sanitize function: escape single quotes for SQL string values\nfunction esc(val) {\n  if (val === null || val === undefined) return 'NULL';\n  return \"'\" + String(val).replace(/'/g, \"''\") + \"'\";\n}\n\nfunction escJsonb(val) {\n  if (val === null || val === undefined) return \"'[]'::jsonb\";\n  const jsonStr = typeof val === 'string' ? val : JSON.stringify(val);\n  return \"'\" + jsonStr.replace(/'/g, \"''\") + \"'::jsonb\";\n}\n\n// Build upsert SQL\nlet sql = 'DO $$ BEGIN\\n';\n\nif (toUpsert.length > 0) {\n  for (const e of toUpsert) {\n    sql += `INSERT INTO alice.ha_entities (entity_id, domain, friendly_name, area_id, area_name, aliases, is_active, weaviate_synced, last_seen_at, updated_at) VALUES (`;\n    sql += `${esc(e.entity_id)}, ${esc(e.domain)}, ${esc(e.friendly_name || e.entity_id.split('.').slice(1).join(' ').replace(/_/g, ' '))}, `;\n    sql += `${e.area_id ? esc(e.area_id) : 'NULL'}, ${e.area_name ? esc(e.area_name) : 'NULL'}, `;\n    sql += `${escJsonb(e.aliases || [])}, true, true, NOW(), NOW()) `;\n    sql += `ON CONFLICT (entity_id) DO UPDATE SET `;\n    sql += `domain = EXCLUDED.domain, friendly_name = EXCLUDED.friendly_name, area_id = EXCLUDED.area_id, `;\n    sql += `area_name = EXCLUDED.area_name, aliases = EXCLUDED.aliases, is_active = true, weaviate_synced = true, `;\n    sql += `last_seen_at = NOW(), updated_at = NOW();\\n`;\n  }\n}\n\nif (toDeactivate.length > 0) {\n  const safeIds = toDeactivate.map(id => esc(id)).join(', ');\n  sql += `UPDATE alice.ha_entities SET is_active = false, weaviate_synced = false, updated_at = NOW() WHERE entity_id IN (${safeIds});\\n`;\n}\n\nsql += 'END $$;';\n\nreturn [{ json: {\n  query: sql,\n  log_id: data.log_id,\n  stats: data.stats,\n  final_status: data.final_status,\n  batch_errors: data.batch_errors || [],\n  warnings: data.warnings || [],\n  weaviate_inserted: data.weaviate_inserted || 0,\n  weaviate_failed: data.weaviate_failed || 0,\n  weaviate_deleted: data.weaviate_deleted || 0\n} }];"
+      }
+    },
+    {
+      "id": "full-sync-pg-upsert-exec",
+      "name": "Full Sync: Execute PG Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3100, 40],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "full-sync-log-complete",
+      "name": "Full Sync: Update Log (complete)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3320, 40],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build safe SQL for log update instead of string interpolation\nconst data = $input.first().json;\n\nconst logId = Number(data.log_id);\nif (!Number.isInteger(logId) || logId <= 0) {\n  console.log('[alice-ha-intent-sync] Invalid log_id for completion update');\n  return [];\n}\n\nconst validStatuses = ['success', 'partial', 'error'];\nconst finalStatus = validStatuses.includes(data.final_status) ? data.final_status : 'error';\n\nconst entitiesFound = Number(data.stats?.entities_found) || 0;\nconst entitiesAdded = Number(data.stats?.entities_added) || 0;\nconst entitiesUpdated = Number(data.stats?.entities_updated) || 0;\nconst entitiesRemoved = Number(data.stats?.entities_removed) || 0;\nconst intentsGenerated = Number(data.weaviate_inserted) || 0;\nconst intentsRemoved = Number(data.weaviate_deleted) || 0;\n\n// BUG-9 partial fix: Truncate error details to avoid leaking full API responses\nconst batchErrors = (data.batch_errors || []).map(e => String(e).substring(0, 200));\nconst errorMessage = batchErrors.length > 0 ? batchErrors.join('; ').substring(0, 1000) : null;\nconst warnings = (data.warnings || []).map(w => String(w).substring(0, 200));\n\nfunction esc(val) {\n  if (val === null || val === undefined) return 'NULL';\n  return \"'\" + String(val).replace(/'/g, \"''\") + \"'\";\n}\n\nconst detailsJson = JSON.stringify({ warnings, batch_errors: batchErrors });\n\nconst query = `UPDATE alice.ha_sync_log SET status = '${finalStatus}', entities_found = ${entitiesFound}, entities_added = ${entitiesAdded}, entities_updated = ${entitiesUpdated}, entities_removed = ${entitiesRemoved}, intents_generated = ${intentsGenerated}, intents_removed = ${intentsRemoved}, error_message = ${errorMessage ? esc(errorMessage) : 'NULL'}, details = ${esc(detailsJson)}::jsonb, completed_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000 WHERE id = ${logId}`;\n\nreturn [{ json: { query } }];"
+      }
+    },
+    {
+      "id": "full-sync-log-complete-exec",
+      "name": "Full Sync: Execute Log Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3540, 40],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "full-sync-conflict-log",
+      "name": "Full Sync: Log Conflict Skip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 220],
+      "parameters": {
+        "jsCode": "console.log('[alice-ha-intent-sync] Full sync skipped: another sync is already running (conflict guard)');\nreturn [];"
+      }
+    },
+    {
+      "id": "incr-sync-conflict-check",
+      "name": "Incr Sync: Conflict Check",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 320],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM alice.ha_sync_log WHERE status = 'running' AND started_at > NOW() - INTERVAL '5 minutes' LIMIT 1;"
+      }
+    },
+    {
+      "id": "incr-sync-conflict-gate",
+      "name": "Incr Sync: Skip if Conflict",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 320],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "notExists" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "incr-sync-log-running",
+      "name": "Incr Sync: Create Log (running)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 300],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alice.ha_sync_log (sync_type, trigger_source, status, started_at) VALUES ('incremental', 'mqtt_entity_created', 'running', NOW()) RETURNING id;"
+      }
+    },
+    {
+      "id": "incr-sync-fetch-entity",
+      "name": "Incr Sync: Fetch Entity from HA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "parameters": {
+        "jsCode": "// BUG-8: entity_id already validated in Parse MQTT Message node\n// BUG-13 fix: Wrap HA API calls in try/catch (same pattern as BUG-4 fix for full sync)\nconst triggerData = $('Parse MQTT Message').first().json;\nconst entityId = triggerData.entity_id;\nif (!entityId) {\n  const logId = $('Incr Sync: Create Log (running)').first().json.id;\n  return [{ json: { _ha_error: true, log_id: logId, error_message: 'entity_id missing in MQTT payload' } }];\n}\n\nconst haUrl = process.env.HA_URL || 'http://homeassistant:8123';\nconst haToken = process.env.HA_TOKEN;\nconst headers = { 'Authorization': 'Bearer ' + haToken, 'Content-Type': 'application/json' };\nconst logId = $('Incr Sync: Create Log (running)').first().json.id;\n\ntry {\n  // Fetch entity registry entry for this specific entity\n  const regResp = await fetch(haUrl + '/api/config/entity_registry/config/' + entityId, { headers });\n  if (!regResp.ok) throw new Error('HA entity registry fetch failed for ' + entityId + ': HTTP ' + regResp.status);\n  const entityReg = await regResp.json();\n\n  // Check if entity is exposed to assistant\n  const opts = entityReg.options || {};\n  const conv = opts.conversation || {};\n  if (conv.should_expose === false) {\n    console.log('[alice-ha-intent-sync] Entity', entityId, 'is not exposed to assistant — skipping');\n    return [{ json: { skip: true, _ha_error: false, entity_id: entityId, log_id: logId, reason: 'not_exposed' } }];\n  }\n\n  // Fetch area name if area_id present\n  let area_name = null;\n  if (entityReg.area_id) {\n    const areaResp = await fetch(haUrl + '/api/config/area_registry/list', { headers });\n    if (areaResp.ok) {\n      const areas = await areaResp.json();\n      const area = areas.find(a => a.area_id === entityReg.area_id);\n      area_name = area ? area.name : null;\n    }\n  }\n\n  const domain = entityId.split('.')[0];\n  const entity = {\n    entity_id: entityId,\n    domain: domain,\n    friendly_name: entityReg.name || entityReg.original_name || entityId.split('.').slice(1).join(' ').replace(/_/g, ' '),\n    area_id: entityReg.area_id || null,\n    area_name: area_name,\n    aliases: entityReg.aliases || []\n  };\n\n  return [{ json: { entity, log_id: logId, skip: false, _ha_error: false } }];\n} catch (err) {\n  // Return error info so the error handler can update the sync log\n  return [{ json: { _ha_error: true, log_id: logId, error_message: String(err.message).substring(0, 500) } }];\n}"
+      }
+    },
+    {
+      "id": "incr-sync-noop-check",
+      "name": "Incr Sync: No-op Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 320],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json.skip }}", "rightValue": false, "operator": { "type": "boolean", "operation": "equal" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "incr-sync-load-templates",
+      "name": "Incr Sync: Load Templates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 280],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Use code node to build safe query instead of string interpolation\nconst entity = $('Incr Sync: Fetch Entity from HA').first().json.entity;\n// Validate domain: only allow alphanumeric and underscore\nconst domain = String(entity.domain).replace(/[^a-z0-9_]/g, '');\nconst query = `SELECT domain, intent, service, patterns, default_parameters, language FROM alice.ha_intent_templates WHERE is_active = true AND (domain = '${domain}' OR domain LIKE '${domain}_%') ORDER BY priority DESC;`;\nreturn [{ json: { query } }];"
+      }
+    },
+    {
+      "id": "incr-sync-load-templates-exec",
+      "name": "Incr Sync: Execute Load Templates",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, 240],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('Incr Sync: Load Templates').first().json.query }}"
+      }
+    },
+    {
+      "id": "incr-sync-check-existing",
+      "name": "Incr Sync: Check Existing in DB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 360],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build safe query for entity lookup\nconst entity = $('Incr Sync: Fetch Entity from HA').first().json.entity;\n// Validate entity_id format\nconst entityId = String(entity.entity_id).replace(/[^a-z0-9_.]/g, '');\nconst query = `SELECT entity_id, friendly_name, area_id, area_name, aliases FROM alice.ha_entities WHERE entity_id = '${entityId}';`;\nreturn [{ json: { query } }];"
+      }
+    },
+    {
+      "id": "incr-sync-check-existing-exec",
+      "name": "Incr Sync: Execute Check Existing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, 420],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('Incr Sync: Check Existing in DB').first().json.query }}"
+      }
+    },
+    {
+      "id": "incr-sync-generate",
+      "name": "Incr Sync: Generate & Insert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 320],
+      "parameters": {
+        "jsCode": "// BUG-5 fix: Added area_name to no-op comparison\n// BUG-12 fix: Read certaintyThreshold from env var\nconst CERTAINTY_THRESHOLD = parseFloat(process.env.CERTAINTY_THRESHOLD) || 0.82;\n\nconst fetchData = $('Incr Sync: Fetch Entity from HA').first().json;\nconst entity = fetchData.entity;\nconst logId = fetchData.log_id;\nconst templateRows = $('Incr Sync: Execute Load Templates').all().map(i => i.json);\nconst existingRows = $('Incr Sync: Execute Check Existing').all().map(i => i.json);\n\n// No-op check — BUG-5 fix: also compare area_name\nif (existingRows.length > 0) {\n  const ex = existingRows[0];\n  const noChange = ex.friendly_name === entity.friendly_name &&\n                   ex.area_id === entity.area_id &&\n                   ex.area_name === entity.area_name &&\n                   JSON.stringify(ex.aliases) === JSON.stringify(entity.aliases);\n  if (noChange) {\n    console.log('[alice-ha-intent-sync] Incremental sync: no change detected for', entity.entity_id, '— skipping');\n    return [{ json: { log_id: logId, skip_reason: 'no_change', entity_id: entity.entity_id, intents_generated: 0, status: 'success' } }];\n  }\n}\n\n// Build template map\nconst templateMap = {};\nfor (const t of templateRows) {\n  if (!templateMap[t.domain]) templateMap[t.domain] = [];\n  templateMap[t.domain].push(t);\n}\n\n// Generate utterances\nfunction generateUtterances(entity, templates) {\n  const utterances = [];\n  const domain = entity.domain;\n  const name = entity.friendly_name || entity.entity_id.split('.').slice(1).join(' ').replace(/_/g, ' ');\n  const area = entity.area_name || null;\n  const aliases = Array.isArray(entity.aliases) ? entity.aliases : [];\n  const names = [name, ...aliases].filter(Boolean);\n\n  const allTemplates = Object.values(templates).flat();\n\n  if (allTemplates.length === 0) {\n    console.log('[alice-ha-intent-sync] No templates for domain:', domain);\n    return [];\n  }\n\n  for (const tpl of allTemplates) {\n    const patterns = Array.isArray(tpl.patterns) ? tpl.patterns : [];\n    for (const pattern of patterns) {\n      if (pattern.includes('{value}') || pattern.includes('{message}') || pattern.includes('{temperature}')) continue;\n      \n      for (const n of names) {\n        const variants = [];\n        \n        if (pattern.includes('{where}')) {\n          variants.push(pattern.replace(/\\{where\\}/g, n));\n          if (area) variants.push(pattern.replace(/\\{where\\}/g, area));\n        } else if (pattern.includes('{name}') && pattern.includes('{area}')) {\n          if (area) variants.push(pattern.replace(/\\{name\\}/g, n).replace(/\\{area\\}/g, area));\n        } else if (pattern.includes('{name}')) {\n          variants.push(pattern.replace(/\\{name\\}/g, n));\n        } else if (pattern.includes('{area}')) {\n          if (area) variants.push(pattern.replace(/\\{area\\}/g, area));\n        } else {\n          variants.push(pattern + ' ' + n);\n        }\n        \n        for (const utterance of variants) {\n          if (!utterance?.trim()) continue;\n          if (utterances.some(u => u.utterance === utterance.trim())) continue;\n          utterances.push({\n            utterance: utterance.trim(),\n            entityId: entity.entity_id,\n            domain: domain,\n            service: tpl.service,\n            parameters: JSON.stringify(tpl.default_parameters || {}),\n            language: tpl.language || 'de',\n            intentTemplate: domain + ':' + tpl.intent,\n            certaintyThreshold: CERTAINTY_THRESHOLD\n          });\n        }\n      }\n    }\n  }\n  return utterances;\n}\n\nconst utterances = generateUtterances(entity, templateMap);\n\n// BUG-18 fix: Wrap Weaviate fetch calls in try/catch for network errors\nconst weaviateUrl = process.env.WEAVIATE_URL || 'http://weaviate:8080';\nlet weaviateErrors = [];\n\n// Delete existing Weaviate objects if this is an update\nif (existingRows.length > 0) {\n  const deleteBody = {\n    match: { class: 'HAIntent', where: { operator: 'Equal', path: ['entityId'], valueText: entity.entity_id } }\n  };\n  try {\n    const delResp = await fetch(weaviateUrl + '/v1/batch/objects', {\n      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deleteBody)\n    });\n    if (!delResp.ok) weaviateErrors.push('Delete HTTP ' + delResp.status);\n  } catch (e) {\n    weaviateErrors.push('Delete network error: ' + String(e.message || e).substring(0, 200));\n    console.log('[alice-ha-intent-sync] Incr Sync: Weaviate delete error:', e.message);\n  }\n}\n\n// Insert new utterances\nlet inserted = 0;\nif (utterances.length > 0) {\n  const batchBody = {\n    objects: utterances.map(u => ({ class: 'HAIntent', properties: u }))\n  };\n  try {\n    const resp = await fetch(weaviateUrl + '/v1/batch/objects', {\n      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(batchBody)\n    });\n    if (resp.ok) {\n      const result = await resp.json();\n      inserted = result.filter(r => !r.result?.errors).length;\n    } else {\n      weaviateErrors.push('Insert HTTP ' + resp.status);\n    }\n  } catch (e) {\n    weaviateErrors.push('Insert network error: ' + String(e.message || e).substring(0, 200));\n    console.log('[alice-ha-intent-sync] Incr Sync: Weaviate insert error:', e.message);\n  }\n}\n\nconst finalStatus = weaviateErrors.length > 0 ? (inserted > 0 ? 'partial' : 'error') : 'success';\nreturn [{ json: {\n  log_id: logId,\n  entity,\n  intents_generated: inserted,\n  status: finalStatus,\n  weaviate_errors: weaviateErrors\n} }];"
+      }
+    },
+    {
+      "id": "incr-sync-pg-upsert",
+      "name": "Incr Sync: PG Upsert Entity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 320],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build safe SQL instead of using n8n expression interpolation\n// BUG-16 fix: No-op skip case sets query to 'SELECT 1' to avoid undefined SQL execution\nconst data = $input.first().json;\nconst entity = data.entity;\n\nif (!entity || !entity.entity_id) {\n  // No-op skip case — return a safe no-op query so downstream Postgres node doesn't fail\n  return [{ json: { ...data, query: 'SELECT 1' } }];\n}\n\nfunction esc(val) {\n  if (val === null || val === undefined) return 'NULL';\n  return \"'\" + String(val).replace(/'/g, \"''\") + \"'\";\n}\n\nconst entityId = esc(entity.entity_id);\nconst domain = esc(entity.domain);\nconst friendlyName = esc(entity.friendly_name);\nconst areaId = entity.area_id ? esc(entity.area_id) : 'NULL';\nconst areaName = entity.area_name ? esc(entity.area_name) : 'NULL';\nconst aliases = \"'\" + JSON.stringify(entity.aliases || []).replace(/'/g, \"''\") + \"'::jsonb\";\nconst intentsGenerated = Number(data.intents_generated) || 0;\n\nconst query = `INSERT INTO alice.ha_entities (entity_id, domain, friendly_name, area_id, area_name, aliases, is_active, weaviate_synced, intents_count, last_seen_at, updated_at) VALUES (${entityId}, ${domain}, ${friendlyName}, ${areaId}, ${areaName}, ${aliases}, true, true, ${intentsGenerated}, NOW(), NOW()) ON CONFLICT (entity_id) DO UPDATE SET friendly_name = EXCLUDED.friendly_name, area_id = EXCLUDED.area_id, area_name = EXCLUDED.area_name, aliases = EXCLUDED.aliases, is_active = true, weaviate_synced = true, intents_count = EXCLUDED.intents_count, last_seen_at = NOW(), updated_at = NOW();`;\n\nreturn [{ json: { ...data, query } }];"
+      }
+    },
+    {
+      "id": "incr-sync-pg-upsert-exec",
+      "name": "Incr Sync: Execute PG Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2880, 320],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "incr-sync-log-complete",
+      "name": "Incr Sync: Update Log (complete)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 320],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build safe SQL for log update\n// BUG-14 fix: Detect no-op skip case and report entities_added = 0 with accurate details\nconst data = $input.first().json;\nconst logId = Number(data.log_id);\nif (!Number.isInteger(logId) || logId <= 0) {\n  console.log('[alice-ha-intent-sync] Invalid log_id for incremental log update');\n  return [{ json: { query: 'SELECT 1' } }];\n}\n\nconst validStatuses = ['success', 'partial', 'error'];\nconst status = validStatuses.includes(data.status) ? data.status : 'error';\nconst intentsGenerated = Number(data.intents_generated) || 0;\n\n// BUG-14 fix: If skip_reason is 'no_change', set entities_added = 0 and add detail\nconst isNoOp = data.skip_reason === 'no_change';\nconst entitiesAdded = isNoOp ? 0 : 1;\nconst detailsJson = isNoOp ? JSON.stringify({ skip_reason: 'no_change', entity_id: data.entity_id || null }) : 'NULL';\nconst detailsClause = isNoOp ? `, details = '${detailsJson.replace(/'/g, \"''\")}'::jsonb` : '';\n\nconst query = `UPDATE alice.ha_sync_log SET status = '${status}', entities_added = ${entitiesAdded}, intents_generated = ${intentsGenerated}${detailsClause}, completed_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000 WHERE id = ${logId};`;\n\nreturn [{ json: { query } }];"
+      }
+    },
+    {
+      "id": "incr-sync-log-complete-exec",
+      "name": "Incr Sync: Execute Log Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3320, 320],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "incr-sync-skip-log",
+      "name": "Incr Sync: Log Skip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 500],
+      "parameters": {
+        "jsCode": "// BUG-17 fix: When a log_id exists (sync log entry was created), update it to 'success' with skip reason\nconst data = $input.first().json;\nconst reason = data.reason || data.skip_reason || 'not_exposed';\nconsole.log('[alice-ha-intent-sync] Incremental sync skipped:', reason, 'for', data.entity_id);\n\nconst logId = Number(data.log_id);\nif (Number.isInteger(logId) && logId > 0) {\n  const safeReason = String(reason).replace(/'/g, \"''\").substring(0, 200);\n  const safeEntityId = String(data.entity_id || '').replace(/[^a-z0-9_.]/g, '').substring(0, 200);\n  const detailsJson = JSON.stringify({ skip_reason: safeReason, entity_id: safeEntityId }).replace(/'/g, \"''\");\n  const query = `UPDATE alice.ha_sync_log SET status = 'success', entities_added = 0, intents_generated = 0, details = '${detailsJson}'::jsonb, completed_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000 WHERE id = ${logId};`;\n  return [{ json: { query, log_id: logId } }];\n}\n\n// No log_id means we came from Skip if Conflict (no log entry was created) — nothing to update\nreturn [];"
+      }
+    },
+    {
+      "id": "remove-weaviate",
+      "name": "Remove: Delete from Weaviate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 460],
+      "parameters": {
+        "jsCode": "// BUG-8: entity_id already validated in Parse MQTT Message node\n// BUG-18 fix: Wrap fetch in try/catch for network errors\nconst triggerData = $('Parse MQTT Message').first().json;\nconst entityId = triggerData.entity_id;\nif (!entityId) throw new Error('entity_id missing in MQTT payload for entity_removed event');\n\nconst weaviateUrl = process.env.WEAVIATE_URL || 'http://weaviate:8080';\n\nconst deleteBody = {\n  match: {\n    class: 'HAIntent',\n    where: { operator: 'Equal', path: ['entityId'], valueText: entityId }\n  }\n};\n\nlet deletedCount = 0;\nlet weaviateError = null;\ntry {\n  const resp = await fetch(weaviateUrl + '/v1/batch/objects', {\n    method: 'DELETE',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify(deleteBody)\n  });\n\n  if (resp.ok) {\n    const result = await resp.json();\n    deletedCount = result.results?.successful || 0;\n  } else {\n    weaviateError = 'Weaviate delete HTTP ' + resp.status;\n  }\n} catch (e) {\n  weaviateError = 'Weaviate network error: ' + String(e.message || e).substring(0, 200);\n  console.log('[alice-ha-intent-sync] Remove: Weaviate unreachable:', weaviateError);\n}\n\nreturn [{ json: { entity_id: entityId, weaviate_deleted: deletedCount, weaviate_error: weaviateError } }];"
+      }
+    },
+    {
+      "id": "remove-pg",
+      "name": "Remove: Deactivate in PG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 460],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build safe SQL instead of string interpolation\nconst entityId = $input.first().json.entity_id;\n// entity_id already validated by Parse MQTT Message (alphanumeric, dots, underscores only)\nconst safeId = String(entityId).replace(/[^a-z0-9_.]/g, '');\nconst query = `UPDATE alice.ha_entities SET is_active = false, weaviate_synced = false, updated_at = NOW() WHERE entity_id = '${safeId}';`;\nreturn [{ json: { entity_id: entityId, weaviate_deleted: $input.first().json.weaviate_deleted, query } }];"
+      }
+    },
+    {
+      "id": "remove-pg-exec",
+      "name": "Remove: Execute PG Deactivate",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 460],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "remove-log",
+      "name": "Remove: Log Entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 460],
+      "parameters": {
+        "jsCode": "// BUG-7 fix: Build safe SQL for remove log entry\nconst data = $input.first().json;\nconst weaviateDeleted = Number(data.weaviate_deleted) || 0;\nconst query = `INSERT INTO alice.ha_sync_log (sync_type, trigger_source, entities_removed, intents_removed, status, started_at, completed_at, duration_ms) VALUES ('incremental', 'mqtt_entity_removed', 1, ${weaviateDeleted}, 'success', NOW(), NOW(), 0);`;\nreturn [{ json: { query } }];"
+      }
+    },
+    {
+      "id": "remove-log-exec",
+      "name": "Remove: Execute Log Entry",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 460],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "incr-sync-skip-log-exec",
+      "name": "Incr Sync: Execute Skip Log Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2440, 500],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    },
+    {
+      "id": "incr-sync-ha-error-gate",
+      "name": "Incr Sync: HA Error Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json._ha_error }}", "rightValue": false, "operator": { "type": "boolean", "operation": "equal" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "incr-sync-ha-error-log",
+      "name": "Incr Sync: Log HA Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 440],
+      "parameters": {
+        "jsCode": "// BUG-13 fix: Update sync log to 'error' when HA API is unreachable during incremental sync\nconst data = $input.first().json;\nconst logId = Number(data.log_id);\nconst errorMsg = String(data.error_message || 'Unknown HA API error').substring(0, 500);\n\nif (!Number.isInteger(logId) || logId <= 0) {\n  console.log('[alice-ha-intent-sync] Invalid log_id for incr sync error update:', data.log_id);\n  return [];\n}\n\nconst safeErrorMsg = errorMsg.replace(/'/g, \"''\");\nconst query = `UPDATE alice.ha_sync_log SET status = 'error', error_message = '${safeErrorMsg}', completed_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000 WHERE id = ${logId}`;\n\nreturn [{ json: { query, log_id: logId } }];"
+      }
+    },
+    {
+      "id": "incr-sync-ha-error-exec",
+      "name": "Incr Sync: Execute HA Error Log Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, 440],
+      "credentials": {
+        "postgres": {
+          "id": "pg-alice",
+          "name": "pg-alice"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      }
+    }
+  ],
+  "connections": {
+    "MQTT Trigger": {
+      "main": [
+        [{ "node": "Parse MQTT Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse MQTT Message": {
+      "main": [
+        [{ "node": "Event Router", "type": "main", "index": 0 }]
+      ]
+    },
+    "Event Router": {
+      "main": [
+        [{ "node": "Full Sync: Conflict Check", "type": "main", "index": 0 }],
+        [{ "node": "Incr Sync: Conflict Check", "type": "main", "index": 0 }],
+        [{ "node": "Remove: Delete from Weaviate", "type": "main", "index": 0 }],
+        [{ "node": "Log Unknown Event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Conflict Check": {
+      "main": [
+        [{ "node": "Full Sync: Skip if Conflict", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Skip if Conflict": {
+      "main": [
+        [{ "node": "Full Sync: Create Log (running)", "type": "main", "index": 0 }],
+        [{ "node": "Full Sync: Log Conflict Skip", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Create Log (running)": {
+      "main": [
+        [{ "node": "Full Sync: Fetch Exposed Entities (REST)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Fetch Exposed Entities (REST)": {
+      "main": [
+        [{ "node": "Full Sync: HA Error Gate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: HA Error Gate": {
+      "main": [
+        [
+          { "node": "Full Sync: Load Templates from DB", "type": "main", "index": 0 },
+          { "node": "Full Sync: Diff vs DB", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Full Sync: Log HA Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Log HA Error": {
+      "main": [
+        [{ "node": "Full Sync: Update Log (HA error)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Update Log (HA error)": {
+      "main": [
+        [{ "node": "Full Sync: Execute HA Error Log Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Load Templates from DB": {
+      "main": [
+        [{ "node": "Full Sync: Generate Utterances", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Diff vs DB": {
+      "main": [
+        [{ "node": "Full Sync: Generate Utterances", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Generate Utterances": {
+      "main": [
+        [{ "node": "Full Sync: Delete Weaviate (updated+removed)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Delete Weaviate (updated+removed)": {
+      "main": [
+        [{ "node": "Full Sync: Batch Insert Weaviate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Batch Insert Weaviate": {
+      "main": [
+        [{ "node": "Full Sync: Upsert ha_entities", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Upsert ha_entities": {
+      "main": [
+        [{ "node": "Full Sync: Execute PG Upsert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Execute PG Upsert": {
+      "main": [
+        [{ "node": "Full Sync: Update Log (complete)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Full Sync: Update Log (complete)": {
+      "main": [
+        [{ "node": "Full Sync: Execute Log Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Conflict Check": {
+      "main": [
+        [{ "node": "Incr Sync: Skip if Conflict", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Skip if Conflict": {
+      "main": [
+        [{ "node": "Incr Sync: Create Log (running)", "type": "main", "index": 0 }],
+        [{ "node": "Incr Sync: Log Skip", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Create Log (running)": {
+      "main": [
+        [{ "node": "Incr Sync: Fetch Entity from HA", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Fetch Entity from HA": {
+      "main": [
+        [{ "node": "Incr Sync: HA Error Gate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: HA Error Gate": {
+      "main": [
+        [{ "node": "Incr Sync: No-op Gate", "type": "main", "index": 0 }],
+        [{ "node": "Incr Sync: Log HA Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Log HA Error": {
+      "main": [
+        [{ "node": "Incr Sync: Execute HA Error Log Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: No-op Gate": {
+      "main": [
+        [
+          { "node": "Incr Sync: Load Templates", "type": "main", "index": 0 },
+          { "node": "Incr Sync: Check Existing in DB", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Incr Sync: Log Skip", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Load Templates": {
+      "main": [
+        [{ "node": "Incr Sync: Execute Load Templates", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Execute Load Templates": {
+      "main": [
+        [{ "node": "Incr Sync: Generate & Insert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Check Existing in DB": {
+      "main": [
+        [{ "node": "Incr Sync: Execute Check Existing", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Execute Check Existing": {
+      "main": [
+        [{ "node": "Incr Sync: Generate & Insert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Generate & Insert": {
+      "main": [
+        [{ "node": "Incr Sync: PG Upsert Entity", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: PG Upsert Entity": {
+      "main": [
+        [{ "node": "Incr Sync: Execute PG Upsert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Execute PG Upsert": {
+      "main": [
+        [{ "node": "Incr Sync: Update Log (complete)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Update Log (complete)": {
+      "main": [
+        [{ "node": "Incr Sync: Execute Log Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "Remove: Delete from Weaviate": {
+      "main": [
+        [{ "node": "Remove: Deactivate in PG", "type": "main", "index": 0 }]
+      ]
+    },
+    "Remove: Deactivate in PG": {
+      "main": [
+        [{ "node": "Remove: Execute PG Deactivate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Remove: Execute PG Deactivate": {
+      "main": [
+        [{ "node": "Remove: Log Entry", "type": "main", "index": 0 }]
+      ]
+    },
+    "Incr Sync: Log Skip": {
+      "main": [
+        [{ "node": "Incr Sync: Execute Skip Log Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "Remove: Log Entry": {
+      "main": [
+        [{ "node": "Remove: Execute Log Entry", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "timezone": "Europe/Berlin"
+  },
+  "tags": ["alice", "ha-sync", "mqtt"],
+  "pinData": {}
+}
