@@ -341,3 +341,88 @@ Log: "Intent X (domain=Y): N patterns [hassil]"
 - **Deploy method:** `sync-compose.sh` → `docker compose up -d --build` (layer cache used; only app layer rebuilt)
 - **Health check:** `{"status":"healthy"}` confirmed post-deploy
 - **Image rebuild:** Yes (app layer only — no `--no-cache` needed)
+
+## Production Smoke Test
+
+**Tested:** 2026-02-27
+**Tester:** QA Engineer (AI)
+**Test Method:** Fresh Docker image built from current source, container started with real GitHub download, endpoints tested via curl and docker exec
+**hassil version:** 3.5.0
+
+### Smoke Test Results
+
+#### ST-1: Container starts and serves /health
+- [x] Container starts without errors
+- [x] `GET /health` returns `{"status": "healthy"}`
+- **PASS**
+
+#### ST-2: hassil library is active (not custom fallback)
+- [x] `_USE_HASSIL = True` confirmed inside container
+- [x] hassil 3.5.0 installed via pip
+- **PASS**
+
+#### ST-3: Full sync expansion produces 55 templates via [hassil] path
+- [x] 55 `[hassil]` log lines observed (one per intent template)
+- [x] 0 `[custom]` log lines observed
+- [x] 0 `AttributeError` occurrences
+- [x] 0 `WARNING` log lines during expansion
+- [x] "Total templates to upsert: 55" confirmed
+- **PASS**
+
+#### ST-4: {name} and {area} slot placeholders preserved
+- [x] `light_HassTurnOn` patterns contain `{name}` and `{area}` as literal strings
+- [x] Sample: `"schalte der {name} in {area} an"` -- correct
+- **PASS**
+
+#### ST-5: _normalize_expansion_rules edge cases (live container)
+- [x] EC-1: String value `"(rot|gruen|blau)"` -> unchanged -- **PASS**
+- [x] EC-2: Single-item list `["rot"]` -> `"rot"` -- **PASS**
+- [x] EC-3: Empty list `[]` -> skipped with warning -- **PASS**
+- [x] EC-4: List of dicts `[{"in": "rot"}, {"in": "blau"}]` -> `"(rot|blau)"` -- **PASS**
+- [x] EC-5: Nested list `[["rot", "gruen"], "blau"]` -> `"blau"` (inner list skipped) -- **PASS**
+- [x] EC-6: Multi-item list `["rot", "gruen", "blau"]` -> `"(rot|gruen|blau)"` -- **PASS**
+- **PASS**
+
+#### ST-6: Function signatures unchanged
+- [x] `parse_intent_yaml(yaml_data: dict, domain: str, max_patterns: int = 50) -> list[dict]`
+- [x] `expand_intent_sentences(sentences: list[str], expansion_rules: dict[str, list[str]], max_patterns: int = 50) -> list[str]`
+- **PASS**
+
+#### ST-7: Performance within 15s requirement
+- [x] Full download + expansion completed in ~2.6s (from download start to "Total templates" log)
+- [x] Well under the 15s threshold
+- **PASS**
+
+#### ST-8: 139 shared expansion rules loaded from _common.yaml
+- [x] "Loaded 139 shared expansion rules from _common" confirmed in logs
+- [x] This confirms the OBS-1 fix (string-type rules now included via `_merge_common_rules()`)
+- **PASS**
+
+### Observations (Non-Blocking)
+
+#### OBS-SMOKE-1: /intents/trigger-entity-sync returns published:true when MQTT_URL is empty
+- **Severity:** Low (pre-existing, not a PROJ-6 regression)
+- **Description:** When `MQTT_URL` is not set, `_publish_mqtt()` logs a warning and returns without error. The `/intents/trigger-entity-sync` endpoint then returns `{"published": true}`, which is semantically inaccurate. The function did not actually publish anything.
+- **Impact:** None in production (MQTT_URL is always set on ki.lan). Only affects local dev/testing.
+- **Resolution:** Not blocking. Consider returning `{"published": false, "reason": "MQTT_URL not configured"}` in a future cleanup.
+
+### Smoke Test Summary
+
+| Category | Result |
+|---|---|
+| Health endpoint | PASS |
+| hassil library active | PASS |
+| 55 templates via [hassil] | PASS |
+| 0 [custom] fallbacks | PASS |
+| 0 AttributeErrors | PASS |
+| 0 warnings during expansion | PASS |
+| Slot placeholders preserved | PASS |
+| Edge cases verified | PASS (6/6) |
+| Function signatures | PASS |
+| Performance (<15s) | PASS (~2.6s) |
+| 139 shared rules loaded | PASS |
+
+- **All 8 smoke tests:** PASS
+- **Bugs found:** 0
+- **Observations:** 1 low-severity pre-existing issue (OBS-SMOKE-1)
+- **Production status:** CONFIRMED WORKING
