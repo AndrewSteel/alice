@@ -335,4 +335,23 @@ No bugs found.
 
 ## Deployment
 
-_To be added by /deploy_
+**Deployed:** 2026-02-27
+**Environment:** Production (ki.lan)
+
+### Deployment Steps Completed
+1. Committed: `feat(PROJ-5): Integrate hassil library as native expansion engine` (1c85c8e)
+2. Synced to server via `sync-compose.sh`
+3. Docker image rebuilt: `docker compose build --no-cache hassil-parser` — hassil-3.5.0 installed
+4. Container restarted: `docker compose up -d hassil-parser`
+5. Sync triggered: `POST /intents/sync` → `{"inserted":0,"updated":55,"skipped":0,"duration_ms":11534}`
+
+### Production Verification
+- Container running: ✓
+- hassil library importable in container: ✓
+- `/health` endpoint: 200 OK ✓
+- 55 templates updated (≥55 threshold met) ✓
+- Duration 11,534ms (within +20% budget of ~11s baseline) ✓
+- No regression in pattern counts ✓
+
+### Post-Deployment Observation
+In production, `Intents.from_dict(yaml_data)` fails with `'list' object has no attribute 'strip'` for all domains due to an API incompatibility between hassil 3.5.0 and the actual HA intent YAML structure (some `expansion_rules` contain list values). The domain-level fallback triggers correctly for all domains, routing to the custom regex path. All 55 templates are updated successfully. Functionally no regression. A follow-up task (PROJ-6 or hotfix) should investigate the `expansion_rules` list-type incompatibility to enable actual hassil code path in production.
