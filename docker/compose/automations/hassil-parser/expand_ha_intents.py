@@ -1,11 +1,9 @@
 """
 Hassil template expansion for Home Assistant intent sentences.
 
-Handles four constructs:
-  [optional]   -> two variants: with and without
-  (alt1|alt2)  -> one variant per alternative
-  <rule>       -> recursive resolution via expansion_rules
-  {slot}       -> kept as placeholder (never replaced)
+Supports two expansion engines:
+  1. hassil library (preferred) — official HA parser, activated when hassil is importable
+  2. Custom regex fallback — handles [optional], (alt1|alt2), <rule>, {slot}
 
 Hard cap: MAX_PATTERNS_PER_INTENT patterns per intent (default 50).
 """
@@ -84,18 +82,13 @@ MAX_PATTERNS = int(os.environ.get("MAX_PATTERNS_PER_INTENT", "50"))
 # ---------------------------------------------------------------------------
 _USE_HASSIL = False
 try:
-    from hassil.expression import Expression
     from hassil.intents import Intents
-    from hassil.parse_expression import parse_expression
-    from hassil.recognize import MISSING_ENTITY
+    from hassil.sample import sample_sentence
 
     _USE_HASSIL = True
-    logger.info("hassil library available (using custom expansion for now)")
+    logger.info("Using hassil library for template expansion")
 except ImportError:
-    logger.info("hassil library not available, using custom expansion")
-# NOTE: _USE_HASSIL is intentionally not yet used to switch expansion paths.
-# The custom implementation handles all required constructs. Full hassil
-# integration is reserved for a future iteration if deeper parsing is needed.
+    logger.info("hassil library not available, using custom regex expansion")
 
 
 # ===================================================================
@@ -243,6 +236,151 @@ def expand_intent_sentences(
 
 
 # ===================================================================
+# hassil-based expansion (preferred when _USE_HASSIL is True)
+# ===================================================================
+
+
+def _expand_with_hassil(
+    yaml_data: dict,
+    domain: str,
+    max_patterns: int = MAX_PATTERNS,
+) -> list[dict]:
+    """
+    Use the hassil library to parse and expand intent templates.
+
+    Returns the same format as the custom path: list of dicts with
+    domain, intent, service, language, patterns, source, default_parameters.
+
+    Raises on import-level errors (caller should catch and fall back).
+    Individual intent errors fall back to custom expansion per-intent.
+    """
+    language = yaml_data.get("language", "de")
+    raw_intents = yaml_data.get("intents", {})
+
+    # Parse the full YAML with hassil (includes expansion_rules, lists, intents)
+    hassil_intents = Intents.from_dict(yaml_data)
+
+    results: list[dict] = []
+
+    for intent_name, intent_obj in hassil_intents.intents.items():
+        # Extract default_parameters from the raw YAML (context filters)
+        default_parameters: dict = {}
+        raw_intent = raw_intents.get(intent_name, {})
+        for block in raw_intent.get("data", []):
+            excludes_context = block.get("excludes_context", {})
+            if excludes_context and "domain" in excludes_context:
+                default_parameters.setdefault("excludes_domain", [])
+                excluded = excludes_context["domain"]
+                if isinstance(excluded, str):
+                    if excluded not in default_parameters["excludes_domain"]:
+                        default_parameters["excludes_domain"].append(excluded)
+                elif isinstance(excluded, list):
+                    for d in excluded:
+                        if d not in default_parameters["excludes_domain"]:
+                            default_parameters["excludes_domain"].append(d)
+
+            requires_context = block.get("requires_context", {})
+            if requires_context and "domain" in requires_context:
+                default_parameters["requires_domain"] = requires_context["domain"]
+
+        # Expand sentences using hassil with intent-level fallback
+        try:
+            all_patterns: list[str] = []
+            seen: set[str] = set()
+
+            for intent_data in intent_obj.data:
+                # Merge local expansion rules with global ones
+                if intent_data.expansion_rules:
+                    local_rules = {
+                        **hassil_intents.expansion_rules,
+                        **intent_data.expansion_rules,
+                    }
+                else:
+                    local_rules = hassil_intents.expansion_rules
+
+                for sentence in intent_data.sentences:
+                    for text in sample_sentence(
+                        sentence,
+                        slot_lists=hassil_intents.slot_lists,
+                        expansion_rules=local_rules,
+                        language=language,
+                        expand_lists=False,
+                    ):
+                        normalized = _normalize(text)
+                        if normalized and normalized not in seen:
+                            seen.add(normalized)
+                            all_patterns.append(normalized)
+                        if len(all_patterns) >= max_patterns:
+                            break
+                    if len(all_patterns) >= max_patterns:
+                        break
+                if len(all_patterns) >= max_patterns:
+                    break
+
+        except Exception as exc:
+            # Intent-level fallback: use custom expansion for this intent only
+            logger.warning(
+                "hassil failed for intent %s in domain %s (%s), falling back to custom expansion",
+                intent_name,
+                domain,
+                exc,
+            )
+            # Gather raw sentences from YAML for custom expansion
+            raw_sentences: list[str] = []
+            for block in raw_intent.get("data", []):
+                raw_sentences.extend(block.get("sentences", []))
+
+            expansion_rules = yaml_data.get("expansion_rules", {})
+            all_patterns = expand_intent_sentences(raw_sentences, expansion_rules, max_patterns)
+
+        if not all_patterns:
+            # If hassil produced 0 patterns, try custom expansion as last resort
+            raw_sentences_fallback: list[str] = []
+            for block in raw_intent.get("data", []):
+                raw_sentences_fallback.extend(block.get("sentences", []))
+
+            if raw_sentences_fallback:
+                logger.warning(
+                    "hassil produced 0 patterns for intent %s (domain=%s), trying custom fallback",
+                    intent_name,
+                    domain,
+                )
+                expansion_rules = yaml_data.get("expansion_rules", {})
+                all_patterns = expand_intent_sentences(
+                    raw_sentences_fallback, expansion_rules, max_patterns
+                )
+
+        if not all_patterns:
+            logger.warning(
+                "Intent %s in domain %s expanded to 0 patterns (both paths), skipping",
+                intent_name,
+                domain,
+            )
+            continue
+
+        logger.info(
+            "Intent %s (domain=%s): %d patterns [hassil]",
+            intent_name,
+            domain,
+            len(all_patterns),
+        )
+
+        results.append(
+            {
+                "domain": domain,
+                "intent": intent_name,
+                "service": _intent_to_service(intent_name, domain),
+                "language": language,
+                "patterns": all_patterns,
+                "source": "github",
+                "default_parameters": default_parameters if default_parameters else None,
+            }
+        )
+
+    return results
+
+
+# ===================================================================
 # YAML parsing: extract intents from HA intent YAML files
 # ===================================================================
 
@@ -258,6 +396,19 @@ def parse_intent_yaml(
         "patterns": list[str], "source": "github",
         "default_parameters": dict | None}, ...]
     """
+    # --- hassil path (preferred) ---
+    if _USE_HASSIL:
+        try:
+            return _expand_with_hassil(yaml_data, domain, max_patterns)
+        except Exception as exc:
+            logger.warning(
+                "hassil expansion failed for domain %s (%s), falling back to custom expansion",
+                domain,
+                exc,
+            )
+            # Fall through to custom path below
+
+    # --- Custom regex path (fallback) ---
     language = yaml_data.get("language", "de")
     expansion_rules = yaml_data.get("expansion_rules", {})
     lists_data = yaml_data.get("lists", {})
@@ -322,7 +473,7 @@ def parse_intent_yaml(
             continue
 
         logger.info(
-            "Intent %s (domain=%s): %d sentences -> %d patterns",
+            "Intent %s (domain=%s): %d sentences -> %d patterns [custom]",
             intent_name,
             domain,
             len(all_sentences),

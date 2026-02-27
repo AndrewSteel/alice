@@ -5,4 +5,4 @@ pyyaml
 httpx
 psycopg2-binary
 paho-mqtt
-hassil
+hassil>=3.5,<4.0
