@@ -22,6 +22,8 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | PROJ-2 | FastAPI container + hassil intent expansion                         | ✅ Deployed  |
 | PROJ-3 | HA-first chat handler with intent routing                           | ✅ Deployed  |
 | PROJ-4 | HA auto-sync (MQTT → n8n → Weaviate)                                | ✅ Deployed  |
+| PROJ-5 | Hassil native library integration (expansion engine upgrade)        | ✅ Deployed  |
+| PROJ-6 | Hassil expansion_rules compatibility fix (all intents via hassil)   | ✅ Deployed  |
 
 ---
 

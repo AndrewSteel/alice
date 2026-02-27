@@ -144,6 +144,17 @@ def _merge_common_rules(domain_yamls: dict[str, dict]) -> dict[str, list[str]]:
     for rule_name, alternatives in common.get("expansion_rules", {}).items():
         if isinstance(alternatives, list):
             shared_rules[rule_name] = alternatives
+        elif isinstance(alternatives, str):
+            # Wrap string-type rules in a single-item list so both the custom
+            # expansion path (iterates over list items) and the hassil path
+            # (_normalize_expansion_rules converts back to string) work correctly.
+            shared_rules[rule_name] = [alternatives]
+        else:
+            logger.warning(
+                "Skipping _common expansion_rules[%s] with unsupported type %s",
+                rule_name,
+                type(alternatives).__name__,
+            )
 
     # lists from _common
     for list_name, list_def in common.get("lists", {}).items():
