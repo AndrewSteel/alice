@@ -240,6 +240,70 @@ def expand_intent_sentences(
 # ===================================================================
 
 
+def _normalize_expansion_rules(rules: dict) -> dict:
+    """
+    Normalize expansion_rules values so hassil's Intents.from_dict() can parse them.
+
+    HA intents YAML files from GitHub sometimes store expansion_rules values as
+    lists of strings (e.g. ["rot", "gruen", "blau"]), but hassil expects template
+    strings (e.g. "(rot|gruen|blau)").
+
+    Conversion rules:
+      - str value         -> unchanged
+      - list[str], 1 item -> "item" (no parentheses needed)
+      - list[str], 2+ items -> "(a|b|c)"
+      - list[], empty     -> skip entry + log warning
+      - list[dict]        -> extract "in" key from each dict; skip + warn if missing
+      - other types       -> skip entry + log warning
+    """
+    normalized: dict = {}
+
+    for key, value in rules.items():
+        if isinstance(value, str):
+            # Already hassil-compatible
+            normalized[key] = value
+        elif isinstance(value, list):
+            if len(value) == 0:
+                logger.warning(
+                    "expansion_rules[%s] is an empty list, skipping", key
+                )
+                continue
+
+            # Extract string values; handle list[dict] with "in" key
+            str_values: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    str_values.append(item)
+                elif isinstance(item, dict) and "in" in item:
+                    str_values.append(str(item["in"]))
+                else:
+                    logger.warning(
+                        "expansion_rules[%s] contains unsupported item type %s, skipping item",
+                        key,
+                        type(item).__name__,
+                    )
+
+            if not str_values:
+                logger.warning(
+                    "expansion_rules[%s] produced no usable string values, skipping",
+                    key,
+                )
+                continue
+
+            if len(str_values) == 1:
+                normalized[key] = str_values[0]
+            else:
+                normalized[key] = "(" + "|".join(str_values) + ")"
+        else:
+            logger.warning(
+                "expansion_rules[%s] has unexpected type %s, skipping",
+                key,
+                type(value).__name__,
+            )
+
+    return normalized
+
+
 def _expand_with_hassil(
     yaml_data: dict,
     domain: str,
@@ -257,8 +321,35 @@ def _expand_with_hassil(
     language = yaml_data.get("language", "de")
     raw_intents = yaml_data.get("intents", {})
 
+    # Normalize expansion_rules before passing to hassil (work on a copy
+    # so the caller's yaml_data reference is not mutated — the custom-path
+    # fallback continues to read the original dict safely).
+    normalized_data = dict(yaml_data)
+    if "expansion_rules" in normalized_data:
+        normalized_data["expansion_rules"] = _normalize_expansion_rules(
+            normalized_data["expansion_rules"]
+        )
+
+    # Also normalize expansion_rules inside intent data blocks
+    if "intents" in normalized_data:
+        normalized_intents = {}
+        for intent_name, intent_def in normalized_data["intents"].items():
+            if isinstance(intent_def, dict) and "data" in intent_def:
+                normalized_blocks = []
+                for block in intent_def["data"]:
+                    if isinstance(block, dict) and "expansion_rules" in block:
+                        block = dict(block)
+                        block["expansion_rules"] = _normalize_expansion_rules(
+                            block["expansion_rules"]
+                        )
+                    normalized_blocks.append(block)
+                intent_def = dict(intent_def)
+                intent_def["data"] = normalized_blocks
+            normalized_intents[intent_name] = intent_def
+        normalized_data["intents"] = normalized_intents
+
     # Parse the full YAML with hassil (includes expansion_rules, lists, intents)
-    hassil_intents = Intents.from_dict(yaml_data)
+    hassil_intents = Intents.from_dict(normalized_data)
 
     results: list[dict] = []
 
