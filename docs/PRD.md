@@ -24,9 +24,10 @@ Alice ist ein lokaler, KI-first und Sprache-first Personal Assistant und Smart H
 | P0 (MVP) | Infrastruktur: DB-Schema & Weaviate HAIntent Collection | 1.1 | Deployed |
 | P0 (MVP) | React Chat Frontend (Text-basiert) | 1.1 | Deployed |
 | P0 (MVP) | n8n Chat-Handler Grundgerüst mit Memory | 1.1 | Deployed |
-| P0 (MVP) | FastAPI Container + Python Helper (hassil) | 1.2 | Planned |
-| P0 (MVP) | HA-First Chat-Handler mit Intent-Routing | 1.2 | Planned |
-| P0 (MVP) | HA Auto-Sync via MQTT | 1.2 | Planned |
+| P0 (MVP) | FastAPI Container + Python Helper (hassil) | 1.2 | Deployed |
+| P0 (MVP) | HA-First Chat-Handler mit Intent-Routing | 1.2 | Deployed |
+| P0 (MVP) | HA Auto-Sync via MQTT | 1.2 | Deployed |
+| P0 (MVP) | Hassil Native Library Integration (Expansion Engine Upgrade) | 1.2 | Planned |
 | P1 | JWT Auth / Login Screen | 1.5 | Planned |
 | P1 | DMS-Pipeline (NAS → Weaviate) | 1.4 | Planned |
 | P1 | Memory-Transfer PostgreSQL → Weaviate | 1.5 | Planned |
