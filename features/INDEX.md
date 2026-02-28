@@ -22,7 +22,8 @@
 | PROJ-7 | JWT Auth / Login Screen | Deployed | [PROJ-7-jwt-auth-login.md](PROJ-7-jwt-auth-login.md) | 2026-02-27 |
 | PROJ-8 | Services Sidebar & Landing Page Migration | Deployed | [PROJ-8-services-sidebar-and-landing-page-migration.md](PROJ-8-services-sidebar-and-landing-page-migration.md) | 2026-02-28 |
 | PROJ-9 | Chat-Handler JWT-Schutz | Deployed | [PROJ-9-chat-handler-jwt-protection.md](PROJ-9-chat-handler-jwt-protection.md) | 2026-02-28 |
+| PROJ-10 | Weaviate Intent Lookup — Migration auf native n8n-Nodes | Planned | [PROJ-10-weaviate-intent-lookup-migration.md](PROJ-10-weaviate-intent-lookup-migration.md) | 2026-02-28 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-10
+## Next Available ID: PROJ-11
