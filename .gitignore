@@ -15,7 +15,14 @@ coverage.xml
 .env.local
 .env.production
 .env.n8n
-.pem
+
+# TLS-Zertifikate & private Schlüssel (niemals ins Repo!)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+docker/compose/infra/certs/
 
 # Docker Compose .env files (contain credentials)
 docker/compose/ai/jupyter/.env
