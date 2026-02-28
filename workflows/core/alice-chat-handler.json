@@ -429,7 +429,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: {\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
+        "jsCode": "return [{ json: {\n  chatInput: $json.userMessage,\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -468,8 +468,8 @@
       "name": "Ollama Chat Model",
       "credentials": {
         "ollamaApi": {
-          "id": "ollama-local",
-          "name": "Ollama Local"
+          "id": "8TAanq1tJFFodeaP",
+          "name": "Ollama 3090"
         }
       }
     },
