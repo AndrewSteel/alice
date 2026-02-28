@@ -234,22 +234,27 @@ Webhook → Input Validator (user_id aus Body) → Empty Check → [...]
 
 **Nach PROJ-9:**
 ```
-Webhook
-  ↓
-[NEU] JWT Auth Guard (Code Node)
+Webhook (JWT-Auth nativ aktiviert)
   ├── Kein / ungültiger / abgelaufener Token
-  │     → [NEU] Unauthorized Response (HTTP 401)
-  │         [Workflow endet hier]
-  └── Gültiger Token → user_id, username, role aus JWT
+  │     → n8n gibt automatisch HTTP 401 zurück
+  │         [Workflow endet hier — kein extra Node nötig]
+  └── Gültiger Token → Workflow läuft weiter
   ↓
-Input Validator (geändert: user_id aus JWT, nicht Body)
+[NEU] JWT Claims Extractor (Code Node — nur dekodieren, nicht verifizieren)
+  → liest user_id, username, role aus dem bereits verifizierten Payload
+  ↓
+Input Validator (geändert: user_id aus JWT-Claims, nicht Body)
   ↓
 Empty Input Check
   ↓
 [... Rest unverändert ...]
 ```
 
-**JWT-Verifikation:** Via Node.js built-in `crypto` (HMAC-SHA256). Kein externes npm-Paket — n8n-Sandbox erlaubt nur `axios` als Whitelist-Eintrag.
+**JWT-Verifikation:** Nativ im Webhook-Node über n8n's eingebaute JWT-Credential. n8n unterstützt HS256 und weitere Algorithmen direkt — kein Code-Node, kein `crypto`, kein externes npm-Paket.
+
+**JWT-Credential in n8n:** Wird einmalig in n8n unter *Credentials → JWT* mit dem `JWT_SECRET` aus der n8n `.env` angelegt. Der Webhook-Node referenziert diese Credential.
+
+**JWT Claims Extractor:** Ein einfacher Code-Node der den mittleren Teil des Tokens (Payload) base64url-dekodiert und die Claims als Felder weitergibt. Keine Kryptographie — die Verifikation hat der Webhook-Node bereits erledigt.
 
 ---
 
@@ -273,7 +278,7 @@ Empty Input Check
 | Nachrichten in React State (in-memory) | Einfachste Lösung für Phase 1.5; verhindert Over-Engineering |
 | `useChatSessions`-Hook statt Context | Single-Responsibility; AppShell ist der einzige Consumer |
 | Auto-Start nach Login im AppShell-Mount | Nutzer wartet nach Login nicht auf manuellen Klick — direkter Einstieg |
-| JWT-Guard als erster Node in n8n | Fail-Fast: keine DB-Queries für unautorisierte Requests |
+| n8n nativer JWT-Auth auf Webhook (kein Code-Node) | n8n hat eingebaute JWT-Verifikation inkl. HS256 — kein Custom-Code, kein `crypto`, automatisches 401 |
 | `window.location.href` bei 401 | Vollständiger Page-Reload löscht State sauber; konsistent mit PROJ-7 |
 
 ---
