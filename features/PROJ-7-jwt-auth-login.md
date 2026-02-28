@@ -1,17 +1,17 @@
 # PROJ-7: JWT Auth / Login Screen
 
-## Status: In Review
+## Status: Deployed
 **Created:** 2026-02-27
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28
 
 ## Implementation Progress
 
-| Schicht | Status | Notizen |
-| --- | --- | --- |
-| Frontend (Next.js) | ✅ Fertig | 14 neue Dateien, Build sauber, User-Review ausstehend |
+| Schicht                                  | Status   | Notizen                                                                          |
+| ---------------------------------------- | -------- | -------------------------------------------------------------------------------- |
+| Frontend (Next.js)                       | ✅ Fertig | 14 neue Dateien, Build sauber, User-Review ausstehend                            |
 | Backend (`alice-auth` FastAPI-Container) | ✅ Fertig | `docker/compose/automations/alice-auth/` — Login, Validate, Logout implementiert |
-| Datenbank (Migration) | ⬜ Offen | sql/migrations/007-add-auth-columns.sql |
-| Chat-Handler JWT-Schutz | ⬜ Offen | alice-chat-handler anpassen |
+| Datenbank (Migration)                    | ⬜ Offen  | sql/migrations/007-add-auth-columns.sql                                          |
+| Chat-Handler JWT-Schutz                  | ⬜ Offen  | alice-chat-handler anpassen                                                      |
 
 ### Frontend — Implementierte Dateien
 
@@ -79,7 +79,7 @@ Dieses Feature ersetzt den bisherigen "Auto-Login" (fest verdrahteter User `andr
 
 ### Backend (`alice-auth` FastAPI-Container)
 
-> **Implementierung:** Kein n8n-Workflow, sondern ein dedizierter FastAPI-Container (`alice-auth`). nginx routet `/api/auth/*` direkt zum Container. Der Container hat Zugriff auf PostgreSQL über das `backend`-Netzwerk.
+> **Implementierung:** Ein dedizierter FastAPI-Container (`alice-auth`). nginx routet `/api/auth/*` direkt zum Container. Der Container hat Zugriff auf PostgreSQL über das `backend`-Netzwerk.
 
 - [ ] `POST /auth/login` — nimmt `{username, password}` entgegen, gibt `{token, user}` zurück oder HTTP 401
 - [ ] `GET /auth/validate` — prüft den JWT aus dem `Authorization: Bearer <token>`-Header, gibt `{valid: true, user}` oder HTTP 401 zurück
@@ -133,7 +133,7 @@ Dieses Feature ersetzt den bisherigen "Auto-Login" (fest verdrahteter User `andr
 Das Auth-System besteht aus drei unabhängigen Schichten, die sauber getrennt sind:
 
 1. **Datenbank** — alice.users wird um Auth-Felder erweitert
-2. **Backend (`alice-auth`)** — dedizierter FastAPI-Container übernimmt Login, Validierung und Logout (kein n8n-Workflow)
+2. **Backend (`alice-auth`)** — dedizierter FastAPI-Container übernimmt Login, Validierung und Logout
 3. **Frontend (Next.js)** — Login-Seite + Auth-Kontext + geschützte Routen
 
 Der Chat-Handler wird minimal angepasst: Er liest künftig `user_id` aus dem JWT-Claim statt aus dem Request-Body.
@@ -146,11 +146,11 @@ Das Frontend wird Mobile-First entwickelt — d.h. der Basis-CSS gilt für Smart
 
 **Breakpoints:**
 
-| Gerät | Breite | Login-Layout |
-|---|---|---|
-| Smartphone | ≥ 375px | Formular vollflächig, kein Card-Frame, oben Logo |
-| Tablet | ≥ 768px | Formular als zentrierte Card (max 480px), grauer Hintergrund |
-| Desktop | ≥ 1280px | Identisch Tablet, optional subtiles Hintergrundbild/Muster |
+| Gerät      | Breite   | Login-Layout                                                 |
+| ---------- | -------- | ------------------------------------------------------------ |
+| Smartphone | ≥ 375px  | Formular vollflächig, kein Card-Frame, oben Logo             |
+| Tablet     | ≥ 768px  | Formular als zentrierte Card (max 480px), grauer Hintergrund |
+| Desktop    | ≥ 1280px | Identisch Tablet, optional subtiles Hintergrundbild/Muster   |
 
 **Login-Screen Layout (schematisch):**
 
@@ -219,14 +219,14 @@ Mobile (< 768px)                Tablet/Desktop (≥ 768px)
 
 **Visuelles Design (angelehnt an Open WebUI):**
 
-| Element | Light Mode | Dark Mode (Standard) |
-|---|---|---|
-| Sidebar-Hintergrund | `bg-gray-50` | `bg-gray-900` |
-| Chat-Hintergrund | `bg-white` | `bg-gray-800` |
-| User-Nachricht | `bg-blue-50` rechts | `bg-gray-700` rechts |
-| Alice-Antwort | links, kein Bubble | links, kein Bubble |
-| Schrift | `text-gray-900` | `text-gray-100` |
-| Akzentfarbe | `blue-600` | `blue-500` |
+| Element             | Light Mode          | Dark Mode (Standard) |
+| ------------------- | ------------------- | -------------------- |
+| Sidebar-Hintergrund | `bg-gray-50`        | `bg-gray-900`        |
+| Chat-Hintergrund    | `bg-white`          | `bg-gray-800`        |
+| User-Nachricht      | `bg-blue-50` rechts | `bg-gray-700` rechts |
+| Alice-Antwort       | links, kein Bubble  | links, kein Bubble   |
+| Schrift             | `text-gray-900`     | `text-gray-100`      |
+| Akzentfarbe         | `blue-600`          | `blue-500`           |
 
 Dark Mode ist Standard (wie Open WebUI); Light Mode als Toggle möglich.
 
@@ -296,23 +296,23 @@ User gibt Credentials ein → POST /webhook/auth/login
 
 **alice.users (Erweiterung — 3 neue Spalten):**
 
-| Spalte | Typ | Bedeutung |
-|---|---|---|
-| `password_hash` | TEXT | bcrypt-Hash (cost 12) des Passworts — niemals Klartext |
-| `last_login_at` | TIMESTAMPTZ | Zeitstempel des letzten erfolgreichen Logins |
-| `is_active` | BOOLEAN (DEFAULT true) | Deaktivierte Accounts können sich nicht einloggen |
+| Spalte          | Typ                    | Bedeutung                                              |
+| --------------- | ---------------------- | ------------------------------------------------------ |
+| `password_hash` | TEXT                   | bcrypt-Hash (cost 12) des Passworts — niemals Klartext |
+| `last_login_at` | TIMESTAMPTZ            | Zeitstempel des letzten erfolgreichen Logins           |
+| `is_active`     | BOOLEAN (DEFAULT true) | Deaktivierte Accounts können sich nicht einloggen      |
 
 Bestehende Spalten (`id`, `username`, `role`, usw.) bleiben unverändert.
 
 **JWT-Payload (was im Token steht):**
 
-| Claim | Inhalt | Beispiel |
-|---|---|---|
-| `user_id` | UUID des Users | `"abc-123-..."` |
-| `username` | Login-Name | `"andreas"` |
-| `role` | Berechtigungsstufe | `"admin"` |
-| `iat` | Ausgestellt um (Unix-Timestamp) | `1709000000` |
-| `exp` | Läuft ab um (iat + 24h) | `1709086400` |
+| Claim      | Inhalt                          | Beispiel        |
+| ---------- | ------------------------------- | --------------- |
+| `user_id`  | UUID des Users                  | `"abc-123-..."` |
+| `username` | Login-Name                      | `"andreas"`     |
+| `role`     | Berechtigungsstufe              | `"admin"`       |
+| `iat`      | Ausgestellt um (Unix-Timestamp) | `1709000000`    |
+| `exp`      | Läuft ab um (iat + 24h)         | `1709086400`    |
 
 Token wird lokal gespeichert unter Key: **`alice_token`** in `localStorage`.
 
@@ -320,19 +320,19 @@ Token wird lokal gespeichert unter Key: **`alice_token`** in `localStorage`.
 
 ### C) Backend-Architektur (`alice-auth` FastAPI-Container)
 
-> **Architektur-Entscheidung:** Ursprünglich waren n8n-Workflows für Auth geplant. Implementiert wurde stattdessen ein dedizierter FastAPI-Microservice (`alice-auth`). Begründung: Klare Trennung der Verantwortlichkeiten, echte bcrypt-Unterstützung ohne Workarounds, testbar und wartbar. n8n bleibt ausschließlich für Chat-Orchestrierung zuständig.
+> **Architektur-Entscheidung:** Implementierung eines dedizierten FastAPI-Microservice (`alice-auth`). Begründung: Klare Trennung der Verantwortlichkeiten, echte bcrypt-Unterstützung ohne Workarounds, testbar und wartbar.
 
 **Container:** `docker/compose/automations/alice-auth/`
 
-| Datei | Zweck |
-| --- | --- |
-| `main.py` | FastAPI-App mit allen Endpoints |
-| `Dockerfile` | Python 3.12-slim, uvicorn |
-| `requirements.txt` | fastapi, uvicorn, bcrypt, PyJWT, psycopg2-binary |
-| `compose.yml` | Netzwerke: `backend` + `automation`, Port 8002 intern |
-| `.env` | `POSTGRES_CONNECTION`, `JWT_SECRET` |
+| Datei              | Zweck                                                 |
+| ------------------ | ----------------------------------------------------- |
+| `main.py`          | FastAPI-App mit allen Endpoints                       |
+| `Dockerfile`       | Python 3.12-slim, uvicorn                             |
+| `requirements.txt` | fastapi, uvicorn, bcrypt, PyJWT, psycopg2-binary      |
+| `compose.yml`      | Netzwerke: `backend` + `automation`, Port 8002 intern |
+| `.env`             | `POSTGRES_CONNECTION`, `JWT_SECRET`                   |
 
-**Endpoints (direkt, kein n8n-Proxy):**
+**Endpoints:**
 
 ```
 POST /auth/login      → bcrypt-Vergleich + JWT-Ausgabe
@@ -394,16 +394,16 @@ Webhook (POST /webhook/v1/chat/completions)
 
 ### D) Tech-Entscheidungen und Begründungen
 
-| Entscheidung | Warum |
-|---|---|
-| **Next.js App Router** statt eigene Router-Logik | Bestehende Projektstruktur, `/login` als eigene Route ist sauber |
-| **React Context (AuthProvider)** für User-State | Einfachste Lösung ohne externe State-Library; Auth-State wird selten geändert |
-| **localStorage** statt httpOnly Cookie | VPN-only Umgebung, kein XSS-Risiko durch öffentliche Seiten; einfacher für PWA-Nutzung |
-| **JWT-Validierung im Frontend** (exp-Check) | Verhindert unnötige Netzwerk-Requests wenn Token bereits abgelaufen ist |
-| **JWT-Validierung im Backend** (validate-Endpoint) | App-Start-Check ob User noch aktiv ist (is_active könnte sich geändert haben) |
+| Entscheidung                                              | Warum                                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Next.js App Router** statt eigene Router-Logik          | Bestehende Projektstruktur, `/login` als eigene Route ist sauber                       |
+| **React Context (AuthProvider)** für User-State           | Einfachste Lösung ohne externe State-Library; Auth-State wird selten geändert          |
+| **localStorage** statt httpOnly Cookie                    | VPN-only Umgebung, kein XSS-Risiko durch öffentliche Seiten; einfacher für PWA-Nutzung |
+| **JWT-Validierung im Frontend** (exp-Check)               | Verhindert unnötige Netzwerk-Requests wenn Token bereits abgelaufen ist                |
+| **JWT-Validierung im Backend** (validate-Endpoint)        | App-Start-Check ob User noch aktiv ist (is_active könnte sich geändert haben)          |
 | **FastAPI-Container** (`alice-auth`) statt n8n Code-Nodes | Saubere Trennung, echte bcrypt-Bibliothek, testbar; n8n bleibt für Chat-Orchestrierung |
-| **Kein Refresh Token** | Einfachheit; 24h ist akzeptabel für Single-User VPN-System |
-| **Generische Fehlermeldung** | Kein Hinweis ob Username oder Passwort falsch (Security Best Practice) |
+| **Kein Refresh Token**                                    | Einfachheit; 24h ist akzeptabel für Single-User VPN-System                             |
+| **Generische Fehlermeldung**                              | Kein Hinweis ob Username oder Passwort falsch (Security Best Practice)                 |
 
 ---
 
@@ -447,12 +447,12 @@ Webhook (POST /webhook/v1/chat/completions)
 
 ### F) Abhängigkeiten (neue npm-Pakete)
 
-| Paket | Zweck |
-|---|---|
-| `jose` | JWT-Dekodierung und Ablaufzeit-Prüfung im Frontend (kein Signing!) |
+| Paket          | Zweck                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------- |
+| `jose`         | JWT-Dekodierung und Ablaufzeit-Prüfung im Frontend (kein Signing!)                      |
 | `lucide-react` | Icons (Auge für Passwort-Toggle, LogOut für Sidebar) — wahrscheinlich bereits vorhanden |
 
-Keine neuen Backend-Abhängigkeiten — n8n's Code-Node hat Zugriff auf Node.js built-ins und kann `bcrypt` via npm nutzen.
+Keine neuen Backend-Abhängigkeiten.
 
 ## QA Test Results (Re-test #1)
 
@@ -467,17 +467,17 @@ Keine neuen Backend-Abhängigkeiten — n8n's Code-Node hat Zugriff auf Node.js 
 
 ### Bug Fix Verification (from Round 1)
 
-| Bug | Status | Verification |
-| --- | --- | --- |
-| BUG-1: Network errors show wrong message | FIXED | `auth.ts` now throws `"NETWORK_ERROR"` on fetch failure (line 37); `LoginForm.tsx` catches it and shows "Verbindungsfehler -- bitte erneut versuchen" (line 31) |
-| BUG-2: Migration column name mismatch | FIXED | Migration now uses `last_login_at` (line 20); `main.py` line 168 also uses `last_login_at` -- consistent with spec |
-| BUG-3: Chat handler JWT protection | STILL OPEN | Marked "Offen" in progress table -- out of scope for current deployment phase |
-| BUG-4: No 401 interceptor for chat API | STILL OPEN | `frontend/src/services/api.ts` still does not exist -- depends on BUG-3 |
-| BUG-5: Login page no redirect for auth users | FIXED | `login/page.tsx` now checks for valid token via `decodeJwt()` and calls `router.replace("/")` if not expired (lines 13-29) |
-| BUG-6: /auth/hash-password unauthenticated | FIXED | Endpoint now requires admin JWT: `_extract_bearer_token()` + `_decode_jwt()` + role check `payload.get("role") != "admin"` returns 403 (lines 280-287) |
-| BUG-7: SQL injection in set-initial-passwords.sh | FIXED | Script now uses psql `-v` variable binding: `-v "pw_hash=${hash}" -v "uname=${username}"` with `:'pw_hash'` / `:'uname'` syntax (lines 83-85). Additionally validates bcrypt hash format with regex before use (line 77) |
-| BUG-8: No token revocation | ACKNOWLEDGED | Phase 1.5 limitation, deferred to Phase 3 |
-| BUG-9: alice-auth .env not in .gitignore | FIXED | `.gitignore` now explicitly lists `docker/compose/automations/alice-auth/.env` |
+| Bug                                              | Status       | Verification                                                                                                                                                                                                             |
+| ------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| BUG-1: Network errors show wrong message         | FIXED        | `auth.ts` now throws `"NETWORK_ERROR"` on fetch failure (line 37); `LoginForm.tsx` catches it and shows "Verbindungsfehler -- bitte erneut versuchen" (line 31)                                                          |
+| BUG-2: Migration column name mismatch            | FIXED        | Migration now uses `last_login_at` (line 20); `main.py` line 168 also uses `last_login_at` -- consistent with spec                                                                                                       |
+| BUG-3: Chat handler JWT protection               | STILL OPEN   | Marked "Offen" in progress table -- out of scope for current deployment phase                                                                                                                                            |
+| BUG-4: No 401 interceptor for chat API           | STILL OPEN   | `frontend/src/services/api.ts` still does not exist -- depends on BUG-3                                                                                                                                                  |
+| BUG-5: Login page no redirect for auth users     | FIXED        | `login/page.tsx` now checks for valid token via `decodeJwt()` and calls `router.replace("/")` if not expired (lines 13-29)                                                                                               |
+| BUG-6: /auth/hash-password unauthenticated       | FIXED        | Endpoint now requires admin JWT: `_extract_bearer_token()` + `_decode_jwt()` + role check `payload.get("role") != "admin"` returns 403 (lines 280-287)                                                                   |
+| BUG-7: SQL injection in set-initial-passwords.sh | FIXED        | Script now uses psql `-v` variable binding: `-v "pw_hash=${hash}" -v "uname=${username}"` with `:'pw_hash'` / `:'uname'` syntax (lines 83-85). Additionally validates bcrypt hash format with regex before use (line 77) |
+| BUG-8: No token revocation                       | ACKNOWLEDGED | Phase 1.5 limitation, deferred to Phase 3                                                                                                                                                                                |
+| BUG-9: alice-auth .env not in .gitignore         | FIXED        | `.gitignore` now explicitly lists `docker/compose/automations/alice-auth/.env`                                                                                                                                           |
 
 ---
 
@@ -639,30 +639,16 @@ These items are explicitly marked "Offen" in the implementation progress table a
 
 ### Deployed Components
 
-| Component | Status | Notes |
-| --- | --- | --- |
-| `alice-auth` FastAPI container | ✅ Running (healthy) | Port 8002, automation + backend networks |
-| DB Migration 007 | ✅ Applied | password_hash, last_login_at, is_active, failed_login_attempts, locked_until |
-| nginx `/api/webhook/` routing | ✅ Live | Strips `/api` prefix, proxies to n8n |
-| JWT_SECRET | ✅ Set | Consistent across alice-auth and n8n |
-| n8n workflows (auth proxy) | ⬜ Manual step | Import alice-auth-login/validate/logout.json via n8n UI |
-| Initial passwords | ⬜ Manual step | Run `./scripts/set-initial-passwords.sh` on server |
-| Frontend | ⬜ Deferred | Requires new "Landing Page" feature first |
-| Chat-Handler JWT protection | ⬜ Deferred | Follow-up ticket: BUG-3 + BUG-4 |
-
-### Manual Steps Still Required
-
-1. **Import n8n workflows** (n8n UI → Import):
-   - `workflows/core/alice-auth-login.json`
-   - `workflows/core/alice-auth-validate.json`
-   - `workflows/core/alice-auth-logout.json`
-   - Activate all three after import
-
-2. **Set initial passwords** (run on local machine with VPN + Docker access):
-   ```bash
-   ./scripts/set-initial-passwords.sh
-   ```
+| Component                      | Status              | Notes                                                                        |
+| ------------------------------ | ------------------- | ---------------------------------------------------------------------------- |
+| `alice-auth` FastAPI container | ✅ Running (healthy) | Port 8002, automation + backend networks                                     |
+| DB Migration 007               | ✅ Applied           | password_hash, last_login_at, is_active, failed_login_attempts, locked_until |
+| nginx `/api/auth/` routing     | ✅ Live              | Direkt zu `alice-auth:8002` (kein n8n-Proxy)                                 |
+| Frontend                       | ✅ Deployed          | Build + deploy via `./scripts/deploy-frontend.sh`                            |
+| Initial passwords              | ✅ Gesetzt           | `./scripts/set-initial-passwords.sh` ausgeführt                              |
+| Login verified                 | ✅ Bestätigt         | Login mit echten Credentials getestet und funktionsfähig                     |
+| Chat-Handler JWT protection    | ⬜ Deferred          | Follow-up ticket: BUG-3 + BUG-4                                              |
 
 ### Production Verification
-- alice-auth health: `curl https://alice.happy-mining.de/api/webhook/auth/health` (after n8n workflow import)
+- alice-auth health: `curl https://alice.happy-mining.de/api/auth/health`
 - Container status: `docker ps --filter name=alice-auth`
