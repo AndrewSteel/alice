@@ -48,7 +48,7 @@ export function ChatInputArea({ onSend, disabled }: ChatInputAreaProps) {
   );
 
   return (
-    <div className="border-t border-gray-700 bg-gray-800 px-4 py-3">
+    <div className="bg-gray-800 px-4 pb-4 pt-2">
       <div className="flex items-end gap-2 max-w-3xl mx-auto">
         <Textarea
           ref={textareaRef}

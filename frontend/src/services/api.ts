@@ -71,7 +71,12 @@ export async function sendMessage(
     );
   }
 
-  const data: ChatCompletionResponse = await res.json();
+  let data: ChatCompletionResponse;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Ungueltige Antwort vom Server -- bitte versuche es erneut.");
+  }
 
   const assistantMessage = data.choices?.[0]?.message?.content;
   if (!assistantMessage) {
