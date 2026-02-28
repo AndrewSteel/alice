@@ -15,6 +15,7 @@ coverage.xml
 .env.local
 .env.production
 .env.n8n
+.pem
 
 # Docker Compose .env files (contain credentials)
 docker/compose/ai/jupyter/.env

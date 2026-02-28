@@ -4,6 +4,7 @@
 
 # Runtime / volatile
 infra/nginx/logs/**
+infra/certs/**
 **/*.log
 
 # Server-generated secrets (keep server-side)
