@@ -24,6 +24,7 @@ docker/compose/infra/watchtower/.env
 docker/compose/data/database/.env
 docker/compose/automations/n8n/.env
 docker/compose/automations/hassil-parser/.env
+docker/compose/automations/alice-auth/.env
 
 # Home Assistant configuration
 config/*
@@ -65,6 +66,9 @@ logs/
 frontend/node_modules/
 frontend/build/
 frontend/.env
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
 
 # IDE
 .vscode/

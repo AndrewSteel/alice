@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthProvider } from "@/components/Auth/AuthProvider";
 
 export const metadata: Metadata = {
-  title: "AI Coding Starter Kit",
-  description: "Built with AI Agent Team System",
+  title: "Alice",
+  description: "Dein persönlicher KI-Assistent",
 };
 
 export default function RootLayout({
@@ -12,9 +13,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="antialiased">
-        {children}
+    <html lang="de" className="dark">
+      <body className="antialiased bg-gray-900 text-gray-100">
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

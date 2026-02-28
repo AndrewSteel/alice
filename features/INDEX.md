@@ -19,7 +19,8 @@
 | PROJ-4 | HA Auto-Sync (MQTT → n8n → Weaviate) | Deployed | [PROJ-4-ha-auto-sync.md](PROJ-4-ha-auto-sync.md) | 2026-02-23 |
 | PROJ-5 | Hassil Native Library Integration (Expansion Engine Upgrade) | Deployed | [PROJ-5-hassil-native-expansion.md](PROJ-5-hassil-native-expansion.md) | 2026-02-26 |
 | PROJ-6 | Hassil expansion_rules Compatibility Fix | Deployed | [PROJ-6-hassil-expansion-rules-fix.md](PROJ-6-hassil-expansion-rules-fix.md) | 2026-02-27 |
+| PROJ-7 | JWT Auth / Login Screen | In Review | [PROJ-7-jwt-auth-login.md](PROJ-7-jwt-auth-login.md) | 2026-02-27 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-7
+## Next Available ID: PROJ-8

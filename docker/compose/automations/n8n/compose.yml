@@ -19,6 +19,8 @@ services:
       - INTENT_MIN_CERTAINTY=0.82
       - INTENT_MAX_RESULTS=3
       - OLLAMA_MODEL=qwen3:14b
+      # PROJ-7: JWT Auth (2026-02-27)
+      - JWT_SECRET="${JWT_SECRET}"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
       interval: 20s
