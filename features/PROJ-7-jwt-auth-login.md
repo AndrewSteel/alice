@@ -633,4 +633,36 @@ These items are explicitly marked "Offen" in the implementation progress table a
 - **Recommendation:** Deploy the auth system (alice-auth container, frontend, database migration). Create a follow-up ticket for Chat-Handler JWT integration (BUG-3 + BUG-4). After that follow-up is implemented, run `/qa` again to verify AC-6 and EC-2.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-02-28
+**Environment:** Production (alice.happy-mining.de, via VPN)
+
+### Deployed Components
+
+| Component | Status | Notes |
+| --- | --- | --- |
+| `alice-auth` FastAPI container | ✅ Running (healthy) | Port 8002, automation + backend networks |
+| DB Migration 007 | ✅ Applied | password_hash, last_login_at, is_active, failed_login_attempts, locked_until |
+| nginx `/api/webhook/` routing | ✅ Live | Strips `/api` prefix, proxies to n8n |
+| JWT_SECRET | ✅ Set | Consistent across alice-auth and n8n |
+| n8n workflows (auth proxy) | ⬜ Manual step | Import alice-auth-login/validate/logout.json via n8n UI |
+| Initial passwords | ⬜ Manual step | Run `./scripts/set-initial-passwords.sh` on server |
+| Frontend | ⬜ Deferred | Requires new "Landing Page" feature first |
+| Chat-Handler JWT protection | ⬜ Deferred | Follow-up ticket: BUG-3 + BUG-4 |
+
+### Manual Steps Still Required
+
+1. **Import n8n workflows** (n8n UI → Import):
+   - `workflows/core/alice-auth-login.json`
+   - `workflows/core/alice-auth-validate.json`
+   - `workflows/core/alice-auth-logout.json`
+   - Activate all three after import
+
+2. **Set initial passwords** (run on local machine with VPN + Docker access):
+   ```bash
+   ./scripts/set-initial-passwords.sh
+   ```
+
+### Production Verification
+- alice-auth health: `curl https://alice.happy-mining.de/api/webhook/auth/health` (after n8n workflow import)
+- Container status: `docker ps --filter name=alice-auth`
