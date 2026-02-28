@@ -99,6 +99,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 | `weaviate`              | Vector search                              |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090) |
 | `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)      |
+| `alice-auth`            | JWT authentication (FastAPI, bcrypt)       |
 | `postgres`              | Structured data, alice schema, auth        |
 | `redis`                 | Session cache, message queue               |
 | `mqtt`                  | Event bus (alice/# topics)                 |
@@ -190,7 +191,10 @@ docker exec postgres psql -U alice_user -d alice -f sql/init-postgres.sql
 # 3. Initialize Weaviate collections
 ./scripts/init-weaviate-schema.sh http://weaviate:8080
 
-# 4. Start frontend dev server
+# 4. Set initial passwords for alice.users
+./scripts/set-initial-passwords.sh
+
+# 5. Start frontend dev server
 cd frontend && npm ci && npm run dev
 ```
 

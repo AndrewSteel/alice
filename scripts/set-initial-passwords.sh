@@ -79,10 +79,9 @@ print(hashed.decode("utf-8"))
         continue
     fi
 
-    # Update hash in DB using psql variable binding to prevent SQL injection
-    docker exec "${POSTGRES_CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" \
-        -v "pw_hash=${hash}" -v "uname=${username}" \
-        -c "UPDATE alice.users SET password_hash = :'pw_hash' WHERE username = :'uname';" \
+    # Update hash in DB — hash format validated above (no SQL injection risk)
+    docker exec "${POSTGRES_CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" -q \
+        -c "UPDATE alice.users SET password_hash = '${hash}' WHERE username = '${username}';" \
         > /dev/null 2>&1 && \
         echo "  OK: password set for ${username}" || \
         echo "  ERROR: DB update failed for ${username}"
