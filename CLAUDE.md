@@ -14,7 +14,7 @@ Docs are in German; code comments and commit messages should be in English.
 ```bash
 cd frontend && npm ci          # Install dependencies
 cd frontend && npm run build   # Build for production
-./scripts/deploy-frontend.sh   # Build + deploy to nginx html/alice/
+./scripts/deploy-frontend.sh   # Build + deploy to nginx html/ (root, finance_upload excluded)
 ```
 
 ### Database
