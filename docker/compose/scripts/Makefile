@@ -12,6 +12,7 @@ STACKS ?= \
   data/database \
   automations/n8n \
   automations/hassil-parser \
+  automations/alice-auth \
   automations/mqtt \
   automations/weaviate \
   ai/ollama \

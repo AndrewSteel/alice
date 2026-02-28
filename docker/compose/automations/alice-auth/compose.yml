@@ -1,0 +1,33 @@
+services:
+  alice-auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-auth
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8002/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-auth]
+      backend:
+        aliases: [alice-auth]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation
