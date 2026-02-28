@@ -7,6 +7,7 @@ import { NewChatButton } from "./NewChatButton";
 import { ChatSearch } from "./ChatSearch";
 import { ChatList } from "./ChatList";
 import { UserCard } from "./UserCard";
+import { ServiceLinks } from "./ServiceLinks";
 import { ChatSession } from "./ChatListItem";
 
 interface SidebarProps {
@@ -16,6 +17,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
   onCollapse: () => void;
+  onServiceLinkClick?: () => void;
 }
 
 export function Sidebar({
@@ -25,6 +27,7 @@ export function Sidebar({
   onSelectSession,
   onDeleteSession,
   onCollapse,
+  onServiceLinkClick,
 }: SidebarProps) {
   const [search, setSearch] = useState("");
 
@@ -47,6 +50,7 @@ export function Sidebar({
         />
       </ScrollArea>
 
+      <ServiceLinks onLinkClick={onServiceLinkClick} />
       <UserCard />
     </div>
   );

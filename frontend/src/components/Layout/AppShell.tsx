@@ -37,6 +37,7 @@ export function AppShell({ children }: AppShellProps) {
     onSelectSession: (id: string) => { setActiveId(id); setMobileOpen(false); },
     onDeleteSession: handleDelete,
     onCollapse: () => setDesktopCollapsed(true),
+    onServiceLinkClick: () => setMobileOpen(false),
   };
 
   return (
