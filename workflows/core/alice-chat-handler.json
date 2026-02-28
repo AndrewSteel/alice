@@ -133,7 +133,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst getEnv = (key, fallback) => { try { return $env[key] || fallback; } catch { return fallback; } };\nconst CERTAINTY_THRESHOLD = parseFloat(getEnv('INTENT_MIN_CERTAINTY', '0.82'));\nconst MAX_RESULTS = parseInt(getEnv('INTENT_MAX_RESULTS', '3'));\nconst WEAVIATE_URL = getEnv('WEAVIATE_URL', 'http://weaviate:8080');\n\nconst parts = $json.parts || [$json.userMessage];\n\nfunction sanitizeForGql(str) {\n  return str.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500);\n}\n\nasync function queryIntent(part) {\n  const concept = sanitizeForGql(part);\n  const gql = `{ Get { HAIntent( nearText: { concepts: [\"${concept}\"] }, limit: ${MAX_RESULTS} ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }`;\n  try {\n    const response = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${WEAVIATE_URL}/v1/graphql`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ query: gql }),\n      timeout: 3000\n    });\n    const data = typeof response === 'string' ? JSON.parse(response) : response;\n    const candidates = data?.data?.Get?.HAIntent || [];\n    const qualified = candidates\n      .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n      .sort((a, b) => {\n        const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n        if (Math.abs(certDiff) > 0.001) return certDiff;\n        return (b.priority || 0) - (a.priority || 0);\n      });\n    const best = qualified[0];\n    if (best) {\n      return {\n        part,\n        matched: true,\n        certainty: best._additional.certainty,\n        entityId: best.entityId,\n        domain: best.domain,\n        service: best.service,\n        parameters: best.parameters ? JSON.parse(best.parameters) : {},\n        intentTemplate: best.intentTemplate,\n        requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n      };\n    }\n    return { part, matched: false, certainty: candidates[0]?._additional?.certainty || 0 };\n  } catch (err) {\n    return { part, matched: false, certainty: 0, weaviateError: true };\n  }\n}\n\nconst results = await Promise.all(parts.map(p => queryIntent(p)));\nconst matchedCount = results.filter(r => r.matched).length;\nconst weaviateDown = results.every(r => r.weaviateError);\n\nlet pathDecision;\nif (weaviateDown || matchedCount === 0) pathDecision = 'LLM_ONLY';\nelse if (matchedCount === results.length) pathDecision = 'HA_FAST';\nelse pathDecision = 'HYBRID';\n\nreturn [{ json: { ...($json), intentResults: results, matchedCount, totalCount: results.length, pathDecision, weaviateDown } }];"
+        "jsCode": "const CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst getEnv = (key, fallback) => { try { return $env[key] || fallback; } catch { return fallback; } };\nconst CERTAINTY_THRESHOLD = parseFloat(getEnv('INTENT_MIN_CERTAINTY', '0.82'));\nconst MAX_RESULTS = parseInt(getEnv('INTENT_MAX_RESULTS', '3'));\nconst WEAVIATE_URL = getEnv('WEAVIATE_URL', 'http://weaviate:8080');\n\nconst axios = require('axios');\nconst parts = $json.parts || [$json.userMessage];\n\nfunction sanitizeForGql(str) {\n  return str.replace(/\\/g, '\\\\').replace(/\"/g, \"'\").replace(/[\r\n\t]/g, ' ').substring(0, 500);\n}\n\nasync function queryIntent(part) {\n  const concept = sanitizeForGql(part);\n  const gql = `{ Get { HAIntent( nearText: { concepts: [\"\"] }, limit:  ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }`;\n  try {\n    const response = await axios.post(\n      `${WEAVIATE_URL}/v1/graphql`,\n      { query: gql },\n      { headers: { 'Content-Type': 'application/json' }, timeout: 5000 }\n    );\n    const data = response.data;\n    const candidates = data?.data?.Get?.HAIntent || [];\n    const qualified = candidates\n      .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n      .sort((a, b) => {\n        const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n        if (Math.abs(certDiff) > 0.001) return certDiff;\n        return (b.priority || 0) - (a.priority || 0);\n      });\n    const best = qualified[0];\n    if (best) {\n      return {\n        part, matched: true,\n        certainty: best._additional.certainty,\n        entityId: best.entityId, domain: best.domain, service: best.service,\n        parameters: best.parameters ? JSON.parse(best.parameters) : {},\n        intentTemplate: best.intentTemplate,\n        requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n      };\n    }\n    return { part, matched: false, certainty: candidates[0]?._additional?.certainty || 0 };\n  } catch (err) {\n    return { part, matched: false, certainty: 0, weaviateError: true, weaviateErrorMsg: err.message };\n  }\n}\n\nconst results = await Promise.all(parts.map(p => queryIntent(p)));\nconst matchedCount = results.filter(r => r.matched).length;\nconst weaviateDown = results.every(r => r.weaviateError);\n\nlet pathDecision;\nif (weaviateDown || matchedCount === 0) pathDecision = 'LLM_ONLY';\nelse if (matchedCount === results.length) pathDecision = 'HA_FAST';\nelse pathDecision = 'HYBRID';\n\nreturn [{ json: { ...($json), intentResults: results, matchedCount, totalCount: results.length, pathDecision, weaviateDown } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -299,8 +299,8 @@
       "name": "DB Insert HA Fast",
       "credentials": {
         "postgres": {
-          "id": "postgres-alice",
-          "name": "Alice PostgreSQL"
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
         }
       },
       "onError": "continueErrorOutput"
@@ -395,8 +395,8 @@
       "name": "DB Insert Hybrid",
       "credentials": {
         "postgres": {
-          "id": "postgres-alice",
-          "name": "Alice PostgreSQL"
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
         }
       },
       "onError": "continueErrorOutput"
@@ -524,8 +524,8 @@
       "name": "DB Insert LLM",
       "credentials": {
         "postgres": {
-          "id": "postgres-alice",
-          "name": "Alice PostgreSQL"
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
         }
       },
       "onError": "continueErrorOutput"
@@ -594,8 +594,8 @@
       "name": "Insert User Msg HA Fast",
       "credentials": {
         "postgres": {
-          "id": "postgres-alice",
-          "name": "Alice PostgreSQL"
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
         }
       },
       "onError": "continueErrorOutput"
@@ -638,8 +638,8 @@
       "name": "Insert User Msg Hybrid",
       "credentials": {
         "postgres": {
-          "id": "postgres-alice",
-          "name": "Alice PostgreSQL"
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
         }
       },
       "onError": "continueErrorOutput"
@@ -682,8 +682,8 @@
       "name": "Insert User Msg LLM",
       "credentials": {
         "postgres": {
-          "id": "postgres-alice",
-          "name": "Alice PostgreSQL"
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
         }
       },
       "onError": "continueErrorOutput"
