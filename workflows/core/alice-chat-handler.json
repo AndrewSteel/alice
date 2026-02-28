@@ -11,6 +11,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "v1/chat/completions",
+        "authentication": "jwt",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -23,16 +24,35 @@
       "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
       "name": "Webhook",
       "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\nconst userId = body.user_id || 'andreas';\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
+        "jsCode": "// JWT Claims Extractor — decode the already-verified JWT payload\n// The Webhook node has already verified the signature and expiry.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\n\nif (!token) {\n  throw new Error('No JWT token found in Authorization header');\n}\n\n// Decode payload (middle part) — no crypto needed, already verified\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\n\nreturn [{\n  json: {\n    ...$json,\n    jwtClaims: {\n      user_id: payload.sub || payload.user_id,\n      username: payload.username,\n      role: payload.role\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1136,
+        -1140,
+        -192
+      ],
+      "id": "node-jwt-claims-extractor",
+      "name": "JWT Claims Extractor"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\n// user_id comes from JWT claims — body.user_id is ignored\nconst userId = $json.jwtClaims?.user_id;\nconst username = $json.jwtClaims?.username;\nconst role = $json.jwtClaims?.role;\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    username,\n    role,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -936,
         -192
       ],
       "id": "node-input-validator",
@@ -66,7 +86,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -944,
+        -744,
         -192
       ],
       "id": "node-early-exit",
@@ -734,6 +754,17 @@
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [
+          {
+            "node": "JWT Claims Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT Claims Extractor": {
       "main": [
         [
           {
