@@ -1,41 +1,67 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Sidebar } from "@/components/Sidebar/Sidebar";
-import { ChatSession } from "@/components/Sidebar/ChatListItem";
+import { ChatWindow } from "@/components/Chat/ChatWindow";
+import { useChatSessions } from "@/hooks/useChatSessions";
 
-interface AppShellProps {
-  children: React.ReactNode;
-}
-
-// Placeholder-Daten bis PROJ-8 den echten Session-Store liefert
-const MOCK_SESSIONS: ChatSession[] = [];
-
-export function AppShell({ children }: AppShellProps) {
+export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
-  const [sessions] = useState<ChatSession[]>(MOCK_SESSIONS);
-  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const {
+    sessions,
+    sessionsLoaded,
+    activeSessionId,
+    messages,
+    isLoading,
+    createNewSession,
+    selectSession,
+    deleteSession,
+    sendMessage,
+  } = useChatSessions();
+
+  // Auto-start: wait until localStorage is loaded before deciding
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    if (sessions.length === 0) {
+      createNewSession();
+    } else if (!activeSessionId) {
+      selectSession(sessions[0].id);
+    }
+  }, [sessionsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleNewChat() {
+    createNewSession();
     setMobileOpen(false);
-    // Session-Logik kommt in PROJ-8
   }
 
-  function handleDelete(id: string) {
-    console.log("delete", id); // wird in PROJ-8 implementiert
+  function handleSelectSession(id: string) {
+    selectSession(id);
+    setMobileOpen(false);
   }
+
+  function handleDeleteSession(id: string) {
+    deleteSession(id);
+  }
+
+  // Map SessionMeta to ChatSession shape expected by Sidebar
+  const sidebarSessions = sessions.map((s) => ({
+    id: s.id,
+    title: s.title,
+    updatedAt: s.updatedAt,
+  }));
 
   const sidebarProps = {
-    sessions,
-    activeSessionId: activeId,
+    sessions: sidebarSessions,
+    activeSessionId,
     onNewChat: handleNewChat,
-    onSelectSession: (id: string) => { setActiveId(id); setMobileOpen(false); },
-    onDeleteSession: handleDelete,
+    onSelectSession: handleSelectSession,
+    onDeleteSession: handleDeleteSession,
     onCollapse: () => setDesktopCollapsed(true),
     onServiceLinkClick: () => setMobileOpen(false),
   };
@@ -67,14 +93,14 @@ export function AppShell({ children }: AppShellProps) {
               size="icon"
               onClick={() => setMobileOpen(true)}
               className="text-gray-400 hover:text-gray-100"
-              aria-label="Menü öffnen"
+              aria-label="Menue oeffnen"
             >
               <Menu className="h-5 w-5" />
             </Button>
             <span className="font-semibold text-gray-100">Alice</span>
           </header>
 
-          {/* Desktop: collapsed-State — Sidebar-Toggle-Button */}
+          {/* Desktop: collapsed-State -- Sidebar-Toggle-Button */}
           {desktopCollapsed && (
             <div className="hidden md:flex items-center px-4 py-3 border-b border-gray-700 bg-gray-900">
               <Button
@@ -89,7 +115,19 @@ export function AppShell({ children }: AppShellProps) {
             </div>
           )}
 
-          <main className="flex-1 overflow-hidden">{children}</main>
+          <main className="flex-1 overflow-hidden">
+            {activeSessionId ? (
+              <ChatWindow
+                messages={messages}
+                isLoading={isLoading}
+                onSend={sendMessage}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                <p>Starte einen neuen Chat.</p>
+              </div>
+            )}
+          </main>
         </div>
       </div>
     </TooltipProvider>
