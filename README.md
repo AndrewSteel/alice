@@ -10,7 +10,8 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | ------------- | ---------- | -------------------------------------------------------- |
 | Phase 0       | ✅ Deployed | Hardware setup, GPU configuration, storage layout        |
 | Phase 1.1     | ✅ Deployed | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA |
-| **Phase 1.2** | ✅ Deployed | HA-first intent routing with semantic matching           |
+| Phase 1.2     | ✅ Deployed | HA-first intent routing with semantic matching           |
+| **Phase 1.5** | ✅ Deployed | JWT authentication, login screen, services sidebar       |
 | Phase 2       | 🗓 Planned  | Speech gateway: Whisper STT + Piper TTS + Speaker-ID     |
 | Phase 3       | 🗓 Planned  | Multi-user, display routing, security hardening          |
 
@@ -24,6 +25,13 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | PROJ-4 | HA auto-sync (MQTT → n8n → Weaviate)                                | ✅ Deployed  |
 | PROJ-5 | Hassil native library integration (expansion engine upgrade)        | ✅ Deployed  |
 | PROJ-6 | Hassil expansion_rules compatibility fix (all intents via hassil)   | ✅ Deployed  |
+
+### Phase 1.5 Features
+
+| ID     | Feature                                                             | Status      |
+| ------ | ------------------------------------------------------------------- | ----------- |
+| PROJ-7 | JWT auth / login screen (bcrypt passwords, JWT sessions, ProtectedRoute) | ✅ Deployed  |
+| PROJ-8 | Services sidebar & landing page migration (old HTML dashboard → Alice sidebar) | ✅ Deployed  |
 
 ---
 
