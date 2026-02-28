@@ -1,4 +1,4 @@
-const AUTH_BASE = "/api/webhook/auth";
+const AUTH_BASE = "/api/auth";
 const TOKEN_KEY = "alice_token";
 
 export interface AuthUser {
