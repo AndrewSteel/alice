@@ -1,6 +1,6 @@
-# PROJ-9: Chat-Handler JWT-Schutz
+# PROJ-9: Chat-Fenster & JWT-Schutz
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-02-28
 **Last Updated:** 2026-02-28
 
@@ -11,70 +11,108 @@
 
 ## Übersicht
 
-Der `alice-chat-handler`-Webhook ist aktuell ohne Authentifizierung erreichbar. Jeder der die URL kennt, kann Anfragen stellen. Dieses Feature schließt diese Sicherheitslücke:
+Dieses Feature schließt zwei zusammenhängende Lücken:
 
-1. **Backend (n8n):** Der Chat-Webhook prüft den `Authorization: Bearer`-Header und liest `user_id` aus dem JWT-Claim — nicht mehr aus dem Request-Body.
-2. **Frontend:** `services/api.ts` wird erstellt und sendet den gespeicherten JWT bei jedem Chat-Request automatisch mit. 401-Antworten lösen automatischen Logout + Redirect zu `/login` aus.
+1. **Chat-Fenster (Frontend):** Das erste nutzbare Chat-UI — Nachrichten eingeben, Antworten von Alice empfangen, neue Chats starten. Nach dem Login startet automatisch ein neuer Chat. Der "Neuer Chat"-Button in der Sidebar wird funktional.
+
+2. **JWT-Schutz (Backend + Frontend):** Der `alice-chat-handler`-Webhook prüft den `Authorization: Bearer`-Header. Kein gültiges JWT → sofortiger 401. `user_id` kommt aus dem JWT-Claim, nicht mehr aus dem Body. Das Frontend sendet den Token automatisch mit und behandelt 401-Antworten mit Auto-Logout.
 
 ---
 
 ## User Stories
 
-1. **Als Nutzer** möchte ich, dass meine Chat-Anfragen automatisch mit meiner Authentifizierung gesendet werden, ohne dass ich mich darum kümmern muss.
-2. **Als Nutzer** möchte ich bei einer abgelaufenen Session automatisch zum Login-Screen weitergeleitet werden, damit meine Daten geschützt bleiben.
-3. **Als Admin** möchte ich, dass der Chat-Endpoint ohne gültiges JWT nicht erreichbar ist, damit unautorisierter Zugriff verhindert wird.
-4. **Als Entwickler** möchte ich, dass `user_id` aus dem JWT-Claim gelesen wird (nicht aus dem Body), damit Clients ihre eigene `user_id` nicht manipulieren können.
+### Chat-Fenster
+1. **Als Nutzer** möchte ich nach dem Login sofort ein Chat-Fenster sehen, ohne einen Button drücken zu müssen, damit ich ohne Umwege mit Alice sprechen kann.
+2. **Als Nutzer** möchte ich eine Nachricht eingeben und absenden (Enter oder Button), damit ich Alice Fragen stellen kann.
+3. **Als Nutzer** möchte ich Alices Antwort im Chat-Fenster sehen, sobald sie verfügbar ist, damit ich eine Konversation führen kann.
+4. **Als Nutzer** möchte ich sehen, wenn Alice gerade antwortet (Typing Indicator), damit ich weiß dass meine Nachricht angekommen ist.
+5. **Als Nutzer** möchte ich mit "Neuer Chat" in der Sidebar einen frischen Chat starten, damit ich Themen voneinander trennen kann.
+6. **Als Nutzer** möchte ich meine bisherigen Chats in der Sidebar sehen (nach Datum gruppiert), damit ich frühere Gespräche wieder aufrufen kann.
+
+### JWT-Schutz
+7. **Als Nutzer** möchte ich, dass meine Chat-Anfragen automatisch mit meiner Authentifizierung gesendet werden, ohne dass ich mich darum kümmern muss.
+8. **Als Nutzer** möchte ich bei einer abgelaufenen Session automatisch zum Login-Screen weitergeleitet werden, damit meine Daten geschützt bleiben.
+9. **Als Admin** möchte ich, dass der Chat-Endpoint ohne gültiges JWT nicht erreichbar ist, damit unautorisierter Zugriff verhindert wird.
+10. **Als Entwickler** möchte ich, dass `user_id` aus dem JWT-Claim gelesen wird (nicht aus dem Body), damit Clients ihre eigene `user_id` nicht manipulieren können.
 
 ---
 
 ## Acceptance Criteria
 
-### Backend — n8n `alice-chat-handler`
+### Frontend — Chat-Fenster
 
-- [ ] Der Webhook liest den `Authorization: Bearer <token>`-Header aus dem Request
-- [ ] Fehlt der Header oder ist das Format ungültig → sofort HTTP 401 zurückgeben, keine weitere Verarbeitung
-- [ ] Das JWT wird mit `JWT_SECRET` verifiziert (Signatur + Ablaufzeit)
-- [ ] Ist das Token ungültig oder abgelaufen → HTTP 401
-- [ ] `user_id` wird aus dem JWT-Claim `user_id` gelesen — der `user_id`-Parameter im Request-Body wird ignoriert
-- [ ] `username` und `role` aus dem JWT werden für Logging verfügbar gemacht
-- [ ] Alle nachfolgenden Nodes verwenden `user_id` aus dem JWT (nicht aus dem Body)
+- [ ] Nach dem Login wird automatisch ein neuer Chat gestartet (leeres Chat-Fenster sichtbar, keine manuelle Aktion nötig)
+- [ ] Das Chat-Fenster zeigt eine leere Nachrichtenliste mit einem Willkommenshinweis wenn noch keine Nachrichten vorhanden sind
+- [ ] Der Nutzer kann eine Nachricht in ein Texteingabefeld eingeben
+- [ ] Absenden via Enter-Taste (ohne Shift) oder Send-Button
+- [ ] Die eigene Nachricht erscheint sofort im Chat (rechts, User-Bubble)
+- [ ] Während Alice antwortet, ist ein Typing Indicator sichtbar (links, als Platzhalter)
+- [ ] Alices Antwort ersetzt den Typing Indicator und wird links angezeigt
+- [ ] Das Send-Button und Eingabefeld sind während des laufenden Requests deaktiviert (kein Doppel-Submit)
+- [ ] Bei einem Fehler (Netzwerk, 500) erscheint eine Fehlermeldung im Chat statt dem Typing Indicator
+- [ ] Die Nachrichtenliste scrollt automatisch nach unten wenn neue Nachrichten erscheinen
+- [ ] Der "Neuer Chat"-Button in der Sidebar erstellt eine neue Session und leert das Chat-Fenster
+- [ ] Jede Session bekommt als Titel die ersten 40 Zeichen der ersten User-Nachricht
+- [ ] Sessions erscheinen in der Sidebar-Liste (nach Datum gruppiert)
+- [ ] Ein Klick auf eine Session in der Sidebar lädt deren Nachrichten ins Chat-Fenster
 
 ### Frontend — `services/api.ts`
 
-- [ ] `services/api.ts` wird neu erstellt mit einer `sendMessage()`-Funktion (oder gleichwertig)
-- [ ] Jeder Chat-Request enthält den Header `Authorization: Bearer <token>` (Token aus `localStorage` via `getToken()` aus `auth.ts`)
-- [ ] Antwortet der Server mit HTTP 401 → Token aus localStorage löschen + `window.location.href = '/login'`
-- [ ] Ist kein Token in localStorage → kein Request wird gesendet, direkter Redirect zu `/login`
-- [ ] Die Funktion wirft bei anderen Fehlern (500, Netzwerk) einen beschreibenden Error
+- [ ] `services/api.ts` wird neu erstellt mit einer `sendMessage()`-Funktion
+- [ ] Jeder Chat-Request enthält den Header `Authorization: Bearer <token>`
+- [ ] Antwortet der Server mit HTTP 401 → Token löschen + `window.location.href = '/login'`
+- [ ] Ist kein Token vorhanden → sofortiger Redirect zu `/login`, kein Request
+- [ ] Bei Netzwerk-/Serverfehlern wird ein beschreibender Error geworfen
+
+### Backend — n8n `alice-chat-handler`
+
+- [ ] Der Webhook liest den `Authorization: Bearer <token>`-Header
+- [ ] Fehlt der Header oder ist das Format ungültig → sofort HTTP 401, keine weitere Verarbeitung
+- [ ] Das JWT wird mit `JWT_SECRET` verifiziert (Signatur + Ablaufzeit)
+- [ ] Ungültiges oder abgelaufenes Token → HTTP 401
+- [ ] `user_id` kommt aus dem JWT-Claim — der Body-Parameter `user_id` wird ignoriert
+- [ ] `username` und `role` aus dem JWT stehen für Logging zur Verfügung
+- [ ] Alle nachfolgenden Nodes verwenden `user_id` aus dem JWT
 
 ---
 
 ## Edge Cases
 
-- **Token läuft während aktiver Chat-Session ab:** Nächste Chat-Anfrage erhält 401 → automatischer Logout + Redirect, kein stiller Fehler
-- **Token fehlt beim Senden:** Kein Request, sofortiger Redirect zu `/login`
-- **Manipulation von `user_id` im Body:** Wird serverseitig ignoriert — `user_id` kommt ausschließlich aus dem JWT
-- **Gleichzeitige Requests bei 401:** Beide lösen Redirect aus; da `window.location.href` zugewiesen wird, ist das unproblematisch
-- **n8n JWT-Verifikation schlägt fehl (falscher `JWT_SECRET`):** 401 zurück — kein Leak von Fehlerdetails
+- **Seite wird neu geladen:** Session-Metadaten (id, title, updatedAt) bleiben via localStorage erhalten; Nachrichten innerhalb der Session gehen verloren (in-memory) — akzeptiert für Phase 1.5
+- **Token läuft während Chat ab:** Nächste Anfrage erhält 401 → Auto-Logout + Redirect
+- **Token fehlt beim Senden:** Kein Request, sofortiger Redirect
+- **Manipulation von `user_id` im Body:** Serverseitig ignoriert — nur JWT-Claim zählt
+- **Leere Nachricht absenden:** Send-Button bleibt deaktiviert solange Eingabe leer/nur Whitespace
+- **Sehr lange Antwort von Alice:** Chat scrollt fortlaufend nach unten, kein Layout-Bruch
+- **Netzwerkfehler während Typing:** Fehlermeldung als Chat-Nachricht (links), Eingabe wird wieder aktiviert
+- **Session löschen:** Session wird aus Sidebar und localStorage entfernt; wenn aktiv → automatisch neuer Chat
 
 ---
 
 ## Technical Requirements
 
-- **JWT_SECRET:** Muss in n8n als Umgebungsvariable verfügbar sein (bereits vorhanden seit PROJ-7)
-- **Kein neues npm-Paket nötig:** JWT-Verifikation in n8n via Code-Node (jose oder crypto built-in); `jose` ist bereits im Frontend als Dependency vorhanden
-- **Kein Caching:** JWT wird bei jeder Anfrage live verifiziert
-- **Kein Token-Blacklisting:** Token läuft nach 24h natürlich ab (Phase 1.5 Scope — wie PROJ-7)
-- **Rückwärtskompatibilität:** Der `session_id`-Parameter bleibt im Body; nur `user_id` wird aus dem JWT gelesen
+- **Nachrichten-Persistenz:** Session-Metadaten in `localStorage`; Nachrichten pro Session in React State (in-memory) — Vollpersistenz via DB ist PROJ-10+
+- **JWT_SECRET:** Bereits als n8n-Umgebungsvariable gesetzt (PROJ-7)
+- **Keine neuen npm-Pakete:** JWT-Verifikation in n8n via built-in `crypto`; `uuid` via `crypto.randomUUID()` (built-in)
+- **Kein Token-Blacklisting:** Token läuft nach 24h ab (Phase 1.5)
+- **Request-Format:** OpenAI-kompatibel — `{ messages: [...], session_id: "..." }` — `user_id` wird nicht mehr gesendet
 
 ---
 
-## Geänderte Dateien
+## Neue und geänderte Dateien
 
 | Datei | Änderung |
 |---|---|
-| `workflows/core/alice-chat-handler.json` | JWT-Validierung als erster Node nach dem Webhook |
-| `frontend/src/services/api.ts` | Neu erstellen: sendMessage + Authorization-Header + 401-Handler |
+| `frontend/src/components/Chat/ChatWindow.tsx` | Neu — Container: MessageList + ChatInputArea |
+| `frontend/src/components/Chat/MessageList.tsx` | Neu — scrollbare Nachrichtenliste mit Auto-Scroll |
+| `frontend/src/components/Chat/MessageBubble.tsx` | Neu — User- (rechts) und Alice-Nachrichten (links) |
+| `frontend/src/components/Chat/TypingIndicator.tsx` | Neu — Pulsierender "Alice antwortet..."-Indikator |
+| `frontend/src/components/Chat/ChatInputArea.tsx` | Neu — Textarea + Send-Button |
+| `frontend/src/hooks/useChatSessions.ts` | Neu — Session-State + localStorage-Sync |
+| `frontend/src/services/api.ts` | Neu — sendMessage + Bearer-Header + 401-Handler |
+| `frontend/src/components/Layout/AppShell.tsx` | Geändert — handleNewChat und Session-Management verdrahten |
+| `frontend/src/app/page.tsx` | Geändert — Placeholder durch ChatWindow ersetzen |
+| `workflows/core/alice-chat-handler.json` | Geändert — JWT Auth Guard + Unauthorized Response Node |
 
 ---
 
@@ -82,139 +120,174 @@ Der `alice-chat-handler`-Webhook ist aktuell ohne Authentifizierung erreichbar. 
 
 ### Übersicht
 
-Zwei unabhängige Änderungen, die zusammen die Sicherheitslücke schließen:
+PROJ-9 besteht aus drei zusammenhängenden Teilen:
 
-1. **n8n `alice-chat-handler`** — ein neuer Code-Node direkt nach dem Webhook-Trigger prüft das JWT. Kein gültiges Token → sofortige 401-Antwort, der Rest des Workflows läuft nicht an.
-2. **Frontend `services/api.ts`** — neue Datei, die alle Chat-Requests mit dem gespeicherten JWT ausstattet und 401-Antworten behandelt.
+1. **Chat-Fenster (Frontend)** — neue Komponenten-Familie `Chat/` + Hook `useChatSessions`
+2. **API-Service (Frontend)** — neue `services/api.ts` mit JWT-Header und 401-Handler
+3. **JWT-Schutz (n8n)** — neuer Guard-Node im `alice-chat-handler`
 
 ---
 
-### A) n8n Workflow — Geänderter Ablauf
+### A) Frontend — Komponentenstruktur
 
-**Aktueller Ablauf:**
 ```
-Webhook (POST /webhook/v1/chat/completions)
-  ↓
-Input Validator  ← liest user_id aus Body (unsicher)
-  ↓
-Empty Input Check
-  ↓
-[... Haupt-Logik ...]
+AppShell (bestehend — erweitert)
+├── Sidebar (bestehend — NewChatButton jetzt funktional)
+│   ├── NewChatButton  → löst handleNewChat() aus
+│   └── ChatList       → zeigt echte Sessions aus useChatSessions
+└── Hauptbereich
+    ├── [leer, kein aktiver Chat] → Empty State: "Starte einen neuen Chat"
+    └── ChatWindow (NEU)
+        ├── MessageList (NEU)
+        │   ├── [leer] → Welcome Message: "Wie kann ich helfen?"
+        │   ├── MessageBubble × n (NEU)
+        │   │   ├── User-Nachricht  (rechts, grau)
+        │   │   └── Alice-Antwort   (links, kein Bubble)
+        │   └── TypingIndicator (NEU) — sichtbar während API-Call
+        └── ChatInputArea (NEU)
+            ├── Textarea (shadcn, auto-resize)
+            └── Send-Button (shadcn, deaktiviert während Loading)
 ```
 
-**Neuer Ablauf nach PROJ-9:**
+---
+
+### B) Auto-Start nach Login
+
+Nach einem erfolgreichen Login landet der Nutzer auf `/`. Die `AppShell` prüft beim Mounten:
+
 ```
-Webhook (POST /webhook/v1/chat/completions)
+AppShell mountet
+  └── Keine aktive Session?
+        → handleNewChat() automatisch aufrufen
+        → Neues ChatWindow mit leerer Nachrichtenliste öffnen
+```
+
+Das heißt: der Nutzer sieht nach dem Login sofort ein leeres Chat-Fenster mit Eingabefeld — kein Klick nötig.
+
+---
+
+### C) Session-Datenmodell
+
+**Wo gespeichert:** Session-Metadaten in `localStorage`; Nachrichten in React State (in-memory).
+
+```
+Session (localStorage):
+  id        — UUID (crypto.randomUUID())
+  title     — erste 40 Zeichen der ersten User-Nachricht
+  updatedAt — Zeitstempel der letzten Aktivität
+
+Nachrichten (React State, pro Session):
+  role      — "user" oder "assistant"
+  content   — Nachrichtentext
+  timestamp — Zeitstempel
+```
+
+**Warum localStorage für Metadaten, State für Nachrichten?**
+Sessions bleiben nach Page-Reload in der Sidebar sichtbar. Nachrichten-Persistenz (DB-Anbindung) ist PROJ-10+. Für Phase 1.5 ist der Verlust von Nachrichten nach Reload akzeptiert.
+
+---
+
+### D) Hook `useChatSessions`
+
+Neuer Hook der die gesamte Session-Logik kapselt und von `AppShell` genutzt wird:
+
+```
+useChatSessions gibt zurück:
+  sessions          — Liste aller Sessions (aus localStorage)
+  activeSessionId   — aktive Session-ID
+  messages          — Nachrichten der aktiven Session (aus State)
+  isLoading         — true während API-Call läuft
+  createNewSession()  → neue Session anlegen + aktivieren
+  selectSession(id)   → andere Session aktivieren
+  deleteSession(id)   → Session entfernen
+  sendMessage(text)   → Nachricht senden (ruft api.ts auf)
+```
+
+---
+
+### E) Nachrichtenfluss (sendMessage)
+
+```
+Nutzer sendet Nachricht
+  ↓
+useChatSessions.sendMessage(text)
+  ├── User-Nachricht sofort in State hinzufügen (optimistic)
+  ├── isLoading = true → TypingIndicator sichtbar
+  ├── api.ts.sendMessage(allMessages, sessionId)
+  │     → POST /api/webhook/v1/chat/completions
+  │         Header: Authorization: Bearer <token>
+  │         Body: { messages: [...], session_id }
+  ├── Bei 401 → clearToken() + window.location.href = '/login'
+  ├── Bei Fehler → Fehler-Nachricht in State einfügen
+  └── Bei Erfolg → Alice-Antwort in State einfügen
+        isLoading = false → TypingIndicator verschwindet
+```
+
+---
+
+### F) n8n Workflow — Geänderter Ablauf
+
+**Aktuell:**
+```
+Webhook → Input Validator (user_id aus Body) → Empty Check → [...]
+```
+
+**Nach PROJ-9:**
+```
+Webhook
   ↓
 [NEU] JWT Auth Guard (Code Node)
   ├── Kein / ungültiger / abgelaufener Token
-  │     → Respond To Webhook: HTTP 401 {"detail": "Unauthorized"}
+  │     → [NEU] Unauthorized Response (HTTP 401)
   │         [Workflow endet hier]
-  └── Gültiger Token
-        → Übergibt user_id, username, role aus JWT-Claims
+  └── Gültiger Token → user_id, username, role aus JWT
   ↓
-Input Validator  ← liest user_id jetzt aus JWT-Claims (sicher)
+Input Validator (geändert: user_id aus JWT, nicht Body)
   ↓
 Empty Input Check
   ↓
-[... Haupt-Logik unverändert ...]
+[... Rest unverändert ...]
 ```
 
-**Zwei neue Nodes:**
-| Node | Typ | Zweck |
-|---|---|---|
-| JWT Auth Guard | Code Node | Bearer-Token aus Header lesen, Signatur + Ablaufzeit prüfen, Claims extrahieren |
-| Unauthorized Response | Respond To Webhook | Sofort HTTP 401 zurückgeben wenn Token fehlt/ungültig |
-
-**Geänderte Node:**
-| Node | Änderung |
-|---|---|
-| Input Validator | `userId` nicht mehr aus `body.user_id` lesen, sondern aus den JWT-Claims des vorherigen Nodes |
+**JWT-Verifikation:** Via Node.js built-in `crypto` (HMAC-SHA256). Kein externes npm-Paket — n8n-Sandbox erlaubt nur `axios` als Whitelist-Eintrag.
 
 ---
 
-### B) JWT-Verifikation im Code-Node (Technischer Ansatz)
-
-n8n erlaubt in Code-Nodes Node.js built-in Module. JWT HS256 kann ohne externe Bibliotheken verifiziert werden:
-
-- Das Token wird in drei Teile zerlegt: Header, Payload, Signatur (Base64url-kodiert)
-- Die Signatur wird mit `crypto.createHmac('sha256', JWT_SECRET)` nachberechnet und verglichen
-- Der Payload wird dekodiert und das `exp`-Feld gegen die aktuelle Uhrzeit geprüft
-
-`JWT_SECRET` ist bereits als n8n-Umgebungsvariable gesetzt (seit PROJ-7) und via `$env.JWT_SECRET` im Code-Node abrufbar.
-
-**Kein neues npm-Paket nötig.** Der compose.yml erlaubt nur `axios` als externe Bibliothek — built-in `crypto` ist immer verfügbar.
-
----
-
-### C) Frontend — `services/api.ts`
-
-**Neue Datei** (neben dem bestehenden `services/auth.ts`):
-
-```
-frontend/src/services/
-├── auth.ts     (bestehend — Login, Logout, Validate, Token-Management)
-└── api.ts      (NEU — Chat-Requests mit JWT)
-```
-
-**Verantwortlichkeiten von `api.ts`:**
-
-```
-sendMessage(messages, sessionId)
-  ├── Kein Token in localStorage?
-  │     → window.location.href = '/login'  [kein Request]
-  ├── POST /api/webhook/v1/chat/completions
-  │     Header: Authorization: Bearer <token>
-  │     Body: { messages, session_id }
-  ├── HTTP 401?
-  │     → clearToken() + window.location.href = '/login'
-  ├── Netzwerk-/Serverfehler?
-  │     → throw Error mit beschreibender Meldung
-  └── HTTP 200?
-        → Response-JSON zurückgeben
-```
-
-**Warum kein `user_id` mehr im Body?**
-Nach PROJ-9 liest der Chat-Handler `user_id` ausschließlich aus dem JWT-Claim. `api.ts` sendet `user_id` daher nicht mehr — der Wert käme ohnehin aus dem Token.
-
-**Nginx-Routing (unverändert):**
-```
-POST /api/webhook/v1/chat/completions
-  → nginx: rewrite /api → /webhook
-  → n8n: POST /webhook/v1/chat/completions
-```
-
----
-
-### D) Request-Format (vorher/nachher)
+### G) Request-Format (vorher/nachher)
 
 | Feld | Vorher | Nachher |
 |---|---|---|
-| Header `Authorization` | — | `Bearer <jwt>` (neu, required) |
+| Header `Authorization` | — | `Bearer <jwt>` (required) |
 | Body `messages` | ✅ bleibt | ✅ bleibt |
 | Body `session_id` | ✅ bleibt | ✅ bleibt |
-| Body `user_id` | gesendet (unsicher) | nicht mehr gesendet |
+| Body `user_id` | gesendet (unsicher) | entfernt |
 
 ---
 
-### E) Tech-Entscheidungen
+### H) Tech-Entscheidungen
 
 | Entscheidung | Begründung |
 |---|---|
-| JWT-Prüfung via built-in `crypto` (kein jose) | n8n-Sandbox erlaubt nur `axios` als externe Bibliothek; `crypto` ist immer verfügbar |
-| Guard als erster Node (vor Input Validator) | Schnelles Fail-Fast: unautorisierte Requests werden sofort abgebrochen, keine DB-Queries |
-| `user_id` aus JWT, nicht aus Body | Verhindert Manipulation: ein Client kann nicht die `user_id` eines anderen Nutzers angeben |
-| 401 ohne Fehlerdetails (`{"detail": "Unauthorized"}`) | Kein Leak von Informationen (abgelaufen vs. ungültig vs. fehlt — alles gleich) |
-| `window.location.href` für Logout-Redirect | Vollständiger Page-Reload löscht App-State; konsistent mit Login-Redirect aus PROJ-7 |
+| Chat-Komponenten unter `components/Chat/` | Klare Trennung vom bestehenden Sidebar/Auth-Code; eigener Namespace |
+| Session-Metadaten in localStorage | Sidebar bleibt nach Page-Reload nutzbar; volle DB-Persistenz ist PROJ-10 |
+| Nachrichten in React State (in-memory) | Einfachste Lösung für Phase 1.5; verhindert Over-Engineering |
+| `useChatSessions`-Hook statt Context | Single-Responsibility; AppShell ist der einzige Consumer |
+| Auto-Start nach Login im AppShell-Mount | Nutzer wartet nach Login nicht auf manuellen Klick — direkter Einstieg |
+| JWT-Guard als erster Node in n8n | Fail-Fast: keine DB-Queries für unautorisierte Requests |
+| `window.location.href` bei 401 | Vollständiger Page-Reload löscht State sauber; konsistent mit PROJ-7 |
 
 ---
 
-### F) Betroffene Dateien
+### I) Keine neuen npm-Pakete
 
-| Datei | Änderung |
+Alle benötigten Abhängigkeiten sind bereits installiert:
+
+| Was | Woher |
 |---|---|
-| `workflows/core/alice-chat-handler.json` | 2 neue Nodes (JWT Auth Guard + Unauthorized Response), Input Validator angepasst |
-| `frontend/src/services/api.ts` | Neue Datei |
+| `uuid` für Session-IDs | `crypto.randomUUID()` — Browser built-in |
+| JWT-Payload lesen | `jose` — bereits installiert (PROJ-7) |
+| UI-Komponenten | `shadcn/ui` — Textarea, Button, ScrollArea bereits vorhanden |
+| Icons | `lucide-react` — bereits installiert |
 
 ## QA Test Results
 _To be added by /qa_
