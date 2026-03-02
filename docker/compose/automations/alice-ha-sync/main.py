@@ -843,19 +843,20 @@ def full_sync(mqtt_client: MQTTClient, trigger_source: str, force_all: bool = Fa
     all_utterances = []
     warnings = []
 
+    warned_domains: set[str] = set()
     for entity in to_process:
         utts = generate_utterances(entity, template_map)
-        if not utts and entity["domain"] in template_map:
-            pass  # Templates exist but no utterances generated (all filtered out)
-        elif not utts:
-            warnings.append(f"No template for domain: {entity['domain']} ({entity['entity_id']})")
-            publish_warning(
-                mqtt_client,
-                "no_template",
-                entity_id=entity["entity_id"],
-                domain=entity["domain"],
-                message=f"No template for domain {entity['domain']}",
-            )
+        if not utts and entity["domain"] not in template_map:
+            if entity["domain"] not in warned_domains:
+                warned_domains.add(entity["domain"])
+                warnings.append(f"No template for domain: {entity['domain']}")
+                publish_warning(
+                    mqtt_client,
+                    "no_template",
+                    entity_id=entity["entity_id"],
+                    domain=entity["domain"],
+                    message=f"No template for domain {entity['domain']} (skipping all entities of this domain)",
+                )
         all_utterances.extend(utts)
 
     # 6. Delete Weaviate objects for entities that will be reprocessed + removed
