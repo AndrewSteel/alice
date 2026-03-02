@@ -28,7 +28,7 @@ STACKS ?= \
 #   make update s=ai/ollama-3090 svc=ollama
 #   make update prune=yes
 
-.PHONY: up down ps logs app-up app-down restart recreate update update-all pull pull-all health wait prune-old images
+.PHONY: up down ps logs app-up app-down restart recreate rebuild update update-all pull pull-all health wait prune-old images
 
 networks:
 	@echo "Creating networks if not exist..."
@@ -78,6 +78,14 @@ restart:
 recreate:
 	@test -n "$(s)" || (echo "Setze s=<stack-pfad>"; exit 1)
 	@echo ">>> recreate $(s) $(svc)"
+	@docker compose -f $(ROOT)/$(s)/compose.yml up -d --force-recreate --remove-orphans $(svc)
+	@$(MAKE) wait s=$(s) svc="$(svc)"
+
+# Rebuild + Recreate (für Code-Änderungen in custom Images)
+rebuild:
+	@test -n "$(s)" || (echo "Setze s=<stack-pfad>"; exit 1)
+	@echo ">>> rebuild $(s) $(svc)"
+	@docker compose -f $(ROOT)/$(s)/compose.yml build $(svc)
 	@docker compose -f $(ROOT)/$(s)/compose.yml up -d --force-recreate --remove-orphans $(svc)
 	@$(MAKE) wait s=$(s) svc="$(svc)"
 
