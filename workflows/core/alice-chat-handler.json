@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-02-25T19:26:00.942Z",
+  "updatedAt": "2026-02-28T21:52:02.981Z",
   "createdAt": "2025-10-08T13:43:05.174Z",
   "id": "ZYaMfLlmnkZrX2G5",
   "name": "alice-chat-handler",
@@ -18,7 +18,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -1340,
+        -1344,
         -192
       ],
       "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
@@ -39,7 +39,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1140,
+        -1136,
         -192
       ],
       "id": "node-jwt-claims-extractor",
@@ -52,7 +52,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -936,
+        -944,
         -192
       ],
       "id": "node-input-validator",
@@ -86,7 +86,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -744,
+        -752,
         -192
       ],
       "id": "node-early-exit",
@@ -130,19 +130,6 @@
       ],
       "id": "node-sentence-splitter",
       "name": "Sentence Splitter"
-    },
-    {
-      "parameters": {
-        "jsCode": "const CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst getEnv = (key, fallback) => { try { return $env[key] || fallback; } catch { return fallback; } };\nconst CERTAINTY_THRESHOLD = parseFloat(getEnv('INTENT_MIN_CERTAINTY', '0.82'));\nconst MAX_RESULTS = parseInt(getEnv('INTENT_MAX_RESULTS', '3'));\nconst WEAVIATE_URL = getEnv('WEAVIATE_URL', 'http://weaviate:8080');\n\nconst axios = require('axios');\nconst parts = $json.parts || [$json.userMessage];\n\nfunction sanitizeForGql(str) {\n  return str.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500);\n\t]/g, ' ').substring(0, 500);\n}\n\nasync function queryIntent(part) {\n  const concept = sanitizeForGql(part);\n  const gql = `{ Get { HAIntent( nearText: { concepts: [\"\"] }, limit:  ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }`;\n  try {\n    const response = await axios.post(\n      `${WEAVIATE_URL}/v1/graphql`,\n      { query: gql },\n      { headers: { 'Content-Type': 'application/json' }, timeout: 5000 }\n    );\n    const data = response.data;\n    const candidates = data?.data?.Get?.HAIntent || [];\n    const qualified = candidates\n      .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n      .sort((a, b) => {\n        const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n        if (Math.abs(certDiff) > 0.001) return certDiff;\n        return (b.priority || 0) - (a.priority || 0);\n      });\n    const best = qualified[0];\n    if (best) {\n      return {\n        part, matched: true,\n        certainty: best._additional.certainty,\n        entityId: best.entityId, domain: best.domain, service: best.service,\n        parameters: best.parameters ? JSON.parse(best.parameters) : {},\n        intentTemplate: best.intentTemplate,\n        requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n      };\n    }\n    return { part, matched: false, certainty: candidates[0]?._additional?.certainty || 0 };\n  } catch (err) {\n    return { part, matched: false, certainty: 0, weaviateError: true, weaviateErrorMsg: err.message };\n  }\n}\n\nconst results = await Promise.all(parts.map(p => queryIntent(p)));\nconst matchedCount = results.filter(r => r.matched).length;\nconst weaviateDown = results.every(r => r.weaviateError);\n\nlet pathDecision;\nif (weaviateDown || matchedCount === 0) pathDecision = 'LLM_ONLY';\nelse if (matchedCount === results.length) pathDecision = 'HA_FAST';\nelse pathDecision = 'HYBRID';\n\nreturn [{ json: { ...($json), intentResults: results, matchedCount, totalCount: results.length, pathDecision, weaviateDown } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -528,
-        -304
-      ],
-      "id": "node-intent-lookup",
-      "name": "Intent Lookup"
     },
     {
       "parameters": {
@@ -229,7 +216,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        -304,
+        320,
         -304
       ],
       "id": "node-path-router",
@@ -242,7 +229,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -80,
+        544,
         -496
       ],
       "id": "node-ha-fast-executor",
@@ -255,7 +242,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        144,
+        768,
         -496
       ],
       "id": "node-ha-fast-save",
@@ -292,7 +279,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        784,
+        1408,
         -608
       ],
       "id": "node-ha-fast-db",
@@ -312,7 +299,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        368,
+        992,
         -496
       ],
       "id": "node-ha-fast-format",
@@ -325,7 +312,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        592,
+        1216,
         -496
       ],
       "id": "node-ha-fast-respond",
@@ -338,7 +325,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -80,
+        544,
         -304
       ],
       "id": "node-hybrid-executor",
@@ -351,7 +338,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        144,
+        768,
         -304
       ],
       "id": "node-hybrid-save",
@@ -388,7 +375,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        592,
+        1216,
         -304
       ],
       "id": "node-hybrid-db",
@@ -408,7 +395,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        368,
+        992,
         -304
       ],
       "id": "node-hybrid-format",
@@ -421,7 +408,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        784,
+        1408,
         -304
       ],
       "id": "node-hybrid-respond",
@@ -434,7 +421,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -80,
+        544,
         -80
       ],
       "id": "node-llm-prep",
@@ -447,7 +434,7 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 1.7,
       "position": [
-        192,
+        816,
         -80
       ],
       "id": "c5af60f9-ea13-4012-984f-702794af83fe",
@@ -461,7 +448,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        160,
+        784,
         160
       ],
       "id": "a1857233-ff63-4d85-b5e5-be6dbb06318f",
@@ -480,7 +467,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        448,
+        1072,
         -80
       ],
       "id": "node-llm-save",
@@ -517,7 +504,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        864,
+        1488,
         -80
       ],
       "id": "node-llm-db",
@@ -537,7 +524,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1072,
+        1696,
         -80
       ],
       "id": "8b094d72-9dbf-4719-819f-3e0812b4a72b",
@@ -550,7 +537,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1280,
+        1904,
         -80
       ],
       "id": "bfa1fcb1-8c8f-48e9-af0c-9ea4b683402a",
@@ -587,7 +574,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        144,
+        768,
         -608
       ],
       "id": "node-user-msg-ha",
@@ -631,7 +618,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        144,
+        768,
         -416
       ],
       "id": "node-user-msg-hybrid",
@@ -675,7 +662,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        640,
+        1264,
         -192
       ],
       "id": "node-user-msg-llm",
@@ -689,12 +676,18 @@
       "onError": "continueErrorOutput"
     },
     {
+      "parameters": {
+        "topic": "alice/errors/db",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ path: \"HA_FAST\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}",
+        "options": {}
+      },
       "id": "node-mqtt-err-ha",
       "name": "MQTT Error HA Fast",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
       "position": [
-        1120,
+        1744,
         -608
       ],
       "credentials": {
@@ -702,20 +695,21 @@
           "id": "mqtt-local",
           "name": "mqtt-local"
         }
-      },
-      "parameters": {
-        "topic": "alice/errors/db",
-        "sendInputData": false,
-        "message": "={{ JSON.stringify({ path: \"HA_FAST\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
       }
     },
     {
+      "parameters": {
+        "topic": "alice/errors/db",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ path: \"HYBRID\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}",
+        "options": {}
+      },
       "id": "node-mqtt-err-hybrid",
       "name": "MQTT Error Hybrid",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
       "position": [
-        1120,
+        1744,
         -304
       ],
       "credentials": {
@@ -723,20 +717,21 @@
           "id": "mqtt-local",
           "name": "mqtt-local"
         }
-      },
-      "parameters": {
-        "topic": "alice/errors/db",
-        "sendInputData": false,
-        "message": "={{ JSON.stringify({ path: \"HYBRID\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
       }
     },
     {
+      "parameters": {
+        "topic": "alice/errors/db",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ path: \"LLM_ONLY\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.__sessionId, user_id: $json.__userId, timestamp: Date.now() }) }}",
+        "options": {}
+      },
       "id": "node-mqtt-err-llm",
       "name": "MQTT Error LLM",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
       "position": [
-        1120,
+        1744,
         -80
       ],
       "credentials": {
@@ -744,11 +739,86 @@
           "id": "mqtt-local",
           "name": "mqtt-local"
         }
-      },
+      }
+    },
+    {
+      "id": "node-config-intent-params",
+      "name": "Config: Intent Params",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -960,
+        -304
+      ],
       "parameters": {
-        "topic": "alice/errors/db",
-        "sendInputData": false,
-        "message": "={{ JSON.stringify({ path: \"LLM_ONLY\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.__sessionId, user_id: $json.__userId, timestamp: Date.now() }) }}"
+        "mode": "raw",
+        "jsonOutput": "{\"weaviateUrl\": \"http://weaviate:8080\", \"intentMinCertainty\": 0.82, \"intentMaxResults\": 3}",
+        "options": {
+          "includeOtherFields": true
+        }
+      }
+    },
+    {
+      "id": "node-split-parts",
+      "name": "Split Parts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        -304
+      ],
+      "parameters": {
+        "jsCode": "const parts = $json.parts || [$json.userMessage];\nreturn parts.map(currentPart => ({\n  json: { ...$json, currentPart }\n}));"
+      }
+    },
+    {
+      "id": "node-weaviate-neartextsearch",
+      "name": "Weaviate: nearText Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -316,
+        -304
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config: Intent Params').first().json.weaviateUrl }}/v1/graphql",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $('Config: Intent Params').first().json.intentMaxResults + ' ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }' }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      }
+    },
+    {
+      "id": "node-filter-rank",
+      "name": "Filter & Rank",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -104,
+        -304
+      ],
+      "parameters": {
+        "jsCode": "// Recover original item via item pairing (n8n automatic pairing through linear chain)\nconst original = $('Split Parts').item.json;\nconst currentPart = original.currentPart;\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = $('Config: Intent Params').first().json.intentMinCertainty;\n\n// Check for HTTP/Weaviate error (continueOnFail emits error item)\nif ($json.error || $json.errors) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: false,\n      weaviateError: true,\n      weaviateErrorMsg: $json.error?.message\n        || ($json.errors || []).map(e => e.message).join(', ')\n        || 'Weaviate request failed'\n    }\n  }];\n}\n\nconst candidates = $json.data?.Get?.HAIntent || [];\nconst qualified = candidates\n  .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => {\n    const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n    if (Math.abs(certDiff) > 0.001) return certDiff;\n    return (b.priority || 0) - (a.priority || 0);\n  });\n\nconst best = qualified[0];\nif (best) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: true,\n      certainty: best._additional.certainty,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: best.parameters ? JSON.parse(best.parameters) : {},\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...original,\n    currentPart,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-build-route-decision",
+      "name": "Build Route Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        108,
+        -304
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allParts = $input.all();\nconst totalCount = allParts.length;\nconst first = allParts[0].json;\n\nconst matchedParts = allParts.filter(item => item.json.matched);\nconst matchedCount = matchedParts.length;\n\nlet pathDecision;\nif (matchedCount === totalCount && matchedCount > 0) {\n  pathDecision = 'HA_FAST';\n} else if (matchedCount > 0) {\n  pathDecision = 'HYBRID';\n} else {\n  pathDecision = 'LLM_ONLY';\n}\n\nreturn [{\n  json: {\n    userMessage: first.userMessage,\n    userId: first.userId,\n    username: first.username,\n    role: first.role,\n    sessionId: first.sessionId,\n    allMessages: first.allMessages,\n    requestStartMs: first.requestStartMs,\n    parts: first.parts,\n    pathDecision,\n    intentResults: allParts.map(item => ({\n      part: item.json.currentPart,\n      matched: item.json.matched,\n      certainty: item.json.certainty,\n      entityId: item.json.entityId,\n      domain: item.json.domain,\n      service: item.json.service,\n      parameters: item.json.parameters,\n      intentTemplate: item.json.intentTemplate,\n      requiresConfirmation: item.json.requiresConfirmation,\n      weaviateError: item.json.weaviateError,\n      weaviateErrorMsg: item.json.weaviateErrorMsg\n    })),\n    matchedCount,\n    totalCount\n  }\n}];"
       }
     }
   ],
@@ -797,7 +867,7 @@
         ],
         [
           {
-            "node": "Sentence Splitter",
+            "node": "Config: Intent Params",
             "type": "main",
             "index": 0
           }
@@ -815,18 +885,62 @@
         ]
       ]
     },
-    "Sentence Splitter": {
+    "Config: Intent Params": {
       "main": [
         [
           {
-            "node": "Intent Lookup",
+            "node": "Sentence Splitter",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Intent Lookup": {
+    "Sentence Splitter": {
+      "main": [
+        [
+          {
+            "node": "Split Parts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Parts": {
+      "main": [
+        [
+          {
+            "node": "Weaviate: nearText Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weaviate: nearText Search": {
+      "main": [
+        [
+          {
+            "node": "Filter & Rank",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Rank": {
+      "main": [
+        [
+          {
+            "node": "Build Route Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Route Decision": {
       "main": [
         [
           {
@@ -1114,21 +1228,41 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "02fdef7d-8a59-4f7c-a316-ccb27cc6e74a",
-  "activeVersionId": "02fdef7d-8a59-4f7c-a316-ccb27cc6e74a",
-  "versionCounter": 131,
+  "versionId": "02ddfb6d-6828-4364-b248-92cdaad7f182",
+  "activeVersionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
+  "versionCounter": 304,
   "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2025-10-08T13:43:05.177Z",
+      "createdAt": "2025-10-08T13:43:05.177Z",
+      "role": "workflow:owner",
+      "workflowId": "ZYaMfLlmnkZrX2G5",
+      "projectId": "yHMHK9aiZMuCbKiJ",
+      "project": {
+        "updatedAt": "2025-10-07T18:45:26.775Z",
+        "createdAt": "2025-10-07T18:42:17.053Z",
+        "id": "yHMHK9aiZMuCbKiJ",
+        "name": "Andreas Stahlhut <stahlhutandreas@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "2db0bd2f-9d9b-4d1e-8469-7ec88cdaedbb"
+      }
+    }
+  ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-02-25T19:26:00.943Z",
-    "createdAt": "2026-02-25T19:26:00.943Z",
-    "versionId": "02fdef7d-8a59-4f7c-a316-ccb27cc6e74a",
+    "updatedAt": "2026-02-28T21:45:33.414Z",
+    "createdAt": "2026-02-28T21:45:33.414Z",
+    "versionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
     "workflowId": "ZYaMfLlmnkZrX2G5",
     "nodes": [
       {
         "parameters": {
           "httpMethod": "POST",
           "path": "v1/chat/completions",
+          "authentication": "jwt",
           "responseMode": "responseNode",
           "options": {}
         },
@@ -1141,16 +1275,35 @@
         "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
         "name": "Webhook",
         "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "credentials": {
+          "jwtAuth": {
+            "id": "4iUJhbFCSgQeHAGL",
+            "name": "JWT Auth account"
+          }
+        }
       },
       {
         "parameters": {
-          "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\nconst userId = body.user_id || 'andreas';\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
+          "jsCode": "// JWT Claims Extractor — decode the already-verified JWT payload\n// The Webhook node has already verified the signature and expiry.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\n\nif (!token) {\n  throw new Error('No JWT token found in Authorization header');\n}\n\n// Decode payload (middle part) — no crypto needed, already verified\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\n\nreturn [{\n  json: {\n    ...$json,\n    jwtClaims: {\n      user_id: payload.sub || payload.user_id,\n      username: payload.username,\n      role: payload.role\n    }\n  }\n}];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1136,
+          -1140,
+          -192
+        ],
+        "id": "node-jwt-claims-extractor",
+        "name": "JWT Claims Extractor"
+      },
+      {
+        "parameters": {
+          "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\n// user_id comes from JWT claims — body.user_id is ignored\nconst userId = $json.jwtClaims?.user_id;\nconst username = $json.jwtClaims?.username;\nconst role = $json.jwtClaims?.role;\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    username,\n    role,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -936,
           -192
         ],
         "id": "node-input-validator",
@@ -1184,7 +1337,7 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          -944,
+          -744,
           -192
         ],
         "id": "node-early-exit",
@@ -1230,17 +1383,84 @@
         "name": "Sentence Splitter"
       },
       {
+        "id": "node-config-intent-params",
+        "name": "Config: Intent Params",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -960,
+          -304
+        ],
         "parameters": {
-          "jsCode": "const CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = parseFloat($env.INTENT_MIN_CERTAINTY || '0.82');\nconst MAX_RESULTS = parseInt($env.INTENT_MAX_RESULTS || '3');\nconst WEAVIATE_URL = $env.WEAVIATE_URL || 'http://weaviate:8080';\n\nconst parts = $json.parts || [$json.userMessage];\n\nfunction sanitizeForGql(str) {\n  return str.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500);\n}\n\nasync function queryIntent(part) {\n  const concept = sanitizeForGql(part);\n  const gql = `{ Get { HAIntent( nearText: { concepts: [\"${concept}\"] }, limit: ${MAX_RESULTS} ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }`;\n  try {\n    const response = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${WEAVIATE_URL}/v1/graphql`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ query: gql }),\n      timeout: 3000\n    });\n    const data = typeof response === 'string' ? JSON.parse(response) : response;\n    const candidates = data?.data?.Get?.HAIntent || [];\n    const qualified = candidates\n      .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n      .sort((a, b) => {\n        const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n        if (Math.abs(certDiff) > 0.001) return certDiff;\n        return (b.priority || 0) - (a.priority || 0);\n      });\n    const best = qualified[0];\n    if (best) {\n      return {\n        part,\n        matched: true,\n        certainty: best._additional.certainty,\n        entityId: best.entityId,\n        domain: best.domain,\n        service: best.service,\n        parameters: best.parameters ? JSON.parse(best.parameters) : {},\n        intentTemplate: best.intentTemplate,\n        requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n      };\n    }\n    return { part, matched: false, certainty: candidates[0]?._additional?.certainty || 0 };\n  } catch (err) {\n    return { part, matched: false, certainty: 0, weaviateError: true };\n  }\n}\n\nconst results = await Promise.all(parts.map(p => queryIntent(p)));\nconst matchedCount = results.filter(r => r.matched).length;\nconst weaviateDown = results.every(r => r.weaviateError);\n\nlet pathDecision;\nif (weaviateDown || matchedCount === 0) pathDecision = 'LLM_ONLY';\nelse if (matchedCount === results.length) pathDecision = 'HA_FAST';\nelse pathDecision = 'HYBRID';\n\nreturn [{ json: { ...($json), intentResults: results, matchedCount, totalCount: results.length, pathDecision, weaviateDown } }];"
-        },
+          "mode": "raw",
+          "jsonOutput": "{\"weaviateUrl\": \"http://weaviate:8080\", \"intentMinCertainty\": 0.82, \"intentMaxResults\": 3}",
+          "options": {
+            "includeOtherFields": true
+          }
+        }
+      },
+      {
+        "id": "node-split-parts",
+        "name": "Split Parts",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           -528,
           -304
         ],
-        "id": "node-intent-lookup",
-        "name": "Intent Lookup"
+        "parameters": {
+          "jsCode": "const parts = $json.parts || [$json.userMessage];\nreturn parts.map(currentPart => ({\n  json: { ...$json, currentPart }\n}));"
+        }
+      },
+      {
+        "id": "node-weaviate-neartextsearch",
+        "name": "Weaviate: nearText Search",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -316,
+          -304
+        ],
+        "continueOnFail": true,
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Config: Intent Params').first().json.weaviateUrl }}/v1/graphql",
+          "authentication": "none",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $('Config: Intent Params').first().json.intentMaxResults + ' ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }' }) }}",
+          "options": {
+            "timeout": 5000
+          }
+        }
+      },
+      {
+        "id": "node-filter-rank",
+        "name": "Filter & Rank",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -104,
+          -304
+        ],
+        "parameters": {
+          "jsCode": "// Recover original item via item pairing (n8n automatic pairing through linear chain)\nconst original = $('Split Parts').item.json;\nconst currentPart = original.currentPart;\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = $('Config: Intent Params').first().json.intentMinCertainty;\n\n// Check for HTTP/Weaviate error (continueOnFail emits error item)\nif ($json.error || $json.errors) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: false,\n      weaviateError: true,\n      weaviateErrorMsg: $json.error?.message\n        || ($json.errors || []).map(e => e.message).join(', ')\n        || 'Weaviate request failed'\n    }\n  }];\n}\n\nconst candidates = $json.data?.Get?.HAIntent || [];\nconst qualified = candidates\n  .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => {\n    const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n    if (Math.abs(certDiff) > 0.001) return certDiff;\n    return (b.priority || 0) - (a.priority || 0);\n  });\n\nconst best = qualified[0];\nif (best) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: true,\n      certainty: best._additional.certainty,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: best.parameters ? JSON.parse(best.parameters) : {},\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...original,\n    currentPart,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0\n  }\n}];"
+        }
+      },
+      {
+        "id": "node-build-route-decision",
+        "name": "Build Route Decision",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          108,
+          -304
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const allParts = $input.all();\nconst totalCount = allParts.length;\nconst first = allParts[0].json;\n\nconst matchedParts = allParts.filter(item => item.json.matched);\nconst matchedCount = matchedParts.length;\n\nlet pathDecision;\nif (matchedCount === totalCount && matchedCount > 0) {\n  pathDecision = 'HA_FAST';\n} else if (matchedCount > 0) {\n  pathDecision = 'HYBRID';\n} else {\n  pathDecision = 'LLM_ONLY';\n}\n\nreturn [{\n  json: {\n    userMessage: first.userMessage,\n    userId: first.userId,\n    username: first.username,\n    role: first.role,\n    sessionId: first.sessionId,\n    allMessages: first.allMessages,\n    requestStartMs: first.requestStartMs,\n    parts: first.parts,\n    pathDecision,\n    intentResults: allParts.map(item => ({\n      part: item.json.currentPart,\n      matched: item.json.matched,\n      certainty: item.json.certainty,\n      entityId: item.json.entityId,\n      domain: item.json.domain,\n      service: item.json.service,\n      parameters: item.json.parameters,\n      intentTemplate: item.json.intentTemplate,\n      requiresConfirmation: item.json.requiresConfirmation,\n      weaviateError: item.json.weaviateError,\n      weaviateErrorMsg: item.json.weaviateErrorMsg\n    })),\n    matchedCount,\n    totalCount\n  }\n}];"
+        }
       },
       {
         "parameters": {
@@ -1397,8 +1617,8 @@
         "name": "DB Insert HA Fast",
         "credentials": {
           "postgres": {
-            "id": "postgres-alice",
-            "name": "Alice PostgreSQL"
+            "id": "2YBtxcocRMLQuAdF",
+            "name": "pg-alice"
           }
         },
         "onError": "continueErrorOutput"
@@ -1493,8 +1713,8 @@
         "name": "DB Insert Hybrid",
         "credentials": {
           "postgres": {
-            "id": "postgres-alice",
-            "name": "Alice PostgreSQL"
+            "id": "2YBtxcocRMLQuAdF",
+            "name": "pg-alice"
           }
         },
         "onError": "continueErrorOutput"
@@ -1527,7 +1747,7 @@
       },
       {
         "parameters": {
-          "jsCode": "return [{ json: {\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
+          "jsCode": "return [{ json: {\n  chatInput: $json.userMessage,\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1566,8 +1786,8 @@
         "name": "Ollama Chat Model",
         "credentials": {
           "ollamaApi": {
-            "id": "ollama-local",
-            "name": "Ollama Local"
+            "id": "8TAanq1tJFFodeaP",
+            "name": "Ollama 3090"
           }
         }
       },
@@ -1622,8 +1842,8 @@
         "name": "DB Insert LLM",
         "credentials": {
           "postgres": {
-            "id": "postgres-alice",
-            "name": "Alice PostgreSQL"
+            "id": "2YBtxcocRMLQuAdF",
+            "name": "pg-alice"
           }
         },
         "onError": "continueErrorOutput"
@@ -1692,8 +1912,8 @@
         "name": "Insert User Msg HA Fast",
         "credentials": {
           "postgres": {
-            "id": "postgres-alice",
-            "name": "Alice PostgreSQL"
+            "id": "2YBtxcocRMLQuAdF",
+            "name": "pg-alice"
           }
         },
         "onError": "continueErrorOutput"
@@ -1736,8 +1956,8 @@
         "name": "Insert User Msg Hybrid",
         "credentials": {
           "postgres": {
-            "id": "postgres-alice",
-            "name": "Alice PostgreSQL"
+            "id": "2YBtxcocRMLQuAdF",
+            "name": "pg-alice"
           }
         },
         "onError": "continueErrorOutput"
@@ -1780,8 +2000,8 @@
         "name": "Insert User Msg LLM",
         "credentials": {
           "postgres": {
-            "id": "postgres-alice",
-            "name": "Alice PostgreSQL"
+            "id": "2YBtxcocRMLQuAdF",
+            "name": "pg-alice"
           }
         },
         "onError": "continueErrorOutput"
@@ -1855,6 +2075,17 @@
         "main": [
           [
             {
+              "node": "JWT Claims Extractor",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "JWT Claims Extractor": {
+        "main": [
+          [
+            {
               "node": "Input Validator",
               "type": "main",
               "index": 0
@@ -1884,7 +2115,7 @@
           ],
           [
             {
-              "node": "Sentence Splitter",
+              "node": "Config: Intent Params",
               "type": "main",
               "index": 0
             }
@@ -1902,18 +2133,62 @@
           ]
         ]
       },
-      "Sentence Splitter": {
+      "Config: Intent Params": {
         "main": [
           [
             {
-              "node": "Intent Lookup",
+              "node": "Sentence Splitter",
               "type": "main",
               "index": 0
             }
           ]
         ]
       },
-      "Intent Lookup": {
+      "Sentence Splitter": {
+        "main": [
+          [
+            {
+              "node": "Split Parts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split Parts": {
+        "main": [
+          [
+            {
+              "node": "Weaviate: nearText Search",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Weaviate: nearText Search": {
+        "main": [
+          [
+            {
+              "node": "Filter & Rank",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter & Rank": {
+        "main": [
+          [
+            {
+              "node": "Build Route Decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Route Decision": {
         "main": [
           [
             {
@@ -2194,6 +2469,24 @@
     "authors": "Andreas Stahlhut",
     "name": null,
     "description": null,
-    "autosaved": false
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-28T21:45:33.460Z",
+        "id": 120,
+        "workflowId": "ZYaMfLlmnkZrX2G5",
+        "versionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
+        "event": "activated",
+        "userId": "2db0bd2f-9d9b-4d1e-8469-7ec88cdaedbb"
+      },
+      {
+        "createdAt": "2026-02-28T21:45:33.446Z",
+        "id": 119,
+        "workflowId": "ZYaMfLlmnkZrX2G5",
+        "versionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
+        "event": "deactivated",
+        "userId": "2db0bd2f-9d9b-4d1e-8469-7ec88cdaedbb"
+      }
+    ]
   }
 }
