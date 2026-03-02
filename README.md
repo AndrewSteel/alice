@@ -32,6 +32,9 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | ------ | ------------------------------------------------------------------- | ----------- |
 | PROJ-7 | JWT auth / login screen (bcrypt passwords, JWT sessions, ProtectedRoute) | ✅ Deployed  |
 | PROJ-8 | Services sidebar & landing page migration (old HTML dashboard → Alice sidebar) | ✅ Deployed  |
+| PROJ-9 | Chat-handler JWT protection (webhook auth guard + token validation) | ✅ Deployed  |
+| PROJ-10 | Weaviate intent lookup — migration to native n8n nodes            | 🗓 Planned   |
+| PROJ-11 | HA sync Python worker (replaces n8n alice-ha-intent-sync, credentials in .env) | ✅ Deployed  |
 
 ---
 
@@ -99,6 +102,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 | `weaviate`              | Vector search                              |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090) |
 | `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)      |
+| `alice-ha-sync`         | HA entity sync worker (MQTT-triggered Python, replaces PROJ-4 n8n workflow) |
 | `alice-auth`            | JWT authentication (FastAPI, bcrypt)       |
 | `postgres`              | Structured data, alice schema, auth        |
 | `redis`                 | Session cache, message queue               |
@@ -173,7 +177,8 @@ alice/
 ├── scripts/                 # Setup and init scripts
 ├── sql/                     # PostgreSQL schema migrations
 ├── workflows/               # n8n workflow exports (JSON)
-├── sync-compose.sh          # Sync compose files to production server
+├── scripts/                 # Operational scripts (sync, deploy, init)
+│   └── sync-compose.sh      # Sync compose files to production server
 └── .env.n8n.example         # Required n8n environment variables
 ```
 
@@ -206,7 +211,7 @@ See `CLAUDE.md` for full development reference and AI assistant instructions.
 
 ```bash
 # Sync compose files to production server (ki.lan)
-./sync-compose.sh
+./scripts/sync-compose.sh
 
 # Deploy frontend
 cd frontend && npm run build
