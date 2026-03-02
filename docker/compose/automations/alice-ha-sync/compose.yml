@@ -1,0 +1,33 @@
+services:
+  alice-ha-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-ha-sync
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import os,time; t=float(open(''/tmp/heartbeat'').read()); exit(0 if time.time()-t<90 else 1)"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-ha-sync]
+      backend:
+        aliases: [alice-ha-sync]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation
