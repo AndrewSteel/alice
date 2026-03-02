@@ -436,54 +436,46 @@ class HAFetchError:
 
 
 def fetch_ha_entities() -> list[dict] | HAFetchError:
-    """Fetch entity registry + area registry from HA. Returns HAFetchError on error."""
+    """Fetch entities from HA /api/states (REST, all HA versions). Area info fetched
+    optionally from area registry and gracefully omitted if unavailable."""
     try:
-        entity_resp = requests.get(
-            f"{HA_URL}/api/config/entity_registry/list",
+        states_resp = requests.get(
+            f"{HA_URL}/api/states",
             headers=_ha_headers(),
             timeout=30,
         )
-        if entity_resp.status_code == 401:
+        if states_resp.status_code == 401:
             return HAFetchError(
                 "invalid_token",
                 "HA API returned 401 Unauthorized -- check HA_TOKEN",
             )
-        entity_resp.raise_for_status()
-        all_entities = entity_resp.json()
-
-        area_resp = requests.get(
-            f"{HA_URL}/api/config/area_registry/list",
-            headers=_ha_headers(),
-            timeout=30,
-        )
-        if area_resp.status_code == 401:
-            return HAFetchError(
-                "invalid_token",
-                "HA API returned 401 Unauthorized on area registry -- check HA_TOKEN",
-            )
-        area_resp.raise_for_status()
-        areas = area_resp.json()
+        states_resp.raise_for_status()
+        all_states = states_resp.json()
     except requests.RequestException as e:
         logger.error("HA API error: %s", e)
         return HAFetchError("ha_unreachable", str(e)[:500])
 
-    area_map = {a["area_id"]: a["name"] for a in areas}
+    # Area registry is optional — not available on all HA versions/configurations.
+    # If unavailable, entities will get name-only utterances (no area context).
+    area_map: dict[str, str] = {}
+    try:
+        area_resp = requests.get(
+            f"{HA_URL}/api/config/area_registry/list",
+            headers=_ha_headers(),
+            timeout=15,
+        )
+        if area_resp.ok:
+            area_map = {a["area_id"]: a["name"] for a in area_resp.json()}
+    except requests.RequestException:
+        pass
 
     entities = []
-    for e in all_entities:
-        opts = e.get("options", {})
-        conv = opts.get("conversation", {})
-        if conv.get("should_expose") is False:
-            continue
-
-        entity_id = e.get("entity_id", "")
+    for s in all_states:
+        entity_id = s.get("entity_id", "")
         domain = entity_id.split(".")[0] if "." in entity_id else ""
-        friendly_name = (
-            e.get("name")
-            or e.get("original_name")
-            or _fallback_name(entity_id)
-        )
-        area_id = e.get("area_id")
+        attrs = s.get("attributes", {})
+        friendly_name = attrs.get("friendly_name") or _fallback_name(entity_id)
+        area_id = attrs.get("area_id")
         area_name = area_map.get(area_id) if area_id else None
 
         entities.append(
@@ -493,8 +485,8 @@ def fetch_ha_entities() -> list[dict] | HAFetchError:
                 "friendly_name": friendly_name,
                 "area_id": area_id,
                 "area_name": area_name,
-                "aliases": e.get("aliases", []),
-                "device_class": e.get("device_class"),
+                "aliases": [],
+                "device_class": attrs.get("device_class"),
             }
         )
 
@@ -502,28 +494,27 @@ def fetch_ha_entities() -> list[dict] | HAFetchError:
 
 
 def fetch_single_entity(entity_id: str) -> dict | None:
-    """Fetch a single entity from HA registry. Returns None on error."""
+    """Fetch a single entity from HA /api/states/{entity_id}. Returns None on error."""
     try:
-        reg_resp = requests.get(
-            f"{HA_URL}/api/config/entity_registry/config/{entity_id}",
+        state_resp = requests.get(
+            f"{HA_URL}/api/states/{entity_id}",
             headers=_ha_headers(),
             timeout=15,
         )
-        reg_resp.raise_for_status()
-        entity_reg = reg_resp.json()
+        if state_resp.status_code == 404:
+            return None  # Entity does not exist in HA
+        state_resp.raise_for_status()
+        s = state_resp.json()
     except requests.RequestException as e:
         logger.error("HA API error for %s: %s", entity_id, e)
         return None
 
-    # Check exposure
-    opts = entity_reg.get("options", {})
-    conv = opts.get("conversation", {})
-    if conv.get("should_expose") is False:
-        return {"_skip": True, "reason": "not_exposed"}
+    attrs = s.get("attributes", {})
+    domain = entity_id.split(".")[0] if "." in entity_id else ""
+    friendly_name = attrs.get("friendly_name") or _fallback_name(entity_id)
+    area_id = attrs.get("area_id")
 
-    # Fetch area name if needed
     area_name = None
-    area_id = entity_reg.get("area_id")
     if area_id:
         try:
             area_resp = requests.get(
@@ -538,20 +529,14 @@ def fetch_single_entity(entity_id: str) -> dict | None:
         except requests.RequestException:
             pass
 
-    domain = entity_id.split(".")[0] if "." in entity_id else ""
-    friendly_name = (
-        entity_reg.get("name")
-        or entity_reg.get("original_name")
-        or _fallback_name(entity_id)
-    )
-
     return {
         "entity_id": entity_id,
         "domain": domain,
         "friendly_name": friendly_name,
         "area_id": area_id,
         "area_name": area_name,
-        "aliases": entity_reg.get("aliases", []),
+        "aliases": [],
+        "device_class": attrs.get("device_class"),
     }
 
 
