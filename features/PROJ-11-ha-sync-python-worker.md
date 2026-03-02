@@ -389,7 +389,7 @@ Not applicable -- PROJ-11 is a backend Python worker with no UI component.
 |-----|----------|--------|-------------|
 | BUG-1 | Medium | CLOSED | MQTT_USER/MQTT_PASSWORD not validated |
 | BUG-2 | Medium | CLOSED | No HA unreachable vs invalid token differentiation |
-| BUG-3 | Low | OPEN (accepted) | API endpoint deviates from spec (entity_registry vs states) |
+| BUG-3 | Low | CLOSED | API endpoint deviates from spec — fixed: reverted to `/api/states` (entity_registry is WebSocket-only, returns 404 via REST) |
 | BUG-4 | Low | CLOSED | Entity ID regex too restrictive |
 | BUG-5 | Low | OPEN | No DB connection pooling |
 | BUG-6 | Low | OPEN | Weaviate client created per operation |
@@ -401,9 +401,8 @@ Not applicable -- PROJ-11 is a backend Python worker with no UI component.
 
 - **Acceptance Criteria:** 21/23 passed, 2 not testable (post-deployment tasks AC-7)
 - **Previous Bugs Fixed:** 3/3 verified from Re-Test #1 (BUG-7 High, BUG-8 Medium, BUG-9 Low -- all CLOSED)
-- **Total Bugs Closed:** 6 of 9 (BUG-1, BUG-2, BUG-4, BUG-7, BUG-8, BUG-9)
-- **Total Bugs Still Open:** 3 (all Low severity, all acceptable for deployment)
-  - BUG-3 (LOW): Spec says `/api/states`, code uses `/api/config/entity_registry/list` -- update spec only
+- **Total Bugs Closed:** 7 of 9 (BUG-1, BUG-2, BUG-3, BUG-4, BUG-7, BUG-8, BUG-9)
+- **Total Bugs Still Open:** 2 (all Low severity, all acceptable)
   - BUG-5 (LOW): No DB connection pooling -- acceptable for low-frequency sync
   - BUG-6 (LOW): Weaviate client not reused -- acceptable for low-frequency sync
 - **New Bugs Found This Round:** 0
@@ -423,7 +422,18 @@ Not applicable -- PROJ-11 is a backend Python worker with no UI component.
 4. Verified container healthy via Docker healthcheck
 5. n8n workflow `alice-ha-intent-sync` (PROJ-4) deactivated in n8n UI
 
-### Post-Deployment Notes
-- AC-7 (n8n workflow deactivation) completed post-deploy
-- BUG-3 (endpoint deviation) accepted: spec to be updated to reflect `entity_registry` API usage
+### Post-Deployment Fixes
+
+**Fix 1 — BUG-3: HA API endpoint** (`b87af71`)
+- Root cause: `/api/config/entity_registry/list` is WebSocket-only in HA, returns 404 via REST
+- Fix: Switched `fetch_ha_entities()` and `fetch_single_entity()` to `/api/states` (available in all HA versions)
+- Area registry fetch made optional with silent fallback (not all HA versions expose it via REST)
+
+**Fix 2 — `no_template` warning spam** (`1274335`)
+- Root cause: Full sync logged one MQTT warning per entity with unknown domain (e.g. 50 `device_tracker` entities → 50 warnings)
+- Fix: Deduplicated to one warning per domain per sync run
+- Makefile: Added `rebuild` target (`docker compose build` + `force-recreate`) for custom image stacks
+
+### Notes
+- AC-7 (n8n workflow deactivation) to be completed post-deploy
 - BUG-5, BUG-6 (no connection pooling) accepted: low-frequency sync does not require pooling
