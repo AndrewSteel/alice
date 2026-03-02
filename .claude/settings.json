@@ -7,6 +7,7 @@
       "Bash(npm run build:*)",
       "Bash(npm run lint:*)",
       "Bash(npm run start:*)",
+      "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git tag:*)",
@@ -16,7 +17,11 @@
       "Bash(kill:*)",
       "Bash(npx shadcn@latest add:*)",
       "Bash(ls:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(python3 -c \":*)",
+      "mcp__postgres__query",
+      "mcp__n8n-mcp__n8n_:*",
+      "Bash(npx tsc --noEmit)"
     ]
   }
 }

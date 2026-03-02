@@ -4,7 +4,7 @@ description: Context-aware guide that tells you where you are in the workflow an
 argument-hint: [optional question]
 user-invocable: true
 allowed-tools: Read, Glob, Grep, Bash
-model: opus
+model: sonnet
 ---
 
 # Project Help Guide
@@ -40,33 +40,41 @@ Read these files to understand where the project stands:
 Based on the state analysis, determine what the user should do next:
 
 **If PRD is empty template:**
+
 > Your project hasn't been initialized yet.
 > Run `/requirements` with a description of what you want to build.
 > Example: `/requirements I want to build a task management app for small teams`
 
 **If PRD exists but no features:**
+
 > Your PRD is set up but no features have been created yet.
 > Run `/requirements` to create your first feature specification.
 
 **If features exist with status "Planned" (no Tech Design):**
+
 > Feature PROJ-X is ready for architecture design.
 > Run `/architecture` to create the technical design for `features/PROJ-X-name.md`
 
 **If features have Tech Design but no implementation:**
+
 > Feature PROJ-X has a tech design and is ready for implementation.
 > Run `/frontend` to build the UI for `features/PROJ-X-name.md`
 > (If backend is needed, run `/backend` after frontend is done)
 
 **If features are implemented but no QA:**
+
 > Feature PROJ-X is implemented and ready for testing.
 > Run `/qa` to test `features/PROJ-X-name.md` against its acceptance criteria.
 
 **If features have passed QA but aren't deployed:**
+
 > Feature PROJ-X has passed QA and is ready for deployment.
 > Run `/deploy` to deploy to production.
 
 **If all features are deployed:**
+
 > All current features are deployed! You can:
+>
 > - Run `/requirements` to add a new feature
 > - Check `docs/PRD.md` for planned features not yet specified
 
@@ -85,20 +93,25 @@ If the user asked a specific question (via arguments), answer it in the context 
 Always respond with this structure:
 
 ### Current Project Status
+
 _Brief summary of where the project stands_
 
 ### Features Overview
+
 _Table of features and their current status (from INDEX.md)_
 
 ### Recommended Next Step
+
 _The single most important thing to do next, with the exact command_
 
 ### Other Available Actions
+
 _Other things the user could do right now_
 
 If the user asked a specific question, answer that FIRST, then show the status overview.
 
 ## Important
+
 - Be concise and actionable
 - Always give the exact command to run
 - Reference specific file paths
