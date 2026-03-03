@@ -1,8 +1,9 @@
 # PROJ-1: HA Intent Infrastructure (DB-Schema & Weaviate Collection)
 
-## Status: In Review
+## Status: Deployed
 **Created:** 2026-02-23
 **Last Updated:** 2026-02-24
+**Deployed:** 2026-02-24
 
 ## Dependencies
 - None (Phase 1.1 already deployed: alice.* schema exists, Weaviate running)

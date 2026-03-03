@@ -1,8 +1,9 @@
 # PROJ-2: FastAPI Container + hassil-parser (hassil Intent Expansion)
 
-## Status: In Review
+## Status: Deployed
 
 **Created:** 2026-02-23
+**Deployed:** 2026-02-24
 **Last Updated:** 2026-02-23
 
 ## Dependencies
