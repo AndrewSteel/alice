@@ -65,6 +65,10 @@ export async function sendMessage(
     throw new Error("Session abgelaufen -- bitte erneut anmelden.");
   }
 
+  if (res.status === 429) {
+    throw new Error("Zu viele Anfragen -- bitte kurz warten.");
+  }
+
   if (!res.ok) {
     throw new Error(
       `Serverfehler (${res.status}) -- bitte versuche es erneut.`

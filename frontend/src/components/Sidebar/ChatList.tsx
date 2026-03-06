@@ -8,6 +8,7 @@ interface ChatListProps {
   activeId: string | null;
   searchQuery: string;
   onSelect: (id: string) => void;
+  onRename: (id: string, newTitle: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -37,7 +38,7 @@ function groupByDate(sessions: ChatSession[]): { label: string; items: ChatSessi
     .map(([label, items]) => ({ label, items }));
 }
 
-export function ChatList({ sessions, activeId, searchQuery, onSelect, onDelete }: ChatListProps) {
+export function ChatList({ sessions, activeId, searchQuery, onSelect, onRename, onDelete }: ChatListProps) {
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
     const q = searchQuery.toLowerCase();
@@ -68,6 +69,7 @@ export function ChatList({ sessions, activeId, searchQuery, onSelect, onDelete }
                 session={s}
                 isActive={s.id === activeId}
                 onSelect={onSelect}
+                onRename={onRename}
                 onDelete={onDelete}
               />
             ))}
