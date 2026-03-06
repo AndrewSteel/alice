@@ -20,13 +20,48 @@ interface ServiceLink {
 }
 
 const SERVICES: ServiceLink[] = [
-  { label: "n8n", url: "https://n8n.happy-mining.de", icon: Workflow, external: true },
-  { label: "Open WebUI", url: "https://openwebui.happy-mining.de", icon: MessageSquare, external: true },
-  { label: "Home Assistant", url: "https://homeassistant.happy-mining.de", icon: Home, external: true },
-  { label: "HA Development", url: "https://hassdev.happy-mining.de", icon: Hammer, external: true },
-  { label: "Kanboard", url: "https://kanboard.happy-mining.de", icon: KanbanSquare, external: true },
-  { label: "Jupyter", url: "https://jupyter.happy-mining.de", icon: NotebookPen, external: true },
-  { label: "Finance Upload", url: "/finance_upload/index.html", icon: Upload, external: false },
+  {
+    label: "n8n",
+    url: "https://n8n.happy-mining.de",
+    icon: Workflow,
+    external: true,
+  },
+  {
+    label: "Open WebUI",
+    url: "https://openwebui.happy-mining.de",
+    icon: MessageSquare,
+    external: true,
+  },
+  {
+    label: "Home Assistant",
+    url: "http://homeassistant.lan:8123",
+    icon: Home,
+    external: true,
+  },
+  {
+    label: "HA Development",
+    url: "http://hassdev.lan:8123",
+    icon: Hammer,
+    external: true,
+  },
+  {
+    label: "Kanboard",
+    url: "https://kanboard.happy-mining.de",
+    icon: KanbanSquare,
+    external: true,
+  },
+  {
+    label: "Jupyter",
+    url: "https://jupyter.happy-mining.de",
+    icon: NotebookPen,
+    external: true,
+  },
+  {
+    label: "Finance Upload",
+    url: "/finance_upload/index.html",
+    icon: Upload,
+    external: false,
+  },
 ];
 
 interface ServiceLinksProps {
