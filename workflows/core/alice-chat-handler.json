@@ -1,36 +1,27 @@
 {
-  "updatedAt": "2026-02-28T21:52:02.981Z",
-  "createdAt": "2025-10-08T13:43:05.174Z",
-  "id": "ZYaMfLlmnkZrX2G5",
   "name": "alice-chat-handler",
-  "description": null,
-  "active": true,
-  "isArchived": false,
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "v1/chat/completions",
-        "authentication": "jwt",
+        "authentication": "jwtAuth",
         "responseMode": "responseNode",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [
-        -1344,
-        -192
-      ],
+      "position": [-2704, -272],
       "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
       "name": "Webhook",
       "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
-      "onError": "continueRegularOutput",
       "credentials": {
         "jwtAuth": {
           "id": "4iUJhbFCSgQeHAGL",
           "name": "JWT Auth account"
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -38,10 +29,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -1136,
-        -192
-      ],
+      "position": [-2480, -272],
       "id": "node-jwt-claims-extractor",
       "name": "JWT Claims Extractor"
     },
@@ -51,10 +39,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -944,
-        -192
-      ],
+      "position": [-2304, -272],
       "id": "node-input-validator",
       "name": "Input Validator"
     },
@@ -85,10 +70,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        -752,
-        -192
-      ],
+      "position": [-2096, -272],
       "id": "node-early-exit",
       "name": "Empty Input Check"
     },
@@ -98,10 +80,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -736,
-        -80
-      ],
+      "position": [-1792, -560],
       "id": "node-error-response",
       "name": "Error Response"
     },
@@ -111,23 +90,17 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        -544,
-        -80
-      ],
+      "position": [-1568, -560],
       "id": "node-error-respond",
       "name": "Respond Error"
     },
     {
       "parameters": {
-        "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction stripFillers(str) {\n  let prev = '';\n  let result = str;\n  while (result !== prev) {\n    prev = result;\n    result = result.replace(FILLER, '').trim();\n  }\n  return result;\n}\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => stripFillers(p))\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
+        "jsCode": "const text = $('Input Validator').first().json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction stripFillers(str) {\n  let prev = '';\n  let result = str;\n  while (result !== prev) {\n    prev = result;\n    result = result.replace(FILLER, '').trim();\n  }\n  return result;\n}\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => stripFillers(p))\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -736,
-        -304
-      ],
+      "position": [-1632, -256],
       "id": "node-sentence-splitter",
       "name": "Sentence Splitter"
     },
@@ -138,13 +111,11 @@
             {
               "conditions": {
                 "options": {
-                  "version": 2,
                   "caseSensitive": true,
-                  "typeValidation": "strict",
                   "leftValue": "",
-                  "rightValue": ""
+                  "typeValidation": "strict",
+                  "version": 2
                 },
-                "combinator": "and",
                 "conditions": [
                   {
                     "id": "ha-fast-cond",
@@ -155,20 +126,18 @@
                       "operation": "equals"
                     }
                   }
-                ]
-              },
-              "renameOutput": "HA_FAST"
+                ],
+                "combinator": "and"
+              }
             },
             {
               "conditions": {
                 "options": {
-                  "version": 2,
                   "caseSensitive": true,
-                  "typeValidation": "strict",
                   "leftValue": "",
-                  "rightValue": ""
+                  "typeValidation": "strict",
+                  "version": 2
                 },
-                "combinator": "and",
                 "conditions": [
                   {
                     "id": "hybrid-cond",
@@ -179,20 +148,18 @@
                       "operation": "equals"
                     }
                   }
-                ]
-              },
-              "renameOutput": "HYBRID"
+                ],
+                "combinator": "and"
+              }
             },
             {
               "conditions": {
                 "options": {
-                  "version": 2,
                   "caseSensitive": true,
-                  "typeValidation": "strict",
                   "leftValue": "",
-                  "rightValue": ""
+                  "typeValidation": "strict",
+                  "version": 2
                 },
-                "combinator": "and",
                 "conditions": [
                   {
                     "id": "llm-only-cond",
@@ -203,9 +170,9 @@
                       "operation": "equals"
                     }
                   }
-                ]
-              },
-              "renameOutput": "LLM_ONLY"
+                ],
+                "combinator": "and"
+              }
             }
           ]
         },
@@ -215,25 +182,9 @@
       },
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [
-        320,
-        -304
-      ],
+      "position": [-592, -272],
       "id": "node-path-router",
       "name": "Path Router"
-    },
-    {
-      "parameters": {
-        "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst intents = $json.intentResults.filter(r => r.matched);\n\nconst needsConfirmation = intents.filter(i => i.requiresConfirmation);\nconst executableIntents = intents.filter(i => !i.requiresConfirmation);\n\nif (executableIntents.length === 0 && needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  return [{ json: {\n    ...($json),\n    __confirmationRequired: true,\n    haResults: [],\n    responseText: `Bist du sicher? Ich soll ${names} steuern. Bitte bestätige mit \"Ja\".`\n  }}];\n}\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nfunction buildText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const svc = i.service;\n    const action = svc.includes('turn_on') ? 'eingeschaltet'\n      : svc.includes('turn_off') ? 'ausgeschaltet'\n      : svc.includes('open') ? 'geöffnet'\n      : svc.includes('close') ? 'geschlossen'\n      : svc.includes('start') ? 'gestartet'\n      : svc.includes('stop') ? 'gestoppt'\n      : svc.includes('return') ? 'zurückgeschickt'\n      : svc.includes('lock') ? 'gesperrt'\n      : svc.includes('unlock') ? 'entsperrt'\n      : svc.includes('arm') ? 'scharf geschaltet'\n      : svc.includes('disarm') ? 'deaktiviert'\n      : svc.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst haResults = await Promise.all(executableIntents.map(i => callHA(i)));\n\nlet responseText = buildText(haResults);\nif (needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  responseText += ` Für ${names} benötige ich noch deine Bestätigung.`;\n}\n\nreturn [{ json: { ...($json), haResults, __confirmationRequired: needsConfirmation.length > 0, responseText } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        544,
-        -496
-      ],
-      "id": "node-ha-fast-executor",
-      "name": "HA Fast Executor"
     },
     {
       "parameters": {
@@ -241,16 +192,12 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        768,
-        -496
-      ],
+      "position": [848, -816],
       "id": "node-ha-fast-save",
       "name": "Save Message HA Fast"
     },
     {
       "parameters": {
-        "operation": "insert",
         "schema": {
           "__rl": true,
           "mode": "list",
@@ -272,16 +219,11 @@
             "tool_results": "={{ JSON.stringify($json.toolResults) }}"
           }
         },
-        "options": {
-          "onError": "continueRegularOutput"
-        }
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        1408,
-        -608
-      ],
+      "position": [1760, -1008],
       "id": "node-ha-fast-db",
       "name": "DB Insert HA Fast",
       "credentials": {
@@ -298,10 +240,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        992,
-        -496
-      ],
+      "position": [1120, -640],
       "id": "node-ha-fast-format",
       "name": "Format Response HA Fast"
     },
@@ -311,25 +250,9 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        1216,
-        -496
-      ],
+      "position": [2112, -640],
       "id": "node-ha-fast-respond",
       "name": "Respond HA Fast"
-    },
-    {
-      "parameters": {
-        "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst OLLAMA_URL = $env.OLLAMA_URL || 'http://ollama:11434';\n\nconst allIntents = $json.intentResults || [];\nconst haIntents = allIntents.filter(r => r.matched && !r.requiresConfirmation);\nconst confirmIntents = allIntents.filter(r => r.matched && r.requiresConfirmation);\nconst llmParts = allIntents.filter(r => !r.matched).map(r => r.part);\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nasync function callOllama(parts) {\n  const userText = parts.join('. ');\n  try {\n    const resp = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${OLLAMA_URL}/api/chat`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        model: $env.OLLAMA_MODEL || 'qwen3:14b',\n        messages: [...($json.allMessages || []), { role: 'user', content: userText }],\n        stream: false\n      }),\n      timeout: 30000\n    });\n    const data = typeof resp === 'string' ? JSON.parse(resp) : resp;\n    return data && data.message ? data.message.content : 'Ich konnte keine Antwort generieren.';\n  } catch {\n    return 'Chat-Anfrage konnte nicht verarbeitet werden.';\n  }\n}\n\nconst [haResults, llmText] = await Promise.all([\n  Promise.all(haIntents.map(i => callHA(i))),\n  llmParts.length > 0 ? callOllama(llmParts) : Promise.resolve(null)\n]);\n\nfunction haText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const action = i.service.includes('turn_on') ? 'eingeschaltet'\n      : i.service.includes('turn_off') ? 'ausgeschaltet'\n      : i.service.includes('open') ? 'geöffnet'\n      : i.service.includes('close') ? 'geschlossen'\n      : i.service.includes('start') ? 'gestartet'\n      : i.service.includes('stop') ? 'gestoppt'\n      : i.service.includes('return') ? 'zurückgeschickt'\n      : i.service.includes('lock') ? 'gesperrt'\n      : i.service.includes('unlock') ? 'entsperrt'\n      : i.service.includes('arm') ? 'scharf geschaltet'\n      : i.service.includes('disarm') ? 'deaktiviert'\n      : i.service.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst confirmText = confirmIntents.length > 0\n  ? `Für ${confirmIntents.map(i => i.entityId || i.domain).join(', ')} benötige ich noch deine Bestätigung.`\n  : '';\n\nconst haPart = haResults.length > 0 ? haText(haResults) : '';\nconst parts2 = [haPart, llmText, confirmText].filter(Boolean);\nconst responseText = parts2.join(' ');\n\nreturn [{ json: { ...($json), haResults, llmText, responseText } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        544,
-        -304
-      ],
-      "id": "node-hybrid-executor",
-      "name": "Hybrid Executor"
     },
     {
       "parameters": {
@@ -337,16 +260,12 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        768,
-        -304
-      ],
+      "position": [784, -432],
       "id": "node-hybrid-save",
       "name": "Save Message Hybrid"
     },
     {
       "parameters": {
-        "operation": "insert",
         "schema": {
           "__rl": true,
           "mode": "list",
@@ -368,16 +287,11 @@
             "tool_results": "={{ JSON.stringify($json.toolResults) }}"
           }
         },
-        "options": {
-          "onError": "continueRegularOutput"
-        }
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        1216,
-        -304
-      ],
+      "position": [1776, -560],
       "id": "node-hybrid-db",
       "name": "DB Insert Hybrid",
       "credentials": {
@@ -394,10 +308,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        992,
-        -304
-      ],
+      "position": [1120, -240],
       "id": "node-hybrid-format",
       "name": "Format Response Hybrid"
     },
@@ -407,10 +318,7 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        1408,
-        -304
-      ],
+      "position": [2112, -240],
       "id": "node-hybrid-respond",
       "name": "Respond Hybrid"
     },
@@ -420,10 +328,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        544,
-        -80
-      ],
+      "position": [-32, 16],
       "id": "node-llm-prep",
       "name": "LLM Only Prep"
     },
@@ -433,24 +338,18 @@
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 1.7,
-      "position": [
-        816,
-        -80
-      ],
+      "position": [384, 16],
       "id": "c5af60f9-ea13-4012-984f-702794af83fe",
       "name": "AI Agent"
     },
     {
       "parameters": {
-        "model": "qwen3:14b",
+        "model": "={{ $env.OLLAMA_MODEL }}",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
-      "position": [
-        784,
-        160
-      ],
+      "position": [272, 272],
       "id": "a1857233-ff63-4d85-b5e5-be6dbb06318f",
       "name": "Ollama Chat Model",
       "credentials": {
@@ -466,16 +365,12 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1072,
-        -80
-      ],
+      "position": [1120, 16],
       "id": "node-llm-save",
       "name": "Save Message LLM"
     },
     {
       "parameters": {
-        "operation": "insert",
         "schema": {
           "__rl": true,
           "mode": "list",
@@ -497,16 +392,11 @@
             "tool_results": "={{ JSON.stringify($json.__toolResults) }}"
           }
         },
-        "options": {
-          "onError": "continueRegularOutput"
-        }
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        1488,
-        -80
-      ],
+      "position": [1792, -96],
       "id": "node-llm-db",
       "name": "DB Insert LLM",
       "credentials": {
@@ -523,10 +413,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1696,
-        -80
-      ],
+      "position": [1456, 256],
       "id": "8b094d72-9dbf-4719-819f-3e0812b4a72b",
       "name": "Code in JavaScript"
     },
@@ -536,16 +423,12 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        1904,
-        -80
-      ],
+      "position": [2112, 256],
       "id": "bfa1fcb1-8c8f-48e9-af0c-9ea4b683402a",
       "name": "Respond to Webhook"
     },
     {
       "parameters": {
-        "operation": "insert",
         "schema": {
           "__rl": true,
           "mode": "list",
@@ -564,19 +447,135 @@
             "role": "user",
             "content": "={{ $json.userMessage }}",
             "tool_calls": "={{ null }}",
-            "tool_results": "={{ null }}"
-          }
+            "tool_results": "={{ null }}",
+            "id": 0,
+            "token_count": 0
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_calls",
+              "displayName": "tool_calls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_results",
+              "displayName": "tool_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "token_count",
+              "displayName": "token_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_to_weaviate",
+              "displayName": "transferred_to_weaviate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_at",
+              "displayName": "transferred_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "weaviate_id",
+              "displayName": "weaviate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         },
-        "options": {
-          "onError": "continueRegularOutput"
-        }
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        768,
-        -608
-      ],
+      "position": [1424, -832],
       "id": "node-user-msg-ha",
       "name": "Insert User Msg HA Fast",
       "credentials": {
@@ -589,7 +588,6 @@
     },
     {
       "parameters": {
-        "operation": "insert",
         "schema": {
           "__rl": true,
           "mode": "list",
@@ -611,16 +609,11 @@
             "tool_results": "={{ null }}"
           }
         },
-        "options": {
-          "onError": "continueRegularOutput"
-        }
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        768,
-        -416
-      ],
+      "position": [1440, -432],
       "id": "node-user-msg-hybrid",
       "name": "Insert User Msg Hybrid",
       "credentials": {
@@ -633,7 +626,6 @@
     },
     {
       "parameters": {
-        "operation": "insert",
         "schema": {
           "__rl": true,
           "mode": "list",
@@ -655,16 +647,11 @@
             "tool_results": "={{ null }}"
           }
         },
-        "options": {
-          "onError": "continueRegularOutput"
-        }
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        1264,
-        -192
-      ],
+      "position": [1456, 16],
       "id": "node-user-msg-llm",
       "name": "Insert User Msg LLM",
       "credentials": {
@@ -686,14 +673,11 @@
       "name": "MQTT Error HA Fast",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [
-        1744,
-        -608
-      ],
+      "position": [2112, -816],
       "credentials": {
         "mqtt": {
-          "id": "mqtt-local",
-          "name": "mqtt-local"
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
         }
       }
     },
@@ -708,14 +692,11 @@
       "name": "MQTT Error Hybrid",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [
-        1744,
-        -304
-      ],
+      "position": [2112, -416],
       "credentials": {
         "mqtt": {
-          "id": "mqtt-local",
-          "name": "mqtt-local"
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
         }
       }
     },
@@ -730,98 +711,247 @@
       "name": "MQTT Error LLM",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [
-        1744,
-        -80
-      ],
+      "position": [2112, 32],
       "credentials": {
         "mqtt": {
-          "id": "mqtt-local",
-          "name": "mqtt-local"
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
         }
       }
     },
     {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3f1ff778-28f6-4746-9eb2-aae8d8cadd95",
+              "name": "weaviateUrl",
+              "value": "={{ $env.WEAVIATE_URL }}",
+              "type": "string"
+            },
+            {
+              "id": "a1857a39-c903-4687-a500-753394f71dc0",
+              "name": "intentMinCertainty",
+              "value": "={{ parseFloat($env.INTENT_MIN_CERTAINTY) }}",
+              "type": "number"
+            },
+            {
+              "id": "727ec8c3-69e1-49d9-b989-ed178f452127",
+              "name": "intentMaxResults",
+              "value": "={{ parseInt($env.INTENT_MAX_RESULTS) }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
       "id": "node-config-intent-params",
       "name": "Config: Intent Params",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [
-        -960,
-        -304
-      ],
-      "parameters": {
-        "mode": "raw",
-        "jsonOutput": "{\"weaviateUrl\": \"http://weaviate:8080\", \"intentMinCertainty\": 0.82, \"intentMaxResults\": 3}",
-        "options": {
-          "includeOtherFields": true
-        }
-      }
+      "position": [-1856, -256]
     },
     {
+      "parameters": {
+        "jsCode": "const parts = $json.parts || [$json.userMessage];\nreturn parts.map(currentPart => ({\n  json: { ...$json, currentPart }\n}));"
+      },
       "id": "node-split-parts",
       "name": "Split Parts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -528,
-        -304
-      ],
-      "parameters": {
-        "jsCode": "const parts = $json.parts || [$json.userMessage];\nreturn parts.map(currentPart => ({\n  json: { ...$json, currentPart }\n}));"
-      }
+      "position": [-1424, -256]
     },
     {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config: Intent Params').first().json.weaviateUrl }}/v1/graphql",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $('Config: Intent Params').first().json.intentMaxResults + ' ) { utterance entityId domain service parameters intentTemplate _additional { certainty } } } }' }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
       "id": "node-weaviate-neartextsearch",
       "name": "Weaviate: nearText Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -316,
-        -304
-      ],
-      "continueOnFail": true,
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $('Config: Intent Params').first().json.weaviateUrl }}/v1/graphql",
-        "authentication": "none",
-        "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $('Config: Intent Params').first().json.intentMaxResults + ' ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }' }) }}",
-        "options": {
-          "timeout": 5000
-        }
-      }
+      "position": [-1264, -112],
+      "continueOnFail": true
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Filter & Rank (Run Once for Each Item)\n// IMPORTANT: must return a single item object: { json: {...} }  (NOT an array)\n\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = (typeof $json.intentMinCertainty === 'number')\n  ? $json.intentMinCertainty\n  : 0.82;\n\nconst candidates = $json?.data?.Get?.HAIntent ?? [];\n\nconst qualified = candidates\n  .filter(c => (c?._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => (b?._additional?.certainty || 0) - (a?._additional?.certainty || 0));\n\nconst best = qualified[0];\n\nfunction safeParseParams(p) {\n  if (!p) return {};\n  if (typeof p === 'object' && !Array.isArray(p)) return p;\n  if (typeof p === 'string') {\n    try {\n      const parsed = JSON.parse(p);\n      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};\n    } catch {\n      return {};\n    }\n  }\n  return {};\n}\n\n// Preserve context if present (from Split Parts / Merge)\nconst context = {\n  weaviateUrl: $json.weaviateUrl,\n  intentMinCertainty: $json.intentMinCertainty,\n  intentMaxResults: $json.intentMaxResults,\n  parts: $json.parts,\n  currentPart: $json.currentPart,\n  partIndex: $json.partIndex,\n  partCount: $json.partCount,\n};\n\nif (best) {\n  return {\n    json: {\n      ...context,\n      matched: true,\n      certainty: best._additional?.certainty || 0,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: safeParseParams(best.parameters),\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain),\n      weaviateError: false,\n      weaviateErrorMsg: null,\n    }\n  };\n}\n\nreturn {\n  json: {\n    ...context,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0,\n    weaviateError: false,\n    weaviateErrorMsg: null,\n  }\n};"
+      },
       "id": "node-filter-rank",
       "name": "Filter & Rank",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -104,
-        -304
-      ],
-      "parameters": {
-        "jsCode": "// Recover original item via item pairing (n8n automatic pairing through linear chain)\nconst original = $('Split Parts').item.json;\nconst currentPart = original.currentPart;\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = $('Config: Intent Params').first().json.intentMinCertainty;\n\n// Check for HTTP/Weaviate error (continueOnFail emits error item)\nif ($json.error || $json.errors) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: false,\n      weaviateError: true,\n      weaviateErrorMsg: $json.error?.message\n        || ($json.errors || []).map(e => e.message).join(', ')\n        || 'Weaviate request failed'\n    }\n  }];\n}\n\nconst candidates = $json.data?.Get?.HAIntent || [];\nconst qualified = candidates\n  .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => {\n    const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n    if (Math.abs(certDiff) > 0.001) return certDiff;\n    return (b.priority || 0) - (a.priority || 0);\n  });\n\nconst best = qualified[0];\nif (best) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: true,\n      certainty: best._additional.certainty,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: best.parameters ? JSON.parse(best.parameters) : {},\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...original,\n    currentPart,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0\n  }\n}];"
-      }
+      "position": [-960, -256]
     },
     {
+      "parameters": {
+        "jsCode": "const all = $input.all();\nconst totalCount = all.length;\n\n// Take base context from the first incoming item.\n// This requires that Split Parts carried those fields through.\nconst base = all[0]?.json ?? {};\n\nconst matchedParts = all.filter(i => i.json.matched);\nconst matchedCount = matchedParts.length;\n\nconst anyWeaviateError = all.some(i => i.json.weaviateError);\n\n// Decision logic\nlet pathDecision = 'LLM_ONLY';\nif (totalCount === 0) {\n  pathDecision = 'LLM_ONLY';\n} else if (!anyWeaviateError && matchedCount === totalCount && matchedCount > 0) {\n  pathDecision = 'HA_FAST';\n} else if (matchedCount > 0) {\n  pathDecision = 'HYBRID';\n} else {\n  pathDecision = 'LLM_ONLY';\n}\n\nreturn [{\n  json: {\n    // --- BASE CONTEXT (must always be present) ---\n    userMessage: base.userMessage ?? base.chatInput ?? (base.parts ? base.parts.join('. ') : undefined),\n    chatInput: base.chatInput ?? base.userMessage ?? (base.parts ? base.parts.join('. ') : undefined),\n    userId: base.userId,\n    username: base.username,\n    role: base.role,\n    sessionId: base.sessionId,\n    allMessages: base.allMessages ?? [],\n    requestStartMs: base.requestStartMs,\n\n    // --- routing payload ---\n    parts: base.parts ?? all.map(i => i.json.currentPart).filter(Boolean),\n    pathDecision,\n    intentResults: all.map(i => ({\n      part: i.json.currentPart ?? i.json.part,\n      matched: i.json.matched,\n      certainty: i.json.certainty,\n      entityId: i.json.entityId,\n      domain: i.json.domain,\n      service: i.json.service,\n      parameters: i.json.parameters,\n      intentTemplate: i.json.intentTemplate,\n      requiresConfirmation: i.json.requiresConfirmation,\n      weaviateError: i.json.weaviateError,\n      weaviateErrorMsg: i.json.weaviateErrorMsg\n    })),\n    matchedCount,\n    totalCount,\n    anyWeaviateError\n  }\n}];"
+      },
       "id": "node-build-route-decision",
       "name": "Build Route Decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        108,
-        -304
-      ],
+      "position": [-784, -256]
+    },
+    {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const allParts = $input.all();\nconst totalCount = allParts.length;\nconst first = allParts[0].json;\n\nconst matchedParts = allParts.filter(item => item.json.matched);\nconst matchedCount = matchedParts.length;\n\nlet pathDecision;\nif (matchedCount === totalCount && matchedCount > 0) {\n  pathDecision = 'HA_FAST';\n} else if (matchedCount > 0) {\n  pathDecision = 'HYBRID';\n} else {\n  pathDecision = 'LLM_ONLY';\n}\n\nreturn [{\n  json: {\n    userMessage: first.userMessage,\n    userId: first.userId,\n    username: first.username,\n    role: first.role,\n    sessionId: first.sessionId,\n    allMessages: first.allMessages,\n    requestStartMs: first.requestStartMs,\n    parts: first.parts,\n    pathDecision,\n    intentResults: allParts.map(item => ({\n      part: item.json.currentPart,\n      matched: item.json.matched,\n      certainty: item.json.certainty,\n      entityId: item.json.entityId,\n      domain: item.json.domain,\n      service: item.json.service,\n      parameters: item.json.parameters,\n      intentTemplate: item.json.intentTemplate,\n      requiresConfirmation: item.json.requiresConfirmation,\n      weaviateError: item.json.weaviateError,\n      weaviateErrorMsg: item.json.weaviateErrorMsg\n    })),\n    matchedCount,\n    totalCount\n  }\n}];"
-      }
+        "jsCode": "// HA Fast - Prep Requests\n// Output: one item per HA call request (kind=\"ha\"), or a single validation/noop request (kind=\"noop\")\n// Keeps the final output contract expected downstream: haResults, responseText, __confirmationRequired\n\nfunction normalizeBaseUrl(u) {\n  const raw = (u ?? '').toString().trim();\n  if (!raw) return null;\n  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\//.test(raw) ? raw : `http://${raw}`;\n  return withScheme.replace(/\\/+$/, '');\n}\n\nconst HA_URL = normalizeBaseUrl($env.HA_URL) || 'http://homeassistant:8123';\nconst HA_TOKEN = ($env.HA_TOKEN ?? '').toString().trim();\n\nconst intentResults = $json.intentResults || [];\nconst intents = intentResults.filter(r => r.matched);\n\nconst needsConfirmation = intents.filter(i => i.requiresConfirmation);\nconst executableIntents = intents.filter(i => !i.requiresConfirmation);\n\nconst base = {\n  // Keep original payload for downstream nodes\n  ...$json,\n  __haUrl: HA_URL,\n};\n\nif (!HA_TOKEN) {\n  // No HTTP call, but we still output one item so the route continues deterministically\n  return [{\n    json: {\n      ...base,\n      __confirmationRequired: false,\n      __haPrepError: true,\n      responseText: 'HA_TOKEN fehlt. Bitte Umgebungsvariable setzen.',\n      haResults: [],\n      __http: {\n        kind: 'noop',\n        method: 'GET',\n        url: `${HA_URL}/api/`,\n        headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n        body: null,\n      },\n    }\n  }];\n}\n\n// Confirmation-only case: don't execute any HA services, but we can still do a harmless GET /api/ to validate connectivity/token\nif (executableIntents.length === 0 && needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  return [{\n    json: {\n      ...base,\n      __confirmationRequired: true,\n      haResults: [],\n      responseText: `Bist du sicher? Ich soll ${names} steuern. Bitte bestätige mit \"Ja\".`,\n      __http: {\n        kind: 'noop',\n        method: 'GET',\n        url: `${HA_URL}/api/`,\n        headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n        body: null,\n      },\n    }\n  }];\n}\n\n// Normal case: create one item per executable intent\nreturn executableIntents.map(intent => {\n  const [domain, ...rest] = (intent.service || '').split('.');\n  const service = rest.join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n\n  return {\n    json: {\n      ...base,\n      __confirmationRequired: needsConfirmation.length > 0,\n      __needsConfirmation: needsConfirmation,\n      __http: {\n        kind: 'ha',\n        method: 'POST',\n        url: `${HA_URL}/api/services/${domain}/${service}`,\n        headers: {\n          Authorization: `Bearer ${HA_TOKEN}`,\n          'Content-Type': 'application/json',\n        },\n        body,\n      },\n      __intent: intent, // keep for assembling results\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-48, -832],
+      "id": "node-ha-fast-executor",
+      "name": "HA Fast Prep Requests"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hybrid - Prep Requests\n// Creates items for:\n// - HA calls (kind=\"ha\") for matched executable intents\n// - one Ollama call (kind=\"ollama\") if llmParts exist\n// - one noop GET /api/ if nothing to do (edge case)\n\nfunction normalizeBaseUrl(u) {\n  const raw = (u ?? '').toString().trim();\n  if (!raw) return null;\n  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\//.test(raw) ? raw : `http://${raw}`;\n  return withScheme.replace(/\\/+$/, '');\n}\n\nconst HA_URL = normalizeBaseUrl($env.HA_URL) || 'http://homeassistant:8123';\nconst HA_TOKEN = ($env.HA_TOKEN ?? '').toString().trim();\n\nconst OLLAMA_URL = normalizeBaseUrl($env.OLLAMA_URL) || 'http://ollama:11434';\nconst OLLAMA_MODEL = ($env.OLLAMA_MODEL ?? 'qwen3:14b').toString().trim();\n\nconst allIntents = $json.intentResults || [];\nconst haIntents = allIntents.filter(r => r.matched && !r.requiresConfirmation);\nconst confirmIntents = allIntents.filter(r => r.matched && r.requiresConfirmation);\nconst llmParts = allIntents.filter(r => !r.matched).map(r => r.part).filter(Boolean);\n\nconst base = {\n  ...$json,\n  __haUrl: HA_URL,\n  __ollamaUrl: OLLAMA_URL,\n  __ollamaModel: OLLAMA_MODEL,\n  __confirmationRequired: confirmIntents.length > 0,\n  __confirmIntents: confirmIntents,\n};\n\nconst out = [];\n\n// HA items\nfor (const intent of haIntents) {\n  const [domain, ...rest] = (intent.service || '').split('.');\n  const service = rest.join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n\n  out.push({\n    json: {\n      ...base,\n      __http: {\n        kind: 'ha',\n        method: 'POST',\n        url: `${HA_URL}/api/services/${domain}/${service}`,\n        headers: {\n          Authorization: `Bearer ${HA_TOKEN}`,\n          'Content-Type': 'application/json',\n        },\n        body,\n      },\n      __intent: intent,\n    }\n  });\n}\n\n// Ollama item (only if we have non-intent parts)\nif (llmParts.length > 0) {\n  const userText = llmParts.join('. ');\n  out.push({\n    json: {\n      ...base,\n      __http: {\n        kind: 'ollama',\n        method: 'POST',\n        url: `${OLLAMA_URL}/api/chat`,\n        headers: { 'Content-Type': 'application/json' },\n        body: {\n          model: OLLAMA_MODEL,\n          messages: [...($json.allMessages || []), { role: 'user', content: userText }],\n          stream: false\n        }\n      }\n    }\n  });\n}\n\n// Edge case: nothing to do -> noop\nif (out.length === 0) {\n  out.push({\n    json: {\n      ...base,\n      __http: {\n        kind: 'noop',\n        method: 'GET',\n        url: `${HA_URL}/api/`,\n        headers: {\n          Authorization: `Bearer ${HA_TOKEN}`,\n          'Content-Type': 'application/json',\n        },\n        body: null\n      }\n    }\n  });\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-32, -432],
+      "id": "node-hybrid-executor",
+      "name": "Hybrid Prep Requests"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hybrid - Assemble (for Merge By Position output)\n// Expects items that are merged from:\n// - Input 1 (Prep): has __http.kind, __intent, __confirmIntents, __confirmationRequired\n// - Input 2 (HTTP): has statusCode, body, headers, statusMessage (full response)\n\nconst items = $input.all();\n\nfunction actionText(service) {\n  const svc = service || '';\n  return svc.includes('turn_on') ? 'eingeschaltet'\n    : svc.includes('turn_off') ? 'ausgeschaltet'\n    : svc.includes('open') ? 'geöffnet'\n    : svc.includes('close') ? 'geschlossen'\n    : svc.includes('start') ? 'gestartet'\n    : svc.includes('stop') ? 'gestoppt'\n    : svc.includes('return') ? 'zurückgeschickt'\n    : svc.includes('lock') ? 'gesperrt'\n    : svc.includes('unlock') ? 'entsperrt'\n    : svc.includes('arm') ? 'scharf geschaltet'\n    : svc.includes('disarm') ? 'deaktiviert'\n    : svc.includes('set_temperature') ? 'eingestellt'\n    : 'ausgeführt';\n}\n\nfunction entityLabel(intent) {\n  const raw = (intent?.entityId || intent?.domain || 'Aktion');\n  const name = raw.split('.').pop().replace(/_/g, ' ');\n  return name.charAt(0).toUpperCase() + name.slice(1);\n}\n\n// Because Merge node structures can vary, we extract prep+http data defensively\nfunction getKind(j) {\n  // Prefer merged __http.kind if present\n  if (j?.__http?.kind) return j.__http.kind;\n\n  // Some merge modes nest inputs; try common patterns\n  if (j?.input1?.__http?.kind) return j.input1.__http.kind;\n  if (j?.json?.__http?.kind) return j.json.__http.kind;\n\n  return null;\n}\n\nfunction getIntent(j) {\n  return j?.__intent || j?.input1?.__intent || null;\n}\n\nfunction getConfirmIntents(base) {\n  return base?.__confirmIntents || base?.input1?.__confirmIntents || [];\n}\n\nfunction getConfirmationRequired(base) {\n  return !!(base?.__confirmationRequired ?? base?.input1?.__confirmationRequired);\n}\n\nfunction getHttpResponse(j) {\n  // HTTP Request node output fields are usually at top-level: statusCode/body/headers\n  if (typeof j?.statusCode === 'number') {\n    return {\n      statusCode: j.statusCode,\n      body: j.body,\n      statusMessage: j.statusMessage,\n      headers: j.headers,\n      error: j.error\n    };\n  }\n\n  // If merge nested it\n  if (j?.input2 && typeof j.input2.statusCode === 'number') {\n    return {\n      statusCode: j.input2.statusCode,\n      body: j.input2.body,\n      statusMessage: j.input2.statusMessage,\n      headers: j.input2.headers,\n      error: j.input2.error\n    };\n  }\n\n  // Some merge nodes may put second stream under another key; last resort:\n  const maybe = Object.values(j || {}).find(v => v && typeof v === 'object' && typeof v.statusCode === 'number');\n  if (maybe) {\n    return {\n      statusCode: maybe.statusCode,\n      body: maybe.body,\n      statusMessage: maybe.statusMessage,\n      headers: maybe.headers,\n      error: maybe.error\n    };\n  }\n\n  return { statusCode: 0, body: null, statusMessage: null, headers: null, error: j?.error };\n}\n\nconst base = items[0]?.json ?? items[0] ?? {};\nconst haResults = [];\nlet llmText = null;\n\nfor (const it of items) {\n  const j = it.json ?? it;\n  const kind = getKind(j);\n  const resp = getHttpResponse(j);\n\n  if (kind === 'ha') {\n    const intent = getIntent(j);\n    const status = resp.statusCode ?? 0;\n\n    if (status >= 200 && status < 300) {\n      haResults.push({ intent, success: true, status });\n    } else {\n      let error = 'unknown';\n      if (status === 401) error = 'auth';\n      else if (status === 404) error = 'notfound';\n      else if (!status) error = 'network';\n\n      const msg =\n        resp?.error?.message ||\n        (resp?.body ? (typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body)) : 'unknown');\n\n      haResults.push({\n        intent,\n        success: false,\n        status: status || 0,\n        error,\n        msg: error === 'auth' ? 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.'\n          : error === 'notfound' ? `Ich konnte ${intent?.entityId || intent?.domain} nicht finden.`\n          : `Fehler bei ${intent?.entityId || intent?.domain}: ${msg}`\n      });\n    }\n  }\n\n  if (kind === 'ollama') {\n    const status = resp.statusCode ?? 0;\n    if (status >= 200 && status < 300) {\n      llmText = resp?.body?.message?.content || resp?.body?.response || null;\n    } else {\n      const msg =\n        resp?.error?.message ||\n        (resp?.body ? (typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body)) : 'unknown');\n      llmText = `Chat-Anfrage konnte nicht verarbeitet werden: ${msg}`;\n    }\n  }\n}\n\n// Build text\nconst haText = haResults.map(r => {\n  if (!r.success) return r.msg;\n  return `${entityLabel(r.intent)} ${actionText(r.intent?.service)}.`;\n}).join(' ');\n\nconst confirmIntents = getConfirmIntents(base);\nconst confirmText = confirmIntents.length > 0\n  ? `Für ${confirmIntents.map(i => i.entityId || i.domain).join(', ')} benötige ich noch deine Bestätigung.`\n  : '';\n\nconst responseText = [haText, llmText, confirmText].filter(Boolean).join(' ') || 'Erledigt.';\n\nreturn [{\n  json: {\n    // Keep original base if possible\n    ...(base?.json ? base.json : base),\n    haResults,\n    llmText,\n    responseText,\n    __confirmationRequired: getConfirmationRequired(base),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [592, -432],
+      "id": "f6ee89b7-1c5a-47f1-a26d-b1792b914e09",
+      "name": "Hybrid Assemble"
+    },
+    {
+      "parameters": {
+        "jsCode": "// HA Fast - Assemble (for Merge By Position output)\n\nconst items = $input.all();\n\nfunction actionText(service) {\n  const svc = service || '';\n  return svc.includes('turn_on') ? 'eingeschaltet'\n    : svc.includes('turn_off') ? 'ausgeschaltet'\n    : svc.includes('open') ? 'geöffnet'\n    : svc.includes('close') ? 'geschlossen'\n    : svc.includes('start') ? 'gestartet'\n    : svc.includes('stop') ? 'gestoppt'\n    : svc.includes('return') ? 'zurückgeschickt'\n    : svc.includes('lock') ? 'gesperrt'\n    : svc.includes('unlock') ? 'entsperrt'\n    : svc.includes('arm') ? 'scharf geschaltet'\n    : svc.includes('disarm') ? 'deaktiviert'\n    : svc.includes('set_temperature') ? 'eingestellt'\n    : 'ausgeführt';\n}\n\nfunction entityLabel(intent) {\n  const raw = (intent?.entityId || intent?.domain || 'Aktion');\n  const name = raw.split('.').pop().replace(/_/g, ' ');\n  return name.charAt(0).toUpperCase() + name.slice(1);\n}\n\nfunction getKind(j) {\n  return j?.__http?.kind || j?.input1?.__http?.kind || null;\n}\nfunction getIntent(j) {\n  return j?.__intent || j?.input1?.__intent || null;\n}\nfunction getNeedsConfirmation(base) {\n  return base?.__needsConfirmation || base?.input1?.__needsConfirmation || [];\n}\nfunction getConfirmationRequired(base) {\n  return !!(base?.__confirmationRequired ?? base?.input1?.__confirmationRequired);\n}\nfunction getHttpResponse(j) {\n  if (typeof j?.statusCode === 'number') return j;\n  if (j?.input2 && typeof j.input2.statusCode === 'number') return j.input2;\n  const maybe = Object.values(j || {}).find(v => v && typeof v === 'object' && typeof v.statusCode === 'number');\n  return maybe || { statusCode: 0 };\n}\n\nconst base = items[0]?.json ?? items[0] ?? {};\nconst haResults = [];\n\nfor (const it of items) {\n  const j = it.json ?? it;\n  const kind = getKind(j);\n  const resp = getHttpResponse(j);\n\n  if (kind !== 'ha') continue;\n\n  const intent = getIntent(j);\n  const status = resp.statusCode ?? 0;\n\n  if (status >= 200 && status < 300) {\n    haResults.push({ intent, success: true, status });\n  } else {\n    let error = 'unknown';\n    if (status === 401) error = 'auth';\n    else if (status === 404) error = 'notfound';\n    else if (!status) error = 'network';\n\n    const msg =\n      resp?.error?.message ||\n      (resp?.body ? (typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body)) : 'unknown');\n\n    haResults.push({\n      intent,\n      success: false,\n      status: status || 0,\n      error,\n      msg: error === 'auth' ? 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.'\n        : error === 'notfound' ? `Ich konnte ${intent?.entityId || intent?.domain} nicht finden.`\n        : `Fehler bei ${intent?.entityId || intent?.domain}: ${msg}`\n    });\n  }\n}\n\nlet responseText = haResults.map(r => {\n  if (!r.success) return r.msg;\n  return `${entityLabel(r.intent)} ${actionText(r.intent?.service)}.`;\n}).join(' ');\n\nconst needs = getNeedsConfirmation(base);\nif (getConfirmationRequired(base) && needs.length > 0) {\n  responseText += ` Für ${needs.map(i => i.entityId || i.domain).join(', ')} benötige ich noch deine Bestätigung.`;\n}\n\nif (!responseText) responseText = 'Erledigt.';\n\nreturn [{\n  json: {\n    ...(base?.json ? base.json : base),\n    haResults,\n    responseText,\n    __confirmationRequired: getConfirmationRequired(base)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [592, -816],
+      "id": "eb6b585e-27e8-46a1-8fb9-25c1b1873692",
+      "name": "HA Fast Assemble"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [416, -432],
+      "id": "6683dd65-c373-42bc-a2d7-5b16ebcbb54b",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [-1120, -256],
+      "id": "49c4889c-85a8-4785-947c-4e514cd69ba3",
+      "name": "Merge Parts"
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.__http.method }}",
+        "url": "={{ $json.__http.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.__http.headers.Authorization }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.__http.headers[\"Content-Type\"]"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__http.body || {}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 8000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [192, -672],
+      "id": "e536c131-7fe3-43c2-9ea4-b3b8d2fcabf8",
+      "name": "HA Fast HTTP Request",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.__http.method }}",
+        "url": "={{ $json.__http.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.__http.headers.Authorization || \"\" }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.__http.headers[\"Content-Type\"] || \"application/json\" }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__http.body || {}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [208, -304],
+      "id": "0382d0f8-9a5d-4069-bcf9-b06c950c7509",
+      "name": "Hybrid HTTP Request"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [400, -816],
+      "id": "5a7de9a5-54d1-41df-b287-4545c1126dde",
+      "name": "Merge"
     }
   ],
+  "pinData": {},
   "connections": {
     "Webhook": {
       "main": [
@@ -914,6 +1044,11 @@
             "node": "Weaviate: nearText Search",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Merge Parts",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -922,9 +1057,9 @@
       "main": [
         [
           {
-            "node": "Filter & Rank",
+            "node": "Merge Parts",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -955,14 +1090,14 @@
       "main": [
         [
           {
-            "node": "HA Fast Executor",
+            "node": "HA Fast Prep Requests",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Hybrid Executor",
+            "node": "Hybrid Prep Requests",
             "type": "main",
             "index": 0
           }
@@ -970,17 +1105,6 @@
         [
           {
             "node": "LLM Only Prep",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "HA Fast Executor": {
-      "main": [
-        [
-          {
-            "node": "Save Message HA Fast",
             "type": "main",
             "index": 0
           }
@@ -1015,9 +1139,7 @@
       ]
     },
     "Respond HA Fast": {
-      "main": [
-        []
-      ]
+      "main": [[]]
     },
     "Insert User Msg HA Fast": {
       "main": [
@@ -1031,17 +1153,6 @@
         [
           {
             "node": "MQTT Error HA Fast",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Hybrid Executor": {
-      "main": [
-        [
-          {
-            "node": "Save Message Hybrid",
             "type": "main",
             "index": 0
           }
@@ -1208,1285 +1319,132 @@
       ]
     },
     "Respond Hybrid": {
-      "main": [
-        []
-      ]
+      "main": [[]]
     },
     "Respond to Webhook": {
+      "main": [[]]
+    },
+    "HA Fast Prep Requests": {
       "main": [
-        []
+        [
+          {
+            "node": "HA Fast HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hybrid Prep Requests": {
+      "main": [
+        [
+          {
+            "node": "Hybrid HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hybrid Assemble": {
+      "main": [
+        [
+          {
+            "node": "Save Message Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HA Fast Assemble": {
+      "main": [
+        [
+          {
+            "node": "Save Message HA Fast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Hybrid Assemble",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Parts": {
+      "main": [
+        [
+          {
+            "node": "Filter & Rank",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HA Fast HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Hybrid HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "HA Fast Assemble",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "staticData": null,
+  "versionId": "73347814-72ee-4173-874c-44ef8dd5cb10",
   "meta": {
-    "templateCredsSetupCompleted": true
+    "templateCredsSetupCompleted": true,
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
   },
-  "pinData": {},
-  "versionId": "02ddfb6d-6828-4364-b248-92cdaad7f182",
-  "activeVersionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
-  "versionCounter": 304,
-  "triggerCount": 1,
-  "shared": [
-    {
-      "updatedAt": "2025-10-08T13:43:05.177Z",
-      "createdAt": "2025-10-08T13:43:05.177Z",
-      "role": "workflow:owner",
-      "workflowId": "ZYaMfLlmnkZrX2G5",
-      "projectId": "yHMHK9aiZMuCbKiJ",
-      "project": {
-        "updatedAt": "2025-10-07T18:45:26.775Z",
-        "createdAt": "2025-10-07T18:42:17.053Z",
-        "id": "yHMHK9aiZMuCbKiJ",
-        "name": "Andreas Stahlhut <stahlhutandreas@gmail.com>",
-        "type": "personal",
-        "icon": null,
-        "description": null,
-        "creatorId": "2db0bd2f-9d9b-4d1e-8469-7ec88cdaedbb"
-      }
-    }
-  ],
-  "tags": [],
-  "activeVersion": {
-    "updatedAt": "2026-02-28T21:45:33.414Z",
-    "createdAt": "2026-02-28T21:45:33.414Z",
-    "versionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
-    "workflowId": "ZYaMfLlmnkZrX2G5",
-    "nodes": [
-      {
-        "parameters": {
-          "httpMethod": "POST",
-          "path": "v1/chat/completions",
-          "authentication": "jwt",
-          "responseMode": "responseNode",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.webhook",
-        "typeVersion": 2.1,
-        "position": [
-          -1340,
-          -192
-        ],
-        "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
-        "name": "Webhook",
-        "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
-        "onError": "continueRegularOutput",
-        "credentials": {
-          "jwtAuth": {
-            "id": "4iUJhbFCSgQeHAGL",
-            "name": "JWT Auth account"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "jsCode": "// JWT Claims Extractor — decode the already-verified JWT payload\n// The Webhook node has already verified the signature and expiry.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\n\nif (!token) {\n  throw new Error('No JWT token found in Authorization header');\n}\n\n// Decode payload (middle part) — no crypto needed, already verified\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\n\nreturn [{\n  json: {\n    ...$json,\n    jwtClaims: {\n      user_id: payload.sub || payload.user_id,\n      username: payload.username,\n      role: payload.role\n    }\n  }\n}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -1140,
-          -192
-        ],
-        "id": "node-jwt-claims-extractor",
-        "name": "JWT Claims Extractor"
-      },
-      {
-        "parameters": {
-          "jsCode": "const body = $json.body || {};\nconst messages = body.messages || [];\nconst userMsg = [...messages].reverse().find(m => m.role === 'user');\n\nif (!userMsg || !userMsg.content || userMsg.content.trim().length === 0) {\n  return [{ json: { __error: true, errorMsg: 'Leere Eingabe. Bitte gib etwas ein.', allMessages: messages } }];\n}\n\n// user_id comes from JWT claims — body.user_id is ignored\nconst userId = $json.jwtClaims?.user_id;\nconst username = $json.jwtClaims?.username;\nconst role = $json.jwtClaims?.role;\nconst sessionId = body.session_id || require('crypto').randomUUID();\n\nreturn [{\n  json: {\n    __error: false,\n    userMessage: userMsg.content.trim(),\n    userId,\n    username,\n    role,\n    sessionId,\n    allMessages: messages,\n    requestStartMs: Date.now()\n  }\n}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -936,
-          -192
-        ],
-        "id": "node-input-validator",
-        "name": "Input Validator"
-      },
-      {
-        "parameters": {
-          "conditions": {
-            "options": {
-              "version": 2,
-              "caseSensitive": true,
-              "typeValidation": "strict",
-              "leftValue": "",
-              "rightValue": ""
-            },
-            "combinator": "and",
-            "conditions": [
-              {
-                "id": "error-check",
-                "leftValue": "={{ $json.__error }}",
-                "rightValue": true,
-                "operator": {
-                  "type": "boolean",
-                  "operation": "equals"
-                }
-              }
-            ]
-          },
-          "options": {}
-        },
-        "type": "n8n-nodes-base.if",
-        "typeVersion": 2.2,
-        "position": [
-          -744,
-          -192
-        ],
-        "id": "node-early-exit",
-        "name": "Empty Input Check"
-      },
-      {
-        "parameters": {
-          "jsCode": "const errorMsg = $json.errorMsg || 'Ungültige Eingabe.';\nconst now = Math.floor(Date.now() / 1000);\nreturn [{ json: {\n  id: 'chatcmpl-err-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice',\n  choices: [{ index: 0, message: { role: 'assistant', content: errorMsg }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }\n}}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -736,
-          -80
-        ],
-        "id": "node-error-response",
-        "name": "Error Response"
-      },
-      {
-        "parameters": {
-          "options": {}
-        },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.1,
-        "position": [
-          -544,
-          -80
-        ],
-        "id": "node-error-respond",
-        "name": "Respond Error"
-      },
-      {
-        "parameters": {
-          "jsCode": "const text = $json.userMessage || '';\nconst SPLITTERS = ['und dann', 'und danach', 'und außerdem', 'und', 'dann', 'danach', 'außerdem', 'sowie', 'zusätzlich', 'auch noch'];\nconst FILLER = /^(bitte|mal|noch|auch|doch|kurz)\\s+/gi;\nconst PUNCT = /[,\\.;]+/;\n\nfunction stripFillers(str) {\n  let prev = '';\n  let result = str;\n  while (result !== prev) {\n    prev = result;\n    result = result.replace(FILLER, '').trim();\n  }\n  return result;\n}\n\nfunction splitText(input) {\n  let parts = [input];\n  for (const sep of SPLITTERS) {\n    const regex = new RegExp(`\\\\b${sep}\\\\b`, 'gi');\n    parts = parts.flatMap(p => p.split(regex));\n  }\n  parts = parts.flatMap(p => p.split(PUNCT));\n  return parts\n    .map(p => stripFillers(p))\n    .filter(p => p.length >= 4);\n}\n\nconst parts = splitText(text);\nreturn [{ json: { ...($json), parts: parts.length > 0 ? parts : [text] } }];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -736,
-          -304
-        ],
-        "id": "node-sentence-splitter",
-        "name": "Sentence Splitter"
-      },
-      {
-        "id": "node-config-intent-params",
-        "name": "Config: Intent Params",
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          -960,
-          -304
-        ],
-        "parameters": {
-          "mode": "raw",
-          "jsonOutput": "{\"weaviateUrl\": \"http://weaviate:8080\", \"intentMinCertainty\": 0.82, \"intentMaxResults\": 3}",
-          "options": {
-            "includeOtherFields": true
-          }
-        }
-      },
-      {
-        "id": "node-split-parts",
-        "name": "Split Parts",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -528,
-          -304
-        ],
-        "parameters": {
-          "jsCode": "const parts = $json.parts || [$json.userMessage];\nreturn parts.map(currentPart => ({\n  json: { ...$json, currentPart }\n}));"
-        }
-      },
-      {
-        "id": "node-weaviate-neartextsearch",
-        "name": "Weaviate: nearText Search",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          -316,
-          -304
-        ],
-        "continueOnFail": true,
-        "parameters": {
-          "method": "POST",
-          "url": "={{ $('Config: Intent Params').first().json.weaviateUrl }}/v1/graphql",
-          "authentication": "none",
-          "sendBody": true,
-          "contentType": "raw",
-          "rawContentType": "application/json",
-          "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $('Config: Intent Params').first().json.intentMaxResults + ' ) { utterance entityId domain service parameters intentTemplate priority _additional { certainty } } } }' }) }}",
-          "options": {
-            "timeout": 5000
-          }
-        }
-      },
-      {
-        "id": "node-filter-rank",
-        "name": "Filter & Rank",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -104,
-          -304
-        ],
-        "parameters": {
-          "jsCode": "// Recover original item via item pairing (n8n automatic pairing through linear chain)\nconst original = $('Split Parts').item.json;\nconst currentPart = original.currentPart;\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = $('Config: Intent Params').first().json.intentMinCertainty;\n\n// Check for HTTP/Weaviate error (continueOnFail emits error item)\nif ($json.error || $json.errors) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: false,\n      weaviateError: true,\n      weaviateErrorMsg: $json.error?.message\n        || ($json.errors || []).map(e => e.message).join(', ')\n        || 'Weaviate request failed'\n    }\n  }];\n}\n\nconst candidates = $json.data?.Get?.HAIntent || [];\nconst qualified = candidates\n  .filter(c => (c._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => {\n    const certDiff = (b._additional?.certainty || 0) - (a._additional?.certainty || 0);\n    if (Math.abs(certDiff) > 0.001) return certDiff;\n    return (b.priority || 0) - (a.priority || 0);\n  });\n\nconst best = qualified[0];\nif (best) {\n  return [{\n    json: {\n      ...original,\n      currentPart,\n      matched: true,\n      certainty: best._additional.certainty,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: best.parameters ? JSON.parse(best.parameters) : {},\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain)\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...original,\n    currentPart,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0\n  }\n}];"
-        }
-      },
-      {
-        "id": "node-build-route-decision",
-        "name": "Build Route Decision",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          108,
-          -304
-        ],
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "jsCode": "const allParts = $input.all();\nconst totalCount = allParts.length;\nconst first = allParts[0].json;\n\nconst matchedParts = allParts.filter(item => item.json.matched);\nconst matchedCount = matchedParts.length;\n\nlet pathDecision;\nif (matchedCount === totalCount && matchedCount > 0) {\n  pathDecision = 'HA_FAST';\n} else if (matchedCount > 0) {\n  pathDecision = 'HYBRID';\n} else {\n  pathDecision = 'LLM_ONLY';\n}\n\nreturn [{\n  json: {\n    userMessage: first.userMessage,\n    userId: first.userId,\n    username: first.username,\n    role: first.role,\n    sessionId: first.sessionId,\n    allMessages: first.allMessages,\n    requestStartMs: first.requestStartMs,\n    parts: first.parts,\n    pathDecision,\n    intentResults: allParts.map(item => ({\n      part: item.json.currentPart,\n      matched: item.json.matched,\n      certainty: item.json.certainty,\n      entityId: item.json.entityId,\n      domain: item.json.domain,\n      service: item.json.service,\n      parameters: item.json.parameters,\n      intentTemplate: item.json.intentTemplate,\n      requiresConfirmation: item.json.requiresConfirmation,\n      weaviateError: item.json.weaviateError,\n      weaviateErrorMsg: item.json.weaviateErrorMsg\n    })),\n    matchedCount,\n    totalCount\n  }\n}];"
-        }
-      },
-      {
-        "parameters": {
-          "rules": {
-            "values": [
-              {
-                "conditions": {
-                  "options": {
-                    "version": 2,
-                    "caseSensitive": true,
-                    "typeValidation": "strict",
-                    "leftValue": "",
-                    "rightValue": ""
-                  },
-                  "combinator": "and",
-                  "conditions": [
-                    {
-                      "id": "ha-fast-cond",
-                      "leftValue": "={{ $json.pathDecision }}",
-                      "rightValue": "HA_FAST",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ]
-                },
-                "renameOutput": "HA_FAST"
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "version": 2,
-                    "caseSensitive": true,
-                    "typeValidation": "strict",
-                    "leftValue": "",
-                    "rightValue": ""
-                  },
-                  "combinator": "and",
-                  "conditions": [
-                    {
-                      "id": "hybrid-cond",
-                      "leftValue": "={{ $json.pathDecision }}",
-                      "rightValue": "HYBRID",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ]
-                },
-                "renameOutput": "HYBRID"
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "version": 2,
-                    "caseSensitive": true,
-                    "typeValidation": "strict",
-                    "leftValue": "",
-                    "rightValue": ""
-                  },
-                  "combinator": "and",
-                  "conditions": [
-                    {
-                      "id": "llm-only-cond",
-                      "leftValue": "={{ $json.pathDecision }}",
-                      "rightValue": "LLM_ONLY",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ]
-                },
-                "renameOutput": "LLM_ONLY"
-              }
-            ]
-          },
-          "options": {
-            "fallbackOutput": "none"
-          }
-        },
-        "type": "n8n-nodes-base.switch",
-        "typeVersion": 3.2,
-        "position": [
-          -304,
-          -304
-        ],
-        "id": "node-path-router",
-        "name": "Path Router"
-      },
-      {
-        "parameters": {
-          "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst intents = $json.intentResults.filter(r => r.matched);\n\nconst needsConfirmation = intents.filter(i => i.requiresConfirmation);\nconst executableIntents = intents.filter(i => !i.requiresConfirmation);\n\nif (executableIntents.length === 0 && needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  return [{ json: {\n    ...($json),\n    __confirmationRequired: true,\n    haResults: [],\n    responseText: `Bist du sicher? Ich soll ${names} steuern. Bitte bestätige mit \"Ja\".`\n  }}];\n}\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nfunction buildText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const svc = i.service;\n    const action = svc.includes('turn_on') ? 'eingeschaltet'\n      : svc.includes('turn_off') ? 'ausgeschaltet'\n      : svc.includes('open') ? 'geöffnet'\n      : svc.includes('close') ? 'geschlossen'\n      : svc.includes('start') ? 'gestartet'\n      : svc.includes('stop') ? 'gestoppt'\n      : svc.includes('return') ? 'zurückgeschickt'\n      : svc.includes('lock') ? 'gesperrt'\n      : svc.includes('unlock') ? 'entsperrt'\n      : svc.includes('arm') ? 'scharf geschaltet'\n      : svc.includes('disarm') ? 'deaktiviert'\n      : svc.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst haResults = await Promise.all(executableIntents.map(i => callHA(i)));\n\nlet responseText = buildText(haResults);\nif (needsConfirmation.length > 0) {\n  const names = needsConfirmation.map(i => i.entityId || i.domain).join(', ');\n  responseText += ` Für ${names} benötige ich noch deine Bestätigung.`;\n}\n\nreturn [{ json: { ...($json), haResults, __confirmationRequired: needsConfirmation.length > 0, responseText } }];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -80,
-          -496
-        ],
-        "id": "node-ha-fast-executor",
-        "name": "HA Fast Executor"
-      },
-      {
-        "parameters": {
-          "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HA_FAST',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  latency_ms: latencyMs,\n  confirmation_required: $json.__confirmationRequired || false\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          144,
-          -496
-        ],
-        "id": "node-ha-fast-save",
-        "name": "Save Message HA Fast"
-      },
-      {
-        "parameters": {
-          "operation": "insert",
-          "schema": {
-            "__rl": true,
-            "mode": "list",
-            "value": "alice"
-          },
-          "table": {
-            "__rl": true,
-            "mode": "list",
-            "value": "messages"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "session_id": "={{ $json.sessionId }}",
-              "user_id": "={{ $json.userId }}",
-              "role": "assistant",
-              "content": "={{ $json.responseText }}",
-              "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
-              "tool_results": "={{ JSON.stringify($json.toolResults) }}"
-            }
-          },
-          "options": {
-            "onError": "continueRegularOutput"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          784,
-          -608
-        ],
-        "id": "node-ha-fast-db",
-        "name": "DB Insert HA Fast",
-        "credentials": {
-          "postgres": {
-            "id": "2YBtxcocRMLQuAdF",
-            "name": "pg-alice"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-ha-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-ha-fast',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          368,
-          -496
-        ],
-        "id": "node-ha-fast-format",
-        "name": "Format Response HA Fast"
-      },
-      {
-        "parameters": {
-          "options": {}
-        },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.1,
-        "position": [
-          592,
-          -496
-        ],
-        "id": "node-ha-fast-respond",
-        "name": "Respond HA Fast"
-      },
-      {
-        "parameters": {
-          "jsCode": "const HA_URL = $env.HA_URL || 'http://homeassistant:8123';\nconst HA_TOKEN = $env.HA_TOKEN;\nconst OLLAMA_URL = $env.OLLAMA_URL || 'http://ollama:11434';\n\nconst allIntents = $json.intentResults || [];\nconst haIntents = allIntents.filter(r => r.matched && !r.requiresConfirmation);\nconst confirmIntents = allIntents.filter(r => r.matched && r.requiresConfirmation);\nconst llmParts = allIntents.filter(r => !r.matched).map(r => r.part);\n\nasync function callHA(intent) {\n  const parts = intent.service.split('.');\n  const domain = parts[0];\n  const service = parts.slice(1).join('.');\n  const body = { entity_id: intent.entityId, ...(intent.parameters || {}) };\n  try {\n    await $helpers.httpRequest({\n      method: 'POST',\n      url: `${HA_URL}/api/services/${domain}/${service}`,\n      headers: { 'Authorization': `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },\n      body: JSON.stringify(body),\n      timeout: 5000\n    });\n    return { intent, success: true };\n  } catch (err) {\n    const status = err.httpCode || err.status || 0;\n    if (status === 401) return { intent, success: false, error: 'auth', msg: 'HA-Verbindung fehlgeschlagen, bitte Token prüfen.' };\n    if (status === 404) return { intent, success: false, error: 'notfound', msg: `Ich konnte ${intent.entityId || intent.domain} nicht finden.` };\n    return { intent, success: false, error: 'unknown', msg: `Fehler bei ${intent.entityId || intent.domain}.` };\n  }\n}\n\nasync function callOllama(parts) {\n  const userText = parts.join('. ');\n  try {\n    const resp = await $helpers.httpRequest({\n      method: 'POST',\n      url: `${OLLAMA_URL}/api/chat`,\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        model: $env.OLLAMA_MODEL || 'qwen3:14b',\n        messages: [...($json.allMessages || []), { role: 'user', content: userText }],\n        stream: false\n      }),\n      timeout: 30000\n    });\n    const data = typeof resp === 'string' ? JSON.parse(resp) : resp;\n    return data && data.message ? data.message.content : 'Ich konnte keine Antwort generieren.';\n  } catch {\n    return 'Chat-Anfrage konnte nicht verarbeitet werden.';\n  }\n}\n\nconst [haResults, llmText] = await Promise.all([\n  Promise.all(haIntents.map(i => callHA(i))),\n  llmParts.length > 0 ? callOllama(llmParts) : Promise.resolve(null)\n]);\n\nfunction haText(results) {\n  return results.map(r => {\n    if (!r.success) return r.msg;\n    const i = r.intent;\n    const entity = (i.entityId || i.domain).split('.').pop().replace(/_/g, ' ');\n    const action = i.service.includes('turn_on') ? 'eingeschaltet'\n      : i.service.includes('turn_off') ? 'ausgeschaltet'\n      : i.service.includes('open') ? 'geöffnet'\n      : i.service.includes('close') ? 'geschlossen'\n      : i.service.includes('start') ? 'gestartet'\n      : i.service.includes('stop') ? 'gestoppt'\n      : i.service.includes('return') ? 'zurückgeschickt'\n      : i.service.includes('lock') ? 'gesperrt'\n      : i.service.includes('unlock') ? 'entsperrt'\n      : i.service.includes('arm') ? 'scharf geschaltet'\n      : i.service.includes('disarm') ? 'deaktiviert'\n      : i.service.includes('set_temperature') ? 'eingestellt'\n      : 'ausgeführt';\n    return `${entity.charAt(0).toUpperCase() + entity.slice(1)} ${action}.`;\n  }).join(' ');\n}\n\nconst confirmText = confirmIntents.length > 0\n  ? `Für ${confirmIntents.map(i => i.entityId || i.domain).join(', ')} benötige ich noch deine Bestätigung.`\n  : '';\n\nconst haPart = haResults.length > 0 ? haText(haResults) : '';\nconst parts2 = [haPart, llmText, confirmText].filter(Boolean);\nconst responseText = parts2.join(' ');\n\nreturn [{ json: { ...($json), haResults, llmText, responseText } }];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -80,
-          -304
-        ],
-        "id": "node-hybrid-executor",
-        "name": "Hybrid Executor"
-      },
-      {
-        "parameters": {
-          "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HYBRID',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  llm_used: true,\n  latency_ms: latencyMs\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          144,
-          -304
-        ],
-        "id": "node-hybrid-save",
-        "name": "Save Message Hybrid"
-      },
-      {
-        "parameters": {
-          "operation": "insert",
-          "schema": {
-            "__rl": true,
-            "mode": "list",
-            "value": "alice"
-          },
-          "table": {
-            "__rl": true,
-            "mode": "list",
-            "value": "messages"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "session_id": "={{ $json.sessionId }}",
-              "user_id": "={{ $json.userId }}",
-              "role": "assistant",
-              "content": "={{ $json.responseText }}",
-              "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
-              "tool_results": "={{ JSON.stringify($json.toolResults) }}"
-            }
-          },
-          "options": {
-            "onError": "continueRegularOutput"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          592,
-          -304
-        ],
-        "id": "node-hybrid-db",
-        "name": "DB Insert Hybrid",
-        "credentials": {
-          "postgres": {
-            "id": "2YBtxcocRMLQuAdF",
-            "name": "pg-alice"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-hy-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-hybrid',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          368,
-          -304
-        ],
-        "id": "node-hybrid-format",
-        "name": "Format Response Hybrid"
-      },
-      {
-        "parameters": {
-          "options": {}
-        },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.1,
-        "position": [
-          784,
-          -304
-        ],
-        "id": "node-hybrid-respond",
-        "name": "Respond Hybrid"
-      },
-      {
-        "parameters": {
-          "jsCode": "return [{ json: {\n  chatInput: $json.userMessage,\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -80,
-          -80
-        ],
-        "id": "node-llm-prep",
-        "name": "LLM Only Prep"
-      },
-      {
-        "parameters": {
-          "options": {}
-        },
-        "type": "@n8n/n8n-nodes-langchain.agent",
-        "typeVersion": 1.7,
-        "position": [
-          192,
-          -80
-        ],
-        "id": "c5af60f9-ea13-4012-984f-702794af83fe",
-        "name": "AI Agent"
-      },
-      {
-        "parameters": {
-          "model": "qwen3:14b",
-          "options": {}
-        },
-        "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
-        "typeVersion": 1,
-        "position": [
-          160,
-          160
-        ],
-        "id": "a1857233-ff63-4d85-b5e5-be6dbb06318f",
-        "name": "Ollama Chat Model",
-        "credentials": {
-          "ollamaApi": {
-            "id": "8TAanq1tJFFodeaP",
-            "name": "Ollama 3090"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "jsCode": "const startMs = $('LLM Only Prep').first().json.__requestStartMs || Date.now();\nconst latencyMs = Date.now() - startMs;\nconst toolResults = { path_taken: 'LLM_ONLY', latency_ms: latencyMs, llm_used: true };\nconst text = $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nconst userMessageRow = {\n  session_id: $('LLM Only Prep').first().json.__sessionId,\n  user_id: $('LLM Only Prep').first().json.__userId,\n  role: 'user',\n  content: $('Input Validator').first().json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: {\n  ...($json),\n  __responseText: text,\n  __toolResults: toolResults,\n  __userId: $('LLM Only Prep').first().json.__userId,\n  __sessionId: $('LLM Only Prep').first().json.__sessionId,\n  __userMessageRow: userMessageRow\n}}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          448,
-          -80
-        ],
-        "id": "node-llm-save",
-        "name": "Save Message LLM"
-      },
-      {
-        "parameters": {
-          "operation": "insert",
-          "schema": {
-            "__rl": true,
-            "mode": "list",
-            "value": "alice"
-          },
-          "table": {
-            "__rl": true,
-            "mode": "list",
-            "value": "messages"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "session_id": "={{ $json.__sessionId }}",
-              "user_id": "={{ $json.__userId }}",
-              "role": "assistant",
-              "content": "={{ $json.__responseText }}",
-              "tool_calls": "={{ $json.__toolResults ? JSON.stringify($json.__toolResults.llm_tool_calls || null) : null }}",
-              "tool_results": "={{ JSON.stringify($json.__toolResults) }}"
-            }
-          },
-          "options": {
-            "onError": "continueRegularOutput"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          864,
-          -80
-        ],
-        "id": "node-llm-db",
-        "name": "DB Insert LLM",
-        "credentials": {
-          "postgres": {
-            "id": "2YBtxcocRMLQuAdF",
-            "name": "pg-alice"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-llm',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1072,
-          -80
-        ],
-        "id": "8b094d72-9dbf-4719-819f-3e0812b4a72b",
-        "name": "Code in JavaScript"
-      },
-      {
-        "parameters": {
-          "options": {}
-        },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.1,
-        "position": [
-          1280,
-          -80
-        ],
-        "id": "bfa1fcb1-8c8f-48e9-af0c-9ea4b683402a",
-        "name": "Respond to Webhook"
-      },
-      {
-        "parameters": {
-          "operation": "insert",
-          "schema": {
-            "__rl": true,
-            "mode": "list",
-            "value": "alice"
-          },
-          "table": {
-            "__rl": true,
-            "mode": "list",
-            "value": "messages"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "session_id": "={{ $json.sessionId }}",
-              "user_id": "={{ $json.userId }}",
-              "role": "user",
-              "content": "={{ $json.userMessage }}",
-              "tool_calls": "={{ null }}",
-              "tool_results": "={{ null }}"
-            }
-          },
-          "options": {
-            "onError": "continueRegularOutput"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          144,
-          -608
-        ],
-        "id": "node-user-msg-ha",
-        "name": "Insert User Msg HA Fast",
-        "credentials": {
-          "postgres": {
-            "id": "2YBtxcocRMLQuAdF",
-            "name": "pg-alice"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "operation": "insert",
-          "schema": {
-            "__rl": true,
-            "mode": "list",
-            "value": "alice"
-          },
-          "table": {
-            "__rl": true,
-            "mode": "list",
-            "value": "messages"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "session_id": "={{ $json.sessionId }}",
-              "user_id": "={{ $json.userId }}",
-              "role": "user",
-              "content": "={{ $json.userMessage }}",
-              "tool_calls": "={{ null }}",
-              "tool_results": "={{ null }}"
-            }
-          },
-          "options": {
-            "onError": "continueRegularOutput"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          144,
-          -416
-        ],
-        "id": "node-user-msg-hybrid",
-        "name": "Insert User Msg Hybrid",
-        "credentials": {
-          "postgres": {
-            "id": "2YBtxcocRMLQuAdF",
-            "name": "pg-alice"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "operation": "insert",
-          "schema": {
-            "__rl": true,
-            "mode": "list",
-            "value": "alice"
-          },
-          "table": {
-            "__rl": true,
-            "mode": "list",
-            "value": "messages"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "session_id": "={{ $json.__sessionId }}",
-              "user_id": "={{ $json.__userId }}",
-              "role": "user",
-              "content": "={{ $('Input Validator').first().json.userMessage }}",
-              "tool_calls": "={{ null }}",
-              "tool_results": "={{ null }}"
-            }
-          },
-          "options": {
-            "onError": "continueRegularOutput"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          640,
-          -192
-        ],
-        "id": "node-user-msg-llm",
-        "name": "Insert User Msg LLM",
-        "credentials": {
-          "postgres": {
-            "id": "2YBtxcocRMLQuAdF",
-            "name": "pg-alice"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "id": "node-mqtt-err-ha",
-        "name": "MQTT Error HA Fast",
-        "type": "n8n-nodes-base.mqtt",
-        "typeVersion": 1,
-        "position": [
-          1120,
-          -608
-        ],
-        "credentials": {
-          "mqtt": {
-            "id": "mqtt-local",
-            "name": "mqtt-local"
-          }
-        },
-        "parameters": {
-          "topic": "alice/errors/db",
-          "sendInputData": false,
-          "message": "={{ JSON.stringify({ path: \"HA_FAST\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
-        }
-      },
-      {
-        "id": "node-mqtt-err-hybrid",
-        "name": "MQTT Error Hybrid",
-        "type": "n8n-nodes-base.mqtt",
-        "typeVersion": 1,
-        "position": [
-          1120,
-          -304
-        ],
-        "credentials": {
-          "mqtt": {
-            "id": "mqtt-local",
-            "name": "mqtt-local"
-          }
-        },
-        "parameters": {
-          "topic": "alice/errors/db",
-          "sendInputData": false,
-          "message": "={{ JSON.stringify({ path: \"HYBRID\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}"
-        }
-      },
-      {
-        "id": "node-mqtt-err-llm",
-        "name": "MQTT Error LLM",
-        "type": "n8n-nodes-base.mqtt",
-        "typeVersion": 1,
-        "position": [
-          1120,
-          -80
-        ],
-        "credentials": {
-          "mqtt": {
-            "id": "mqtt-local",
-            "name": "mqtt-local"
-          }
-        },
-        "parameters": {
-          "topic": "alice/errors/db",
-          "sendInputData": false,
-          "message": "={{ JSON.stringify({ path: \"LLM_ONLY\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.__sessionId, user_id: $json.__userId, timestamp: Date.now() }) }}"
-        }
-      }
-    ],
-    "connections": {
-      "Webhook": {
-        "main": [
-          [
-            {
-              "node": "JWT Claims Extractor",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "JWT Claims Extractor": {
-        "main": [
-          [
-            {
-              "node": "Input Validator",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Input Validator": {
-        "main": [
-          [
-            {
-              "node": "Empty Input Check",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Empty Input Check": {
-        "main": [
-          [
-            {
-              "node": "Error Response",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Config: Intent Params",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Error Response": {
-        "main": [
-          [
-            {
-              "node": "Respond Error",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Config: Intent Params": {
-        "main": [
-          [
-            {
-              "node": "Sentence Splitter",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Sentence Splitter": {
-        "main": [
-          [
-            {
-              "node": "Split Parts",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Split Parts": {
-        "main": [
-          [
-            {
-              "node": "Weaviate: nearText Search",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Weaviate: nearText Search": {
-        "main": [
-          [
-            {
-              "node": "Filter & Rank",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Filter & Rank": {
-        "main": [
-          [
-            {
-              "node": "Build Route Decision",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Build Route Decision": {
-        "main": [
-          [
-            {
-              "node": "Path Router",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Path Router": {
-        "main": [
-          [
-            {
-              "node": "HA Fast Executor",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Hybrid Executor",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "LLM Only Prep",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "HA Fast Executor": {
-        "main": [
-          [
-            {
-              "node": "Save Message HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Save Message HA Fast": {
-        "main": [
-          [
-            {
-              "node": "Format Response HA Fast",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Insert User Msg HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Format Response HA Fast": {
-        "main": [
-          [
-            {
-              "node": "Respond HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Respond HA Fast": {
-        "main": [
-          []
-        ]
-      },
-      "Insert User Msg HA Fast": {
-        "main": [
-          [
-            {
-              "node": "DB Insert HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "MQTT Error HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Hybrid Executor": {
-        "main": [
-          [
-            {
-              "node": "Save Message Hybrid",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Save Message Hybrid": {
-        "main": [
-          [
-            {
-              "node": "Format Response Hybrid",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Insert User Msg Hybrid",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Insert User Msg Hybrid": {
-        "main": [
-          [
-            {
-              "node": "DB Insert Hybrid",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "MQTT Error Hybrid",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "DB Insert Hybrid": {
-        "main": [
-          [],
-          [
-            {
-              "node": "MQTT Error Hybrid",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Format Response Hybrid": {
-        "main": [
-          [
-            {
-              "node": "Respond Hybrid",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "LLM Only Prep": {
-        "main": [
-          [
-            {
-              "node": "AI Agent",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Ollama Chat Model": {
-        "ai_languageModel": [
-          [
-            {
-              "node": "AI Agent",
-              "type": "ai_languageModel",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "AI Agent": {
-        "main": [
-          [
-            {
-              "node": "Save Message LLM",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Save Message LLM": {
-        "main": [
-          [
-            {
-              "node": "Code in JavaScript",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Insert User Msg LLM",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Insert User Msg LLM": {
-        "main": [
-          [
-            {
-              "node": "DB Insert LLM",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "MQTT Error LLM",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "DB Insert LLM": {
-        "main": [
-          [],
-          [
-            {
-              "node": "MQTT Error LLM",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Code in JavaScript": {
-        "main": [
-          [
-            {
-              "node": "Respond to Webhook",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "DB Insert HA Fast": {
-        "main": [
-          [],
-          [
-            {
-              "node": "MQTT Error HA Fast",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Respond Hybrid": {
-        "main": [
-          []
-        ]
-      },
-      "Respond to Webhook": {
-        "main": [
-          []
-        ]
-      }
-    },
-    "authors": "Andreas Stahlhut",
-    "name": null,
-    "description": null,
-    "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-02-28T21:45:33.460Z",
-        "id": 120,
-        "workflowId": "ZYaMfLlmnkZrX2G5",
-        "versionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
-        "event": "activated",
-        "userId": "2db0bd2f-9d9b-4d1e-8469-7ec88cdaedbb"
-      },
-      {
-        "createdAt": "2026-02-28T21:45:33.446Z",
-        "id": 119,
-        "workflowId": "ZYaMfLlmnkZrX2G5",
-        "versionId": "81f9ce1f-8b7f-4852-8b66-c8232f2708e5",
-        "event": "deactivated",
-        "userId": "2db0bd2f-9d9b-4d1e-8469-7ec88cdaedbb"
-      }
-    ]
-  }
+  "id": "ZYaMfLlmnkZrX2G5",
+  "tags": []
 }
