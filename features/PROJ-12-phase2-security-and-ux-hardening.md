@@ -1,6 +1,6 @@
 # PROJ-12: Phase 2 Security & UX Hardening
 
-## Status: In Progress
+## Status: Deployed
 **Created:** 2026-03-02
 **Last Updated:** 2026-03-02
 
@@ -253,4 +253,19 @@ Escape-Taste:
 _To be added by /qa_
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-03-06
+**Commit:** `b261ffa` — `deploy(PROJ-12): Phase 2 Security & UX Hardening`
+**Production URL:** https://alice.happy-mining.de
+
+### Deployed Changes
+- `docker/compose/infra/nginx/snippets/security-headers.conf` — neu (Security Header Snippet)
+- `docker/compose/infra/nginx/conf.d/rate-limit.conf` — neu (Rate-Limit Zone 20r/m)
+- `docker/compose/infra/nginx/conf.d/alice.conf` — Snippet-Includes in allen 7 CORS-Locations + `limit_req` auf `/api/webhook/`
+- `frontend/src/services/api.ts` — 429-Handler
+- `frontend/src/hooks/useChatSessions.ts` — `renameSession()`
+- `frontend/src/components/Layout/AppShell.tsx`, `Sidebar.tsx`, `ChatList.tsx`, `ChatListItem.tsx` — Rename-Prop-Kette + Inline-Edit
+
+### Post-Deploy
+- Sync zu Server via `./sync-compose.sh` erforderlich (nginx config + static files)
+- Nach Sync: `nginx -s reload` oder Container-Neustart für rate-limit.conf + alice.conf
