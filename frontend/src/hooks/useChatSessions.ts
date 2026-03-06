@@ -94,6 +94,14 @@ export function useChatSessions() {
     setActiveSessionId(id);
   }, []);
 
+  const renameSession = useCallback((id: string, newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, title: trimmed } : s))
+    );
+  }, []);
+
   const deleteSession = useCallback(
     (id: string) => {
       setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -209,6 +217,7 @@ export function useChatSessions() {
     isLoading,
     createNewSession,
     selectSession,
+    renameSession,
     deleteSession,
     sendMessage,
   };

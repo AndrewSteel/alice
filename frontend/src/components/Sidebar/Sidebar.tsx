@@ -15,6 +15,7 @@ interface SidebarProps {
   activeSessionId: string | null;
   onNewChat: () => void;
   onSelectSession: (id: string) => void;
+  onRenameSession: (id: string, newTitle: string) => void;
   onDeleteSession: (id: string) => void;
   onCollapse: () => void;
   onServiceLinkClick?: () => void;
@@ -25,6 +26,7 @@ export function Sidebar({
   activeSessionId,
   onNewChat,
   onSelectSession,
+  onRenameSession,
   onDeleteSession,
   onCollapse,
   onServiceLinkClick,
@@ -46,6 +48,7 @@ export function Sidebar({
           activeId={activeSessionId}
           searchQuery={search}
           onSelect={onSelectSession}
+          onRename={onRenameSession}
           onDelete={onDeleteSession}
         />
       </ScrollArea>

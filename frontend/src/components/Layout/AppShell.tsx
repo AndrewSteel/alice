@@ -21,6 +21,7 @@ export function AppShell() {
     isLoading,
     createNewSession,
     selectSession,
+    renameSession,
     deleteSession,
     sendMessage,
   } = useChatSessions();
@@ -45,6 +46,10 @@ export function AppShell() {
     setMobileOpen(false);
   }
 
+  function handleRenameSession(id: string, newTitle: string) {
+    renameSession(id, newTitle);
+  }
+
   function handleDeleteSession(id: string) {
     deleteSession(id);
   }
@@ -61,6 +66,7 @@ export function AppShell() {
     activeSessionId,
     onNewChat: handleNewChat,
     onSelectSession: handleSelectSession,
+    onRenameSession: handleRenameSession,
     onDeleteSession: handleDeleteSession,
     onCollapse: () => setDesktopCollapsed(true),
     onServiceLinkClick: () => setMobileOpen(false),
