@@ -29,6 +29,8 @@ export function LoginForm() {
     } catch (err) {
       if (err instanceof Error && err.message === "NETWORK_ERROR") {
         setError("Verbindungsfehler — bitte erneut versuchen");
+      } else if (err instanceof Error && err.message === "RATE_LIMITED") {
+        setError("Zu viele Anmeldeversuche — bitte eine Minute warten.");
       } else {
         setError("Ungültige Anmeldedaten");
       }

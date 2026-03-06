@@ -36,6 +36,9 @@ export async function login(username: string, password: string): Promise<LoginRe
   } catch {
     throw new Error("NETWORK_ERROR");
   }
+  if (res.status === 429) {
+    throw new Error("RATE_LIMITED");
+  }
   if (!res.ok) {
     throw new Error("Ungültige Anmeldedaten");
   }
@@ -46,6 +49,9 @@ export async function validate(token: string): Promise<AuthUser> {
   const res = await fetch(`${AUTH_BASE}/validate`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 429) {
+    throw new Error("RATE_LIMITED");
+  }
   if (!res.ok) {
     throw new Error("Token ungültig");
   }
