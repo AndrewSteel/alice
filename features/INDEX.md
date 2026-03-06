@@ -25,7 +25,8 @@
 | PROJ-10 | Weaviate Intent Lookup — Migration auf native n8n-Nodes | Deployed | [PROJ-10-weaviate-intent-lookup-migration.md](PROJ-10-weaviate-intent-lookup-migration.md) | 2026-02-28 |
 | PROJ-11 | HA Sync Python Worker (Ersatz für n8n alice-ha-intent-sync) | Deployed | [PROJ-11-ha-sync-python-worker.md](PROJ-11-ha-sync-python-worker.md) | 2026-03-02 |
 | PROJ-12 | Phase 2 Security & UX Hardening (nginx Headers, Rate-Limiting, Chat-Rename) | Deployed | [PROJ-12-phase2-security-and-ux-hardening.md](PROJ-12-phase2-security-and-ux-hardening.md) | 2026-03-03 |
+| PROJ-13 | Auth-Endpoint Rate-Limiting (Login Brute-Force Schutz) | Planned | [PROJ-13-auth-rate-limiting.md](PROJ-13-auth-rate-limiting.md) | 2026-03-06 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-13
+## Next Available ID: PROJ-14
