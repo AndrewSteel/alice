@@ -36,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Lokale Ablaufzeit-Prüfung ohne Netzwerk
+    let localUser: AuthUser | null = null;
     try {
       const payload = decodeJwt(token);
       const exp = payload.exp as number;
@@ -45,6 +46,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.replace("/login");
         return;
       }
+      // Extract user from JWT for fallback on rate-limit
+      localUser = {
+        id: payload.sub as string,
+        username: payload.username as string,
+        role: payload.role as string,
+      };
     } catch {
       clearToken();
       setIsLoading(false);
@@ -55,7 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Backend-Validierung (is_active Check)
     validate(token)
       .then((u) => setUser(u))
-      .catch(() => {
+      .catch((err) => {
+        // On 429 (rate-limited): fall back to JWT-decoded user, keep token
+        if (err instanceof Error && err.message === "RATE_LIMITED") {
+          if (localUser) setUser(localUser);
+          return;
+        }
         clearToken();
         router.replace("/login");
       })
