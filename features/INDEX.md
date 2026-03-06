@@ -26,7 +26,8 @@
 | PROJ-11 | HA Sync Python Worker (Ersatz für n8n alice-ha-intent-sync) | Deployed | [PROJ-11-ha-sync-python-worker.md](PROJ-11-ha-sync-python-worker.md) | 2026-03-02 |
 | PROJ-12 | Phase 2 Security & UX Hardening (nginx Headers, Rate-Limiting, Chat-Rename) | Deployed | [PROJ-12-phase2-security-and-ux-hardening.md](PROJ-12-phase2-security-and-ux-hardening.md) | 2026-03-03 |
 | PROJ-13 | Auth-Endpoint Rate-Limiting (Login Brute-Force Schutz) | Deployed | [PROJ-13-auth-rate-limiting.md](PROJ-13-auth-rate-limiting.md) | 2026-03-06 |
+| PROJ-14 | Sidebar Context-Menu & Session-Persistenz | In Progress | [PROJ-14-sidebar-context-menu-and-session-persistence.md](PROJ-14-sidebar-context-menu-and-session-persistence.md) | 2026-03-06 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-14
+## Next Available ID: PROJ-15
