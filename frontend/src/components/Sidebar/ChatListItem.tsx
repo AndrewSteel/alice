@@ -24,9 +24,11 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
   const [isRenaming, setIsRenaming] = useState(false);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const committedRef = useRef(false);
 
   useEffect(() => {
     if (isRenaming && inputRef.current) {
+      committedRef.current = false;
       inputRef.current.focus();
       inputRef.current.select();
     }
@@ -38,6 +40,8 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
   }
 
   function commitRename() {
+    if (committedRef.current) return;
+    committedRef.current = true;
     if (draft.trim()) {
       onRename(session.id, draft.trim());
     }
@@ -45,6 +49,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
   }
 
   function cancelRename() {
+    committedRef.current = true;
     setIsRenaming(false);
   }
 
