@@ -1,0 +1,967 @@
+{
+  "name": "alice-dms-folder-api",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dms/folders",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "f1-webhook",
+      "name": "Webhook: GET Folders",
+      "webhookId": "dms-f1-get-folders",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\nreturn [{ json: { role: payload.role } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 0],
+      "id": "f1-jwt",
+      "name": "JWT: GET Folders"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f1-admin-check",
+              "leftValue": "={{ $json._forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [560, 0],
+      "id": "f1-if-admin",
+      "name": "IF: GET Admin"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', id, 'path', path, 'suggested_type', suggested_type, 'description', description, 'enabled', enabled, 'created_at', created_at::text, 'updated_at', updated_at::text) ORDER BY path), '[]'::json) AS folders FROM alice.dms_watched_folders",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, -80],
+      "id": "f1-pg",
+      "name": "PG: List Folders",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const folders = $json.folders || [];\nreturn [{ json: folders }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, -80],
+      "id": "f1-agg",
+      "name": "Aggregate: Folders"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, -80],
+      "id": "f1-respond-200",
+      "name": "Respond: GET 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden: admin role required' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 80],
+      "id": "f1-code-403",
+      "name": "Body: GET 403"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 80],
+      "id": "f1-respond-403",
+      "name": "Respond: GET 403"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dms/folders",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 480],
+      "id": "f2-webhook",
+      "name": "Webhook: POST Folder",
+      "webhookId": "dms-f2-post-folder",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst path = String(body.path || '').trim();\nconst suggestedType = body.suggested_type || null;\nconst description = body.description || null;\n\n// Validate required field\nif (!path) {\n  return [{ json: { _validationError: 'path is required' } }];\n}\nif (path.length > 500) {\n  return [{ json: { _validationError: 'path must be at most 500 characters' } }];\n}\n\n// Validate suggested_type enum\nconst validTypes = ['Rechnung', 'Kontoauszug', 'Dokument', 'Email', 'WertpapierAbrechnung', 'Vertrag'];\nif (suggestedType !== null && !validTypes.includes(suggestedType)) {\n  return [{ json: { _validationError: 'suggested_type must be one of: ' + validTypes.join(', ') + ', or null' } }];\n}\n\nreturn [{ json: { role: payload.role, path, suggestedType, description } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 480],
+      "id": "f2-jwt",
+      "name": "JWT+Validate: POST Folder"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f2-forbidden-check",
+              "leftValue": "={{ $json._forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [560, 480],
+      "id": "f2-if-admin",
+      "name": "IF: POST Admin"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f2-validation-check",
+              "leftValue": "={{ $json._validationError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [840, 400],
+      "id": "f2-if-valid",
+      "name": "IF: POST Valid"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alice.dms_watched_folders (path, suggested_type, description) VALUES ($1, $2, $3) RETURNING id, path, suggested_type, description, enabled, created_at::text, updated_at::text",
+        "options": {
+          "queryParameters": "={{ JSON.stringify([$json.path, $json.suggestedType, $json.description]) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 320],
+      "id": "f2-pg",
+      "name": "PG: Insert Folder",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if the insert failed due to unique constraint (duplicate path)\nconst item = $json;\nif (item.id) {\n  // Success\n  return [{ json: item }];\n}\n// If continueOnFail triggered, check for unique violation\nconst errorMsg = $input.first().json?.error?.message || $input.first().json?.message || '';\nif (errorMsg.includes('unique') || errorMsg.includes('duplicate')) {\n  return [{ json: { _conflict: true } }];\n}\n// Other error\nreturn [{ json: { _serverError: errorMsg || 'Insert failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 320],
+      "id": "f2-check-insert",
+      "name": "Check: Insert Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f2-conflict-check",
+              "leftValue": "={{ $json._conflict }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1680, 320],
+      "id": "f2-if-conflict",
+      "name": "IF: No Conflict"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1960, 240],
+      "id": "f2-respond-201",
+      "name": "Respond: POST 201"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Conflict: path already exists' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 400],
+      "id": "f2-code-409",
+      "name": "Body: POST 409"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2240, 400],
+      "id": "f2-respond-409",
+      "name": "Respond: POST 409"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._validationError || 'Validation failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 480],
+      "id": "f2-code-400",
+      "name": "Body: POST 400"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, 480],
+      "id": "f2-respond-400",
+      "name": "Respond: POST 400"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden: admin role required' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 560],
+      "id": "f2-code-403",
+      "name": "Body: POST 403"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 560],
+      "id": "f2-respond-403",
+      "name": "Respond: POST 403"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "PUT",
+        "path": "dms/folders",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 960],
+      "id": "f3-webhook",
+      "name": "Webhook: PUT Folder",
+      "webhookId": "dms-f3-put-folder",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst query = $json.query || {};\nconst id = parseInt(body.id || query.id, 10);\nif (!id || isNaN(id)) {\n  return [{ json: { _validationError: 'id is required (integer)' } }];\n}\n\n// Build SET clauses dynamically for partial update\nconst setClauses = [];\nconst params = [];\nlet paramIdx = 1;\n\nif (body.path !== undefined) {\n  const path = String(body.path).trim();\n  if (!path) return [{ json: { _validationError: 'path cannot be empty' } }];\n  if (path.length > 500) return [{ json: { _validationError: 'path must be at most 500 characters' } }];\n  setClauses.push('path = $' + paramIdx++);\n  params.push(path);\n}\nif (body.suggested_type !== undefined) {\n  const st = body.suggested_type;\n  const validTypes = ['Rechnung', 'Kontoauszug', 'Dokument', 'Email', 'WertpapierAbrechnung', 'Vertrag'];\n  if (st !== null && !validTypes.includes(st)) {\n    return [{ json: { _validationError: 'suggested_type must be one of: ' + validTypes.join(', ') + ', or null' } }];\n  }\n  setClauses.push('suggested_type = $' + paramIdx++);\n  params.push(st);\n}\nif (body.description !== undefined) {\n  setClauses.push('description = $' + paramIdx++);\n  params.push(body.description);\n}\nif (body.enabled !== undefined) {\n  setClauses.push('enabled = $' + paramIdx++);\n  params.push(Boolean(body.enabled));\n}\n\nif (setClauses.length === 0) {\n  return [{ json: { _validationError: 'No fields to update' } }];\n}\n\nparams.push(id);\nconst sql = 'UPDATE alice.dms_watched_folders SET ' + setClauses.join(', ') + ' WHERE id = $' + paramIdx + ' RETURNING id, path, suggested_type, description, enabled, created_at::text, updated_at::text';\n\nreturn [{ json: { role: payload.role, sql, params: JSON.stringify(params), folderId: id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 960],
+      "id": "f3-jwt",
+      "name": "JWT+Validate: PUT Folder"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f3-forbidden-check",
+              "leftValue": "={{ $json._forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [560, 960],
+      "id": "f3-if-admin",
+      "name": "IF: PUT Admin"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f3-validation-check",
+              "leftValue": "={{ $json._validationError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [840, 880],
+      "id": "f3-if-valid",
+      "name": "IF: PUT Valid"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {
+          "queryParameters": "={{ $json.params }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 800],
+      "id": "f3-pg",
+      "name": "PG: Update Folder",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $json;\nif (item.id) {\n  return [{ json: item }];\n}\n// Check for unique constraint violation\nconst errorMsg = $input.first().json?.error?.message || $input.first().json?.message || '';\nif (errorMsg.includes('unique') || errorMsg.includes('duplicate')) {\n  return [{ json: { _conflict: true } }];\n}\n// Not found (no rows returned)\nreturn [{ json: { _notFound: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 800],
+      "id": "f3-check-update",
+      "name": "Check: Update Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f3-success-check",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1680, 800],
+      "id": "f3-if-success",
+      "name": "IF: PUT Success"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1960, 720],
+      "id": "f3-respond-200",
+      "name": "Respond: PUT 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $json;\nif (item._conflict) {\n  return [{ json: { error: 'Conflict: path already exists', _status: 409 } }];\n}\nreturn [{ json: { error: 'Folder not found', _status: 404 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 880],
+      "id": "f3-code-error",
+      "name": "Body: PUT Error"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": "={{ $json._status || 404 }}"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2240, 880],
+      "id": "f3-respond-error",
+      "name": "Respond: PUT Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._validationError || 'Validation failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 960],
+      "id": "f3-code-400",
+      "name": "Body: PUT 400"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, 960],
+      "id": "f3-respond-400",
+      "name": "Respond: PUT 400"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden: admin role required' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 1040],
+      "id": "f3-code-403",
+      "name": "Body: PUT 403"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 1040],
+      "id": "f3-respond-403",
+      "name": "Respond: PUT 403"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "DELETE",
+        "path": "dms/folders",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 1440],
+      "id": "f4-webhook",
+      "name": "Webhook: DELETE Folder",
+      "webhookId": "dms-f4-delete-folder",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst query = $json.query || {};\nconst body = $json.body || {};\nconst id = parseInt(query.id || body.id, 10);\nif (!id || isNaN(id)) {\n  return [{ json: { _validationError: 'id is required (integer)' } }];\n}\n\nreturn [{ json: { role: payload.role, folderId: id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 1440],
+      "id": "f4-jwt",
+      "name": "JWT+Validate: DELETE Folder"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f4-forbidden-check",
+              "leftValue": "={{ $json._forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [560, 1440],
+      "id": "f4-if-admin",
+      "name": "IF: DELETE Admin"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f4-validation-check",
+              "leftValue": "={{ $json._validationError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [840, 1360],
+      "id": "f4-if-valid",
+      "name": "IF: DELETE Valid"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH del AS (DELETE FROM alice.dms_watched_folders WHERE id = $1 RETURNING id) SELECT EXISTS(SELECT 1 FROM del) AS deleted",
+        "options": {
+          "queryParameters": "={{ JSON.stringify([$json.folderId]) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 1280],
+      "id": "f4-pg",
+      "name": "PG: Delete Folder",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f4-deleted-check",
+              "leftValue": "={{ $json.deleted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1400, 1280],
+      "id": "f4-if-deleted",
+      "name": "IF: Deleted"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 204
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1680, 1200],
+      "id": "f4-respond-204",
+      "name": "Respond: DELETE 204"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Folder not found' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 1360],
+      "id": "f4-code-404",
+      "name": "Body: DELETE 404"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1960, 1360],
+      "id": "f4-respond-404",
+      "name": "Respond: DELETE 404"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._validationError || 'Validation failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 1440],
+      "id": "f4-code-400",
+      "name": "Body: DELETE 400"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, 1440],
+      "id": "f4-respond-400",
+      "name": "Respond: DELETE 400"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden: admin role required' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 1520],
+      "id": "f4-code-403",
+      "name": "Body: DELETE 403"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 1520],
+      "id": "f4-respond-403",
+      "name": "Respond: DELETE 403"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook: GET Folders": {
+      "main": [[{ "node": "JWT: GET Folders", "type": "main", "index": 0 }]]
+    },
+    "JWT: GET Folders": {
+      "main": [[{ "node": "IF: GET Admin", "type": "main", "index": 0 }]]
+    },
+    "IF: GET Admin": {
+      "main": [
+        [{ "node": "PG: List Folders", "type": "main", "index": 0 }],
+        [{ "node": "Body: GET 403", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: List Folders": {
+      "main": [[{ "node": "Aggregate: Folders", "type": "main", "index": 0 }]]
+    },
+    "Aggregate: Folders": {
+      "main": [[{ "node": "Respond: GET 200", "type": "main", "index": 0 }]]
+    },
+    "Body: GET 403": {
+      "main": [[{ "node": "Respond: GET 403", "type": "main", "index": 0 }]]
+    },
+
+    "Webhook: POST Folder": {
+      "main": [[{ "node": "JWT+Validate: POST Folder", "type": "main", "index": 0 }]]
+    },
+    "JWT+Validate: POST Folder": {
+      "main": [[{ "node": "IF: POST Admin", "type": "main", "index": 0 }]]
+    },
+    "IF: POST Admin": {
+      "main": [
+        [{ "node": "IF: POST Valid", "type": "main", "index": 0 }],
+        [{ "node": "Body: POST 403", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: POST Valid": {
+      "main": [
+        [{ "node": "PG: Insert Folder", "type": "main", "index": 0 }],
+        [{ "node": "Body: POST 400", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Insert Folder": {
+      "main": [[{ "node": "Check: Insert Result", "type": "main", "index": 0 }]]
+    },
+    "Check: Insert Result": {
+      "main": [[{ "node": "IF: No Conflict", "type": "main", "index": 0 }]]
+    },
+    "IF: No Conflict": {
+      "main": [
+        [{ "node": "Respond: POST 201", "type": "main", "index": 0 }],
+        [{ "node": "Body: POST 409", "type": "main", "index": 0 }]
+      ]
+    },
+    "Body: POST 400": {
+      "main": [[{ "node": "Respond: POST 400", "type": "main", "index": 0 }]]
+    },
+    "Body: POST 403": {
+      "main": [[{ "node": "Respond: POST 403", "type": "main", "index": 0 }]]
+    },
+    "Body: POST 409": {
+      "main": [[{ "node": "Respond: POST 409", "type": "main", "index": 0 }]]
+    },
+
+    "Webhook: PUT Folder": {
+      "main": [[{ "node": "JWT+Validate: PUT Folder", "type": "main", "index": 0 }]]
+    },
+    "JWT+Validate: PUT Folder": {
+      "main": [[{ "node": "IF: PUT Admin", "type": "main", "index": 0 }]]
+    },
+    "IF: PUT Admin": {
+      "main": [
+        [{ "node": "IF: PUT Valid", "type": "main", "index": 0 }],
+        [{ "node": "Body: PUT 403", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: PUT Valid": {
+      "main": [
+        [{ "node": "PG: Update Folder", "type": "main", "index": 0 }],
+        [{ "node": "Body: PUT 400", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Update Folder": {
+      "main": [[{ "node": "Check: Update Result", "type": "main", "index": 0 }]]
+    },
+    "Check: Update Result": {
+      "main": [[{ "node": "IF: PUT Success", "type": "main", "index": 0 }]]
+    },
+    "IF: PUT Success": {
+      "main": [
+        [{ "node": "Respond: PUT 200", "type": "main", "index": 0 }],
+        [{ "node": "Body: PUT Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Body: PUT 400": {
+      "main": [[{ "node": "Respond: PUT 400", "type": "main", "index": 0 }]]
+    },
+    "Body: PUT 403": {
+      "main": [[{ "node": "Respond: PUT 403", "type": "main", "index": 0 }]]
+    },
+    "Body: PUT Error": {
+      "main": [[{ "node": "Respond: PUT Error", "type": "main", "index": 0 }]]
+    },
+
+    "Webhook: DELETE Folder": {
+      "main": [[{ "node": "JWT+Validate: DELETE Folder", "type": "main", "index": 0 }]]
+    },
+    "JWT+Validate: DELETE Folder": {
+      "main": [[{ "node": "IF: DELETE Admin", "type": "main", "index": 0 }]]
+    },
+    "IF: DELETE Admin": {
+      "main": [
+        [{ "node": "IF: DELETE Valid", "type": "main", "index": 0 }],
+        [{ "node": "Body: DELETE 403", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: DELETE Valid": {
+      "main": [
+        [{ "node": "PG: Delete Folder", "type": "main", "index": 0 }],
+        [{ "node": "Body: DELETE 400", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Delete Folder": {
+      "main": [[{ "node": "IF: Deleted", "type": "main", "index": 0 }]]
+    },
+    "IF: Deleted": {
+      "main": [
+        [{ "node": "Respond: DELETE 204", "type": "main", "index": 0 }],
+        [{ "node": "Body: DELETE 404", "type": "main", "index": 0 }]
+      ]
+    },
+    "Body: DELETE 400": {
+      "main": [[{ "node": "Respond: DELETE 400", "type": "main", "index": 0 }]]
+    },
+    "Body: DELETE 403": {
+      "main": [[{ "node": "Respond: DELETE 403", "type": "main", "index": 0 }]]
+    },
+    "Body: DELETE 404": {
+      "main": [[{ "node": "Respond: DELETE 404", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
