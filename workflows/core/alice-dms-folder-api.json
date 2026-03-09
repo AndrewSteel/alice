@@ -3,7 +3,6 @@
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "GET",
         "path": "dms/folders",
         "authentication": "jwtAuth",
         "responseMode": "responseNode",
@@ -11,8 +10,8 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [0, 0],
-      "id": "f1-webhook",
+      "position": [-848, 80],
+      "id": "81f85944-10ad-43a0-9724-47e5a4b428c8",
       "name": "Webhook: GET Folders",
       "webhookId": "dms-f1-get-folders",
       "credentials": {
@@ -28,8 +27,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [280, 0],
-      "id": "f1-jwt",
+      "position": [-560, 80],
+      "id": "e67ec74d-482f-41db-8171-dfc152bcffb0",
       "name": "JWT: GET Folders"
     },
     {
@@ -59,8 +58,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [560, 0],
-      "id": "f1-if-admin",
+      "position": [-288, 80],
+      "id": "0b3ad398-f2cc-4bd3-98bf-7d71c44f7016",
       "name": "IF: GET Admin"
     },
     {
@@ -71,8 +70,8 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [840, -80],
-      "id": "f1-pg",
+      "position": [0, 0],
+      "id": "6abe9de4-7ab6-46f5-a542-639553c7ca8b",
       "name": "PG: List Folders",
       "credentials": {
         "postgres": {
@@ -84,12 +83,12 @@
     },
     {
       "parameters": {
-        "jsCode": "const folders = $json.folders || [];\nreturn [{ json: folders }];"
+        "jsCode": "return [\n  {\n    json: {\n      folders: $json.folders || []\n    }\n  }\n];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, -80],
-      "id": "f1-agg",
+      "position": [288, 0],
+      "id": "4ed661ee-6e23-482c-9c04-c2ad37566b1f",
       "name": "Aggregate: Folders"
     },
     {
@@ -98,8 +97,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1400, -80],
-      "id": "f1-respond-200",
+      "position": [560, 0],
+      "id": "0a3509fe-d166-482d-811a-40540ef3bf35",
       "name": "Respond: GET 200"
     },
     {
@@ -108,8 +107,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 80],
-      "id": "f1-code-403",
+      "position": [0, 160],
+      "id": "ab7a3ded-a5b4-4ac6-ac49-79bbc95f8848",
       "name": "Body: GET 403"
     },
     {
@@ -120,11 +119,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 80],
-      "id": "f1-respond-403",
+      "position": [288, 160],
+      "id": "637c3d6f-1395-48d3-8f84-8ed8ed74a857",
       "name": "Respond: GET 403"
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
@@ -135,8 +133,8 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [0, 480],
-      "id": "f2-webhook",
+      "position": [-848, 560],
+      "id": "c3600771-d308-4bd6-9490-dcfbce8e6880",
       "name": "Webhook: POST Folder",
       "webhookId": "dms-f2-post-folder",
       "credentials": {
@@ -152,21 +150,19 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [280, 480],
-      "id": "f2-jwt",
+      "position": [-560, 560],
+      "id": "6ac35adf-37c0-47a6-9c2e-5f22f9cf65a4",
       "name": "JWT+Validate: POST Folder"
     },
     {
       "parameters": {
         "conditions": {
           "options": {
-            "version": 2,
             "caseSensitive": true,
-            "typeValidation": "strict",
             "leftValue": "",
-            "rightValue": ""
+            "typeValidation": "strict",
+            "version": 2
           },
-          "combinator": "and",
           "conditions": [
             {
               "id": "f2-forbidden-check",
@@ -177,27 +173,26 @@
                 "operation": "notEquals"
               }
             }
-          ]
+          ],
+          "combinator": "and"
         },
         "options": {}
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [560, 480],
-      "id": "f2-if-admin",
+      "position": [-288, 560],
+      "id": "51060c16-3426-4e97-b14d-1930183c05b6",
       "name": "IF: POST Admin"
     },
     {
       "parameters": {
         "conditions": {
           "options": {
-            "version": 2,
             "caseSensitive": true,
-            "typeValidation": "strict",
             "leftValue": "",
-            "rightValue": ""
+            "typeValidation": "strict",
+            "version": 2
           },
-          "combinator": "and",
           "conditions": [
             {
               "id": "f2-validation-check",
@@ -208,14 +203,15 @@
                 "operation": "notExists"
               }
             }
-          ]
+          ],
+          "combinator": "and"
         },
         "options": {}
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [840, 400],
-      "id": "f2-if-valid",
+      "position": [0, 480],
+      "id": "4ab82fe5-85b6-4e6e-b685-6cc143792f93",
       "name": "IF: POST Valid"
     },
     {
@@ -223,13 +219,13 @@
         "operation": "executeQuery",
         "query": "INSERT INTO alice.dms_watched_folders (path, suggested_type, description) VALUES ($1, $2, $3) RETURNING id, path, suggested_type, description, enabled, created_at::text, updated_at::text",
         "options": {
-          "queryParameters": "={{ JSON.stringify([$json.path, $json.suggestedType, $json.description]) }}"
+          "queryReplacement": "={{ [$json.path, $json.suggestedType, $json.description] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [1120, 320],
-      "id": "f2-pg",
+      "position": [288, 400],
+      "id": "54afe74b-695d-4783-9679-cf9fdf6aca42",
       "name": "PG: Insert Folder",
       "credentials": {
         "postgres": {
@@ -245,8 +241,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1400, 320],
-      "id": "f2-check-insert",
+      "position": [560, 400],
+      "id": "4cb2ccc0-6a65-441c-a86b-db3014324f22",
       "name": "Check: Insert Result"
     },
     {
@@ -276,8 +272,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1680, 320],
-      "id": "f2-if-conflict",
+      "position": [848, 400],
+      "id": "6b7f1205-8941-47d8-b752-532bddda5473",
       "name": "IF: No Conflict"
     },
     {
@@ -288,8 +284,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1960, 240],
-      "id": "f2-respond-201",
+      "position": [1120, 320],
+      "id": "bac7c9f0-d4dd-46ff-a2f8-08f95a3600dd",
       "name": "Respond: POST 201"
     },
     {
@@ -298,8 +294,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1960, 400],
-      "id": "f2-code-409",
+      "position": [1120, 480],
+      "id": "96bc7352-92c7-430d-8172-5cb8e3c67c9f",
       "name": "Body: POST 409"
     },
     {
@@ -310,8 +306,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [2240, 400],
-      "id": "f2-respond-409",
+      "position": [1408, 480],
+      "id": "623979a7-9b3f-49e2-9692-0b71fd9e427e",
       "name": "Respond: POST 409"
     },
     {
@@ -320,8 +316,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 480],
-      "id": "f2-code-400",
+      "position": [288, 560],
+      "id": "4aa63f00-543e-40f2-9783-6a7a6177ee2b",
       "name": "Body: POST 400"
     },
     {
@@ -332,8 +328,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1400, 480],
-      "id": "f2-respond-400",
+      "position": [560, 560],
+      "id": "07ea8c50-9b69-477a-8a41-3d2ec2adb889",
       "name": "Respond: POST 400"
     },
     {
@@ -342,8 +338,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 560],
-      "id": "f2-code-403",
+      "position": [0, 720],
+      "id": "47a641d3-ee5b-4d2d-b7f6-bbcc560b92b8",
       "name": "Body: POST 403"
     },
     {
@@ -354,11 +350,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 560],
-      "id": "f2-respond-403",
+      "position": [288, 720],
+      "id": "b7494da9-de2f-4750-bcea-462226e2dad9",
       "name": "Respond: POST 403"
     },
-
     {
       "parameters": {
         "httpMethod": "PUT",
@@ -369,8 +364,8 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [0, 960],
-      "id": "f3-webhook",
+      "position": [-848, 1040],
+      "id": "1c8eaac0-9f70-4f83-9511-10c56fd61cb0",
       "name": "Webhook: PUT Folder",
       "webhookId": "dms-f3-put-folder",
       "credentials": {
@@ -386,8 +381,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [280, 960],
-      "id": "f3-jwt",
+      "position": [-560, 1040],
+      "id": "a1489b6a-59cb-4875-9380-2178b2c6d332",
       "name": "JWT+Validate: PUT Folder"
     },
     {
@@ -417,8 +412,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [560, 960],
-      "id": "f3-if-admin",
+      "position": [-288, 1040],
+      "id": "5e4a7372-d9f7-48dc-8e83-d35771af7b6d",
       "name": "IF: PUT Admin"
     },
     {
@@ -448,22 +443,22 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [840, 880],
-      "id": "f3-if-valid",
+      "position": [0, 960],
+      "id": "c62f73cd-bbd5-45e5-82c3-a27bc3439907",
       "name": "IF: PUT Valid"
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "={{ $json.sql }}",
+        "query": "{{ $json.sql }}",
         "options": {
-          "queryParameters": "={{ $json.params }}"
+          "queryReplacement": "={{ JSON.parse($json.params) }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [1120, 800],
-      "id": "f3-pg",
+      "position": [288, 880],
+      "id": "e2994af8-d71a-4bc6-aea4-3669af9d9c78",
       "name": "PG: Update Folder",
       "credentials": {
         "postgres": {
@@ -479,21 +474,19 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1400, 800],
-      "id": "f3-check-update",
+      "position": [560, 880],
+      "id": "3ed034e3-1325-44e0-9ad6-07c66c8458c7",
       "name": "Check: Update Result"
     },
     {
       "parameters": {
         "conditions": {
           "options": {
-            "version": 2,
             "caseSensitive": true,
-            "typeValidation": "strict",
             "leftValue": "",
-            "rightValue": ""
+            "typeValidation": "loose",
+            "version": 2
           },
-          "combinator": "and",
           "conditions": [
             {
               "id": "f3-success-check",
@@ -504,14 +497,16 @@
                 "operation": "exists"
               }
             }
-          ]
+          ],
+          "combinator": "and"
         },
+        "looseTypeValidation": true,
         "options": {}
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1680, 800],
-      "id": "f3-if-success",
+      "position": [848, 880],
+      "id": "2783e355-11b0-4f45-94ed-c2d9794de322",
       "name": "IF: PUT Success"
     },
     {
@@ -520,8 +515,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1960, 720],
-      "id": "f3-respond-200",
+      "position": [1120, 800],
+      "id": "52dd602f-ec55-486e-90ad-4167ad804d82",
       "name": "Respond: PUT 200"
     },
     {
@@ -530,8 +525,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1960, 880],
-      "id": "f3-code-error",
+      "position": [1120, 960],
+      "id": "e348880a-a86c-4c9b-b856-1afabfc2dbcd",
       "name": "Body: PUT Error"
     },
     {
@@ -542,8 +537,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [2240, 880],
-      "id": "f3-respond-error",
+      "position": [1408, 960],
+      "id": "1ed0fe2a-8492-4f1a-88bb-0188535c8ef6",
       "name": "Respond: PUT Error"
     },
     {
@@ -552,8 +547,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 960],
-      "id": "f3-code-400",
+      "position": [288, 1040],
+      "id": "88a20658-8ea8-4c5b-8703-10c44fd13fcf",
       "name": "Body: PUT 400"
     },
     {
@@ -564,8 +559,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1400, 960],
-      "id": "f3-respond-400",
+      "position": [560, 1040],
+      "id": "33e66216-1d48-4381-9cd9-768525ac452d",
       "name": "Respond: PUT 400"
     },
     {
@@ -574,8 +569,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 1040],
-      "id": "f3-code-403",
+      "position": [16, 1200],
+      "id": "a61083d2-0c9c-461e-9ecf-4c23be4c5134",
       "name": "Body: PUT 403"
     },
     {
@@ -586,11 +581,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 1040],
-      "id": "f3-respond-403",
+      "position": [288, 1200],
+      "id": "d2308d78-aec4-4c12-82e3-b3a19bfe9d6e",
       "name": "Respond: PUT 403"
     },
-
     {
       "parameters": {
         "httpMethod": "DELETE",
@@ -601,8 +595,8 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [0, 1440],
-      "id": "f4-webhook",
+      "position": [-848, 1520],
+      "id": "7e735fa4-8c31-4ad7-9525-d626494644b7",
       "name": "Webhook: DELETE Folder",
       "webhookId": "dms-f4-delete-folder",
       "credentials": {
@@ -618,8 +612,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [280, 1440],
-      "id": "f4-jwt",
+      "position": [-560, 1520],
+      "id": "04427183-57a3-4af7-bca1-98aa6a0f0087",
       "name": "JWT+Validate: DELETE Folder"
     },
     {
@@ -649,8 +643,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [560, 1440],
-      "id": "f4-if-admin",
+      "position": [-288, 1520],
+      "id": "0938598b-6707-49c2-ab60-c165f1b789de",
       "name": "IF: DELETE Admin"
     },
     {
@@ -680,8 +674,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [840, 1360],
-      "id": "f4-if-valid",
+      "position": [0, 1440],
+      "id": "d8634fe6-ff91-405f-b395-8f4b48cc15d7",
       "name": "IF: DELETE Valid"
     },
     {
@@ -689,13 +683,13 @@
         "operation": "executeQuery",
         "query": "WITH del AS (DELETE FROM alice.dms_watched_folders WHERE id = $1 RETURNING id) SELECT EXISTS(SELECT 1 FROM del) AS deleted",
         "options": {
-          "queryParameters": "={{ JSON.stringify([$json.folderId]) }}"
+          "queryReplacement": "={{ $json.folderId }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [1120, 1280],
-      "id": "f4-pg",
+      "position": [288, 1360],
+      "id": "d3b7f7e1-1329-47d8-8281-08deff6de182",
       "name": "PG: Delete Folder",
       "credentials": {
         "postgres": {
@@ -731,8 +725,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1400, 1280],
-      "id": "f4-if-deleted",
+      "position": [560, 1360],
+      "id": "27222811-fd81-490d-a04b-cdf85ee28a88",
       "name": "IF: Deleted"
     },
     {
@@ -744,8 +738,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1680, 1200],
-      "id": "f4-respond-204",
+      "position": [848, 1280],
+      "id": "e9128ef4-d682-40e5-ab1f-72b56f4875fb",
       "name": "Respond: DELETE 204"
     },
     {
@@ -754,8 +748,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1680, 1360],
-      "id": "f4-code-404",
+      "position": [848, 1440],
+      "id": "72dc0a16-899e-4607-a8a1-2821f191a576",
       "name": "Body: DELETE 404"
     },
     {
@@ -766,8 +760,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1960, 1360],
-      "id": "f4-respond-404",
+      "position": [1120, 1440],
+      "id": "c57b7595-5367-4395-9514-8a2b7f1b90c0",
       "name": "Respond: DELETE 404"
     },
     {
@@ -776,8 +770,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 1440],
-      "id": "f4-code-400",
+      "position": [288, 1520],
+      "id": "f7646413-2e43-49f7-aaf0-20098c845ea0",
       "name": "Body: DELETE 400"
     },
     {
@@ -788,8 +782,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1400, 1440],
-      "id": "f4-respond-400",
+      "position": [560, 1520],
+      "id": "00b1fbab-28e2-47d0-a02c-442d0055d763",
       "name": "Respond: DELETE 400"
     },
     {
@@ -798,8 +792,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 1520],
-      "id": "f4-code-403",
+      "position": [16, 1696],
+      "id": "41c0bbfd-d9ed-43b5-a644-b0211f9449e8",
       "name": "Body: DELETE 403"
     },
     {
@@ -810,158 +804,479 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 1520],
-      "id": "f4-respond-403",
+      "position": [288, 1696],
+      "id": "1bcf6491-04ae-4ccc-97b1-72987253357b",
       "name": "Respond: DELETE 403"
     }
   ],
   "pinData": {},
   "connections": {
     "Webhook: GET Folders": {
-      "main": [[{ "node": "JWT: GET Folders", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "JWT: GET Folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "JWT: GET Folders": {
-      "main": [[{ "node": "IF: GET Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: GET Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: GET Admin": {
       "main": [
-        [{ "node": "PG: List Folders", "type": "main", "index": 0 }],
-        [{ "node": "Body: GET 403", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "PG: List Folders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: GET 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "PG: List Folders": {
-      "main": [[{ "node": "Aggregate: Folders", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Aggregate: Folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Aggregate: Folders": {
-      "main": [[{ "node": "Respond: GET 200", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: GET 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: GET 403": {
-      "main": [[{ "node": "Respond: GET 403", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: GET 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-
     "Webhook: POST Folder": {
-      "main": [[{ "node": "JWT+Validate: POST Folder", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "JWT+Validate: POST Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "JWT+Validate: POST Folder": {
-      "main": [[{ "node": "IF: POST Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: POST Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: POST Admin": {
       "main": [
-        [{ "node": "IF: POST Valid", "type": "main", "index": 0 }],
-        [{ "node": "Body: POST 403", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF: POST Valid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: POST 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF: POST Valid": {
       "main": [
-        [{ "node": "PG: Insert Folder", "type": "main", "index": 0 }],
-        [{ "node": "Body: POST 400", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "PG: Insert Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: POST 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "PG: Insert Folder": {
-      "main": [[{ "node": "Check: Insert Result", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check: Insert Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check: Insert Result": {
-      "main": [[{ "node": "IF: No Conflict", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: No Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: No Conflict": {
       "main": [
-        [{ "node": "Respond: POST 201", "type": "main", "index": 0 }],
-        [{ "node": "Body: POST 409", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Respond: POST 201",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: POST 409",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Body: POST 400": {
-      "main": [[{ "node": "Respond: POST 400", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: POST 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: POST 403": {
-      "main": [[{ "node": "Respond: POST 403", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: POST 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: POST 409": {
-      "main": [[{ "node": "Respond: POST 409", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: POST 409",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-
     "Webhook: PUT Folder": {
-      "main": [[{ "node": "JWT+Validate: PUT Folder", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "JWT+Validate: PUT Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "JWT+Validate: PUT Folder": {
-      "main": [[{ "node": "IF: PUT Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: PUT Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: PUT Admin": {
       "main": [
-        [{ "node": "IF: PUT Valid", "type": "main", "index": 0 }],
-        [{ "node": "Body: PUT 403", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF: PUT Valid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: PUT 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF: PUT Valid": {
       "main": [
-        [{ "node": "PG: Update Folder", "type": "main", "index": 0 }],
-        [{ "node": "Body: PUT 400", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "PG: Update Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: PUT 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "PG: Update Folder": {
-      "main": [[{ "node": "Check: Update Result", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check: Update Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check: Update Result": {
-      "main": [[{ "node": "IF: PUT Success", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: PUT Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: PUT Success": {
       "main": [
-        [{ "node": "Respond: PUT 200", "type": "main", "index": 0 }],
-        [{ "node": "Body: PUT Error", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Respond: PUT 200",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: PUT Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Body: PUT 400": {
-      "main": [[{ "node": "Respond: PUT 400", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: PUT 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: PUT 403": {
-      "main": [[{ "node": "Respond: PUT 403", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: PUT 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: PUT Error": {
-      "main": [[{ "node": "Respond: PUT Error", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: PUT Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-
     "Webhook: DELETE Folder": {
-      "main": [[{ "node": "JWT+Validate: DELETE Folder", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "JWT+Validate: DELETE Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "JWT+Validate: DELETE Folder": {
-      "main": [[{ "node": "IF: DELETE Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: DELETE Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: DELETE Admin": {
       "main": [
-        [{ "node": "IF: DELETE Valid", "type": "main", "index": 0 }],
-        [{ "node": "Body: DELETE 403", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF: DELETE Valid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: DELETE 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF: DELETE Valid": {
       "main": [
-        [{ "node": "PG: Delete Folder", "type": "main", "index": 0 }],
-        [{ "node": "Body: DELETE 400", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "PG: Delete Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: DELETE 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "PG: Delete Folder": {
-      "main": [[{ "node": "IF: Deleted", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF: Deleted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF: Deleted": {
       "main": [
-        [{ "node": "Respond: DELETE 204", "type": "main", "index": 0 }],
-        [{ "node": "Body: DELETE 404", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Respond: DELETE 204",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: DELETE 404",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Body: DELETE 400": {
-      "main": [[{ "node": "Respond: DELETE 400", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: DELETE 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: DELETE 403": {
-      "main": [[{ "node": "Respond: DELETE 403", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: DELETE 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Body: DELETE 404": {
-      "main": [[{ "node": "Respond: DELETE 404", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: DELETE 404",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
   },
+  "versionId": "646e4c47-8315-4c1d-bf6f-0285b741ea77",
   "meta": {
-    "templateCredsSetupCompleted": true
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
   },
+  "id": "2EQ9I9sZMryjegS7",
   "tags": []
 }
