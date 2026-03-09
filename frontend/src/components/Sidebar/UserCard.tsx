@@ -34,7 +34,10 @@ export function UserCard() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" className="w-48 bg-gray-800 border-gray-700">
-          <DropdownMenuItem className="gap-2 text-gray-300 focus:text-gray-100 focus:bg-gray-700 cursor-pointer">
+          <DropdownMenuItem
+            onClick={() => { window.location.href = "/settings"; }}
+            className="gap-2 text-gray-300 focus:text-gray-100 focus:bg-gray-700 cursor-pointer"
+          >
             <Settings className="h-4 w-4" aria-hidden />
             Einstellungen
           </DropdownMenuItem>

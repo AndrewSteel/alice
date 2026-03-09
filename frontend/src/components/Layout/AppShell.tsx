@@ -16,6 +16,8 @@ export function AppShell() {
   const {
     sessions,
     sessionsLoaded,
+    sessionsLoading,
+    messagesLoading,
     activeSessionId,
     messages,
     isLoading,
@@ -26,7 +28,7 @@ export function AppShell() {
     sendMessage,
   } = useChatSessions();
 
-  // Auto-start: wait until localStorage is loaded before deciding
+  // Auto-start: wait until sessions are loaded before deciding
   useEffect(() => {
     if (!sessionsLoaded) return;
     if (sessions.length === 0) {
@@ -64,6 +66,7 @@ export function AppShell() {
   const sidebarProps = {
     sessions: sidebarSessions,
     activeSessionId,
+    sessionsLoading,
     onNewChat: handleNewChat,
     onSelectSession: handleSelectSession,
     onRenameSession: handleRenameSession,
@@ -126,6 +129,7 @@ export function AppShell() {
               <ChatWindow
                 messages={messages}
                 isLoading={isLoading}
+                messagesLoading={messagesLoading}
                 onSend={sendMessage}
               />
             ) : (

@@ -11,8 +11,8 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-2704, -272],
-      "id": "f88fb17b-f63d-41f7-b979-6eee9804e47c",
+      "position": [-1168, 4800],
+      "id": "31736a4d-af53-486a-88cb-0062ec18e50b",
       "name": "Webhook",
       "webhookId": "850cdb2e-28f2-4234-9eed-5632aa977444",
       "credentials": {
@@ -29,8 +29,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-2480, -272],
-      "id": "node-jwt-claims-extractor",
+      "position": [-944, 4800],
+      "id": "71638151-e235-4515-b217-3d70138d1fc2",
       "name": "JWT Claims Extractor"
     },
     {
@@ -39,8 +39,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-2304, -272],
-      "id": "node-input-validator",
+      "position": [-768, 4800],
+      "id": "88f4f697-8674-4e87-9f74-30389a395625",
       "name": "Input Validator"
     },
     {
@@ -70,8 +70,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-2096, -272],
-      "id": "node-early-exit",
+      "position": [-560, 4800],
+      "id": "1b29eaff-21fe-4cdc-a41d-29490197dfd9",
       "name": "Empty Input Check"
     },
     {
@@ -80,8 +80,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1792, -560],
-      "id": "node-error-response",
+      "position": [-256, 4512],
+      "id": "0ea4e21a-ceb8-4d03-aeb5-0403fe5c9005",
       "name": "Error Response"
     },
     {
@@ -90,8 +90,8 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [-1568, -560],
-      "id": "node-error-respond",
+      "position": [-32, 4512],
+      "id": "7e19a288-a74e-43d6-af2c-3f676c5286f2",
       "name": "Respond Error"
     },
     {
@@ -100,8 +100,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1632, -256],
-      "id": "node-sentence-splitter",
+      "position": [-256, 4816],
+      "id": "593324ec-accd-47f6-9e60-9c05689b36ce",
       "name": "Sentence Splitter"
     },
     {
@@ -182,8 +182,8 @@
       },
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [-592, -272],
-      "id": "node-path-router",
+      "position": [1536, 4816],
+      "id": "ebe8118e-1dfe-488d-8f17-ff1602833bfc",
       "name": "Path Router"
     },
     {
@@ -192,8 +192,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [848, -816],
-      "id": "node-ha-fast-save",
+      "position": [2912, 4256],
+      "id": "9b9e0fd5-140a-4d18-8ea7-5796765863a9",
       "name": "Save Message HA Fast"
     },
     {
@@ -216,239 +216,7 @@
             "role": "assistant",
             "content": "={{ $json.responseText }}",
             "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
-            "tool_results": "={{ JSON.stringify($json.toolResults) }}"
-          }
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [1760, -1008],
-      "id": "node-ha-fast-db",
-      "name": "DB Insert HA Fast",
-      "credentials": {
-        "postgres": {
-          "id": "2YBtxcocRMLQuAdF",
-          "name": "pg-alice"
-        }
-      },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-ha-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-ha-fast',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1120, -640],
-      "id": "node-ha-fast-format",
-      "name": "Format Response HA Fast"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [2112, -640],
-      "id": "node-ha-fast-respond",
-      "name": "Respond HA Fast"
-    },
-    {
-      "parameters": {
-        "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HYBRID',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  llm_used: true,\n  latency_ms: latencyMs\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [784, -432],
-      "id": "node-hybrid-save",
-      "name": "Save Message Hybrid"
-    },
-    {
-      "parameters": {
-        "schema": {
-          "__rl": true,
-          "mode": "list",
-          "value": "alice"
-        },
-        "table": {
-          "__rl": true,
-          "mode": "list",
-          "value": "messages"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "session_id": "={{ $json.sessionId }}",
-            "user_id": "={{ $json.userId }}",
-            "role": "assistant",
-            "content": "={{ $json.responseText }}",
-            "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
-            "tool_results": "={{ JSON.stringify($json.toolResults) }}"
-          }
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [1776, -560],
-      "id": "node-hybrid-db",
-      "name": "DB Insert Hybrid",
-      "credentials": {
-        "postgres": {
-          "id": "2YBtxcocRMLQuAdF",
-          "name": "pg-alice"
-        }
-      },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-hy-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-hybrid',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1120, -240],
-      "id": "node-hybrid-format",
-      "name": "Format Response Hybrid"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [2112, -240],
-      "id": "node-hybrid-respond",
-      "name": "Respond Hybrid"
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{ json: {\n  chatInput: $json.userMessage,\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [-32, 16],
-      "id": "node-llm-prep",
-      "name": "LLM Only Prep"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 1.7,
-      "position": [384, 16],
-      "id": "c5af60f9-ea13-4012-984f-702794af83fe",
-      "name": "AI Agent"
-    },
-    {
-      "parameters": {
-        "model": "={{ $env.OLLAMA_MODEL }}",
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
-      "typeVersion": 1,
-      "position": [272, 272],
-      "id": "a1857233-ff63-4d85-b5e5-be6dbb06318f",
-      "name": "Ollama Chat Model",
-      "credentials": {
-        "ollamaApi": {
-          "id": "8TAanq1tJFFodeaP",
-          "name": "Ollama 3090"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const startMs = $('LLM Only Prep').first().json.__requestStartMs || Date.now();\nconst latencyMs = Date.now() - startMs;\nconst toolResults = { path_taken: 'LLM_ONLY', latency_ms: latencyMs, llm_used: true };\nconst text = $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nconst userMessageRow = {\n  session_id: $('LLM Only Prep').first().json.__sessionId,\n  user_id: $('LLM Only Prep').first().json.__userId,\n  role: 'user',\n  content: $('Input Validator').first().json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: {\n  ...($json),\n  __responseText: text,\n  __toolResults: toolResults,\n  __userId: $('LLM Only Prep').first().json.__userId,\n  __sessionId: $('LLM Only Prep').first().json.__sessionId,\n  __userMessageRow: userMessageRow\n}}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1120, 16],
-      "id": "node-llm-save",
-      "name": "Save Message LLM"
-    },
-    {
-      "parameters": {
-        "schema": {
-          "__rl": true,
-          "mode": "list",
-          "value": "alice"
-        },
-        "table": {
-          "__rl": true,
-          "mode": "list",
-          "value": "messages"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "session_id": "={{ $json.__sessionId }}",
-            "user_id": "={{ $json.__userId }}",
-            "role": "assistant",
-            "content": "={{ $json.__responseText }}",
-            "tool_calls": "={{ $json.__toolResults ? JSON.stringify($json.__toolResults.llm_tool_calls || null) : null }}",
-            "tool_results": "={{ JSON.stringify($json.__toolResults) }}"
-          }
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [1792, -96],
-      "id": "node-llm-db",
-      "name": "DB Insert LLM",
-      "credentials": {
-        "postgres": {
-          "id": "2YBtxcocRMLQuAdF",
-          "name": "pg-alice"
-        }
-      },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-llm',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1456, 256],
-      "id": "8b094d72-9dbf-4719-819f-3e0812b4a72b",
-      "name": "Code in JavaScript"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [2112, 256],
-      "id": "bfa1fcb1-8c8f-48e9-af0c-9ea4b683402a",
-      "name": "Respond to Webhook"
-    },
-    {
-      "parameters": {
-        "schema": {
-          "__rl": true,
-          "mode": "list",
-          "value": "alice"
-        },
-        "table": {
-          "__rl": true,
-          "mode": "list",
-          "value": "messages"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "session_id": "={{ $json.sessionId }}",
-            "user_id": "={{ $json.userId }}",
-            "role": "user",
-            "content": "={{ $json.userMessage }}",
-            "tool_calls": "={{ null }}",
-            "tool_results": "={{ null }}",
-            "id": 0,
+            "tool_results": "={{ JSON.stringify($json.toolResults) }}",
             "token_count": 0
           },
           "matchingColumns": ["id"],
@@ -461,7 +229,7 @@
               "display": true,
               "type": "number",
               "canBeUsedToMatch": true,
-              "removed": false
+              "removed": true
             },
             {
               "id": "session_id",
@@ -575,8 +343,599 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [1424, -832],
-      "id": "node-user-msg-ha",
+      "position": [3824, 4064],
+      "id": "3267bca0-ac1c-4fcb-b57d-706b5c761ec3",
+      "name": "DB Insert HA Fast",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-ha-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-ha-fast',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3184, 4432],
+      "id": "6c8c4d25-f67f-422b-bb95-fca3619c5a6b",
+      "name": "Format Response HA Fast"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4176, 4432],
+      "id": "6bdb77a0-64e8-427d-aade-d7225aa76709",
+      "name": "Respond HA Fast"
+    },
+    {
+      "parameters": {
+        "jsCode": "const latencyMs = Date.now() - ($json.requestStartMs || Date.now());\nconst toolResults = {\n  path_taken: 'HYBRID',\n  intents_matched: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.intentTemplate) : [],\n  certainty_scores: $json.intentResults ? $json.intentResults.filter(r => r.matched).map(r => r.certainty) : [],\n  ha_results: $json.haResults ? $json.haResults.map(r => ({ entity: r.intent ? r.intent.entityId : null, success: r.success, error: r.error })) : [],\n  llm_used: true,\n  latency_ms: latencyMs\n};\nconst userMessageRow = {\n  session_id: $json.sessionId,\n  user_id: $json.userId,\n  role: 'user',\n  content: $json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: { ...($json), toolResults, latencyMs, userMessageRow } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2848, 4640],
+      "id": "81b0a924-1715-489d-85a2-ee88300ac408",
+      "name": "Save Message Hybrid"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.sessionId }}",
+            "user_id": "={{ $json.userId }}",
+            "role": "assistant",
+            "content": "={{ $json.responseText }}",
+            "tool_calls": "={{ $json.toolResults ? JSON.stringify($json.toolResults.ha_results || null) : null }}",
+            "tool_results": "={{ JSON.stringify($json.toolResults) }}",
+            "token_count": 0
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_calls",
+              "displayName": "tool_calls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_results",
+              "displayName": "tool_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "token_count",
+              "displayName": "token_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_to_weaviate",
+              "displayName": "transferred_to_weaviate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_at",
+              "displayName": "transferred_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "weaviate_id",
+              "displayName": "weaviate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3840, 4512],
+      "id": "b9167f8b-5449-4e61-9077-00c7297fbeb4",
+      "name": "DB Insert Hybrid",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.responseText || 'Erledigt.';\nreturn [{ json: {\n  id: 'chatcmpl-hy-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-hybrid',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3184, 4832],
+      "id": "cbcd4ebe-1cb9-493e-806d-04e6fe5529ae",
+      "name": "Format Response Hybrid"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4176, 4832],
+      "id": "2c73091e-293a-4f99-a04c-bcdfd58077bc",
+      "name": "Respond Hybrid"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  chatInput: $json.userMessage,\n  body: {\n    messages: $json.allMessages,\n    user_id: $json.userId,\n    session_id: $json.sessionId\n  },\n  __pathDecision: 'LLM_ONLY',\n  __requestStartMs: $json.requestStartMs,\n  __userId: $json.userId,\n  __sessionId: $json.sessionId\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2032, 5088],
+      "id": "4620c387-3857-4efd-ad72-f41d23a1fd15",
+      "name": "LLM Only Prep"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [2448, 5088],
+      "id": "527c537b-a370-4f26-bea3-cf7ea2d0effa",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "={{ $env.OLLAMA_MODEL }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [2336, 5344],
+      "id": "d2fc1a6a-0797-46c3-b685-aeec523904dd",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "8TAanq1tJFFodeaP",
+          "name": "Ollama 3090"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const startMs = $('LLM Only Prep').first().json.__requestStartMs || Date.now();\nconst latencyMs = Date.now() - startMs;\nconst toolResults = { path_taken: 'LLM_ONLY', latency_ms: latencyMs, llm_used: true };\nconst text = $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nconst userMessageRow = {\n  session_id: $('LLM Only Prep').first().json.__sessionId,\n  user_id: $('LLM Only Prep').first().json.__userId,\n  role: 'user',\n  content: $('Input Validator').first().json.userMessage,\n  tool_calls: null,\n  tool_results: null\n};\nreturn [{ json: {\n  ...($json),\n  __responseText: text,\n  __toolResults: toolResults,\n  __userId: $('LLM Only Prep').first().json.__userId,\n  __sessionId: $('LLM Only Prep').first().json.__sessionId,\n  __userMessageRow: userMessageRow\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3184, 5088],
+      "id": "b030c11a-63d1-447e-81d4-e4180dc77204",
+      "name": "Save Message LLM"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.__sessionId }}",
+            "user_id": "={{ $json.__userId }}",
+            "role": "assistant",
+            "content": "={{ $json.__responseText }}",
+            "tool_calls": "={{ $json.__toolResults ? JSON.stringify($json.__toolResults.llm_tool_calls || null) : null }}",
+            "tool_results": "={{ JSON.stringify($json.__toolResults) }}",
+            "token_count": 0
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_calls",
+              "displayName": "tool_calls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_results",
+              "displayName": "tool_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "token_count",
+              "displayName": "token_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_to_weaviate",
+              "displayName": "transferred_to_weaviate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_at",
+              "displayName": "transferred_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "weaviate_id",
+              "displayName": "weaviate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3856, 4976],
+      "id": "0ff9bc68-9685-413b-883f-7ca1dc775935",
+      "name": "DB Insert LLM",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = Math.floor(Date.now() / 1000);\nconst text = $json.__responseText || $json.output || $json.text || $json.completion || $json.answer || $json.response || '';\nreturn [{ json: {\n  id: 'chatcmpl-' + now.toString(36),\n  object: 'chat.completion',\n  created: now,\n  model: 'alice-llm',\n  choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],\n  usage: { prompt_tokens: 0, completion_tokens: (text||'').length, total_tokens: (text||'').length }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3520, 5328],
+      "id": "d8a843ae-23b2-422c-8efa-3289ec02a0be",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4176, 5328],
+      "id": "c010a76f-fd9b-4176-95dd-315e43d1215b",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "alice"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.sessionId }}",
+            "user_id": "={{ $json.userId }}",
+            "role": "user",
+            "content": "={{ $json.userMessage }}",
+            "tool_calls": "={{ null }}",
+            "tool_results": "={{ null }}",
+            "token_count": 0
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_calls",
+              "displayName": "tool_calls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_results",
+              "displayName": "tool_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "token_count",
+              "displayName": "token_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_to_weaviate",
+              "displayName": "transferred_to_weaviate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_at",
+              "displayName": "transferred_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "weaviate_id",
+              "displayName": "weaviate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3488, 4240],
+      "id": "920fde8f-dfc4-4e67-b9a7-53e371e8f9cf",
       "name": "Insert User Msg HA Fast",
       "credentials": {
         "postgres": {
@@ -606,15 +965,135 @@
             "role": "user",
             "content": "={{ $json.userMessage }}",
             "tool_calls": "={{ null }}",
-            "tool_results": "={{ null }}"
-          }
+            "tool_results": "={{ null }}",
+            "token_count": 0
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_calls",
+              "displayName": "tool_calls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_results",
+              "displayName": "tool_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "token_count",
+              "displayName": "token_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_to_weaviate",
+              "displayName": "transferred_to_weaviate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_at",
+              "displayName": "transferred_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "weaviate_id",
+              "displayName": "weaviate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         },
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [1440, -432],
-      "id": "node-user-msg-hybrid",
+      "position": [3504, 4640],
+      "id": "2ea5f514-5e85-42f8-8e7b-1412bbf3d073",
       "name": "Insert User Msg Hybrid",
       "credentials": {
         "postgres": {
@@ -644,15 +1123,135 @@
             "role": "user",
             "content": "={{ $('Input Validator').first().json.userMessage }}",
             "tool_calls": "={{ null }}",
-            "tool_results": "={{ null }}"
-          }
+            "tool_results": "={{ null }}",
+            "token_count": 0
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_calls",
+              "displayName": "tool_calls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_results",
+              "displayName": "tool_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "token_count",
+              "displayName": "token_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_to_weaviate",
+              "displayName": "transferred_to_weaviate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transferred_at",
+              "displayName": "transferred_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "weaviate_id",
+              "displayName": "weaviate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         },
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [1456, 16],
-      "id": "node-user-msg-llm",
+      "position": [3520, 5088],
+      "id": "59ca19ee-41fa-46ce-993a-ce023b8ce8ae",
       "name": "Insert User Msg LLM",
       "credentials": {
         "postgres": {
@@ -669,11 +1268,11 @@
         "message": "={{ JSON.stringify({ path: \"HA_FAST\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}",
         "options": {}
       },
-      "id": "node-mqtt-err-ha",
+      "id": "6bd2112d-ebc3-4380-bdac-4435a768904b",
       "name": "MQTT Error HA Fast",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [2112, -816],
+      "position": [4176, 4256],
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -688,11 +1287,11 @@
         "message": "={{ JSON.stringify({ path: \"HYBRID\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.sessionId, user_id: $json.userId, timestamp: Date.now() }) }}",
         "options": {}
       },
-      "id": "node-mqtt-err-hybrid",
+      "id": "21ab1100-3fca-4405-8579-61085f09c0ca",
       "name": "MQTT Error Hybrid",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [2112, -416],
+      "position": [4176, 4656],
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -707,11 +1306,11 @@
         "message": "={{ JSON.stringify({ path: \"LLM_ONLY\", error: $json.error && $json.error.message ? $json.error.message : \"DB write failed\", session_id: $json.__sessionId, user_id: $json.__userId, timestamp: Date.now() }) }}",
         "options": {}
       },
-      "id": "node-mqtt-err-llm",
+      "id": "39f26c8f-df13-4884-9bb2-2c454b58e026",
       "name": "MQTT Error LLM",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [2112, 32],
+      "position": [4176, 5104],
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -721,85 +1320,53 @@
     },
     {
       "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "3f1ff778-28f6-4746-9eb2-aae8d8cadd95",
-              "name": "weaviateUrl",
-              "value": "={{ $env.WEAVIATE_URL }}",
-              "type": "string"
-            },
-            {
-              "id": "a1857a39-c903-4687-a500-753394f71dc0",
-              "name": "intentMinCertainty",
-              "value": "={{ parseFloat($env.INTENT_MIN_CERTAINTY) }}",
-              "type": "number"
-            },
-            {
-              "id": "727ec8c3-69e1-49d9-b989-ed178f452127",
-              "name": "intentMaxResults",
-              "value": "={{ parseInt($env.INTENT_MAX_RESULTS) }}",
-              "type": "number"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node-config-intent-params",
-      "name": "Config: Intent Params",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [-1856, -256]
-    },
-    {
-      "parameters": {
         "jsCode": "const parts = $json.parts || [$json.userMessage];\nreturn parts.map(currentPart => ({\n  json: { ...$json, currentPart }\n}));"
       },
-      "id": "node-split-parts",
+      "id": "9e51efe4-1bde-44c4-a83a-831e666479a8",
       "name": "Split Parts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1424, -256]
+      "position": [-32, 4816]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config: Intent Params').first().json.weaviateUrl }}/v1/graphql",
+        "url": "={{ $env.WEAVIATE_URL }}/v1/graphql",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $('Config: Intent Params').first().json.intentMaxResults + ' ) { utterance entityId domain service parameters intentTemplate _additional { certainty } } } }' }) }}",
+        "body": "={{ JSON.stringify({ query: '{ Get { HAIntent( nearText: { concepts: [\"' + ($json.currentPart || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, \"'\").replace(/[\\r\\n\\t]/g, ' ').substring(0, 500) + '\"] }, limit: ' + $env.INTENT_MAX_RESULTS + ' ) { utterance entityId domain service parameters intentTemplate _additional { certainty } } } }' }) }}",
         "options": {
           "timeout": 5000
         }
       },
-      "id": "node-weaviate-neartextsearch",
+      "id": "e63d8014-675b-430f-94c6-657a5df1345b",
       "name": "Weaviate: nearText Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1264, -112],
+      "position": [192, 4992],
       "continueOnFail": true
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Filter & Rank (Run Once for Each Item)\n// IMPORTANT: must return a single item object: { json: {...} }  (NOT an array)\n\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = (typeof $json.intentMinCertainty === 'number')\n  ? $json.intentMinCertainty\n  : 0.82;\n\nconst candidates = $json?.data?.Get?.HAIntent ?? [];\n\nconst qualified = candidates\n  .filter(c => (c?._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => (b?._additional?.certainty || 0) - (a?._additional?.certainty || 0));\n\nconst best = qualified[0];\n\nfunction safeParseParams(p) {\n  if (!p) return {};\n  if (typeof p === 'object' && !Array.isArray(p)) return p;\n  if (typeof p === 'string') {\n    try {\n      const parsed = JSON.parse(p);\n      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};\n    } catch {\n      return {};\n    }\n  }\n  return {};\n}\n\n// Preserve context if present (from Split Parts / Merge)\nconst context = {\n  weaviateUrl: $json.weaviateUrl,\n  intentMinCertainty: $json.intentMinCertainty,\n  intentMaxResults: $json.intentMaxResults,\n  parts: $json.parts,\n  currentPart: $json.currentPart,\n  partIndex: $json.partIndex,\n  partCount: $json.partCount,\n};\n\nif (best) {\n  return {\n    json: {\n      ...context,\n      matched: true,\n      certainty: best._additional?.certainty || 0,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: safeParseParams(best.parameters),\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain),\n      weaviateError: false,\n      weaviateErrorMsg: null,\n    }\n  };\n}\n\nreturn {\n  json: {\n    ...context,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0,\n    weaviateError: false,\n    weaviateErrorMsg: null,\n  }\n};"
+        "jsCode": "// Filter & Rank (Run Once for Each Item)\n// IMPORTANT: must return a single item object: { json: {...} }  (NOT an array)\n\nconst CONFIRMATION_DOMAINS = ['lock', 'alarm_control_panel'];\nconst CERTAINTY_THRESHOLD = (typeof $json.intentMinCertainty === 'number')\n  ? $json.intentMinCertainty\n  : 0.82;\n\nconst candidates = $json?.data?.Get?.HAIntent ?? [];\n\nconst qualified = candidates\n  .filter(c => (c?._additional?.certainty || 0) >= CERTAINTY_THRESHOLD)\n  .sort((a, b) => (b?._additional?.certainty || 0) - (a?._additional?.certainty || 0));\n\nconst best = qualified[0];\n\nfunction safeParseParams(p) {\n  if (!p) return {};\n  if (typeof p === 'object' && !Array.isArray(p)) return p;\n  if (typeof p === 'string') {\n    try {\n      const parsed = JSON.parse(p);\n      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};\n    } catch {\n      return {};\n    }\n  }\n  return {};\n}\n\n// Preserve context if present (from Split Parts / Merge)\nconst context = {\n  weaviateUrl: $json.weaviateUrl,\n  intentMinCertainty: $json.intentMinCertainty,\n  intentMaxResults: $json.intentMaxResults,\n  parts: $json.parts,\n  currentPart: $json.currentPart,\n  // User context — must be forwarded so Build Route Decision can reconstruct base\n  userId: $('Input Validator').item.json.userId,\n  sessionId: $('Input Validator').item.json.sessionId,\n  userMessage: $json.userMessage,\n  allMessages: $json.allMessages,\n  requestStartMs: $json.requestStartMs,\n  username: $json.username,\n  role: $json.role,\n};\n\nif (best) {\n  return {\n    json: {\n      ...context,\n      matched: true,\n      certainty: best._additional?.certainty || 0,\n      entityId: best.entityId,\n      domain: best.domain,\n      service: best.service,\n      parameters: safeParseParams(best.parameters),\n      intentTemplate: best.intentTemplate,\n      requiresConfirmation: CONFIRMATION_DOMAINS.includes(best.domain),\n      weaviateError: false,\n      weaviateErrorMsg: null,\n    }\n  };\n}\n\nreturn {\n  json: {\n    ...context,\n    matched: false,\n    certainty: candidates[0]?._additional?.certainty || 0,\n    weaviateError: false,\n    weaviateErrorMsg: null,\n  }\n};"
       },
-      "id": "node-filter-rank",
+      "id": "5a6ccbb6-6962-472f-8acb-e15692808adc",
       "name": "Filter & Rank",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-960, -256]
+      "position": [576, 4832]
     },
     {
       "parameters": {
         "jsCode": "const all = $input.all();\nconst totalCount = all.length;\n\n// Take base context from the first incoming item.\n// This requires that Split Parts carried those fields through.\nconst base = all[0]?.json ?? {};\n\nconst matchedParts = all.filter(i => i.json.matched);\nconst matchedCount = matchedParts.length;\n\nconst anyWeaviateError = all.some(i => i.json.weaviateError);\n\n// Decision logic\nlet pathDecision = 'LLM_ONLY';\nif (totalCount === 0) {\n  pathDecision = 'LLM_ONLY';\n} else if (!anyWeaviateError && matchedCount === totalCount && matchedCount > 0) {\n  pathDecision = 'HA_FAST';\n} else if (matchedCount > 0) {\n  pathDecision = 'HYBRID';\n} else {\n  pathDecision = 'LLM_ONLY';\n}\n\nreturn [{\n  json: {\n    // --- BASE CONTEXT (must always be present) ---\n    userMessage: base.userMessage ?? base.chatInput ?? (base.parts ? base.parts.join('. ') : undefined),\n    chatInput: base.chatInput ?? base.userMessage ?? (base.parts ? base.parts.join('. ') : undefined),\n    userId: base.userId,\n    username: base.username,\n    role: base.role,\n    sessionId: base.sessionId,\n    allMessages: base.allMessages ?? [],\n    requestStartMs: base.requestStartMs,\n\n    // --- routing payload ---\n    parts: base.parts ?? all.map(i => i.json.currentPart).filter(Boolean),\n    pathDecision,\n    intentResults: all.map(i => ({\n      part: i.json.currentPart ?? i.json.part,\n      matched: i.json.matched,\n      certainty: i.json.certainty,\n      entityId: i.json.entityId,\n      domain: i.json.domain,\n      service: i.json.service,\n      parameters: i.json.parameters,\n      intentTemplate: i.json.intentTemplate,\n      requiresConfirmation: i.json.requiresConfirmation,\n      weaviateError: i.json.weaviateError,\n      weaviateErrorMsg: i.json.weaviateErrorMsg\n    })),\n    matchedCount,\n    totalCount,\n    anyWeaviateError\n  }\n}];"
       },
-      "id": "node-build-route-decision",
+      "id": "5b5066da-5333-4293-ad2a-3a2bb0567ed6",
       "name": "Build Route Decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-784, -256]
+      "position": [752, 4832]
     },
     {
       "parameters": {
@@ -807,8 +1374,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-48, -832],
-      "id": "node-ha-fast-executor",
+      "position": [2016, 4240],
+      "id": "ef198833-20de-40ac-8cf6-d45be5c609a9",
       "name": "HA Fast Prep Requests"
     },
     {
@@ -817,8 +1384,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-32, -432],
-      "id": "node-hybrid-executor",
+      "position": [2032, 4640],
+      "id": "b58022aa-e3fa-428e-9835-c4af9b4fc1ec",
       "name": "Hybrid Prep Requests"
     },
     {
@@ -827,8 +1394,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [592, -432],
-      "id": "f6ee89b7-1c5a-47f1-a26d-b1792b914e09",
+      "position": [2656, 4640],
+      "id": "bf1bc3b5-087c-46e4-ac31-af3cac25b173",
       "name": "Hybrid Assemble"
     },
     {
@@ -837,8 +1404,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [592, -816],
-      "id": "eb6b585e-27e8-46a1-8fb9-25c1b1873692",
+      "position": [2656, 4256],
+      "id": "4581623b-fe8f-430a-9477-43650c805143",
       "name": "HA Fast Assemble"
     },
     {
@@ -849,8 +1416,8 @@
       },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
-      "position": [416, -432],
-      "id": "6683dd65-c373-42bc-a2d7-5b16ebcbb54b",
+      "position": [2480, 4640],
+      "id": "166b006a-980f-4f93-af07-172a2de9da87",
       "name": "Merge1"
     },
     {
@@ -861,8 +1428,8 @@
       },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
-      "position": [-1120, -256],
-      "id": "49c4889c-85a8-4785-947c-4e514cd69ba3",
+      "position": [400, 4832],
+      "id": "a16007d3-3452-426b-8418-67dd31e9bb3b",
       "name": "Merge Parts"
     },
     {
@@ -897,8 +1464,8 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [192, -672],
-      "id": "e536c131-7fe3-43c2-9ea4-b3b8d2fcabf8",
+      "position": [2256, 4400],
+      "id": "9c8db41c-8ac5-4c55-8e19-7af7582f7497",
       "name": "HA Fast HTTP Request",
       "onError": "continueRegularOutput"
     },
@@ -934,8 +1501,8 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [208, -304],
-      "id": "0382d0f8-9a5d-4069-bcf9-b06c950c7509",
+      "position": [2272, 4768],
+      "id": "89fde82e-cd25-417d-b237-bf1429bc4568",
       "name": "Hybrid HTTP Request"
     },
     {
@@ -946,9 +1513,50 @@
       },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
-      "position": [400, -816],
-      "id": "5a7de9a5-54d1-41df-b287-4545c1126dde",
+      "position": [2464, 4256],
+      "id": "a1f45f0f-d661-46e7-af4c-cb7cdbf04c1e",
       "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare session UPSERT: extract data before Postgres node\nconst sessionId = $json.sessionId;\nconst userId = $json.userId;\nconst title = ($json.userMessage || '').substring(0, 40);\nreturn [{ json: { session_id: sessionId, user_id: userId, title } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 4832],
+      "id": "3090edfb-b151-4508-96f6-9bc02d1a872b",
+      "name": "Session UPSERT Prep"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alice.sessions (\n  session_id,\n  user_id,\n  title,\n  started_at,\n  last_activity\n)\nVALUES (\n  $1::uuid,\n  $2::uuid,\n  $3,\n  NOW(),\n  NOW()\n)\nON CONFLICT (session_id)\nDO UPDATE SET\n  last_activity = NOW(),\n  title = COALESCE(alice.sessions.title, EXCLUDED.title)\nRETURNING session_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.session_id, $json.user_id, $json.title] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1136, 4832],
+      "id": "b562e36e-75fd-4ade-b31f-36d570fe9863",
+      "name": "Upsert Session",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Restore Build Route Decision context after session UPSERT\n// The UPSERT may have produced different $json; use named node reference to recover context.\nreturn [{ json: $('Build Route Decision').first().json }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1344, 4832],
+      "id": "715b7d13-eb67-48be-8b63-172ba897eaac",
+      "name": "Restore Context After Upsert"
     }
   ],
   "pinData": {},
@@ -997,7 +1605,7 @@
         ],
         [
           {
-            "node": "Config: Intent Params",
+            "node": "Sentence Splitter",
             "type": "main",
             "index": 0
           }
@@ -1009,17 +1617,6 @@
         [
           {
             "node": "Respond Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Config: Intent Params": {
-      "main": [
-        [
-          {
-            "node": "Sentence Splitter",
             "type": "main",
             "index": 0
           }
@@ -1076,6 +1673,39 @@
       ]
     },
     "Build Route Decision": {
+      "main": [
+        [
+          {
+            "node": "Session UPSERT Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Session UPSERT Prep": {
+      "main": [
+        [
+          {
+            "node": "Upsert Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Session": {
+      "main": [
+        [
+          {
+            "node": "Restore Context After Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Context After Upsert": {
       "main": [
         [
           {
@@ -1137,9 +1767,6 @@
           }
         ]
       ]
-    },
-    "Respond HA Fast": {
-      "main": [[]]
     },
     "Insert User Msg HA Fast": {
       "main": [
@@ -1318,12 +1945,6 @@
         ]
       ]
     },
-    "Respond Hybrid": {
-      "main": [[]]
-    },
-    "Respond to Webhook": {
-      "main": [[]]
-    },
     "HA Fast Prep Requests": {
       "main": [
         [
@@ -1440,7 +2061,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "versionId": "73347814-72ee-4173-874c-44ef8dd5cb10",
+  "versionId": "3e9882c7-e8e2-480f-8504-b792d8268a90",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
