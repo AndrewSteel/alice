@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Loader2 } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant" | "error";
@@ -14,9 +14,10 @@ interface Message {
 interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
+  messagesLoading?: boolean;
 }
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+export function MessageList({ messages, isLoading, messagesLoading }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages or when loading state changes
@@ -24,6 +25,19 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
+  // Messages loading from backend (AC-C2)
+  if (messagesLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center h-full">
+        <div className="text-center space-y-3">
+          <Loader2 className="h-8 w-8 text-gray-500 mx-auto animate-spin" />
+          <p className="text-gray-400 text-sm">Nachrichten werden geladen...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state for sessions without messages (AC-C10)
   if (messages.length === 0 && !isLoading) {
     return (
       <div className="flex flex-1 items-center justify-center h-full">

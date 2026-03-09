@@ -1,0 +1,732 @@
+{
+  "name": "alice-session-api",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "alice/sessions",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "c1-webhook",
+      "name": "Webhook: GET Sessions",
+      "webhookId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nreturn [{ json: { userId: payload.sub || payload.user_id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 0],
+      "id": "c1-jwt",
+      "name": "JWT: List Sessions"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('session_id', session_id::text, 'title', title, 'started_at', started_at::text, 'last_activity', last_activity::text) ORDER BY last_activity DESC), '[]'::json) AS sessions FROM alice.sessions WHERE user_id = '{{ $json.userId }}'::uuid",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [560, 0],
+      "id": "c1-pg",
+      "name": "PG: List Sessions",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      sessions: $json.sessions || []\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [848, 0],
+      "id": "c1-agg",
+      "name": "Aggregate: Sessions"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 0],
+      "id": "c1-respond",
+      "name": "Respond: Sessions 200"
+    },
+    {
+      "parameters": {
+        "path": "alice/sessions/messages",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 480],
+      "id": "c2-webhook",
+      "name": "Webhook: GET Messages",
+      "webhookId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nreturn [{ json: {\n  userId: payload.sub || payload.user_id,\n  sessionId: $json.query?.session_id\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 480],
+      "id": "c2-jwt",
+      "name": "JWT: Get Messages"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT EXISTS(SELECT 1 FROM alice.sessions WHERE session_id = '{{ $json.sessionId }}'::uuid AND user_id = '{{ $json.userId }}'::uuid) AS is_owner",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [560, 480],
+      "id": "c2-pg-own",
+      "name": "PG: Check Session Owner",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "msg-owner-check",
+              "leftValue": "={{ $json.is_owner }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [848, 480],
+      "id": "c2-if",
+      "name": "IF: Messages Authorized"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('role', role, 'content', content, 'timestamp', timestamp::text) ORDER BY timestamp ASC), '[]'::json) AS messages FROM alice.messages WHERE session_id = '{{ $('JWT: Get Messages').first().json.sessionId }}'::uuid",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 400],
+      "id": "c2-pg-msg",
+      "name": "PG: Get Messages",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      sessions: $json.sessions || []\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1408, 400],
+      "id": "c2-agg",
+      "name": "Aggregate: Messages"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1680, 400],
+      "id": "c2-respond-ok",
+      "name": "Respond: Messages 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 560],
+      "id": "c2-code-403",
+      "name": "Body: 403 Messages"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1408, 560],
+      "id": "c2-respond-403",
+      "name": "Respond: Messages 403"
+    },
+    {
+      "parameters": {
+        "httpMethod": "PATCH",
+        "path": "alice/sessions",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 960],
+      "id": "c3-webhook",
+      "name": "Webhook: PATCH Session",
+      "webhookId": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nconst title = String($json.body?.title || '').substring(0, 255);\nreturn [{ json: {\n  userId: payload.sub || payload.user_id,\n  sessionId: $json.body?.session_id,\n  title\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 960],
+      "id": "c3-jwt",
+      "name": "JWT: PATCH Session"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH upd AS (UPDATE alice.sessions SET title = $1, last_activity = NOW() WHERE session_id = $2::uuid AND user_id = $3::uuid RETURNING session_id) SELECT EXISTS(SELECT 1 FROM upd) AS updated",
+        "options": {
+          "queryReplacement": "={{ $json.title }},={{ $json.sessionId }},={{ $json.userId }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [560, 960],
+      "id": "c3-pg",
+      "name": "PG: Update Title",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "patch-check",
+              "leftValue": "={{ $json.updated }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [848, 960],
+      "id": "c3-if",
+      "name": "IF: PATCH Authorized"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 880],
+      "id": "c3-code-ok",
+      "name": "Body: PATCH OK"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1408, 880],
+      "id": "c3-respond-ok",
+      "name": "Respond: PATCH 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 1040],
+      "id": "c3-code-403",
+      "name": "Body: 403 PATCH"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1408, 1040],
+      "id": "c3-respond-403",
+      "name": "Respond: PATCH 403"
+    },
+    {
+      "parameters": {
+        "httpMethod": "DELETE",
+        "path": "alice/sessions",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 1440],
+      "id": "c4-webhook",
+      "name": "Webhook: DELETE Session",
+      "webhookId": "d4e5f6a7-b8c9-0123-def0-234567890123",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nreturn [{ json: {\n  userId: payload.sub || payload.user_id,\n  sessionId: $json.query?.session_id\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 1440],
+      "id": "c4-jwt",
+      "name": "JWT: DELETE Session"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH del AS (DELETE FROM alice.sessions WHERE session_id = '{{ $json.sessionId }}'::uuid AND user_id = '{{ $json.userId }}'::uuid RETURNING session_id) SELECT EXISTS(SELECT 1 FROM del) AS deleted",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [560, 1440],
+      "id": "c4-pg",
+      "name": "PG: Delete Session",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "delete-check",
+              "leftValue": "={{ $json.deleted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [848, 1440],
+      "id": "c4-if",
+      "name": "IF: DELETE Authorized"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 204
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 1360],
+      "id": "c4-respond-204",
+      "name": "Respond: DELETE 204"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 1520],
+      "id": "c4-code-403",
+      "name": "Body: 403 DELETE"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1408, 1520],
+      "id": "c4-respond-403",
+      "name": "Respond: DELETE 403"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook: GET Sessions": {
+      "main": [
+        [
+          {
+            "node": "JWT: List Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT: List Sessions": {
+      "main": [
+        [
+          {
+            "node": "PG: List Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: List Sessions": {
+      "main": [
+        [
+          {
+            "node": "Aggregate: Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate: Sessions": {
+      "main": [
+        [
+          {
+            "node": "Respond: Sessions 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: GET Messages": {
+      "main": [
+        [
+          {
+            "node": "JWT: Get Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT: Get Messages": {
+      "main": [
+        [
+          {
+            "node": "PG: Check Session Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Check Session Owner": {
+      "main": [
+        [
+          {
+            "node": "IF: Messages Authorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Messages Authorized": {
+      "main": [
+        [
+          {
+            "node": "PG: Get Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: 403 Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Get Messages": {
+      "main": [
+        [
+          {
+            "node": "Aggregate: Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate: Messages": {
+      "main": [
+        [
+          {
+            "node": "Respond: Messages 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: 403 Messages": {
+      "main": [
+        [
+          {
+            "node": "Respond: Messages 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: PATCH Session": {
+      "main": [
+        [
+          {
+            "node": "JWT: PATCH Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT: PATCH Session": {
+      "main": [
+        [
+          {
+            "node": "PG: Update Title",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Update Title": {
+      "main": [
+        [
+          {
+            "node": "IF: PATCH Authorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: PATCH Authorized": {
+      "main": [
+        [
+          {
+            "node": "Body: PATCH OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: 403 PATCH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: PATCH OK": {
+      "main": [
+        [
+          {
+            "node": "Respond: PATCH 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: 403 PATCH": {
+      "main": [
+        [
+          {
+            "node": "Respond: PATCH 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: DELETE Session": {
+      "main": [
+        [
+          {
+            "node": "JWT: DELETE Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT: DELETE Session": {
+      "main": [
+        [
+          {
+            "node": "PG: Delete Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Delete Session": {
+      "main": [
+        [
+          {
+            "node": "IF: DELETE Authorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: DELETE Authorized": {
+      "main": [
+        [
+          {
+            "node": "Respond: DELETE 204",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: 403 DELETE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: 403 DELETE": {
+      "main": [
+        [
+          {
+            "node": "Respond: DELETE 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "485ddcb6-efe2-4383-b786-d4625681f180",
+  "meta": {
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
+  },
+  "id": "6l4HpEI88IUXOjLO",
+  "tags": []
+}

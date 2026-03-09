@@ -26,7 +26,7 @@
 | PROJ-11 | HA Sync Python Worker (Ersatz für n8n alice-ha-intent-sync) | Deployed | [PROJ-11-ha-sync-python-worker.md](PROJ-11-ha-sync-python-worker.md) | 2026-03-02 |
 | PROJ-12 | Phase 2 Security & UX Hardening (nginx Headers, Rate-Limiting, Chat-Rename) | Deployed | [PROJ-12-phase2-security-and-ux-hardening.md](PROJ-12-phase2-security-and-ux-hardening.md) | 2026-03-03 |
 | PROJ-13 | Auth-Endpoint Rate-Limiting (Login Brute-Force Schutz) | Deployed | [PROJ-13-auth-rate-limiting.md](PROJ-13-auth-rate-limiting.md) | 2026-03-06 |
-| PROJ-14 | Sidebar Context-Menu & Session-Persistenz | In Review | [PROJ-14-sidebar-context-menu-and-session-persistence.md](PROJ-14-sidebar-context-menu-and-session-persistence.md) | 2026-03-06 |
+| PROJ-14 | Sidebar Context-Menu & Session-Persistenz | Deployed | [PROJ-14-sidebar-context-menu-and-session-persistence.md](PROJ-14-sidebar-context-menu-and-session-persistence.md) | 2026-03-06 |
 | PROJ-15 | DMS NAS-Ordner-Verwaltung (CRUD via REST API + Frontend) | Deployed (QA passed) | [PROJ-15-dms-folder-management.md](PROJ-15-dms-folder-management.md) | 2026-03-09 |
 | PROJ-16 | DMS Scanner & NAS Multi-Format-Scan | Planned | [PROJ-16-dms-scanner-nas-infrastructure.md](PROJ-16-dms-scanner-nas-infrastructure.md) | 2026-03-09 |
 | PROJ-17 | DMS Processor Workflow (Multi-Format + OCR) | Planned | [PROJ-17-dms-processor-workflow.md](PROJ-17-dms-processor-workflow.md) | 2026-03-09 |

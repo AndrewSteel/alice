@@ -12,14 +12,15 @@ interface Message {
 interface ChatWindowProps {
   messages: Message[];
   isLoading: boolean;
+  messagesLoading?: boolean;
   onSend: (text: string) => void;
 }
 
-export function ChatWindow({ messages, isLoading, onSend }: ChatWindowProps) {
+export function ChatWindow({ messages, isLoading, messagesLoading, onSend }: ChatWindowProps) {
   return (
     <div className="flex flex-col h-full bg-gray-800">
-      <MessageList messages={messages} isLoading={isLoading} />
-      <ChatInputArea onSend={onSend} disabled={isLoading} />
+      <MessageList messages={messages} isLoading={isLoading} messagesLoading={messagesLoading} />
+      <ChatInputArea onSend={onSend} disabled={isLoading || !!messagesLoading} />
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { ChatSession } from "./ChatListItem";
 interface SidebarProps {
   sessions: ChatSession[];
   activeSessionId: string | null;
+  sessionsLoading?: boolean;
   onNewChat: () => void;
   onSelectSession: (id: string) => void;
   onRenameSession: (id: string, newTitle: string) => void;
@@ -24,6 +25,7 @@ interface SidebarProps {
 export function Sidebar({
   sessions,
   activeSessionId,
+  sessionsLoading,
   onNewChat,
   onSelectSession,
   onRenameSession,
@@ -50,6 +52,7 @@ export function Sidebar({
           onSelect={onSelectSession}
           onRename={onRenameSession}
           onDelete={onDeleteSession}
+          isLoading={sessionsLoading}
         />
       </ScrollArea>
 
