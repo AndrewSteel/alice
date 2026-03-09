@@ -30,7 +30,7 @@ docker exec postgres psql -U user -d alice -f /path/to/sql/seed-users.sql
 ```
 
 ### n8n Workflows
-Workflows are stored as JSON in `workflows/`. Import/export via n8n UI or CLI. The main chat endpoint is `POST /webhook/alice`.
+Workflows are stored as JSON in `workflows/`. Don't deploy n8n-workflow. Tell user: 'Deploy n8n-workflow {name}'. The main chat endpoint is `POST /webhook/alice`.
 
 ### Docker
 Each service has its own compose file under `docker/compose/<category>/`. Use `scipts/sync-compose.sh` to sync compose files to the server.

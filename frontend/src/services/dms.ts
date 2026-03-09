@@ -75,7 +75,24 @@ export async function getFolders(): Promise<DmsFolder[]> {
     throw new Error(`Serverfehler (${res.status}) beim Laden der Ordner.`);
   }
 
-  return res.json();
+  const body = await res.json();
+
+  // n8n returns [{ folders: [...] }] — unwrap to get the actual array
+  if (Array.isArray(body) && body.length > 0 && Array.isArray(body[0]?.folders)) {
+    return body[0].folders;
+  }
+
+  // If the response is already a plain array of folders, use it directly
+  if (Array.isArray(body)) {
+    return body;
+  }
+
+  // Single wrapper object { folders: [...] }
+  if (body && Array.isArray(body.folders)) {
+    return body.folders;
+  }
+
+  return [];
 }
 
 /**

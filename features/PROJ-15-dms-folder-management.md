@@ -501,3 +501,90 @@ This QA round is a **pre-deployment code review**. The n8n workflow and DB migra
 ### Post-deploy notes
 - DB migration must be applied on headless server: `docker exec postgres psql -U user -d alice -f /path/to/009-proj15-dms-watched-folders.sql`
 - n8n workflow deployed separately by user
+
+## QA Post-Deployment Verification
+
+**Tested:** 2026-03-09
+**Production URL:** https://alice.happy-mining.de/settings
+**Tester:** QA Engineer (AI) -- Post-deployment code review + user-confirmed live testing
+**User verification:** Owner confirmed CRUD operations (Create, Rename, Delete) work correctly in production.
+
+### Test Methodology
+
+This is a **post-deployment verification** round. The user manually tested all CRUD operations in production and confirmed they work. This QA round focuses on: (1) confirming the pre-deployment findings, (2) deep security audit of deployed code, (3) identifying any new issues visible only in the full deployed context.
+
+### Acceptance Criteria -- Post-Deployment Status
+
+| AC | Description | Status |
+|---|---|---|
+| AC-1 | PostgreSQL table exists with correct fields | PASS (confirmed by working CRUD) |
+| AC-2 | `suggested_type` nullable | PASS |
+| AC-3 | n8n workflow exists with webhook triggers | PASS (deployed and active) |
+| AC-4 | GET returns all folders (JWT-protected) | PASS (user confirmed) |
+| AC-5 | POST creates new folder | PASS (user confirmed) |
+| AC-6 | PUT updates folder (partial update) | PASS (user confirmed rename works) |
+| AC-7 | DELETE removes folder permanently | PASS (user confirmed) |
+| AC-8 | JWT validation on all endpoints | PASS (n8n jwtAuth on all webhooks) |
+| AC-9 | Path uniqueness enforced | PASS (DB constraint + API 409) |
+| AC-10 | Frontend table with status badges | PASS (user confirmed) |
+| AC-11 | Add folder form | PASS (user confirmed) |
+| AC-12 | Inline editing | PASS (user confirmed rename) |
+| AC-13 | Delete confirmation dialog | PASS (user confirmed) |
+| AC-14 | Invalid path format returns 400 | PASS (backend + frontend validation) |
+
+**Result: 14/14 PASS** (functional -- all acceptance criteria met in production)
+
+### New Bugs Found (Post-Deployment)
+
+#### BUG-8: DELETE query uses string interpolation instead of parameterized query (SQL Injection)
+- **Severity:** High
+- **Description:** The `PG: Delete Folder` node uses n8n expression interpolation in the SQL query: `WHERE id = '{{ $json.folderId }}'`. Unlike the INSERT (which uses `$1, $2, $3`) and the UPDATE (which uses dynamic `$N` parameters), the DELETE query directly interpolates the `folderId` value into the SQL string. While the preceding `JWT+Validate: DELETE Folder` code node parses the ID with `parseInt()` (which sanitizes to an integer or NaN), the value still flows through n8n's expression engine as a string before reaching PostgreSQL. If `parseInt()` were ever bypassed or the code node modified, this would be a direct SQL injection vector. The value is also wrapped in single quotes (`'...'`) despite being compared to an integer column, which is an unnecessary type mismatch.
+- **Steps to Reproduce:**
+  1. Examine `PG: Delete Folder` node in `workflows/core/alice-dms-folder-api.json` (line 684)
+  2. Query: `WITH del AS (DELETE FROM alice.dms_watched_folders WHERE id = '{{ $json.folderId }}' RETURNING id) SELECT EXISTS(SELECT 1 FROM del) AS deleted`
+  3. Compare to `PG: Insert Folder` which correctly uses `$1, $2, $3` with `queryReplacement`
+  4. The interpolation `{{ $json.folderId }}` is NOT parameterized
+- **Priority:** Fix in next sprint. The `parseInt()` in the preceding code node currently mitigates this, but the pattern is inconsistent and fragile. Should be changed to use `$1` parameter with `queryReplacement` like the other queries.
+
+### Pre-Deployment Bugs -- Updated Status
+
+| Bug | Severity | Status | Notes |
+|---|---|---|---|
+| BUG-1 | Low | Accepted | PUT/DELETE use body/query params instead of URL path `:id` -- works as designed due to n8n webhook limitations. Spec deviation only. |
+| BUG-2 | Medium | Open | JWT manual decode without signature verification for role check. Mitigated by n8n jwtAuth but pattern is fragile. |
+| BUG-3 | Low | Accepted | Missing NAS path warning in POST response. Informational only; spec can be updated. |
+| BUG-4 | Medium | Open | Dynamic SQL construction passed via `$json.sql` in PUT endpoint. Values parameterized but pattern is fragile. |
+| BUG-5 | Low | Accepted | No rate limiting on DMS endpoints. Deliberate design decision per tech spec. |
+| BUG-6 | Low | Accepted | RLS policy is permissive. Only n8n (table owner, bypasses RLS) accesses this table. |
+| BUG-8 | High | NEW | DELETE query uses string interpolation instead of parameterized query. |
+
+### Security Audit -- Post-Deployment
+
+#### SQL Injection Surface
+- **POST (INSERT):** Safe -- uses `$1, $2, $3` parameterized query
+- **PUT (UPDATE):** Partially safe -- values parameterized, but SQL string passed between nodes (BUG-4)
+- **DELETE:** VULNERABLE pattern -- uses `{{ $json.folderId }}` interpolation (BUG-8). Currently mitigated by `parseInt()` but inconsistent with other endpoints.
+- **GET (SELECT):** Safe -- no user input in query
+
+#### Authorization Bypass Attempt
+- Non-admin users cannot see the DMS tab (frontend `isAdmin` check)
+- Non-admin users hitting the API directly get 403 (backend role check)
+- Unauthenticated requests get 401 (n8n jwtAuth)
+- **No bypass found**
+
+#### Token Handling
+- JWT stored in localStorage (standard for this project, established in PROJ-7)
+- Token sent via `Authorization: Bearer` header
+- 401 responses trigger automatic redirect to login with token cleanup
+- **No issues**
+
+### Post-Deployment Summary
+
+- **Acceptance Criteria:** 14/14 PASS (all confirmed working in production)
+- **Edge Cases:** 5/6 pass, 1 accepted deviation (BUG-3 -- missing warning)
+- **Bugs Total:** 7 (0 critical, 1 high, 2 medium, 4 low)
+  - 1 high: BUG-8 (DELETE SQL interpolation) -- should be fixed
+  - 2 medium: BUG-2 (JWT manual decode), BUG-4 (dynamic SQL in PUT) -- next sprint
+  - 4 low: BUG-1, BUG-3, BUG-5, BUG-6 -- accepted / nice-to-have
+- **Production Ready:** YES (conditionally)
+- **Recommendation:** Feature is functional and deployed. BUG-8 (High) should be fixed soon -- change the DELETE query to use parameterized `$1` with `queryReplacement` option, matching the pattern used by INSERT and UPDATE. The 2 medium bugs are mitigated and can wait for next sprint.
