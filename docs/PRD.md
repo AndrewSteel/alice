@@ -29,9 +29,11 @@ Alice ist ein lokaler, KI-first und Sprache-first Personal Assistant und Smart H
 | P0 (MVP) | HA Auto-Sync via MQTT                                        | 1.2   | Deployed |
 | P0 (MVP) | Hassil Native Library Integration (Expansion Engine Upgrade) | 1.2   | Deployed |
 | P0 (MVP) | Hassil expansion_rules Compatibility Fix                     | 1.2   | Deployed |
-| P0 (MVP) | HA Sync Python Worker (Ersatz n8n alice-ha-intent-sync)      | 1.2   | Planned  |
-| P1       | JWT Auth / Login Screen                                      | 1.5   | Planned  |
-| P1       | DMS-Pipeline (NAS → Weaviate)                                | 1.4   | Planned  |
+| P0 (MVP) | HA Sync Python Worker (Ersatz n8n alice-ha-intent-sync)      | 1.2   | Deployed |
+| P1       | JWT Auth / Login Screen                                      | 1.5   | Deployed |
+| P1       | DMS Scanner & NAS-Infrastruktur (PROJ-15)                    | 1.4   | Planned  |
+| P1       | DMS Processor Workflow (PROJ-16)                             | 1.4   | Planned  |
+| P1       | DMS Document Search Tool (PROJ-17)                           | 1.4   | Planned  |
 | P1       | Memory-Transfer PostgreSQL → Weaviate                        | 1.5   | Planned  |
 | P2       | Speech Gateway (Whisper STT + Piper TTS)                     | 2     | Planned  |
 | P2       | Speaker-ID / Sprechererkennung                               | 2     | Planned  |
