@@ -28,13 +28,12 @@ export function AppShell() {
     sendMessage,
   } = useChatSessions();
 
-  // Auto-start: wait until sessions are loaded before deciding
+  // Auto-start: always begin with a fresh empty chat on app load.
+  // Users can click on existing sessions in the sidebar to view their history.
   useEffect(() => {
     if (!sessionsLoaded) return;
-    if (sessions.length === 0) {
+    if (!activeSessionId) {
       createNewSession();
-    } else if (!activeSessionId) {
-      selectSession(sessions[0].id);
     }
   }, [sessionsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
