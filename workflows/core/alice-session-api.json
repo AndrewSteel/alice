@@ -170,7 +170,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [\n  {\n    json: {\n      sessions: $json.sessions || []\n    }\n  }\n];"
+        "jsCode": "return [\n  {\n    json: {\n      messages: $json.messages || []\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
