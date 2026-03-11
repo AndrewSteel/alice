@@ -14,8 +14,8 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-1200, 300],
-      "id": "a1000001-0001-4000-8000-000000000001",
+      "position": [30368, 3888],
+      "id": "fe1ec4ad-2450-4ea2-92f5-ec610c1119b8",
       "name": "Schedule: Hourly 07-22"
     },
     {
@@ -26,8 +26,8 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [-920, 300],
-      "id": "a1000001-0002-4000-8000-000000000002",
+      "position": [30656, 3888],
+      "id": "aa585338-cd49-4a3e-a201-94f792189bd2",
       "name": "PG: Active Folders",
       "credentials": {
         "postgres": {
@@ -63,8 +63,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-640, 300],
-      "id": "a1000001-0003-4000-8000-000000000003",
+      "position": [30928, 3888],
+      "id": "5eb20b96-f8a6-4d41-b7fb-886354e8ca77",
       "name": "IF: Has Folders"
     },
     {
@@ -107,16 +107,16 @@
       },
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [-360, 520],
-      "id": "a1000001-0004-4000-8000-000000000004",
+      "position": [31216, 4112],
+      "id": "d43d4537-2ffa-4b36-8520-dc07d0a785e0",
       "name": "Set: Empty Stats"
     },
     {
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [-80, 520],
-      "id": "a1000001-0005-4000-8000-000000000005",
+      "position": [31488, 4112],
+      "id": "93aac52d-4ca8-41a8-a9a9-05b897b5f781",
       "name": "End: No Folders"
     },
     {
@@ -125,8 +125,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-360, 300],
-      "id": "a1000001-0006-4000-8000-000000000006",
+      "position": [31216, 3888],
+      "id": "dcb6a10c-8b77-4da4-bd5e-2e45b26449aa",
       "name": "Code: Scan All Folders"
     },
     {
@@ -156,8 +156,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-80, 300],
-      "id": "a1000001-0007-4000-8000-000000000007",
+      "position": [31488, 3888],
+      "id": "fa79ab67-ae50-40d0-9b2b-289a6d7ee43a",
       "name": "IF: Has Files"
     },
     {
@@ -200,29 +200,28 @@
       },
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [200, 520],
-      "id": "a1000001-0008-4000-8000-000000000008",
+      "position": [31776, 4112],
+      "id": "79702cef-1cb0-4d73-b771-27e0dcb9195f",
       "name": "Set: No Files Stats"
     },
     {
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [480, 520],
-      "id": "a1000001-0009-4000-8000-000000000009",
+      "position": [32048, 4112],
+      "id": "05381a03-e9f8-4dc9-98c1-9e17db9c1193",
       "name": "End: No Files"
     },
     {
       "parameters": {
         "options": {
           "reset": false
-        },
-        "batchSize": 1
+        }
       },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [200, 300],
-      "id": "a1000001-0010-4000-8000-000000000010",
+      "position": [31776, 3888],
+      "id": "bd5b0563-f8a3-4493-944d-728e23e4feb3",
       "name": "Loop: Files"
     },
     {
@@ -231,8 +230,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300],
-      "id": "a1000001-0011-4000-8000-000000000011",
+      "position": [32048, 3888],
+      "id": "1df7c7a0-d9c4-4f26-b2d4-752b0d9b131c",
       "name": "Code: Hash + Size"
     },
     {
@@ -262,20 +261,21 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [760, 300],
-      "id": "a1000001-0012-4000-8000-000000000012",
+      "position": [32336, 3888],
+      "id": "50e6f937-1d65-46b6-8b60-42a071d48867",
       "name": "IF: Hash OK"
     },
     {
       "parameters": {
         "operation": "get",
+        "propertyName": "value",
         "key": "=alice:dms:processed:{{ $json.file_hash }}",
-        "propertyName": "value"
+        "options": {}
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [1040, 300],
-      "id": "a1000001-0013-4000-8000-000000000013",
+      "position": [32608, 3888],
+      "id": "c0ef1ee8-b694-4322-971d-ff5a24ff58f2",
       "name": "Redis: Check Processed",
       "credentials": {
         "redis": {
@@ -288,13 +288,11 @@
       "parameters": {
         "conditions": {
           "options": {
-            "version": 2,
             "caseSensitive": true,
-            "typeValidation": "loose",
             "leftValue": "",
-            "rightValue": ""
+            "typeValidation": "strict",
+            "version": 2
           },
-          "combinator": "and",
           "conditions": [
             {
               "id": "check-not-processed",
@@ -305,26 +303,28 @@
                 "operation": "notEquals"
               }
             }
-          ]
+          ],
+          "combinator": "and"
         },
         "options": {}
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1320, 300],
-      "id": "a1000001-0014-4000-8000-000000000014",
+      "position": [32896, 3888],
+      "id": "a1b05e58-7a79-4036-baa7-7b28d448e75e",
       "name": "IF: Not Processed"
     },
     {
       "parameters": {
         "operation": "get",
+        "propertyName": "value",
         "key": "=alice:dms:queued:{{ $('Code: Hash + Size').first().json.file_hash }}",
-        "propertyName": "value"
+        "options": {}
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [1600, 300],
-      "id": "a1000001-0015-4000-8000-000000000015",
+      "position": [33168, 3888],
+      "id": "fedd8937-56b7-4434-83d8-79e920c45d40",
       "name": "Redis: Check Queued",
       "credentials": {
         "redis": {
@@ -360,21 +360,18 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1880, 300],
-      "id": "a1000001-0016-4000-8000-000000000016",
+      "position": [33456, 3888],
+      "id": "2a25cdda-a69c-4805-b8fc-0c2af3b165a7",
       "name": "IF: Not Queued"
     },
     {
-      "parameters": {
-        "resume": "timeInterval",
-        "amount": 5,
-        "unit": "seconds"
-      },
+      "parameters": {},
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [2160, 300],
-      "id": "a1000001-0017-4000-8000-000000000017",
-      "name": "Wait: 5s Stability"
+      "position": [33728, 3888],
+      "id": "d22f9c7e-30e0-45de-8429-b0e0c6037c42",
+      "name": "Wait: 5s Stability",
+      "webhookId": "41fef22c-aa0b-49c0-84d5-bef6d78343ad"
     },
     {
       "parameters": {
@@ -382,8 +379,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2440, 300],
-      "id": "a1000001-0018-4000-8000-000000000018",
+      "position": [34016, 3888],
+      "id": "9cc488a3-31ea-4a64-8852-014a9a838d88",
       "name": "Code: Stability Check"
     },
     {
@@ -413,8 +410,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [2720, 300],
-      "id": "a1000001-0019-4000-8000-000000000019",
+      "position": [34288, 3888],
+      "id": "f7744bad-54dd-41e9-97a5-959a4ae778b7",
       "name": "IF: Size Stable"
     },
     {
@@ -444,18 +441,18 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [3000, 300],
-      "id": "a1000001-0020-4000-8000-000000000020",
+      "position": [34576, 3888],
+      "id": "fd954f3c-c19b-4feb-a476-1a5a42ff3954",
       "name": "IF: Is PDF"
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nlet needs_ocr = true;\ntry {\n  // Read first 64KB only — enough to find text markers\n  const fd = fs.openSync(item.file_path, 'r');\n  const buf = Buffer.alloc(65536);\n  fs.readSync(fd, buf, 0, 65536, 0);\n  fs.closeSync(fd);\n  const sample = buf.toString('latin1');\n  // BT (Begin Text) is present in every PDF with a real text layer\n  needs_ocr = !(sample.includes('BT ') || sample.includes('BT\\n') || sample.includes('BT\\r'));\n} catch(e) {\n  // On error: safe default — assume OCR needed\n  needs_ocr = true;\n}\nreturn [{ json: { ...item, needs_ocr } }];"
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nlet needs_ocr = true;\ntry {\n  // Read first 64KB only — enough to find text markers\n  const fd = fs.openSync(item.file_path, 'r');\n  const buf = Buffer.alloc(65536);\n  fs.readSync(fd, buf, 0, 65536, 0);\n  fs.closeSync(fd);\n  const sample = buf.toString('latin1');\n  // Font is present in every PDF with a real text layer\n  needs_ocr = !(sample.includes('Font'));\n} catch(e) {\n  // On error: safe default — assume OCR needed\n  needs_ocr = true;\n}\nreturn [{ json: { ...item, needs_ocr } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3280, 200],
-      "id": "a1000001-0023-4000-8000-000000000023",
+      "position": [34848, 3792],
+      "id": "a4acadb2-7689-4a4a-a388-a361c444860c",
       "name": "Code: OCR Check",
       "continueOnFail": true
     },
@@ -465,8 +462,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3280, 440],
-      "id": "a1000001-0024-4000-8000-000000000024",
+      "position": [34848, 4032],
+      "id": "afa76f64-0036-443f-87a3-cb40178ffb17",
       "name": "Set: No OCR Needed"
     },
     {
@@ -475,13 +472,197 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4400, 300],
-      "id": "a1000001-0026-4000-8000-000000000026",
+      "position": [35968, 3888],
+      "id": "13c73607-1625-4a84-adae-804bca763418",
       "name": "Code: Set Priority"
     },
     {
       "parameters": {
-        "topic": "alice/dms/new",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-pdf-text",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-pdf-no-ocr",
+                    "leftValue": "={{ $json.needs_ocr }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "PDF (text)"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-pdf-ocr",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-pdf-needs-ocr",
+                    "leftValue": "={{ $json.needs_ocr }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "PDF (OCR)"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-txt",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "txt",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-md",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "md",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": true,
+              "outputKey": "TXT / MD"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-docx",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "docx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-doc",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "doc",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-odt",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "odt",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-xlsx",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "xlsx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-xls",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "xls",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "route-ods",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "ods",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": true,
+              "outputKey": "Office"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [36256, 3888],
+      "id": "c09f05cf-4dd3-4a55-9ad2-635bc2974602",
+      "name": "Switch: Route by Type"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/pdf",
         "sendInputData": false,
         "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
         "options": {
@@ -490,9 +671,72 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [4680, 300],
-      "id": "a1000001-0027-4000-8000-000000000027",
-      "name": "MQTT: Publish New File",
+      "position": [36528, 3648],
+      "id": "c09bf5e6-de56-4177-96a6-62919897dfdd",
+      "name": "MQTT: Publish PDF",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/ocr",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [36528, 3824],
+      "id": "ecfeba66-f351-411b-af4f-fb391bbe5eb5",
+      "name": "MQTT: Publish OCR",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/txt",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [36528, 4000],
+      "id": "6e734140-246c-4647-82c9-853902fdaa51",
+      "name": "MQTT: Publish TXT",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/office",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [36528, 4192],
+      "id": "742d6835-2bd5-4200-b426-6d6e95272fe8",
+      "name": "MQTT: Publish Office",
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -504,13 +748,12 @@
       "parameters": {
         "operation": "set",
         "key": "=alice:dms:queued:{{ $json.file_hash }}",
-        "value": "1",
-        "expire": false
+        "value": "1"
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [4960, 300],
-      "id": "a1000001-0028-4000-8000-000000000028",
+      "position": [36816, 3888],
+      "id": "15932bad-ec07-4bdf-bde7-95ef6357c278",
       "name": "Redis: Mark Queued",
       "credentials": {
         "redis": {
@@ -521,17 +764,18 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-scanner\n\nScheduled hourly (07:00-22:00).\n\nScans NAS folders from alice.dms_watched_folders,\nfinds new documents, checks dedup via Redis,\nverifies file stability (5s wait),\nchecks PDF text layer for OCR needs,\npublishes to MQTT alice/dms/new.\n\n### Redis Key Pattern\n- `alice:dms:processed:{hash}` = already processed\n- `alice:dms:queued:{hash}` = in queue\n\n### Dedup Note\nUses Redis GET/SET with individual keys per hash\ninstead of SISMEMBER/SADD (n8n Redis node v1\ndoes not support set operations natively).",
-        "width": 360,
-        "height": 380
+        "content": "## alice-dms-scanner\n\nScheduled hourly (07:00-22:00).\n\nScans NAS folders from alice.dms_watched_folders,\nfinds new documents, checks dedup via Redis,\nverifies file stability (5s wait),\nchecks PDF text layer for OCR needs,\nroutes to type-specific MQTT queues:\n- alice/dms/pdf (PDF with text layer)\n- alice/dms/ocr (PDF needing OCR)\n- alice/dms/txt (TXT, MD)\n- alice/dms/office (DOCX, DOC, ODT, XLSX, XLS, ODS)\n\n### Redis Key Pattern\n- `alice:dms:processed:{hash}` = already processed\n- `alice:dms:queued:{hash}` = in queue\n\n### Dedup Note\nUses Redis GET/SET with individual keys per hash\ninstead of SISMEMBER/SADD (n8n Redis node v1\ndoes not support set operations natively).",
+        "height": 380,
+        "width": 360
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [-1200, -140],
-      "id": "a1000001-0029-4000-8000-000000000029",
+      "position": [30368, 3440],
+      "id": "2fdda6a4-a9cc-470f-98ab-e42f7f19fd37",
       "name": "Sticky: Overview"
     }
   ],
+  "pinData": {},
   "connections": {
     "Schedule: Hourly 07-22": {
       "main": [
@@ -807,14 +1051,79 @@
       "main": [
         [
           {
-            "node": "MQTT: Publish New File",
+            "node": "Switch: Route by Type",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MQTT: Publish New File": {
+    "Switch: Route by Type": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQTT: Publish OCR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQTT: Publish TXT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQTT: Publish Office",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish PDF": {
+      "main": [
+        [
+          {
+            "node": "Redis: Mark Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish OCR": {
+      "main": [
+        [
+          {
+            "node": "Redis: Mark Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish TXT": {
+      "main": [
+        [
+          {
+            "node": "Redis: Mark Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Office": {
       "main": [
         [
           {
@@ -837,12 +1146,17 @@
       ]
     }
   },
-  "pinData": {},
+  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
-  "active": false,
-  "tags": [],
-  "meta": {},
-  "id": "agJgZmjdcNiAP0VA"
+  "versionId": "19a39f6a-b29f-4b87-a5d9-560de7e11524",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
+  },
+  "id": "agJgZmjdcNiAP0VA",
+  "tags": []
 }

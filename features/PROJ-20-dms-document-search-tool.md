@@ -1,16 +1,16 @@
-# PROJ-18: DMS Document Search Tool (alice-tool-search)
+# PROJ-20: DMS Document Search Tool (alice-tool-search)
 
 ## Status: Planned
 **Created:** 2026-03-09
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-03-11
 
 ## Dependencies
-- Requires: PROJ-17 (DMS Processor) — Weaviate muss mit Dokumenten befüllt sein
+- Requires: PROJ-19 (DMS Processor) — Weaviate muss mit Dokumenten befüllt sein
 - Requires: PROJ-3 (HA-First Chat Handler) — alice-chat-handler muss den Sub-Workflow aufrufen können
 
 ## Overview
 
-Implementierung des `alice-tool-search` n8n Sub-Workflows sowie Integration als Tool im `alice-chat-handler`. Der Workflow nimmt eine semantische Suchanfrage (+ optionale Filter) entgegen, führt eine Weaviate nearText-Suche über alle DMS-Collections durch und gibt formatierte Ergebnisse zurück, die der Chat-Handler als Tool-Response an Qwen2.5 weitergibt.
+Implementierung des `alice-tool-search` n8n Sub-Workflows sowie Integration als Tool im `alice-chat-handler`. Der Workflow nimmt eine semantische Suchanfrage (+ optionale Filter) entgegen, führt eine Weaviate nearText-Suche über alle DMS-Collections durch und gibt formatierte Ergebnisse zurück, die der Chat-Handler als Tool-Response an Qwen3:14b weitergibt.
 
 ## User Stories
 

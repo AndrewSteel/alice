@@ -28,10 +28,12 @@
 | PROJ-13 | Auth-Endpoint Rate-Limiting (Login Brute-Force Schutz)                      | Deployed | [PROJ-13-auth-rate-limiting.md](PROJ-13-auth-rate-limiting.md)                                                     | 2026-03-06 |
 | PROJ-14 | Sidebar Context-Menu & Session-Persistenz                                   | Deployed | [PROJ-14-sidebar-context-menu-and-session-persistence.md](PROJ-14-sidebar-context-menu-and-session-persistence.md) | 2026-03-06 |
 | PROJ-15 | DMS NAS-Ordner-Verwaltung (CRUD via REST API + Frontend)                    | Deployed | [PROJ-15-dms-folder-management.md](PROJ-15-dms-folder-management.md)                                               | 2026-03-09 |
-| PROJ-16 | DMS Scanner & NAS Multi-Format-Scan                                         | Deployed    | [PROJ-16-dms-scanner-nas-infrastructure.md](PROJ-16-dms-scanner-nas-infrastructure.md)                             | 2026-03-09 |
-| PROJ-17 | DMS Processor Workflow (Multi-Format + OCR)                                 | Planned  | [PROJ-17-dms-processor-workflow.md](PROJ-17-dms-processor-workflow.md)                                             | 2026-03-09 |
-| PROJ-18 | DMS Document Search Tool (alice-tool-search)                                | Planned  | [PROJ-18-dms-document-search-tool.md](PROJ-18-dms-document-search-tool.md)                                         | 2026-03-09 |
+| PROJ-16 | DMS Scanner & NAS Multi-Format-Scan                                         | Deployed | [PROJ-16-dms-scanner-nas-infrastructure.md](PROJ-16-dms-scanner-nas-infrastructure.md)                                         | 2026-03-09 |
+| PROJ-17 | DMS Scanner Multi-Queue-Routing (Erweiterung PROJ-16)                       | Deployed  | [PROJ-17-dms-scanner-multi-queue-routing.md](PROJ-17-dms-scanner-multi-queue-routing.md)                                       | 2026-03-11 |
+| PROJ-18 | DMS Text-Extractor-Container (pdf/ocr/txt/office → plaintext)               | Planned  | [PROJ-18-dms-text-extractor-containers.md](PROJ-18-dms-text-extractor-containers.md)                                           | 2026-03-11 |
+| PROJ-19 | DMS Processor Workflow (LLM-Klassifikation + Weaviate)                      | Planned  | [PROJ-19-dms-processor-workflow.md](PROJ-19-dms-processor-workflow.md)                                                         | 2026-03-09 |
+| PROJ-20 | DMS Document Search Tool (alice-tool-search)                                | Planned  | [PROJ-20-dms-document-search-tool.md](PROJ-20-dms-document-search-tool.md)                                                     | 2026-03-09 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-19
+## Next Available ID: PROJ-21
