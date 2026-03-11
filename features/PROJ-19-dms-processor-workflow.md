@@ -5,14 +5,14 @@
 **Last Updated:** 2026-03-11
 
 ## Dependencies
-- Requires: PROJ-18 (DMS Extractor Container) — `alice/dms/plaintext` Queue muss mit extrahierten Texten befüllt sein
+- Requires: PROJ-18 (DMS Extractor Container) — Redis List `alice:dms:plaintext` muss mit extrahierten Texten befüllt sein
 - Requires: PROJ-17 (DMS Scanner Multi-Queue) — Scanner muss Dateien in die Extractor-Queues stellen
 - Requires: PROJ-15 (DMS Ordnerverwaltung) — `alice.dms_watched_folders` muss existieren
 - Weaviate Collections (`Rechnung`, `Kontoauszug`, `Dokument`, `Email`, `WertpapierAbrechnung`, `Vertrag`) müssen existieren
 
 ## Overview
 
-Implementierung des `alice-dms-processor` n8n Workflows. Er läuft nächtlich, liest fertig extrahierte Plaintext-Nachrichten aus der MQTT-Queue `alice/dms/plaintext` (befüllt von den Extractor-Containern aus PROJ-18) und führt folgende Schritte durch:
+Implementierung des `alice-dms-processor` n8n Workflows. Er läuft nächtlich, liest fertig extrahierte Plaintext-Einträge aus der Redis List `alice:dms:plaintext` (befüllt von den Extractor-Containern aus PROJ-18) und führt folgende Schritte durch:
 
 1. **LLM-Klassifikation** (nur wenn `suggested_type: auto`) — Qwen3:14b bestimmt den Dokumenttyp
 2. **Typenspezifische Feldextraktion** — Qwen3:14b extrahiert strukturierte Felder je Dokumenttyp
@@ -35,7 +35,7 @@ Der Workflow läuft nachts, um die GPU (Qwen3:14b via Ollama) nicht tagsüber f�
 
 - [ ] n8n Workflow `alice-dms-processor` existiert und ist aktiv
 - [ ] Trigger: Schedule, täglich 02:00 Uhr
-- [ ] Workflow liest bis zu `MAX_DOCS_PER_RUN` (Default: 50) Nachrichten von MQTT `alice/dms/plaintext`
+- [ ] Workflow liest bis zu `MAX_DOCS_PER_RUN` (Default: 50) Einträge via `LRANGE alice:dms:plaintext 0 49` aus Redis und entfernt sie anschließend via `LTRIM`
 - [ ] Nachrichten mit `extraction_failed: true` werden direkt als Fehler behandelt (kein LLM-Aufruf)
 - [ ] **LLM-Klassifikation** (Qwen3:14b via Ollama): nur wenn `suggested_type: auto`; bestimmt `document_type`
 - [ ] Bei bekanntem `suggested_type` (nicht `auto`): wird direkt als `document_type` übernommen (kein LLM-Klassifikations-Aufruf)
@@ -71,7 +71,7 @@ Extrahierte Felder: `vertragsart`, `vertragspartner`, `vertragsdatum` (ISO), `la
 
 ## Edge Cases
 
-- **`extraction_failed: true` in Queue-Nachricht**: Kein LLM-Aufruf, kein Weaviate-Insert. Datei wird nach `<ordner>/fehler/` verschoben, Hash aus `queued_files` entfernt, Fehler an `alice/dms/error` gepublisht.
+- **`extraction_failed: true` in Redis-Eintrag**: Kein LLM-Aufruf, kein Weaviate-Insert. Datei wird nach `<ordner>/fehler/` verschoben, Hash aus `queued_files` entfernt, Fehler an `alice/dms/error` gepublisht (MQTT, Monitoring).
 - **LLM gibt ungültiges JSON zurück**: Retry 1×. Bei erneutem Fehler: `document_type: "Dokument"`, leeres Feldobjekt, `extraction_failed: true`.
 - **`suggested_type: auto` — LLM kann Typ nicht bestimmen**: Fallback auf `document_type: "Dokument"`.
 - **Weaviate nicht erreichbar**: Gesamter Run abgebrochen, keine Dateien werden verschoben. Hash verbleibt in `queued_files` (nächste Nacht Retry).
@@ -79,7 +79,7 @@ Extrahierte Felder: `vertragsart`, `vertragspartner`, `vertragsdatum` (ISO), `la
 - **Datei am Ursprungsort bereits gelöscht**: Warnung ins Log, trotzdem als verarbeitet markieren.
 - **`plaintext` leer, `extraction_failed: false`** (Extractor-Fehler nicht korrekt gesetzt): LLM versucht Klassifikation trotzdem; bei leerem Text Fallback auf `document_type: "Dokument"`.
 - **Gleicher Hash zweimal in Queue**: Zweites Item wird übersprungen (Redis `processed_files` Check).
-- **MQTT Queue leer**: Workflow endet sofort mit `processed: 0`.
+- **Redis List leer**: `LRANGE` gibt leeres Array zurück, Workflow endet sofort mit `processed: 0`.
 - **Sehr langer Plaintext (> 10.000 Zeichen)**: Wird für Weaviate auf 10.000 Zeichen gekürzt; voller Text für LLM-Extraktion auf 20.000 Zeichen begrenzt.
 
 ## Technical Requirements
@@ -87,8 +87,9 @@ Extrahierte Felder: `vertragsart`, `vertragspartner`, `vertragsdatum` (ISO), `la
 - **Trigger**: n8n Schedule Trigger, täglich 02:00 Uhr
 - **MAX_DOCS_PER_RUN**: 50 (konfigurierbare Konstante im Workflow)
 - **LLM**: Ollama `qwen3:14b` via n8n Ollama-Node oder HTTP-Request
-- **Input-Queue**: `alice/dms/plaintext` (von PROJ-18 Extractor-Containern befüllt)
-- **Keine Textextraktion im Workflow** — Plaintext kommt fertig aus der Queue
+- **Input-Queue**: Redis List `alice:dms:plaintext` (von PROJ-18 Extractor-Containern via RPUSH befüllt)
+- **Queue-Verarbeitung**: `LRANGE 0 49` lesen → verarbeiten → `LTRIM 50 -1` (atomares Drainieren der ersten 50 Einträge)
+- **Keine Textextraktion im Workflow** — Plaintext kommt fertig aus Redis
 - **Weaviate-Insert**: HTTP-Request an `http://weaviate:8080/v1/objects`
 - **Collection-Mapping**:
   ```
@@ -100,7 +101,7 @@ Extrahierte Felder: `vertragsart`, `vertragspartner`, `vertragsdatum` (ISO), `la
   Vertrag              → Vertrag
   (fallback)           → Dokument
   ```
-- **n8n Credentials**: MQTT (`mqtt-alice`), Ollama (`Ollama 3090`), Redis (`redis-alice`), PostgreSQL (`pg-alice`)
+- **n8n Credentials**: Redis (`redis-alice`, Queue-Lesen), Ollama (`Ollama 3090`), MQTT (`mqtt-alice`, done/error Notifications), PostgreSQL (`pg-alice`)
 - **Workflow-Datei**: `workflows/core/alice-dms-processor.json`
 
 ---

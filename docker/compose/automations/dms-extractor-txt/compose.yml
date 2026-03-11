@@ -1,0 +1,30 @@
+services:
+  dms-extractor-txt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dms-extractor-txt
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - /mnt/nas:/mnt/nas:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "const fs=require(\"fs\"); const t=Number(fs.readFileSync(\"/tmp/heartbeat\",\"utf8\")); process.exit(Date.now()-t<90000?0:1)"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      backend:
+        aliases: [dms-extractor-txt]
+
+networks:
+  backend:
+    external: true
+    name: backend

@@ -16,6 +16,10 @@ STACKS ?= \
   automations/alice-auth \
   automations/mqtt \
   automations/weaviate \
+  automations/dms-extractor-pdf \
+  automations/dms-extractor-ocr \
+  automations/dms-extractor-txt \
+  automations/dms-extractor-office \
   ai/ollama \
   ai/openwebui \
   ai/whisper \
