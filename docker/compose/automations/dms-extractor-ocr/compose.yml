@@ -1,0 +1,30 @@
+services:
+  dms-extractor-ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dms-extractor-ocr
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - /mnt/nas:/mnt/nas:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import os,time; t=float(open(''/tmp/heartbeat'').read()); exit(0 if time.time()-t<90 else 1)"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      backend:
+        aliases: [dms-extractor-ocr]
+
+networks:
+  backend:
+    external: true
+    name: backend

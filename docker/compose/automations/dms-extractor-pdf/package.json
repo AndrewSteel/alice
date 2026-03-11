@@ -1,0 +1,10 @@
+{
+  "name": "dms-extractor-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "mqtt": "^5.10.0",
+    "ioredis": "^5.4.0",
+    "pdf-parse": "^1.1.1"
+  }
+}

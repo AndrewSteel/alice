@@ -34,6 +34,10 @@ docker/compose/automations/n8n/.env
 docker/compose/automations/hassil-parser/.env
 docker/compose/automations/alice-auth/.env
 docker/compose/automations/alice-ha-sync/.env
+docker/compose/automations/dms-extractor-ocr/.env
+docker/compose/automations/dms-extractor-pdf/.env
+docker/compose/automations/dms-extractor-office/.env
+docker/compose/automations/dms-extractor-txt/.env
 
 # Home Assistant configuration
 config/*
