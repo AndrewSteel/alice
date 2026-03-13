@@ -1,0 +1,259 @@
+{
+  "class": "Document",
+  "description": "General documents",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "title",
+      "description": "Title / subject of the document",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "documentType",
+      "description": "Type: letter, notice, information, manual, protocol, note, other",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "sender",
+      "description": "Sender / issuer",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "recipient",
+      "description": "Recipient",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "documentDate",
+      "description": "Date of the document",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "category",
+      "description": "Category: government, insurance, health, education, work, personal, etc.",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "tags",
+      "description": "Tags / keywords",
+      "dataType": ["text[]"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "referenceNumber",
+      "description": "Reference number (if applicable)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "deadline",
+      "description": "Deadline (if applicable)",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "priority",
+      "description": "Priority: low, normal, high, urgent",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "status",
+      "description": "Status: new, in_progress, done, archived",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fullText",
+      "description": "Extracted full text",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "summary",
+      "description": "AI-generated summary",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "fileName",
+      "description": "Original file name",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "filePath",
+      "description": "Path to the archived file",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fileHash",
+      "description": "SHA256 hash of the file",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fileType",
+      "description": "File type extension (pdf, txt, docx, etc.)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdBy",
+      "description": "User who added the document",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdAt",
+      "description": "Timestamp when recorded in the system",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "updatedAt",
+      "description": "Last update timestamp",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    }
+  ]
+}

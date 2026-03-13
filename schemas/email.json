@@ -1,6 +1,6 @@
 {
   "class": "Email",
-  "description": "Archivierte E-Mails",
+  "description": "Email messages",
   "vectorizer": "text2vec-transformers",
   "vectorIndexConfig": {
     "distance": "cosine"
@@ -12,170 +12,253 @@
   },
   "properties": [
     {
-      "name": "betreff",
-      "description": "Betreff der E-Mail",
+      "name": "subject",
+      "description": "Email subject",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": true
     },
     {
-      "name": "absender",
-      "description": "Absender E-Mail-Adresse",
+      "name": "sender",
+      "description": "Sender email address",
       "dataType": ["text"],
       "indexFilterable": true,
-      "indexSearchable": true
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     },
     {
-      "name": "absenderName",
-      "description": "Absender Name",
+      "name": "senderName",
+      "description": "Sender display name",
       "dataType": ["text"],
       "indexFilterable": true,
-      "indexSearchable": true
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     },
     {
-      "name": "empfaenger",
-      "description": "Empfänger E-Mail-Adresse(n)",
+      "name": "recipients",
+      "description": "Recipient email address(es)",
       "dataType": ["text[]"],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
       "name": "cc",
-      "description": "CC-Empfänger",
+      "description": "CC recipients",
       "dataType": ["text[]"],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "datum",
-      "description": "Datum und Uhrzeit der E-Mail",
+      "name": "date",
+      "description": "Date and time of the email",
       "dataType": ["date"],
       "indexFilterable": true,
-      "indexSearchable": false
-    },
-    {
-      "name": "kategorie",
-      "description": "Kategorie: Geschäftlich, Privat, Newsletter, Bestellung, Support, etc.",
-      "dataType": ["text"],
-      "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "wichtigkeit",
-      "description": "Wichtigkeit: niedrig, normal, hoch",
+      "name": "category",
+      "description": "Category: business, personal, newsletter, order, support, etc.",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
+      "tokenization": "keyword",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "hatAnhaenge",
-      "description": "Hat Anhänge",
+      "name": "importance",
+      "description": "Importance: low, normal, high",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "hasAttachments",
+      "description": "Has attachments",
       "dataType": ["boolean"],
       "indexFilterable": true,
-      "indexSearchable": false
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     },
     {
-      "name": "anhaenge",
-      "description": "Liste der Anhänge als JSON",
-      "dataType": ["text"],
+      "name": "attachments",
+      "description": "List of attachments",
+      "dataType": ["text[]"],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "inhalt",
-      "description": "E-Mail-Inhalt (Text)",
+      "name": "content",
+      "description": "Email body content",
       "dataType": ["text"],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
-      "name": "zusammenfassung",
-      "description": "KI-generierte Zusammenfassung",
+      "name": "summary",
+      "description": "AI-generated summary",
       "dataType": ["text"],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "threadId",
-      "description": "Thread-ID für Konversationsgruppierung",
+      "description": "Thread ID for conversation grouping",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
+      "tokenization": "keyword",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
       "name": "messageId",
-      "description": "Message-ID der E-Mail",
+      "description": "Message-ID of the email",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
+      "tokenization": "keyword",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "dateiname",
-      "description": "Original-Dateiname (wenn als .eml gespeichert)",
+      "name": "fileName",
+      "description": "Original file name (if stored as .eml)",
       "dataType": ["text"],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "dateipfad",
-      "description": "Pfad zur archivierten Datei",
+      "name": "filePath",
+      "description": "Path to the archived file",
       "dataType": ["text"],
-      "indexFilterable": false,
+      "indexFilterable": true,
       "indexSearchable": false,
+      "tokenization": "keyword",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "dateiHash",
-      "description": "SHA256-Hash",
+      "name": "fileHash",
+      "description": "SHA256 hash",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fileType",
+      "description": "File type extension (eml, msg, txt, etc.)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdBy",
+      "description": "User who archived the email",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
       }
     },
     {
-      "name": "erstelltVon",
-      "description": "User der die E-Mail archiviert hat",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
-      }
-    },
-    {
-      "name": "erstelltAm",
-      "description": "Zeitpunkt der Archivierung",
+      "name": "createdAt",
+      "description": "Timestamp of archival",
       "dataType": ["date"],
       "indexFilterable": true,
-      "indexSearchable": false
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     }
   ]
 }

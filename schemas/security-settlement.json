@@ -1,0 +1,464 @@
+{
+  "class": "SecuritySettlement",
+  "description": "Securities trading settlement documents",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "transactionType",
+      "description": "Type: buy, sell, dividend, distribution, spin-off, split, transfer in, transfer out",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "bank",
+      "description": "Custodian bank / broker",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "depotNumber",
+      "description": "Depot number (masked)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "securityName",
+      "description": "Name of the security",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "isin",
+      "description": "ISIN of the security",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "wkn",
+      "description": "WKN of the security",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "ticker",
+      "description": "Ticker symbol",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "securityType",
+      "description": "Type: stock, ETF, fund, bond, certificate, option",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "exchange",
+      "description": "Exchange / trading venue",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "transactionDate",
+      "description": "Date of the transaction",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "valueDate",
+      "description": "Value date",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "quantity",
+      "description": "Number of units",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "price",
+      "description": "Price per unit",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "priceCurrency",
+      "description": "Currency of the price",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "marketValue",
+      "description": "Total market value (quantity x price)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "commission",
+      "description": "Commission / order fee",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fees",
+      "description": "Additional fees (exchange, etc.)",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "totalCosts",
+      "description": "Sum of all costs",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "settlementAmount",
+      "description": "Final settlement amount (debit/credit)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "settlementCurrency",
+      "description": "Settlement currency",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "exchangeRate",
+      "description": "Exchange rate for foreign currency",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "taxes",
+      "description": "Tax details as JSON",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "withholdingTax",
+      "description": "Withholding tax (on dividends)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "capitalGainsTax",
+      "description": "Capital gains tax",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "solidaritySurcharge",
+      "description": "Solidarity surcharge",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "churchTax",
+      "description": "Church tax",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "referenceNumber",
+      "description": "Reference / order number",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fullText",
+      "description": "Extracted full text",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "summary",
+      "description": "AI-generated summary",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "fileName",
+      "description": "Original file name",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "filePath",
+      "description": "Path to the archived file",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fileHash",
+      "description": "SHA256 hash of the file",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "fileType",
+      "description": "File type extension (pdf, txt, docx, etc.)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdBy",
+      "description": "User who added the document",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdAt",
+      "description": "Timestamp when recorded in the system",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    }
+  ]
+}

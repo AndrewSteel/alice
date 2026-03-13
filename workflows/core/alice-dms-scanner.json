@@ -14,7 +14,10 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [30368, 3888],
+      "position": [
+        30368,
+        3888
+      ],
       "id": "fe1ec4ad-2450-4ea2-92f5-ec610c1119b8",
       "name": "Schedule: Hourly 07-22"
     },
@@ -26,7 +29,10 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [30656, 3888],
+      "position": [
+        30656,
+        3888
+      ],
       "id": "aa585338-cd49-4a3e-a201-94f792189bd2",
       "name": "PG: Active Folders",
       "credentials": {
@@ -63,7 +69,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [30928, 3888],
+      "position": [
+        30928,
+        3888
+      ],
       "id": "5eb20b96-f8a6-4d41-b7fb-886354e8ca77",
       "name": "IF: Has Folders"
     },
@@ -107,7 +116,10 @@
       },
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [31216, 4112],
+      "position": [
+        31216,
+        4112
+      ],
       "id": "d43d4537-2ffa-4b36-8520-dc07d0a785e0",
       "name": "Set: Empty Stats"
     },
@@ -115,7 +127,10 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [31488, 4112],
+      "position": [
+        31488,
+        4112
+      ],
       "id": "93aac52d-4ca8-41a8-a9a9-05b897b5f781",
       "name": "End: No Folders"
     },
@@ -125,7 +140,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [31216, 3888],
+      "position": [
+        31216,
+        3888
+      ],
       "id": "dcb6a10c-8b77-4da4-bd5e-2e45b26449aa",
       "name": "Code: Scan All Folders"
     },
@@ -156,7 +174,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [31488, 3888],
+      "position": [
+        31488,
+        3888
+      ],
       "id": "fa79ab67-ae50-40d0-9b2b-289a6d7ee43a",
       "name": "IF: Has Files"
     },
@@ -200,7 +221,10 @@
       },
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [31776, 4112],
+      "position": [
+        31776,
+        4112
+      ],
       "id": "79702cef-1cb0-4d73-b771-27e0dcb9195f",
       "name": "Set: No Files Stats"
     },
@@ -208,7 +232,10 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [32048, 4112],
+      "position": [
+        32048,
+        4112
+      ],
       "id": "05381a03-e9f8-4dc9-98c1-9e17db9c1193",
       "name": "End: No Files"
     },
@@ -220,7 +247,10 @@
       },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [31776, 3888],
+      "position": [
+        31776,
+        3888
+      ],
       "id": "bd5b0563-f8a3-4493-944d-728e23e4feb3",
       "name": "Loop: Files"
     },
@@ -230,7 +260,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [32048, 3888],
+      "position": [
+        32048,
+        3888
+      ],
       "id": "1df7c7a0-d9c4-4f26-b2d4-752b0d9b131c",
       "name": "Code: Hash + Size"
     },
@@ -261,77 +294,25 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [32336, 3888],
+      "position": [
+        32336,
+        3888
+      ],
       "id": "50e6f937-1d65-46b6-8b60-42a071d48867",
       "name": "IF: Hash OK"
     },
     {
       "parameters": {
-        "operation": "get",
-        "propertyName": "value",
-        "key": "=alice:dms:processed:{{ $json.file_hash }}",
-        "options": {}
+        "jsCode": "const redis = require('redis');\nconst fs = require('fs');\nconst item = $input.first().json;\nconst filePath = item.file_path;\nconst currentHash = item.file_hash;\n\nif (!currentHash) {\n  return [{ json: { ...item, _lifecycle_action: 'skip', _skip: true } }];\n}\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  // Check 1: Known path -> hash mapping\n  const knownHashForPath = await client.hGet('alice:dms:path_to_hash', filePath);\n  \n  if (knownHashForPath) {\n    if (knownHashForPath === currentHash) {\n      return [{ json: { ...item, _lifecycle_action: 'already_processed', _skip: true } }];\n    } else {\n      // File changed: same path, different hash\n      await client.sRem('alice:dms:processed', knownHashForPath);\n      return [{ json: { ...item, _lifecycle_action: 'replace', _old_hash: knownHashForPath } }];\n    }\n  }\n  \n  // Check 2: Is this hash already processed (potentially at a different path)?\n  const isProcessed = await client.sIsMember('alice:dms:processed', currentHash);\n  \n  if (isProcessed) {\n    const knownPaths = await client.sMembers(`alice:dms:hash_to_paths:${currentHash}`);\n    \n    if (knownPaths.length === 0) {\n      return [{ json: { ...item, _lifecycle_action: 'new' } }];\n    }\n    \n    const existingPaths = knownPaths.filter(p => {\n      try { fs.accessSync(p, fs.constants.F_OK); return true; } catch(e) { return false; }\n    });\n    \n    if (existingPaths.length === 0) {\n      return [{ json: { ...item, _lifecycle_action: 'update_path', _old_paths: knownPaths } }];\n    } else {\n      const deadPaths = knownPaths.filter(p => !existingPaths.includes(p));\n      for (const p of deadPaths) {\n        await client.sRem(`alice:dms:hash_to_paths:${currentHash}`, p);\n      }\n      return [{ json: { ...item, _lifecycle_action: 'add_path', _known_paths: existingPaths } }];\n    }\n  }\n  \n  // Check 3: Is hash currently in the processing queue?\n  const isQueued = await client.sIsMember('alice:dms:queued_files', currentHash);\n  if (isQueued) {\n    return [{ json: { ...item, _lifecycle_action: 'already_queued', _skip: true } }];\n  }\n  \n  return [{ json: { ...item, _lifecycle_action: 'new' } }];\n  \n} finally {\n  await client.quit();\n}"
       },
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [32608, 3888],
-      "id": "c0ef1ee8-b694-4322-971d-ff5a24ff58f2",
-      "name": "Redis: Check Processed",
-      "credentials": {
-        "redis": {
-          "id": "DtO8rm7fWa7IYMen",
-          "name": "redis-alice"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "check-not-processed",
-              "leftValue": "={{ $json.value }}",
-              "rightValue": "1",
-              "operator": {
-                "type": "string",
-                "operation": "notEquals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [32896, 3888],
-      "id": "a1b05e58-7a79-4036-baa7-7b28d448e75e",
-      "name": "IF: Not Processed"
-    },
-    {
-      "parameters": {
-        "operation": "get",
-        "propertyName": "value",
-        "key": "=alice:dms:queued:{{ $('Code: Hash + Size').first().json.file_hash }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [33168, 3888],
-      "id": "fedd8937-56b7-4434-83d8-79e920c45d40",
-      "name": "Redis: Check Queued",
-      "credentials": {
-        "redis": {
-          "id": "DtO8rm7fWa7IYMen",
-          "name": "redis-alice"
-        }
-      }
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32620,
+        3888
+      ],
+      "id": "lifecycle-check-01-alice-dms-scanner-v1",
+      "name": "Code: Lifecycle Check"
     },
     {
       "parameters": {
@@ -339,18 +320,18 @@
           "options": {
             "version": 2,
             "caseSensitive": true,
-            "typeValidation": "loose",
+            "typeValidation": "strict",
             "leftValue": "",
             "rightValue": ""
           },
           "combinator": "and",
           "conditions": [
             {
-              "id": "check-not-queued",
-              "leftValue": "={{ $json.value }}",
-              "rightValue": "1",
+              "id": "check-not-skip",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
               "operator": {
-                "type": "string",
+                "type": "boolean",
                 "operation": "notEquals"
               }
             }
@@ -360,15 +341,88 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [33456, 3888],
-      "id": "2a25cdda-a69c-4805-b8fc-0c2af3b165a7",
-      "name": "IF: Not Queued"
+      "position": [
+        32920,
+        3888
+      ],
+      "id": "lifecycle-route-01-alice-dms-scanner-v1",
+      "name": "IF: Route Lifecycle Action"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "check-new",
+              "leftValue": "={{ $json._lifecycle_action }}",
+              "rightValue": "new",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "check-replace",
+              "leftValue": "={{ $json._lifecycle_action }}",
+              "rightValue": "replace",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        33220,
+        3888
+      ],
+      "id": "lifecycle-event-01-alice-dms-scanner-v1",
+      "name": "IF: Is Lifecycle Event"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/lifecycle",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify( $json._lifecycle_action === 'update_path' ? { action: 'update_path', file_hash: $json.file_hash, file_path: $json.file_path, old_paths: $json._old_paths || [], detected_at: new Date().toISOString() } : { action: 'add_path', file_hash: $json.file_hash, file_path: $json.file_path, detected_at: new Date().toISOString() } ) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        33520,
+        4200
+      ],
+      "id": "mqtt-lifecycle-01-alice-dms-scanner-v1",
+      "name": "MQTT: Publish Lifecycle",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
     },
     {
       "parameters": {},
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [33728, 3888],
+      "position": [
+        33728,
+        3888
+      ],
       "id": "d22f9c7e-30e0-45de-8429-b0e0c6037c42",
       "name": "Wait: 5s Stability",
       "webhookId": "41fef22c-aa0b-49c0-84d5-bef6d78343ad"
@@ -379,7 +433,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [34016, 3888],
+      "position": [
+        34016,
+        3888
+      ],
       "id": "9cc488a3-31ea-4a64-8852-014a9a838d88",
       "name": "Code: Stability Check"
     },
@@ -410,7 +467,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [34288, 3888],
+      "position": [
+        34288,
+        3888
+      ],
       "id": "f7744bad-54dd-41e9-97a5-959a4ae778b7",
       "name": "IF: Size Stable"
     },
@@ -441,7 +501,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [34576, 3888],
+      "position": [
+        34576,
+        3888
+      ],
       "id": "fd954f3c-c19b-4feb-a476-1a5a42ff3954",
       "name": "IF: Is PDF"
     },
@@ -451,7 +514,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [34848, 3792],
+      "position": [
+        34848,
+        3792
+      ],
       "id": "a4acadb2-7689-4a4a-a388-a361c444860c",
       "name": "Code: OCR Check",
       "continueOnFail": true
@@ -462,7 +528,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [34848, 4032],
+      "position": [
+        34848,
+        4032
+      ],
       "id": "afa76f64-0036-443f-87a3-cb40178ffb17",
       "name": "Set: No OCR Needed"
     },
@@ -472,7 +541,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [35968, 3888],
+      "position": [
+        35968,
+        3888
+      ],
       "id": "13c73607-1625-4a84-adae-804bca763418",
       "name": "Code: Set Priority"
     },
@@ -656,7 +728,10 @@
       },
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [36256, 3888],
+      "position": [
+        36256,
+        3888
+      ],
       "id": "c09f05cf-4dd3-4a55-9ad2-635bc2974602",
       "name": "Switch: Route by Type"
     },
@@ -671,7 +746,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [36528, 3648],
+      "position": [
+        36528,
+        3648
+      ],
       "id": "c09bf5e6-de56-4177-96a6-62919897dfdd",
       "name": "MQTT: Publish PDF",
       "credentials": {
@@ -692,7 +770,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [36528, 3824],
+      "position": [
+        36528,
+        3824
+      ],
       "id": "ecfeba66-f351-411b-af4f-fb391bbe5eb5",
       "name": "MQTT: Publish OCR",
       "credentials": {
@@ -713,7 +794,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [36528, 4000],
+      "position": [
+        36528,
+        4000
+      ],
       "id": "6e734140-246c-4647-82c9-853902fdaa51",
       "name": "MQTT: Publish TXT",
       "credentials": {
@@ -734,7 +818,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [36528, 4192],
+      "position": [
+        36528,
+        4192
+      ],
       "id": "742d6835-2bd5-4200-b426-6d6e95272fe8",
       "name": "MQTT: Publish Office",
       "credentials": {
@@ -746,31 +833,29 @@
     },
     {
       "parameters": {
-        "operation": "set",
-        "key": "=alice:dms:queued:{{ $json.file_hash }}",
-        "value": "1"
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (!item.file_hash) {\n  return [{ json: item }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.sAdd('alice:dms:queued_files', item.file_hash);\n} finally {\n  await client.quit();\n}\nreturn [{ json: item }];"
       },
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [36816, 3888],
-      "id": "15932bad-ec07-4bdf-bde7-95ef6357c278",
-      "name": "Redis: Mark Queued",
-      "credentials": {
-        "redis": {
-          "id": "DtO8rm7fWa7IYMen",
-          "name": "redis-alice"
-        }
-      }
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        36816,
+        3888
+      ],
+      "id": "code-mark-queued-01-alice-dms-scanner-v1",
+      "name": "Code: Mark Queued"
     },
     {
       "parameters": {
-        "content": "## alice-dms-scanner\n\nScheduled hourly (07:00-22:00).\n\nScans NAS folders from alice.dms_watched_folders,\nfinds new documents, checks dedup via Redis,\nverifies file stability (5s wait),\nchecks PDF text layer for OCR needs,\nroutes to type-specific MQTT queues:\n- alice/dms/pdf (PDF with text layer)\n- alice/dms/ocr (PDF needing OCR)\n- alice/dms/txt (TXT, MD)\n- alice/dms/office (DOCX, DOC, ODT, XLSX, XLS, ODS)\n\n### Redis Key Pattern\n- `alice:dms:processed:{hash}` = already processed\n- `alice:dms:queued:{hash}` = in queue\n\n### Dedup Note\nUses Redis GET/SET with individual keys per hash\ninstead of SISMEMBER/SADD (n8n Redis node v1\ndoes not support set operations natively).",
-        "height": 380,
-        "width": 360
+        "content": "## alice-dms-scanner\n\nScheduled hourly (07:00-22:00).\n\nScans NAS folders from alice.dms_watched_folders,\nfinds new documents, checks lifecycle via redis,\nverifies file stability (5s wait),\nchecks PDF text layer for OCR needs,\nroutes to type-specific MQTT queues:\n- alice/dms/pdf (PDF with text layer)\n- alice/dms/ocr (PDF needing OCR)\n- alice/dms/txt (TXT, MD)\n- alice/dms/office (DOCX, DOC, ODT, XLSX, XLS, ODS)\n\n### Redis Key Pattern (PROJ-21)\n- `alice:dms:processed` — Set of processed file hashes\n- `alice:dms:queued_files` — Set of in-flight file hashes\n- `alice:dms:path_to_hash` — Hash map: file_path -> file_hash\n- `alice:dms:hash_to_paths:<hash>` — Set of known paths per hash\n\n### Lifecycle Detection (PROJ-21)\nUses redis Code nodes for Set/Hash operations.\nDetects: new files, duplicates (add_path),\nmoved files (update_path), changed files (replace).\nPublishes lifecycle events to alice/dms/lifecycle.",
+        "height": 440,
+        "width": 380
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [30368, 3440],
+      "position": [
+        30368,
+        3380
+      ],
       "id": "2fdda6a4-a9cc-470f-98ab-e42f7f19fd37",
       "name": "Sticky: Overview"
     }
@@ -895,7 +980,7 @@
       "main": [
         [
           {
-            "node": "Redis: Check Processed",
+            "node": "Code: Lifecycle Check",
             "type": "main",
             "index": 0
           }
@@ -909,22 +994,22 @@
         ]
       ]
     },
-    "Redis: Check Processed": {
+    "Code: Lifecycle Check": {
       "main": [
         [
           {
-            "node": "IF: Not Processed",
+            "node": "IF: Route Lifecycle Action",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF: Not Processed": {
+    "IF: Route Lifecycle Action": {
       "main": [
         [
           {
-            "node": "Redis: Check Queued",
+            "node": "IF: Is Lifecycle Event",
             "type": "main",
             "index": 0
           }
@@ -938,18 +1023,7 @@
         ]
       ]
     },
-    "Redis: Check Queued": {
-      "main": [
-        [
-          {
-            "node": "IF: Not Queued",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF: Not Queued": {
+    "IF: Is Lifecycle Event": {
       "main": [
         [
           {
@@ -958,6 +1032,17 @@
             "index": 0
           }
         ],
+        [
+          {
+            "node": "MQTT: Publish Lifecycle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Lifecycle": {
+      "main": [
         [
           {
             "node": "Loop: Files",
@@ -1094,7 +1179,7 @@
       "main": [
         [
           {
-            "node": "Redis: Mark Queued",
+            "node": "Code: Mark Queued",
             "type": "main",
             "index": 0
           }
@@ -1105,7 +1190,7 @@
       "main": [
         [
           {
-            "node": "Redis: Mark Queued",
+            "node": "Code: Mark Queued",
             "type": "main",
             "index": 0
           }
@@ -1116,7 +1201,7 @@
       "main": [
         [
           {
-            "node": "Redis: Mark Queued",
+            "node": "Code: Mark Queued",
             "type": "main",
             "index": 0
           }
@@ -1127,14 +1212,14 @@
       "main": [
         [
           {
-            "node": "Redis: Mark Queued",
+            "node": "Code: Mark Queued",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Redis: Mark Queued": {
+    "Code: Mark Queued": {
       "main": [
         [
           {
@@ -1152,7 +1237,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "versionId": "19a39f6a-b29f-4b87-a5d9-560de7e11524",
+  "versionId": "c3d4e5f6-7890-abcd-ef01-234567890abc",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"

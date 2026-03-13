@@ -28,13 +28,27 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 
 ### Phase 1.5 Features
 
-| ID     | Feature                                                             | Status      |
-| ------ | ------------------------------------------------------------------- | ----------- |
-| PROJ-7 | JWT auth / login screen (bcrypt passwords, JWT sessions, ProtectedRoute) | ✅ Deployed  |
-| PROJ-8 | Services sidebar & landing page migration (old HTML dashboard → Alice sidebar) | ✅ Deployed  |
-| PROJ-9 | Chat-handler JWT protection (webhook auth guard + token validation) | ✅ Deployed  |
-| PROJ-10 | Weaviate intent lookup — migration to native n8n nodes            | 🗓 Planned   |
+| ID      | Feature                                                                         | Status      |
+| ------- | ------------------------------------------------------------------------------- | ----------- |
+| PROJ-7  | JWT auth / login screen (bcrypt passwords, JWT sessions, ProtectedRoute)        | ✅ Deployed  |
+| PROJ-8  | Services sidebar & landing page migration (old HTML dashboard → Alice sidebar)  | ✅ Deployed  |
+| PROJ-9  | Chat-handler JWT protection (webhook auth guard + token validation)             | ✅ Deployed  |
+| PROJ-10 | Weaviate intent lookup — migration to native n8n nodes                          | ✅ Deployed  |
 | PROJ-11 | HA sync Python worker (replaces n8n alice-ha-intent-sync, credentials in .env) | ✅ Deployed  |
+| PROJ-12 | Phase 2 security & UX hardening (nginx headers, rate-limiting, chat rename)     | ✅ Deployed  |
+| PROJ-13 | Auth-endpoint rate-limiting (login brute-force protection)                      | ✅ Deployed  |
+| PROJ-14 | Sidebar context-menu & session persistence                                      | ✅ Deployed  |
+
+### DMS Pipeline Features
+
+| ID      | Feature                                                                         | Status      |
+| ------- | ------------------------------------------------------------------------------- | ----------- |
+| PROJ-15 | DMS NAS folder management (CRUD via REST API + frontend)                        | ✅ Deployed  |
+| PROJ-16 | DMS scanner & NAS multi-format scan                                             | ✅ Deployed  |
+| PROJ-17 | DMS scanner multi-queue routing (PROJ-16 extension)                             | ✅ Deployed  |
+| PROJ-18 | DMS text-extractor containers (pdf/ocr/txt/office → plaintext)                 | ✅ Deployed  |
+| PROJ-19 | DMS processor workflow (LLM classification + Weaviate storage)                  | ✅ Deployed  |
+| PROJ-20 | DMS document search tool (alice-tool-search)                                    | 🗓 Planned  |
 
 ---
 
@@ -103,6 +117,10 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090) |
 | `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)      |
 | `alice-ha-sync`         | HA entity sync worker (MQTT-triggered Python, replaces PROJ-4 n8n workflow) |
+| `alice-dms-pdf`         | DMS text extractor: PDF → plaintext (pdfminer)                              |
+| `alice-dms-ocr`         | DMS text extractor: image/scanned PDF → plaintext (Tesseract OCR)           |
+| `alice-dms-office`      | DMS text extractor: Office documents → plaintext (LibreOffice headless)     |
+| `alice-dms-txt`         | DMS text extractor: plain text passthrough                                  |
 | `alice-auth`            | JWT authentication (FastAPI, bcrypt)       |
 | `postgres`              | Structured data, alice schema, auth        |
 | `redis`                 | Session cache, message queue               |
