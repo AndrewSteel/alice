@@ -1,6 +1,6 @@
 {
-  "class": "Email",
-  "description": "Email messages",
+  "class": "BankStatement",
+  "description": "Bank account statements",
   "vectorizer": "text2vec-transformers",
   "vectorIndexConfig": {
     "distance": "cosine"
@@ -12,15 +12,8 @@
   },
   "properties": [
     {
-      "name": "subject",
-      "description": "Email subject",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": true
-    },
-    {
-      "name": "sender",
-      "description": "Sender email address",
+      "name": "bankName",
+      "description": "Name of the bank",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": true,
@@ -32,11 +25,12 @@
       }
     },
     {
-      "name": "senderName",
-      "description": "Sender display name",
+      "name": "accountNumber",
+      "description": "Account number (masked: ****1234)",
       "dataType": ["text"],
       "indexFilterable": true,
-      "indexSearchable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -45,9 +39,37 @@
       }
     },
     {
-      "name": "recipients",
-      "description": "Recipient email address(es)",
-      "dataType": ["text[]"],
+      "name": "iban",
+      "description": "IBAN (masked)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "bic",
+      "description": "BIC of the bank",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "accountHolder",
+      "description": "Name of the account holder",
+      "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -58,10 +80,10 @@
       }
     },
     {
-      "name": "cc",
-      "description": "CC recipients",
-      "dataType": ["text[]"],
-      "indexFilterable": false,
+      "name": "statementNumber",
+      "description": "Statement number",
+      "dataType": ["text"],
+      "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
         "text2vec-transformers": {
@@ -71,8 +93,8 @@
       }
     },
     {
-      "name": "date",
-      "description": "Date and time of the email",
+      "name": "statementDate",
+      "description": "Date of the statement",
       "dataType": ["date"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -84,8 +106,60 @@
       }
     },
     {
-      "name": "category",
-      "description": "Category: business, personal, newsletter, order, support, etc.",
+      "name": "periodFrom",
+      "description": "Start of the statement period",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "periodTo",
+      "description": "End of the statement period",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "openingBalance",
+      "description": "Opening balance",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "closingBalance",
+      "description": "Closing balance",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "currency",
+      "description": "Account currency",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -98,48 +172,54 @@
       }
     },
     {
-      "name": "importance",
-      "description": "Importance: low, normal, high",
+      "name": "transactionCount",
+      "description": "Number of transactions in the period",
+      "dataType": ["int"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "totalCredits",
+      "description": "Total credits",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "totalDebits",
+      "description": "Total debits",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "transactions",
+      "description": "Individual transactions as JSON array",
       "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "tokenization": "keyword",
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
-      "name": "hasAttachments",
-      "description": "Has attachments",
-      "dataType": ["boolean"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
-      "name": "attachments",
-      "description": "List of attachments",
-      "dataType": ["text[]"],
       "indexFilterable": false,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
+      "indexSearchable": true
     },
     {
-      "name": "content",
-      "description": "Email body content",
+      "name": "fullText",
+      "description": "Extracted full text",
       "dataType": ["text"],
       "indexFilterable": false,
       "indexSearchable": true
@@ -152,39 +232,11 @@
       "indexSearchable": true
     },
     {
-      "name": "threadId",
-      "description": "Thread ID for conversation grouping",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "tokenization": "keyword",
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
-      "name": "messageId",
-      "description": "Message-ID of the email",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "tokenization": "keyword",
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
       "name": "fileName",
-      "description": "Original file name (if stored as .eml)",
+      "description": "Original file name",
       "dataType": ["text"],
       "indexFilterable": false,
-      "indexSearchable": false,
+      "indexSearchable": true,
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -208,7 +260,7 @@
     },
     {
       "name": "fileHash",
-      "description": "SHA256 hash",
+      "description": "SHA256 hash of the file",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -222,7 +274,7 @@
     },
     {
       "name": "fileType",
-      "description": "File type extension (eml, msg, txt, etc.)",
+      "description": "File type extension (pdf, txt, docx, etc.)",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -236,7 +288,7 @@
     },
     {
       "name": "createdBy",
-      "description": "User who archived the email",
+      "description": "User who added the document",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -249,7 +301,7 @@
     },
     {
       "name": "createdAt",
-      "description": "Timestamp of archival",
+      "description": "Timestamp when recorded in the system",
       "dataType": ["date"],
       "indexFilterable": true,
       "indexSearchable": false,

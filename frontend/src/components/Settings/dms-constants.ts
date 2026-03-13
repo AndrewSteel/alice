@@ -1,10 +1,10 @@
 export const SUGGESTED_TYPES = [
-  "Rechnung",
-  "Kontoauszug",
-  "Dokument",
+  "Invoice",
+  "BankStatement",
+  "Document",
   "Email",
-  "WertpapierAbrechnung",
-  "Vertrag",
+  "SecuritySettlement",
+  "Contract",
 ] as const;
 
 export type SuggestedType = (typeof SUGGESTED_TYPES)[number];

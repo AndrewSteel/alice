@@ -1,0 +1,1115 @@
+{
+  "name": "alice-dms-processor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        18000,
+        3888
+      ],
+      "id": "b0000001-0000-0000-0000-000000000001",
+      "name": "Schedule: Nightly 02:00"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:dms:run:start_time', Date.now().toString());\n  await client.del('alice:dms:run:stats');\n  await client.hSet('alice:dms:run:stats', { processed: '0', failed: '0', skipped: '0', llm_classified: '0', used_suggested_type: '0', batches_run: '0' });\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _start_info: 'DMS Processor started', BATCH_SIZE: 50, MAX_RUNTIME_SECONDS: 7200 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18300,
+        3888
+      ],
+      "id": "b0000002-0000-0000-0000-000000000001",
+      "name": "Code: Init"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const items = await client.lRange('alice:dms:plaintext', 0, 49);\n  if (items.length === 0) {\n    return [{ json: { _empty: true } }];\n  }\n  await client.lTrim('alice:dms:plaintext', items.length, -1);\n  await client.hIncrBy('alice:dms:run:stats', 'batches_run', 1);\n  const results = [];\n  for (const raw of items) {\n    try {\n      const parsed = JSON.parse(raw);\n      results.push({ json: { ...parsed, _empty: false } });\n    } catch(e) {\n      results.push({ json: { _empty: false, _parse_error: true, extraction_failed: true, file_hash: null, file_path: raw.slice(0, 200), plaintext: '' } });\n    }\n  }\n  return results;\n} finally {\n  await client.quit();\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18600,
+        3888
+      ],
+      "id": "b0000003-0000-0000-0000-000000000001",
+      "name": "Code: Fetch Batch"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-queue-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        18900,
+        3888
+      ],
+      "id": "b0000004-0000-0000-0000-000000000001",
+      "name": "IF: Queue Empty"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19200,
+        4200
+      ],
+      "id": "b0000005-0000-0000-0000-000000000001",
+      "name": "Code: Final Log"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        19500,
+        4200
+      ],
+      "id": "b0000006-0000-0000-0000-000000000001",
+      "name": "End: Empty Queue"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        19200,
+        3888
+      ],
+      "id": "b0000007-0000-0000-0000-000000000001",
+      "name": "Split In Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n    console.log(`DMS Processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _time_limit_reached: timeLimitReached } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19500,
+        3888
+      ],
+      "id": "b0000008-0000-0000-0000-000000000001",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-time-limit",
+              "leftValue": "={{ $json._time_limit_reached }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        19800,
+        3888
+      ],
+      "id": "b0000009-0000-0000-0000-000000000001",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    reason: 'time_limit_reached',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20100,
+        4200
+      ],
+      "id": "b000000a-0000-0000-0000-000000000001",
+      "name": "Code: Final Log (Time)"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        20400,
+        4200
+      ],
+      "id": "b000000b-0000-0000-0000-000000000001",
+      "name": "End: Time Limit"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (item._parse_error || !item.file_hash) {\n  return [{ json: { ...item, _skip: false } }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const isProcessed = await client.sIsMember('alice:dms:processed', item.file_hash);\n  if (isProcessed) {\n    await client.hIncrBy('alice:dms:run:stats', 'skipped', 1);\n    return [{ json: { ...item, _skip: true, _skip_reason: 'already_processed' } }];\n  }\n  return [{ json: { ...item, _skip: false } }];\n} finally {\n  await client.quit();\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19500,
+        3588
+      ],
+      "id": "b000000c-0000-0000-0000-000000000001",
+      "name": "Code: Parse + Dedup Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-skip",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        19800,
+        3588
+      ],
+      "id": "b000000d-0000-0000-0000-000000000001",
+      "name": "IF: Skip Item"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-extraction-failed",
+              "leftValue": "={{ $json.extraction_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20100,
+        3588
+      ],
+      "id": "b000000e-0000-0000-0000-000000000001",
+      "name": "IF: Extraction Failed"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item.file_hash) {\n    await client.sRem('alice:dms:queued_files', item.file_hash);\n  }\n  await client.hIncrBy('alice:dms:run:stats', 'failed', 1);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { ...item, _error_reason: 'extraction_failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20400,
+        3400
+      ],
+      "id": "b000000f-0000-0000-0000-000000000001",
+      "name": "Code: Handle Failed"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/error",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, error: $json._error_reason || 'extraction_failed', timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        20700,
+        3400
+      ],
+      "id": "b0000010-0000-0000-0000-000000000001",
+      "name": "MQTT: Publish Error",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-auto-classify",
+              "leftValue": "={{ $json.suggested_type }}",
+              "rightValue": "auto",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20400,
+        3588
+      ],
+      "id": "b0000011-0000-0000-0000-000000000001",
+      "name": "IF: Auto Classify"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama-3090:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', prompt: 'You are a document classifier. Analyze the following document text and determine the document type.\\nChoose EXACTLY ONE of the following types: Invoice, BankStatement, Document, Email, SecuritySettlement, Contract\\nRespond ONLY with a JSON object: {\"document_type\": \"<Type>\"}\\n\\nDocument text:\\n' + ($json.plaintext || '').slice(0, 20000), stream: false, format: 'json', options: { temperature: 0 } }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        20700,
+        3600
+      ],
+      "id": "b0000012-0000-0000-0000-000000000001",
+      "name": "HTTP: Ollama Classify",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nconst validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nlet docType = 'Document';\ntry {\n  const response = item.response || item.body?.response || '';\n  const parsed = JSON.parse(response);\n  if (validTypes.includes(parsed.document_type)) {\n    docType = parsed.document_type;\n  }\n} catch(e) {}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.hIncrBy('alice:dms:run:stats', 'llm_classified', 1);\n} finally {\n  await client.quit();\n}\nconst origItem = $('IF: Auto Classify').first().json;\nreturn [{ json: { ...origItem, _document_type: docType, _llm_classified: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21000,
+        3600
+      ],
+      "id": "b0000013-0000-0000-0000-000000000001",
+      "name": "Code: Parse Classify Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nconst validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst docType = validTypes.includes(item.suggested_type) ? item.suggested_type : 'Document';\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.hIncrBy('alice:dms:run:stats', 'used_suggested_type', 1);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { ...item, _document_type: docType, _llm_classified: false } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20700,
+        3888
+      ],
+      "id": "b0000014-0000-0000-0000-000000000001",
+      "name": "Code: Use Suggested Type"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst docType = item._document_type;\nconst plaintext = (item.plaintext || '').slice(0, 20000);\n\nconst prompts = {\n  'Invoice': `Extract structured data from the following invoice text and respond ONLY with a JSON object with these fields:\\n{\"issuer\": \"Company name\", \"recipient\": \"Recipient\", \"invoiceNumber\": \"No.\", \"invoiceDate\": \"YYYY-MM-DD\", \"dueDate\": \"YYYY-MM-DD\", \"amountGross\": 0.00, \"amountNet\": 0.00, \"vatRate\": 19.0, \"currency\": \"EUR\", \"lineItems\": [], \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n\n  'BankStatement': `Extract structured data from the following bank statement and respond ONLY with a JSON object with these fields:\\n{\"bankName\": \"Bank name\", \"accountHolder\": \"Name\", \"iban\": \"DEXX...\", \"periodFrom\": \"YYYY-MM-DD\", \"periodTo\": \"YYYY-MM-DD\", \"openingBalance\": 0.00, \"closingBalance\": 0.00, \"currency\": \"EUR\", \"transactions\": [], \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n\n  'Document': `Extract structured data from the following document and respond ONLY with a JSON object with these fields:\\n{\"title\": \"Title\", \"documentDate\": \"YYYY-MM-DD\", \"sender\": \"Sender\", \"recipient\": \"Recipient\", \"summary\": \"Brief summary\", \"tags\": []}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n\n  'Email': `Extract structured data from the following email and respond ONLY with a JSON object with these fields:\\n{\"subject\": \"Subject\", \"sender\": \"email@domain.de\", \"recipients\": [], \"date\": \"YYYY-MM-DD\", \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n\n  'SecuritySettlement': `Extract structured data from the following securities settlement and respond ONLY with a JSON object with these fields:\\n{\"bank\": \"Bank name\", \"depotNumber\": \"Depot No.\", \"transactionDate\": \"YYYY-MM-DD\", \"securityName\": \"Name\", \"isin\": \"ISIN\", \"transactionType\": \"buy\", \"quantity\": 0.0, \"price\": 0.0, \"settlementAmount\": 0.0, \"settlementCurrency\": \"EUR\", \"summary\": \"Brief summary\"}\\nPossible values for transactionType: buy, sell, dividend, distribution. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n\n  'Contract': `Extract structured data from the following contract and respond ONLY with a JSON object with these fields:\\n{\"contractType\": \"Type\", \"contractPartner\": \"Partner\", \"signDate\": \"YYYY-MM-DD\", \"startDate\": \"YYYY-MM-DD\", \"endDate\": \"YYYY-MM-DD\", \"noticePeriod\": \"3 months\", \"monthlyCost\": 0.0, \"annualCost\": 0.0, \"currency\": \"EUR\", \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`\n};\n\nconst prompt = prompts[docType] || prompts['Document'];\nreturn [{ json: { ...item, _extraction_prompt: prompt } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21300,
+        3888
+      ],
+      "id": "b0000015-0000-0000-0000-000000000001",
+      "name": "Code: Build Extraction Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama-3090:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', prompt: $json._extraction_prompt, stream: false, format: 'json', options: { temperature: 0 } }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21600,
+        3888
+      ],
+      "id": "b0000016-0000-0000-0000-000000000001",
+      "name": "HTTP: Ollama Extract",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet extracted = {};\ntry {\n  const response = item.response || item.body?.response || '';\n  extracted = JSON.parse(response);\n} catch(e) {\n  extracted = {};\n}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\n\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(val);\n  return isNaN(n) ? null : n;\n}\n\nreturn [{ json: { ...item, _extracted: extracted, _toISODate: toISODate.toString(), _extraction_ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21900,
+        3888
+      ],
+      "id": "b0000017-0000-0000-0000-000000000001",
+      "name": "Code: Parse Extract Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst className = item._document_type;\nconst filePath = (item.file_path || '').replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"');\nconst query = `{ Get { ${className}(where: { path: [\"filePath\"], operator: Equal, valueText: \"${filePath}\" }, limit: 1) { _additional { id } } } }`;\nreturn [{ json: { ...item, _weaviate_query: query } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22200,
+        3888
+      ],
+      "id": "b0000018-0000-0000-0000-000000000001",
+      "name": "Code: Build Weaviate Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://weaviate:8080/v1/graphql",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json._weaviate_query }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        22500,
+        3888
+      ],
+      "id": "b0000019-0000-0000-0000-000000000001",
+      "name": "HTTP: Weaviate Search",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet existingId = null;\nlet existingClass = null;\ntry {\n  const body = item.body || item;\n  const data = (typeof body === 'string') ? JSON.parse(body) : body;\n  const className = item._document_type;\n  const results = data?.data?.Get?.[className];\n  if (results && results.length > 0) {\n    existingId = results[0]._additional?.id;\n    existingClass = className;\n  }\n} catch(e) {}\nreturn [{ json: { ...item, _existing_weaviate_id: existingId, _existing_weaviate_class: existingClass } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22800,
+        3888
+      ],
+      "id": "b000001a-0000-0000-0000-000000000001",
+      "name": "Code: Check Existing Entry"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-existing-id",
+              "leftValue": "={{ $json._existing_weaviate_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        23100,
+        3888
+      ],
+      "id": "b000001b-0000-0000-0000-000000000001",
+      "name": "IF: Has Existing Entry"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'http://weaviate:8080/v1/objects/' + $json._existing_weaviate_class + '/' + $json._existing_weaviate_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        23400,
+        3600
+      ],
+      "id": "b000001c-0000-0000-0000-000000000001",
+      "name": "HTTP: Weaviate Delete",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const path = require('path');\nconst item = $input.first().json;\nconst docType = item._document_type;\nconst extracted = item._extracted || {};\nconst now = new Date().toISOString();\nconst fileName = path.basename(item.file_path || '');\nconst fullText = (item.plaintext || '').slice(0, 10000);\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(val);\n  return isNaN(n) ? null : n;\n}\n\nlet properties = {};\n\nif (docType === 'Invoice') {\n  properties = {\n    issuer: extracted.issuer || null,\n    recipient: extracted.recipient || null,\n    invoiceNumber: extracted.invoiceNumber || null,\n    invoiceDate: toISODate(extracted.invoiceDate),\n    dueDate: toISODate(extracted.dueDate),\n    amountGross: toNum(extracted.amountGross),\n    amountNet: toNum(extracted.amountNet),\n    vatRate: toNum(extracted.vatRate),\n    currency: extracted.currency || 'EUR',\n    lineItems: extracted.lineItems ? JSON.stringify(extracted.lineItems) : null,\n    summary: extracted.summary || null,\n    fullText,\n    fileName,\n    filePath: item.file_path,\n    fileHash: item.file_hash,\n    fileType: item.file_type || null,\n    createdBy: 'alice-dms-processor',\n    createdAt: now,\n    updatedAt: now\n  };\n} else if (docType === 'BankStatement') {\n  properties = {\n    bankName: extracted.bankName || null,\n    accountHolder: extracted.accountHolder || null,\n    iban: extracted.iban || null,\n    periodFrom: toISODate(extracted.periodFrom),\n    periodTo: toISODate(extracted.periodTo),\n    openingBalance: toNum(extracted.openingBalance),\n    closingBalance: toNum(extracted.closingBalance),\n    currency: extracted.currency || 'EUR',\n    transactions: extracted.transactions ? JSON.stringify(extracted.transactions) : null,\n    summary: extracted.summary || null,\n    fullText,\n    fileName,\n    filePath: item.file_path,\n    fileHash: item.file_hash,\n    fileType: item.file_type || null,\n    createdBy: 'alice-dms-processor',\n    createdAt: now\n  };\n} else if (docType === 'Email') {\n  properties = {\n    subject: extracted.subject || null,\n    sender: extracted.sender || null,\n    recipients: Array.isArray(extracted.recipients) ? extracted.recipients : (extracted.recipients ? [extracted.recipients] : []),\n    date: toISODate(extracted.date),\n    summary: extracted.summary || null,\n    content: fullText,\n    fileName,\n    filePath: item.file_path,\n    fileHash: item.file_hash,\n    fileType: item.file_type || null,\n    createdBy: 'alice-dms-processor',\n    createdAt: now\n  };\n} else if (docType === 'SecuritySettlement') {\n  properties = {\n    bank: extracted.bank || null,\n    depotNumber: extracted.depotNumber || null,\n    transactionDate: toISODate(extracted.transactionDate),\n    securityName: extracted.securityName || null,\n    isin: extracted.isin || null,\n    transactionType: extracted.transactionType || null,\n    quantity: toNum(extracted.quantity),\n    price: toNum(extracted.price),\n    settlementAmount: toNum(extracted.settlementAmount),\n    settlementCurrency: extracted.settlementCurrency || 'EUR',\n    summary: extracted.summary || null,\n    fullText,\n    fileName,\n    filePath: item.file_path,\n    fileHash: item.file_hash,\n    fileType: item.file_type || null,\n    createdBy: 'alice-dms-processor',\n    createdAt: now\n  };\n} else if (docType === 'Contract') {\n  properties = {\n    contractType: extracted.contractType || null,\n    contractPartner: extracted.contractPartner || null,\n    signDate: toISODate(extracted.signDate),\n    startDate: toISODate(extracted.startDate),\n    endDate: toISODate(extracted.endDate),\n    noticePeriod: extracted.noticePeriod || null,\n    monthlyCost: toNum(extracted.monthlyCost),\n    annualCost: toNum(extracted.annualCost),\n    currency: extracted.currency || 'EUR',\n    summary: extracted.summary || null,\n    fullText,\n    fileName,\n    filePath: item.file_path,\n    fileHash: item.file_hash,\n    fileType: item.file_type || null,\n    createdBy: 'alice-dms-processor',\n    createdAt: now,\n    updatedAt: now\n  };\n} else {\n  properties = {\n    title: extracted.title || fileName,\n    sender: extracted.sender || null,\n    recipient: extracted.recipient || null,\n    documentDate: toISODate(extracted.documentDate),\n    tags: Array.isArray(extracted.tags) ? extracted.tags : [],\n    summary: extracted.summary || null,\n    fullText,\n    fileName,\n    filePath: item.file_path,\n    fileHash: item.file_hash,\n    fileType: item.file_type || null,\n    createdBy: 'alice-dms-processor',\n    createdAt: now,\n    updatedAt: now\n  };\n}\n\nconst cleanProps = Object.fromEntries(Object.entries(properties).filter(([_, v]) => v !== null && v !== undefined));\n\nreturn [{ json: { ...item, _weaviate_class: docType, _weaviate_properties: cleanProps } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        23700,
+        3888
+      ],
+      "id": "b000001d-0000-0000-0000-000000000001",
+      "name": "Code: Build Weaviate Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://weaviate:8080/v1/objects",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ class: $json._weaviate_class, properties: $json._weaviate_properties }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        24000,
+        3888
+      ],
+      "id": "b000001e-0000-0000-0000-000000000001",
+      "name": "HTTP: Weaviate Insert",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\n\nconst insertSuccess = !item.error && (item.statusCode === 200 || item.statusCode === 201 || !item.statusCode);\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (insertSuccess) {\n    if (item.file_hash) {\n      await client.sRem('alice:dms:queued_files', item.file_hash);\n      await client.sAdd('alice:dms:processed', item.file_hash);\n      if (item.file_path) {\n        const oldHash = await client.hGet('alice:dms:path_to_hash', item.file_path);\n        if (oldHash && oldHash !== item.file_hash) {\n          await client.hDel('alice:dms:path_to_hash', item.file_path);\n          await client.sRem(`alice:dms:hash_to_paths:${oldHash}`, item.file_path);\n        }\n        await client.hSet('alice:dms:path_to_hash', item.file_path, item.file_hash);\n        await client.sAdd(`alice:dms:hash_to_paths:${item.file_hash}`, item.file_path);\n      }\n    }\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1);\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1);\n  }\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { ...item, _weaviate_inserted: insertSuccess } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        24300,
+        3888
+      ],
+      "id": "b000001f-0000-0000-0000-000000000001",
+      "name": "Code: Redis State Update"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, document_type: $json._document_type, llm_classified: $json._llm_classified, inserted: $json._weaviate_inserted, timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        24900,
+        3888
+      ],
+      "id": "b0000020-0000-0000-0000-000000000001",
+      "name": "MQTT: Publish Done",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-insert-success",
+              "leftValue": "={{ $json._weaviate_inserted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        24600,
+        3588
+      ],
+      "id": "b0000022-0000-0000-0000-000000000001",
+      "name": "IF: Insert Success"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/error",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, document_type: $json._document_type, error: 'weaviate_insert_failed', timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        24900,
+        3400
+      ],
+      "id": "b0000023-0000-0000-0000-000000000001",
+      "name": "MQTT: Publish Error (Weaviate)",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-aborted',\n    reason: 'weaviate_unreachable',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n} finally {\n  await client.quit();\n}\nthrow new Error('Weaviate insert failed — aborting run. Items remain in queued_files for retry.');"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        25200,
+        3400
+      ],
+      "id": "b0000024-0000-0000-0000-000000000001",
+      "name": "Code: Abort Run"
+    },
+    {
+      "parameters": {
+        "content": "## alice-dms-processor\n\nNightly batch processor (02:00).\n\nReads plaintext items from Redis list `alice:dms:plaintext`,\nclassifies via LLM (Ollama qwen3:14b),\nextracts structured data per document type,\nstores to Weaviate collections.\n\n### Document Types\n- Invoice, BankStatement, Document\n- Email, SecuritySettlement, Contract\n\n### Redis Keys\n- `alice:dms:plaintext` — input queue (List)\n- `alice:dms:processed` — processed hashes (Set)\n- `alice:dms:queued_files` — in-flight hashes (Set)\n- `alice:dms:path_to_hash` — path->hash map (Hash)\n- `alice:dms:hash_to_paths:<hash>` — hash->paths (Set)\n- `alice:dms:run:start_time` — run timestamp (String)\n- `alice:dms:run:stats` — run counters (Hash)\n\n### Safety\n- BATCH_SIZE = 50\n- MAX_RUNTIME = 2h\n- Dedup check before processing\n- Upsert: delete existing Weaviate entry before insert\n- Weaviate failure aborts entire run\n- Stats: processed/failed/skipped/llm_classified/etc.",
+        "height": 520,
+        "width": 380
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        18000,
+        3280
+      ],
+      "id": "b0000021-0000-0000-0000-000000000001",
+      "name": "Sticky: Overview"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule: Nightly 02:00": {
+      "main": [
+        [
+          {
+            "node": "Code: Init",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Init": {
+      "main": [
+        [
+          {
+            "node": "Code: Fetch Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Fetch Batch": {
+      "main": [
+        [
+          {
+            "node": "IF: Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Queue Empty": {
+      "main": [
+        [
+          {
+            "node": "Code: Final Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Final Log": {
+      "main": [
+        [
+          {
+            "node": "End: Empty Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Code: Time Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Parse + Dedup Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Time Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Time Limit Reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [
+          {
+            "node": "Code: Final Log (Time)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Fetch Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Final Log (Time)": {
+      "main": [
+        [
+          {
+            "node": "End: Time Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse + Dedup Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Skip Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Skip Item": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Extraction Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Extraction Failed": {
+      "main": [
+        [
+          {
+            "node": "Code: Handle Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Auto Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Handle Failed": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Error": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Auto Classify": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Ollama Classify",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Use Suggested Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Ollama Classify": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Classify Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse Classify Result": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Extraction Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Use Suggested Type": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Extraction Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Extraction Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Ollama Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Ollama Extract": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Extract Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse Extract Result": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Weaviate Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Weaviate Query": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Weaviate Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Weaviate Search": {
+      "main": [
+        [
+          {
+            "node": "Code: Check Existing Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Check Existing Entry": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Existing Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Existing Entry": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Weaviate Delete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Build Weaviate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Weaviate Delete": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Weaviate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Weaviate Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Weaviate Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Weaviate Insert": {
+      "main": [
+        [
+          {
+            "node": "Code: Redis State Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Redis State Update": {
+      "main": [
+        [
+          {
+            "node": "IF: Insert Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Insert Success": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQTT: Publish Error (Weaviate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Done": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Error (Weaviate)": {
+      "main": [
+        [
+          {
+            "node": "Code: Abort Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "a7b3c1d2-e4f5-6789-abcd-ef0123456789",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
+  },
+  "id": "",
+  "tags": []
+}

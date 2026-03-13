@@ -2,16 +2,16 @@
 # ============================================================
 # Alice - Weaviate Schema Setup
 # ============================================================
-# Erstellt alle Collections für Alice in Weaviate
+# Creates all collections for Alice in Weaviate
 #
-# Voraussetzungen:
-#   - Weaviate läuft und ist erreichbar
-#   - curl und jq sind installiert
+# Prerequisites:
+#   - Weaviate is running and reachable
+#   - curl and jq are installed
 #
-# Verwendung:
+# Usage:
 #   ./init-weaviate-schema.sh [WEAVIATE_URL]
 #
-# Beispiel:
+# Example:
 #   ./init-weaviate-schema.sh http://localhost:8080
 #   ./init-weaviate-schema.sh http://weaviate:8080
 # ============================================================
@@ -19,12 +19,12 @@
 # Note: intentionally no 'set -e' - error counting in the main loop requires
 # create_collection() to be able to return non-zero without aborting the script.
 
-# Konfiguration
+# Configuration
 WEAVIATE_URL="${1:-http://weaviate:8080}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA_DIR="${SCRIPT_DIR}/../schemas"
 
-# Farben für Output
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -38,50 +38,50 @@ echo "Weaviate URL: ${WEAVIATE_URL}"
 echo "Schema Dir:   ${SCHEMA_DIR}"
 echo ""
 
-# Prüfe ob Weaviate erreichbar ist
-echo -n "🔍 Prüfe Weaviate-Verbindung... "
+# Check if Weaviate is reachable
+echo -n "Checking Weaviate connection... "
 if ! curl -s "${WEAVIATE_URL}/v1/.well-known/ready" > /dev/null 2>&1; then
-    echo -e "${RED}FEHLER${NC}"
-    echo "   Weaviate ist nicht erreichbar unter ${WEAVIATE_URL}"
-    echo "   Bitte prüfe ob Weaviate läuft."
+    echo -e "${RED}ERROR${NC}"
+    echo "   Weaviate is not reachable at ${WEAVIATE_URL}"
+    echo "   Please check if Weaviate is running."
     exit 1
 fi
 echo -e "${GREEN}OK${NC}"
 
-# Prüfe ob jq installiert ist
+# Check if jq is installed
 if ! command -v jq &> /dev/null; then
-    echo -e "${RED}FEHLER: jq ist nicht installiert${NC}"
-    echo "   Installation: apt-get install jq"
+    echo -e "${RED}ERROR: jq is not installed${NC}"
+    echo "   Install: apt-get install jq"
     exit 1
 fi
 
-# Funktion: Collection erstellen
+# Function: Create collection
 create_collection() {
     local schema_file="$1"
     local class_name=$(jq -r '.class' "$schema_file")
 
-    echo -n "📦 Erstelle Collection '${class_name}'... "
+    echo -n "Creating collection '${class_name}'... "
 
-    # Prüfe ob Collection bereits existiert
+    # Check if collection already exists
     local exists
     exists=$(curl -s "${WEAVIATE_URL}/v1/schema/${class_name}" 2>/dev/null | jq -r '.class // empty' 2>/dev/null || true)
 
     if [ -n "$exists" ]; then
-        echo -e "${YELLOW}existiert bereits${NC}"
+        echo -e "${YELLOW}already exists${NC}"
         return 0
     fi
 
-    # Collection erstellen
+    # Create collection
     local response=$(curl -s -X POST \
         -H "Content-Type: application/json" \
         -d @"$schema_file" \
         "${WEAVIATE_URL}/v1/schema")
 
-    # Prüfe auf Fehler
+    # Check for errors
     local error
     error=$(echo "$response" | jq -r '.error // empty' 2>/dev/null || true)
     if [ -n "$error" ]; then
-        echo -e "${RED}FEHLER${NC}"
+        echo -e "${RED}ERROR${NC}"
         echo "   $error"
         return 1
     fi
@@ -90,40 +90,40 @@ create_collection() {
     return 0
 }
 
-# Funktion: Collection löschen (für Reset)
+# Function: Delete collection (for reset)
 delete_collection() {
     local class_name="$1"
-    
-    echo -n "🗑️  Lösche Collection '${class_name}'... "
-    
+
+    echo -n "Deleting collection '${class_name}'... "
+
     local response=$(curl -s -X DELETE "${WEAVIATE_URL}/v1/schema/${class_name}")
-    
+
     echo -e "${GREEN}OK${NC}"
 }
 
-# Hauptlogik
+# Main logic
 echo ""
-echo "📚 Erstelle Collections..."
+echo "Creating collections..."
 echo "------------------------------------------------------------"
 
-# Liste der Schema-Dateien
+# List of schema files
 SCHEMAS=(
     "alice-memory.json"
-    "rechnung.json"
-    "kontoauszug.json"
-    "wertpapier-abrechnung.json"
-    "dokument.json"
+    "invoice.json"
+    "bank-statement.json"
+    "security-settlement.json"
+    "document.json"
     "email.json"
-    "vertrag.json"
+    "contract.json"
     "ha-intent.json"
 )
 
-# Optional: Reset-Flag
+# Optional: Reset flag
 if [ "$2" == "--reset" ]; then
     echo ""
-    echo -e "${YELLOW}⚠️  RESET-MODUS: Lösche bestehende Collections...${NC}"
+    echo -e "${YELLOW}WARNING: RESET MODE — Deleting existing collections...${NC}"
     echo ""
-    
+
     for schema in "${SCHEMAS[@]}"; do
         class_name=$(jq -r '.class' "${SCHEMA_DIR}/${schema}" 2>/dev/null || echo "")
         if [ -n "$class_name" ]; then
@@ -133,7 +133,7 @@ if [ "$2" == "--reset" ]; then
     echo ""
 fi
 
-# Collections erstellen
+# Create collections
 success_count=0
 error_count=0
 
@@ -141,42 +141,42 @@ for schema in "${SCHEMAS[@]}"; do
     schema_path="${SCHEMA_DIR}/${schema}"
 
     if [ -f "$schema_path" ]; then
-        # Rufe Funktion auf und speichere Exit-Code
+        # Call function and store exit code
         create_collection "$schema_path"
         result=$?
 
-        # Werte Exit-Code aus
+        # Evaluate exit code
         if [ $result -eq 0 ]; then
             success_count=$((success_count + 1))
         else
             error_count=$((error_count + 1))
         fi
     else
-        echo -e "${YELLOW}⚠️  Schema-Datei nicht gefunden: ${schema}${NC}"
+        echo -e "${YELLOW}WARNING: Schema file not found: ${schema}${NC}"
         error_count=$((error_count + 1))
     fi
 done
 
 echo ""
 echo "------------------------------------------------------------"
-echo "📊 Zusammenfassung"
+echo "Summary"
 echo "------------------------------------------------------------"
-echo -e "   Erfolgreich: ${GREEN}${success_count}${NC}"
-echo -e "   Fehler:      ${RED}${error_count}${NC}"
+echo -e "   Successful: ${GREEN}${success_count}${NC}"
+echo -e "   Errors:     ${RED}${error_count}${NC}"
 echo ""
 
-# Zeige aktuelles Schema
-echo "📋 Aktuelle Collections in Weaviate:"
+# Show current schema
+echo "Current collections in Weaviate:"
 echo "------------------------------------------------------------"
 curl -s "${WEAVIATE_URL}/v1/schema" | jq -r '.classes[].class' | while read class; do
-    echo "   • $class"
+    echo "   - $class"
 done
 echo ""
 
 if [ $error_count -eq 0 ]; then
-    echo -e "${GREEN}✅ Schema-Setup erfolgreich abgeschlossen!${NC}"
+    echo -e "${GREEN}Schema setup completed successfully!${NC}"
     exit 0
 else
-    echo -e "${YELLOW}⚠️  Schema-Setup mit Warnungen abgeschlossen${NC}"
+    echo -e "${YELLOW}Schema setup completed with warnings${NC}"
     exit 1
 fi

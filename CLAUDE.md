@@ -68,7 +68,7 @@ The LLM uses native function calling to directly select and execute tools. Avail
 | Auth workflows          | Webhook                       | Login/validate/refresh/logout (Phase 1.5) |
 
 ### DMS Pipeline
-NAS inbox folders → `alice/dms/new` MQTT topic → PDF extraction + LLM classification → Weaviate collections (Rechnung, Kontoauszug, Dokument, Email, WertpapierAbrechnung, Vertrag).
+NAS inbox folders → `alice/dms/new` MQTT topic → PDF extraction + LLM classification → Weaviate collections (Invoice, BankStatement, Document, Email, SecuritySettlement, Contract).
 
 ### PostgreSQL Schema (`alice`)
 All tables live in the `alice` schema. Key tables:
@@ -83,7 +83,7 @@ All tables live in the `alice` schema. Key tables:
 Permission checks use PL/pgSQL functions: `alice.check_ha_permission()` and `alice.check_dms_permission()`.
 
 ### Weaviate Collections
-Defined in `schemas/` directory as JSON files. Key collections: `AliceMemory`, `Rechnung`, `Kontoauszug`, `Dokument`, `Email`, `WertpapierAbrechnung`, `Vertrag`. Vectorizer: `text2vec-transformers` on the TITAN X GPU.
+Defined in `schemas/` directory as JSON files. Key collections: `AliceMemory`, `Invoice`, `BankStatement`, `Document`, `Email`, `SecuritySettlement`, `Contract`. Vectorizer: `text2vec-transformers` on the TITAN X GPU.
 
 ### Frontend (in `frontend/src/`)
 React + TypeScript + Tailwind CSS. Key structure:

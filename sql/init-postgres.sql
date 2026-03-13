@@ -83,13 +83,13 @@ CREATE TABLE alice.permissions_dms (
     
     -- Dokumenttyp (entspricht Weaviate Collections)
     doc_type VARCHAR(50) NOT NULL CHECK (doc_type IN (
-        'Rechnung', 
-        'Kontoauszug', 
-        'WertpapierAbrechnung', 
-        'Dokument', 
+        'Invoice',
+        'BankStatement',
+        'SecuritySettlement',
+        'Document',
         'Email',
-        'Vertrag',
-        '*'  -- Wildcard für alle Typen
+        'Contract',
+        '*'  -- Wildcard for all types
     )),
     
     -- Berechtigungstypen
@@ -204,11 +204,11 @@ INSERT INTO alice.role_templates (role, description, ha_permissions, dms_permiss
         {"domain": "alarm_control_panel", "can_read": true, "can_control": false}
     ]',
     '[
-        {"doc_type": "Rechnung", "can_read": true, "can_create": true, "can_update": false, "can_delete": false, "can_download": true},
-        {"doc_type": "Dokument", "can_read": true, "can_create": true, "can_update": false, "can_delete": false, "can_download": true},
+        {"doc_type": "Invoice", "can_read": true, "can_create": true, "can_update": false, "can_delete": false, "can_download": true},
+        {"doc_type": "Document", "can_read": true, "can_create": true, "can_update": false, "can_delete": false, "can_download": true},
         {"doc_type": "Email", "can_read": true, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
-        {"doc_type": "Kontoauszug", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
-        {"doc_type": "WertpapierAbrechnung", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}
+        {"doc_type": "BankStatement", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
+        {"doc_type": "SecuritySettlement", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}
     ]',
     '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": true, "can_delete_memory": false}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant", "search_documents", "remember", "recall"]}'

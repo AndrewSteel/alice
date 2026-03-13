@@ -1,6 +1,6 @@
 {
-  "class": "Email",
-  "description": "Email messages",
+  "class": "Contract",
+  "description": "Contracts and agreements",
   "vectorizer": "text2vec-transformers",
   "vectorIndexConfig": {
     "distance": "cosine"
@@ -12,44 +12,19 @@
   },
   "properties": [
     {
-      "name": "subject",
-      "description": "Email subject",
+      "name": "title",
+      "description": "Title / name of the contract",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": true
     },
     {
-      "name": "sender",
-      "description": "Sender email address",
+      "name": "contractType",
+      "description": "Type: lease, employment, insurance, mobile, internet, electricity, gas, subscription, purchase, etc.",
       "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": true,
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
-      "name": "senderName",
-      "description": "Sender display name",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": true,
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
-      "name": "recipients",
-      "description": "Recipient email address(es)",
-      "dataType": ["text[]"],
       "indexFilterable": true,
       "indexSearchable": false,
+      "tokenization": "keyword",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -58,21 +33,42 @@
       }
     },
     {
-      "name": "cc",
-      "description": "CC recipients",
-      "dataType": ["text[]"],
+      "name": "contractPartner",
+      "description": "Contract partner / provider",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "contractNumber",
+      "description": "Contract number / customer number",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "contractSubject",
+      "description": "Subject of the contract",
+      "dataType": ["text"],
       "indexFilterable": false,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
+      "indexSearchable": true
     },
     {
-      "name": "date",
-      "description": "Date and time of the email",
+      "name": "signDate",
+      "description": "Date of contract signing",
       "dataType": ["date"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -84,12 +80,11 @@
       }
     },
     {
-      "name": "category",
-      "description": "Category: business, personal, newsletter, order, support, etc.",
-      "dataType": ["text"],
+      "name": "startDate",
+      "description": "Start of the contract term",
+      "dataType": ["date"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -98,12 +93,11 @@
       }
     },
     {
-      "name": "importance",
-      "description": "Importance: low, normal, high",
-      "dataType": ["text"],
+      "name": "endDate",
+      "description": "End of the contract term (or null if indefinite)",
+      "dataType": ["date"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -112,8 +106,34 @@
       }
     },
     {
-      "name": "hasAttachments",
-      "description": "Has attachments",
+      "name": "noticePeriod",
+      "description": "Notice period in days/months",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "nextCancellationDate",
+      "description": "Next possible cancellation date",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "autoRenewal",
+      "description": "Automatic renewal active",
       "dataType": ["boolean"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -125,9 +145,9 @@
       }
     },
     {
-      "name": "attachments",
-      "description": "List of attachments",
-      "dataType": ["text[]"],
+      "name": "renewalPeriod",
+      "description": "Renewal period (e.g. '12 months')",
+      "dataType": ["text"],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -138,8 +158,96 @@
       }
     },
     {
-      "name": "content",
-      "description": "Email body content",
+      "name": "monthlyCost",
+      "description": "Monthly cost",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "annualCost",
+      "description": "Annual cost",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "currency",
+      "description": "Currency",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "paymentFrequency",
+      "description": "Payment frequency: monthly, quarterly, annually, one-time",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "paymentMethod",
+      "description": "Payment method: direct debit, bank transfer, credit card",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "status",
+      "description": "Status: active, cancelled, expired, paused",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "keyword",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "notes",
+      "description": "Personal notes about the contract",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true
+    },
+    {
+      "name": "fullText",
+      "description": "Extracted full text",
       "dataType": ["text"],
       "indexFilterable": false,
       "indexSearchable": true
@@ -152,39 +260,11 @@
       "indexSearchable": true
     },
     {
-      "name": "threadId",
-      "description": "Thread ID for conversation grouping",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "tokenization": "keyword",
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
-      "name": "messageId",
-      "description": "Message-ID of the email",
-      "dataType": ["text"],
-      "indexFilterable": true,
-      "indexSearchable": false,
-      "tokenization": "keyword",
-      "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": true,
-          "vectorizePropertyName": false
-        }
-      }
-    },
-    {
       "name": "fileName",
-      "description": "Original file name (if stored as .eml)",
+      "description": "Original file name",
       "dataType": ["text"],
       "indexFilterable": false,
-      "indexSearchable": false,
+      "indexSearchable": true,
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -208,7 +288,7 @@
     },
     {
       "name": "fileHash",
-      "description": "SHA256 hash",
+      "description": "SHA256 hash of the file",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -222,7 +302,7 @@
     },
     {
       "name": "fileType",
-      "description": "File type extension (eml, msg, txt, etc.)",
+      "description": "File type extension (pdf, txt, docx, etc.)",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -236,7 +316,7 @@
     },
     {
       "name": "createdBy",
-      "description": "User who archived the email",
+      "description": "User who added the document",
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
@@ -249,7 +329,20 @@
     },
     {
       "name": "createdAt",
-      "description": "Timestamp of archival",
+      "description": "Timestamp when recorded in the system",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "updatedAt",
+      "description": "Last update timestamp",
       "dataType": ["date"],
       "indexFilterable": true,
       "indexSearchable": false,

@@ -26,8 +26,8 @@ CREATE TABLE alice.dms_watched_folders (
   id             SERIAL PRIMARY KEY,
   path           TEXT NOT NULL UNIQUE CHECK (char_length(path) <= 500),
   suggested_type TEXT CHECK (suggested_type IN (
-    'Rechnung', 'Kontoauszug', 'Dokument', 'Email',
-    'WertpapierAbrechnung', 'Vertrag'
+    'Invoice', 'BankStatement', 'Document', 'Email',
+    'SecuritySettlement', 'Contract'
   )),
   description    TEXT,
   enabled        BOOLEAN NOT NULL DEFAULT true,

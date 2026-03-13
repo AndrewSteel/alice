@@ -14,7 +14,7 @@ services:
       - N8N_BASIC_AUTH_USER=${USER}
       - N8N_BASIC_AUTH_PASSWORD=${PASSWORD}
       - WEBHOOK_URL=https://alice.happy-mining.de
-      - NODE_FUNCTION_ALLOW_EXTERNAL=axios
+      - NODE_FUNCTION_ALLOW_EXTERNAL=axios,redis
       - NODE_FUNCTION_ALLOW_BUILTIN=crypto,fs,path
       # PROJ-1: HA Intent Infrastructure (2026-02-24)
       - INTENT_MIN_CERTAINTY=${INTENT_MIN_CERTAINTY}
@@ -24,6 +24,7 @@ services:
       - WEAVIATE_URL=${WEAVIATE_URL}
       - HA_URL=${HA_URL}
       - HA_TOKEN=${HA_TOKEN}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       # PROJ-7: JWT Auth (2026-02-27)
       - JWT_SECRET="${JWT_SECRET}"
     healthcheck:
