@@ -1,0 +1,309 @@
+{
+  "name": "alice-dms-lifecycle",
+  "nodes": [
+    {
+      "parameters": {
+        "topics": "alice/dms/lifecycle",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqttTrigger",
+      "typeVersion": 1,
+      "position": [200, 500],
+      "id": "lifecycle-trigger-01-alice-dms-lifecycle-v1",
+      "name": "MQTT Trigger: alice/dms/lifecycle",
+      "webhookId": "alice-dms-lifecycle-trigger-v1",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('Malformed MQTT message: cannot parse JSON payload. ' + e.message);\n}\n\nif (!msg.action || !msg.file_hash || !msg.file_path) {\n  throw new Error('Invalid lifecycle message: missing required fields (action, file_hash, file_path). Got keys: ' + JSON.stringify(Object.keys(msg)));\n}\n\nif (!['add_path', 'update_path'].includes(msg.action)) {\n  console.warn('[alice-dms-lifecycle] Unknown action: ' + msg.action + ' — discarding message');\n  return [];\n}\n\nreturn [{ json: { ...msg } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 500],
+      "id": "lifecycle-parse-01-alice-dms-lifecycle-v1",
+      "name": "Code: Parse & Validate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst fileHash = item.file_hash;\nconst WEAVIATE = 'http://weaviate:8080';\nconst collections = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\nlet foundClass = null;\nlet foundId = null;\nlet foundAdditionalPaths = [];\n\nfor (const cls of collections) {\n  const q = `{ Get { ${cls}(where: { path: [\"fileHash\"], operator: Equal, valueText: \"${fileHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 10000\n    });\n    const hits = r.data?.data?.Get?.[cls];\n    if (hits && hits.length > 0) {\n      foundClass = cls;\n      foundId = hits[0]._additional?.id;\n      foundAdditionalPaths = hits[0].additionalPaths || [];\n      break;\n    }\n  } catch(e) {\n    // continue to next collection\n  }\n}\n\nif (!foundId) {\n  console.warn(`[alice-dms-lifecycle] Object not found in Weaviate for hash: ${fileHash}`);\n}\n\nreturn [{ json: { ...item, _weaviate_class: foundClass, _weaviate_id: foundId, _existing_additional_paths: foundAdditionalPaths } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 500],
+      "id": "lifecycle-weaviate-find-01-alice-dms-lifecycle-v1",
+      "name": "Code: Weaviate Find by Hash"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-action-add-path",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "add_path",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 500],
+      "id": "lifecycle-if-add-path-01-alice-dms-lifecycle-v1",
+      "name": "IF: Is add_path"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  console.warn(`[alice-dms-lifecycle] add_path: no Weaviate object found for hash ${item.file_hash}, skipping PATCH`);\n  return [{ json: { ...item, _weaviate_patched: false } }];\n}\n\nconst existing = Array.isArray(item._existing_additional_paths) ? item._existing_additional_paths : [];\nconst newPaths = [...new Set([...existing, item.file_path])];\n\ntry {\n  await axios.patch(\n    `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n    { properties: { additionalPaths: newPaths } },\n    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n  );\n} catch(e) {\n  throw new Error(`Weaviate PATCH failed for add_path (${item.file_hash}): ${e.message}`);\n}\n\nreturn [{ json: { ...item, _weaviate_patched: true, _new_additional_paths: newPaths } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 300],
+      "id": "lifecycle-patch-add-path-01-alice-dms-lifecycle-v1",
+      "name": "Code: PATCH additionalPaths"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.hSet('alice:dms:path_to_hash', item.file_path, item.file_hash);\n  await client.sAdd(`alice:dms:hash_to_paths:${item.file_hash}`, item.file_path);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { ...item, _redis_updated: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 300],
+      "id": "lifecycle-redis-add-path-01-alice-dms-lifecycle-v1",
+      "name": "Code: Redis Update (add_path)"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "message": "={{ JSON.stringify({ action: 'add_path', file_hash: $json.file_hash, file_path: $json.file_path, weaviate_patched: $json._weaviate_patched, new_paths_count: ($json._new_additional_paths || []).length, timestamp: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [2000, 300],
+      "id": "lifecycle-done-add-path-01-alice-dms-lifecycle-v1",
+      "name": "MQTT: Done (add_path)",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-action-update-path",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "update_path",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1400, 700],
+      "id": "lifecycle-if-update-path-01-alice-dms-lifecycle-v1",
+      "name": "IF: Is update_path"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  console.warn(`[alice-dms-lifecycle] update_path: no Weaviate object found for hash ${item.file_hash}, skipping PATCH`);\n  return [{ json: { ...item, _weaviate_patched: false } }];\n}\n\ntry {\n  await axios.patch(\n    `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n    { properties: { filePath: item.file_path } },\n    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n  );\n} catch(e) {\n  throw new Error(`Weaviate PATCH failed for update_path (${item.file_hash}): ${e.message}`);\n}\n\nreturn [{ json: { ...item, _weaviate_patched: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 700],
+      "id": "lifecycle-patch-update-path-01-alice-dms-lifecycle-v1",
+      "name": "Code: PATCH filePath"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nconst oldPaths = Array.isArray(item.old_paths) ? item.old_paths : [];\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  for (const op of oldPaths) {\n    await client.hDel('alice:dms:path_to_hash', op);\n    await client.sRem(`alice:dms:hash_to_paths:${item.file_hash}`, op);\n  }\n  await client.hSet('alice:dms:path_to_hash', item.file_path, item.file_hash);\n  await client.sAdd(`alice:dms:hash_to_paths:${item.file_hash}`, item.file_path);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { ...item, _redis_updated: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 700],
+      "id": "lifecycle-redis-update-path-01-alice-dms-lifecycle-v1",
+      "name": "Code: Redis Update (update_path)"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "message": "={{ JSON.stringify({ action: 'update_path', file_hash: $json.file_hash, file_path: $json.file_path, old_paths: $json.old_paths || [], weaviate_patched: $json._weaviate_patched, timestamp: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [2300, 700],
+      "id": "lifecycle-done-update-path-01-alice-dms-lifecycle-v1",
+      "name": "MQTT: Done (update_path)",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, Redis still updated\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-21: Weaviate additionalPaths field on all 6 collections\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
+        "height": 420,
+        "width": 400,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, 100],
+      "id": "lifecycle-note-01-alice-dms-lifecycle-v1",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "MQTT Trigger: alice/dms/lifecycle": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse & Validate": {
+      "main": [
+        [
+          {
+            "node": "Code: Weaviate Find by Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Weaviate Find by Hash": {
+      "main": [
+        [
+          {
+            "node": "IF: Is add_path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is add_path": {
+      "main": [
+        [
+          {
+            "node": "Code: PATCH additionalPaths",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Is update_path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: PATCH additionalPaths": {
+      "main": [
+        [
+          {
+            "node": "Code: Redis Update (add_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Redis Update (add_path)": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Done (add_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is update_path": {
+      "main": [
+        [
+          {
+            "node": "Code: PATCH filePath",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: PATCH filePath": {
+      "main": [
+        [
+          {
+            "node": "Code: Redis Update (update_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Redis Update (update_path)": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Done (update_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateId": "alice-dms-lifecycle-v1"
+  }
+}
