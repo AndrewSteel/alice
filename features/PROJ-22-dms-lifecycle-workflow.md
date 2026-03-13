@@ -1,8 +1,8 @@
 # PROJ-22: DMS Lifecycle Workflow (alice-dms-lifecycle)
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-03-12
-**Last Updated:** 2026-03-12
+**Last Updated:** 2026-03-13
 
 ## Dependencies
 - Requires: PROJ-19 (DMS Processor) — Redis-Mappings `path_to_hash` und `hash_to_paths` müssen befüllt werden
@@ -100,6 +100,13 @@ MQTT: alice/dms/done
 | `redis-alice` | path_to_hash + hash_to_paths aktualisieren |
 
 ---
+
+## Tech Design (Solution Architect)
+
+See **PROJ-21 Tech Design** for the full architecture covering scanner, MQTT queue, Weaviate schema, and this workflow as a producer-consumer pair.
+
+---
+
 <!-- Sections below are added by subsequent skills -->
 
 ## QA Test Results

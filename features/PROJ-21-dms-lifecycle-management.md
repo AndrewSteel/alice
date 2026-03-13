@@ -1,8 +1,8 @@
 # PROJ-21: DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-03-12
-**Last Updated:** 2026-03-12
+**Last Updated:** 2026-03-13
 
 ## Dependencies
 - Requires: PROJ-17 (DMS Scanner Multi-Queue) — Workflow `alice-dms-scanner` muss deployed sein

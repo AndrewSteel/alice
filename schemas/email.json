@@ -259,6 +259,19 @@
           "vectorizePropertyName": false
         }
       }
+    },
+    {
+      "name": "additionalPaths",
+      "description": "Additional known file paths pointing to the same document content (duplicates)",
+      "dataType": ["text[]"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     }
   ]
 }
