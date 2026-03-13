@@ -33,7 +33,7 @@
 | PROJ-18 | DMS Text-Extractor-Container (pdf/ocr/txt/office → plaintext)               | Deployed | [PROJ-18-dms-text-extractor-containers.md](PROJ-18-dms-text-extractor-containers.md)                               | 2026-03-11 |
 | PROJ-19 | DMS Processor Workflow (LLM-Klassifikation + Weaviate)                      | Deployed | [PROJ-19-dms-processor-workflow.md](PROJ-19-dms-processor-workflow.md)                                             | 2026-03-09 |
 | PROJ-20 | DMS Document Search Tool (alice-tool-search)                                | Planned  | [PROJ-20-dms-document-search-tool.md](PROJ-20-dms-document-search-tool.md)                                         | 2026-03-09 |
-| PROJ-21 | DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)        | In Progress | [PROJ-21-dms-lifecycle-management.md](PROJ-21-dms-lifecycle-management.md)                                          | 2026-03-12 |
+| PROJ-21 | DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)        | In Progress | [PROJ-21-dms-lifecycle-management.md](PROJ-21-dms-lifecycle-management.md)                                         | 2026-03-12 |
 | PROJ-22 | DMS Lifecycle Workflow (alice-dms-lifecycle MQTT Consumer)                   | Planned  | [PROJ-22-dms-lifecycle-workflow.md](PROJ-22-dms-lifecycle-workflow.md)                                               | 2026-03-12 |
 
 <!-- Add features above this line -->
