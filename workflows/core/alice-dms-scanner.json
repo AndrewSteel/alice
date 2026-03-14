@@ -429,7 +429,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst item = $('Code: Hash + Size').first().json;\nlet size_stable = false;\ntry {\n  const stat = fs.statSync(item.file_path);\n  size_stable = (stat.size === item.original_size);\n} catch(e) {\n  size_stable = false;\n}\nreturn [{ json: { ...item, size_stable } }];"
+        "jsCode": "const fs = require('fs');\nconst hashItem = $('Code: Hash + Size').first().json;\nconst lifecycleItem = $('Code: Lifecycle Check').first().json;\n// Merge hash data with lifecycle fields (_lifecycle_action, _old_hash)\nconst item = { ...hashItem, ...lifecycleItem };\nlet size_stable = false;\ntry {\n  const stat = fs.statSync(item.file_path);\n  size_stable = (stat.size === item.original_size);\n} catch(e) {\n  size_stable = false;\n}\nreturn [{ json: { ...item, size_stable } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -739,7 +739,7 @@
       "parameters": {
         "topic": "alice/dms/pdf",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority, action: $json._lifecycle_action === 'replace' ? 'replace' : 'new', old_hash: $json._old_hash || null }) }}",
         "options": {
           "qos": 1
         }
@@ -763,7 +763,7 @@
       "parameters": {
         "topic": "alice/dms/ocr",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority, action: $json._lifecycle_action === 'replace' ? 'replace' : 'new', old_hash: $json._old_hash || null }) }}",
         "options": {
           "qos": 1
         }
@@ -787,7 +787,7 @@
       "parameters": {
         "topic": "alice/dms/txt",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority, action: $json._lifecycle_action === 'replace' ? 'replace' : 'new', old_hash: $json._old_hash || null }) }}",
         "options": {
           "qos": 1
         }
@@ -811,7 +811,7 @@
       "parameters": {
         "topic": "alice/dms/office",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority }) }}",
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, needs_ocr: $json.needs_ocr, priority: $json.priority, action: $json._lifecycle_action === 'replace' ? 'replace' : 'new', old_hash: $json._old_hash || null }) }}",
         "options": {
           "qos": 1
         }
@@ -833,7 +833,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (!item.file_hash) {\n  return [{ json: item }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.sAdd('alice:dms:queued_files', item.file_hash);\n} finally {\n  await client.quit();\n}\nreturn [{ json: item }];"
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (!item.file_hash) {\n  return [{ json: item }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  // BUG-2 fix: remove stale old hash from queued_files on Fall 3 replace\n  if (item._lifecycle_action === 'replace' && item._old_hash) {\n    await client.sRem('alice:dms:queued_files', item._old_hash);\n  }\n  await client.sAdd('alice:dms:queued_files', item.file_hash);\n} finally {\n  await client.quit();\n}\nreturn [{ json: item }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
