@@ -574,6 +574,7 @@
     },
     {
       "parameters": {
+        "systemMessage": "Du bist Alice, ein persönlicher Assistent und Smart-Home-Controller. Du hast Zugriff auf folgende Tools:\n\n**search_documents** — Durchsucht das Dokumentenarchiv (Rechnungen, Kontoauszüge, Verträge, E-Mails, Wertpapierabrechnungen). Nutze dieses Tool wenn der Nutzer nach Dokumenten oder Finanzdaten fragt.\n\n**get_document_details** — Ruft alle Details zu einem Dokument ab (per weaviate_id aus search_documents). Nutze dieses Tool wenn der Nutzer mehr Details zu einem gefundenen Dokument möchte.\n\nAntworte immer auf Deutsch. Sei präzise und hilfreich.",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -598,6 +599,168 @@
           "name": "Ollama 3090"
         }
       }
+    },
+    {
+      "parameters": {
+        "description": "Durchsucht das Dokumentenarchiv semantisch nach Rechnungen, Kontoauszügen, Verträgen, E-Mails oder Wertpapierabrechnungen. Gibt eine Liste von Dokumenten mit Metadaten und Score zurück.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "yr488XOzLhEZbnGj",
+          "cachedResultName": "alice-tool-search"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "operation": "search",
+            "user_id": "={{ $('Input Validator').first().json.userId }}",
+            "query": "={{ $fromAI('query', 'Suchbegriff oder Frage auf Deutsch', 'string') }}",
+            "doc_type": "={{ $fromAI('doc_type', 'Dokumenttyp: Rechnung | Kontoauszug | Dokument | Email | WertpapierAbrechnung | Vertrag | alle (optional)', 'string') }}",
+            "date_from": "={{ $fromAI('date_from', 'Startdatum im Format YYYY-MM-DD (optional)', 'string') }}",
+            "date_to": "={{ $fromAI('date_to', 'Enddatum im Format YYYY-MM-DD (optional)', 'string') }}",
+            "limit": "={{ $fromAI('limit', 'Anzahl Ergebnisse 1–20 (optional, Standard: 5)', 'number') }}"
+          },
+          "schema": [
+            {
+              "id": "operation",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "operation",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "user_id",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "user_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "query",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "query",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "doc_type",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "doc_type",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "date_from",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "date_from",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "date_to",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "date_to",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "limit",
+              "type": "number",
+              "display": true,
+              "required": false,
+              "displayName": "limit",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            }
+          ],
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [2576, 5344],
+      "id": "b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e",
+      "name": "search_documents"
+    },
+    {
+      "parameters": {
+        "description": "Ruft alle Details und den vollständigen Inhalt eines spezifischen Dokuments aus dem Archiv ab. Nutze die weaviate_id und collection aus einem vorherigen search_documents-Ergebnis.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "yr488XOzLhEZbnGj",
+          "cachedResultName": "alice-tool-search"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "operation": "details",
+            "user_id": "={{ $('Input Validator').first().json.userId }}",
+            "weaviate_id": "={{ $fromAI('weaviate_id', 'UUID des Dokuments aus einem vorherigen search_documents-Aufruf', 'string') }}",
+            "collection": "={{ $fromAI('collection', 'Weaviate-Collection-Name aus search_documents (z.B. Invoice, BankStatement)', 'string') }}"
+          },
+          "schema": [
+            {
+              "id": "operation",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "operation",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "user_id",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "user_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "weaviate_id",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "weaviate_id",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "collection",
+              "type": "string",
+              "display": true,
+              "required": true,
+              "displayName": "collection",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            }
+          ],
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [2704, 5344],
+      "id": "d0e1f2a3-b4c5-d6e7-f8a9-b0c1d2e3f4a5",
+      "name": "get_document_details"
     },
     {
       "parameters": {
@@ -775,7 +938,7 @@
       "typeVersion": 2,
       "position": [3520, 5328],
       "id": "d8a843ae-23b2-422c-8efa-3289ec02a0be",
-      "name": "Code in JavaScript"
+      "name": "Format Response LLM"
     },
     {
       "parameters": {
@@ -1865,6 +2028,28 @@
         ]
       ]
     },
+    "search_documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_document_details": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "AI Agent": {
       "main": [
         [
@@ -1880,7 +2065,7 @@
       "main": [
         [
           {
-            "node": "Code in JavaScript",
+            "node": "Format Response LLM",
             "type": "main",
             "index": 0
           },
@@ -1922,7 +2107,7 @@
         ]
       ]
     },
-    "Code in JavaScript": {
+    "Format Response LLM": {
       "main": [
         [
           {

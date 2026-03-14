@@ -1,0 +1,220 @@
+{
+  "name": "alice-tool-search",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-656, 144],
+      "id": "2dd673a6-4085-4aa3-b1ca-fddae6ee14dd",
+      "name": "Execute Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input Normalizer — validates and normalizes all inputs\nconst input = $json;\nconst operation = input.operation || 'search';\n\nconst DOC_TYPE_MAP = {\n  'Rechnung': 'Invoice',\n  'Kontoauszug': 'BankStatement',\n  'Dokument': 'Document',\n  'Email': 'Email',\n  'WertpapierAbrechnung': 'SecuritySettlement',\n  'Vertrag': 'Contract'\n};\n\nconst ALL_COLLECTIONS = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\n// Determine which collections to search\nlet collections = ALL_COLLECTIONS;\nif (operation === 'search') {\n  const docType = input.doc_type;\n  if (docType && docType !== 'alle' && DOC_TYPE_MAP[docType]) {\n    collections = [DOC_TYPE_MAP[docType]];\n  }\n}\n\n// Normalize limit (1–20, default 5)\nlet limit = parseInt(input.limit) || 5;\nif (limit > 20) limit = 20;\nif (limit < 1) limit = 1;\n\n// Normalize dates — swap if inverted\nlet dateFrom = input.date_from || null;\nlet dateTo = input.date_to || null;\nif (dateFrom && dateTo && dateFrom > dateTo) {\n  const tmp = dateFrom;\n  dateFrom = dateTo;\n  dateTo = tmp;\n}\n\nreturn [{ json: {\n  operation,\n  userId: input.user_id || null,\n  query: input.query || '',\n  collections,\n  dateFrom,\n  dateTo,\n  limit,\n  weaviateId: input.weaviate_id || null,\n  collection: input.collection || null\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-432, 144],
+      "id": "00ad217b-1c65-489d-bdba-6ca5af930913",
+      "name": "Input Normalizer"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT doc_type FROM alice.permissions_dms WHERE user_id = $1 AND can_read = TRUE",
+        "options": {
+          "queryReplacement": "{{ $json.userId }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-208, 144],
+      "id": "92500fd9-4f3d-4831-bade-9ef86ca24f85",
+      "name": "Check DMS Permissions",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Apply DMS Permission Filter — restrict collections to those the user has can_read=TRUE\nconst inputData = $('Input Normalizer').first().json;\nconst permRows = $input.all().map(item => item.json);\n\n// If no user_id was provided or permission query failed, deny all access\nif (!inputData.userId || permRows.length === 0) {\n  if (inputData.operation === 'search') {\n    return [{ json: { ...inputData, collections: [] } }];\n  }\n  // For details: check if the requested collection is allowed\n  return [{ json: { ...inputData, allowedCollections: [] } }];\n}\n\n// Build list of allowed collection names from permission rows\nconst allowedDocTypes = permRows.map(r => r.doc_type);\n\n// Wildcard '*' means all collections are allowed\nconst ALL_COLLECTIONS = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst hasWildcard = allowedDocTypes.includes('*');\nconst allowedCollections = hasWildcard ? ALL_COLLECTIONS : allowedDocTypes.filter(t => ALL_COLLECTIONS.includes(t));\n\nif (inputData.operation === 'search') {\n  // Filter requested collections to only allowed ones\n  const filteredCollections = inputData.collections.filter(c => allowedCollections.includes(c));\n  return [{ json: { ...inputData, collections: filteredCollections } }];\n} else {\n  // For details: pass allowed collections so the details node can check\n  return [{ json: { ...inputData, allowedCollections } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [16, 144],
+      "id": "d0c0e326-5baa-493d-9e97-30754a6e65bd",
+      "name": "Apply DMS Filter"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "op-search",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "search"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "op-details",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "details",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "details"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [240, 144],
+      "id": "975d128b-5828-4a20-b747-b4d3aadbbe92",
+      "name": "Operation Router"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Weaviate nearText search across selected collections using axios\nconst { query, collections, dateFrom, dateTo, limit } = $json;\n\n// If no collections allowed (permission denied), return empty results\nif (!collections || collections.length === 0) {\n  return [{ json: { results: [], error: null } }];\n}\n\nconst WEAVIATE_URL = 'http://weaviate:8080';\n\nconst DATE_FIELDS = {\n  Invoice: 'invoiceDate',\n  BankStatement: 'statementDate',\n  Contract: 'startDate',\n  Email: 'date',\n  SecuritySettlement: 'transactionDate',\n  Document: 'documentDate'\n};\n\nconst KEY_FIELDS_MAP = {\n  Invoice: ['issuer', 'recipient', 'category'],\n  BankStatement: ['bankName', 'accountHolder', 'iban'],\n  Document: ['sender', 'recipient', 'category'],\n  Email: ['sender', 'senderName', 'subject', 'recipients'],\n  SecuritySettlement: ['securityName', 'transactionType', 'isin'],\n  Contract: ['contractPartner', 'contractType', 'monthlyCost']\n};\n\nconst AMOUNT_FIELDS = {\n  Invoice: 'amountGross',\n  BankStatement: 'closingBalance',\n  SecuritySettlement: 'settlementAmount'\n};\n\nfunction buildGraphQL(collection) {\n  const dateField = DATE_FIELDS[collection];\n  const keyFields = KEY_FIELDS_MAP[collection] || [];\n  const amountField = AMOUNT_FIELDS[collection];\n\n  // Build optional where clause for date range\n  let whereClause = '';\n  if (dateFrom || dateTo) {\n    const conds = [];\n    if (dateFrom) conds.push(`{ path: [\"${dateField}\"], operator: GreaterThanEqual, valueDate: \"${dateFrom}T00:00:00Z\" }`);\n    if (dateTo)   conds.push(`{ path: [\"${dateField}\"], operator: LessThanEqual,    valueDate: \"${dateTo}T23:59:59Z\" }`);\n    whereClause = conds.length === 1\n      ? `where: ${conds[0]}`\n      : `where: { operator: And, operands: [${conds.join(', ')}] }`;\n  }\n\n  const allFields = ['_additional { id distance }', 'summary', dateField, ...keyFields];\n  if (amountField) allFields.push(amountField);\n\n  const escapedQuery = query.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/\\n/g, ' ').replace(/\\r/g, ' ').replace(/\\t/g, ' ').replace(/[\\x00-\\x1f]/g, '');\n\n  return {\n    query: `{ Get { ${collection}(nearText: { concepts: [\"${escapedQuery}\"], distance: 0.8 } ${whereClause} limit: ${limit}) { ${allFields.join(' ')} } } }`\n  };\n}\n\ntry {\n  const axios = require('axios');\n\n  const requests = collections.map(col =>\n    axios.post(`${WEAVIATE_URL}/v1/graphql`, buildGraphQL(col), {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 10000\n    })\n    .then(res => ({ collection: col, data: res.data }))\n    .catch(err => ({ collection: col, error: err.message, data: null }))\n  );\n\n  const responses = await Promise.all(requests);\n\n  const results = [];\n  for (const resp of responses) {\n    if (!resp.data || resp.error) continue;\n    const collData = resp.data?.data?.Get?.[resp.collection] || [];\n    const dateField = DATE_FIELDS[resp.collection];\n    const amountField = AMOUNT_FIELDS[resp.collection];\n\n    for (const item of collData) {\n      const distance = item._additional?.distance ?? 1.0;\n      if (distance > 0.8) continue;\n\n      const key_fields = {};\n      for (const f of KEY_FIELDS_MAP[resp.collection] || []) {\n        if (item[f] != null) key_fields[f] = item[f];\n      }\n\n      const result = {\n        weaviate_id: item._additional?.id,\n        collection: resp.collection,\n        score: distance,\n        title_or_summary: item.summary || '',\n        date: item[dateField] || null,\n        key_fields\n      };\n      if (amountField && item[amountField] != null) {\n        result.amount = item[amountField];\n      }\n      results.push(result);\n    }\n  }\n\n  // Sort ascending by score (lower distance = better match)\n  results.sort((a, b) => a.score - b.score);\n  const limited = results.slice(0, limit);\n\n  return [{ json: { results: limited, error: null } }];\n} catch (err) {\n  return [{ json: { results: [], error: err.message } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, -16],
+      "id": "2759532d-29fa-47c9-9142-2eefa95cce0a",
+      "name": "Weaviate Search"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Weaviate GET single document by UUID and collection\nconst { weaviateId, collection, allowedCollections } = $json;\nconst WEAVIATE_URL = 'http://weaviate:8080';\n\nif (!weaviateId || !collection) {\n  return [{ json: { document: {}, error: 'Missing weaviate_id or collection' } }];\n}\n\n// Check if user has permission to read this collection\nif (!allowedCollections || !allowedCollections.includes(collection)) {\n  return [{ json: { document: {}, error: 'Keine Berechtigung für diesen Dokumenttyp' } }];\n}\n\ntry {\n  const axios = require('axios');\n  const resp = await axios.get(\n    `${WEAVIATE_URL}/v1/objects/${collection}/${weaviateId}`,\n    { timeout: 10000 }\n  );\n  return [{ json: { document: resp.data, error: null } }];\n} catch (err) {\n  if (err.response?.status === 404) {\n    return [{ json: { document: {}, error: 'Dokument nicht gefunden' } }];\n  }\n  return [{ json: { document: {}, error: err.message } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [496, 272],
+      "id": "89dca504-fc45-4881-adcf-8733f652a7c6",
+      "name": "Weaviate Details"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Input Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Normalizer": {
+      "main": [
+        [
+          {
+            "node": "Check DMS Permissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check DMS Permissions": {
+      "main": [
+        [
+          {
+            "node": "Apply DMS Filter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apply DMS Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply DMS Filter": {
+      "main": [
+        [
+          {
+            "node": "Operation Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Operation Router": {
+      "main": [
+        [
+          {
+            "node": "Weaviate Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Weaviate Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c9c996d0-24ea-4ef9-9e24-f46846a95476",
+  "meta": {
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
+  },
+  "id": "yr488XOzLhEZbnGj",
+  "tags": []
+}
