@@ -1,8 +1,8 @@
 # PROJ-22: DMS Lifecycle Workflow (alice-dms-lifecycle)
 
-## Status: In Progress
+## Status: Deployed
 **Created:** 2026-03-12
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 
 ## Dependencies
 - Requires: PROJ-19 (DMS Processor) — Redis-Mappings `path_to_hash` und `hash_to_paths` müssen befüllt werden
@@ -110,7 +110,118 @@ See **PROJ-21 Tech Design** for the full architecture covering scanner, MQTT que
 <!-- Sections below are added by subsequent skills -->
 
 ## QA Test Results
-_To be added by /qa_
+
+### Re-Test #1 (2026-03-13)
+
+**Tested:** 2026-03-13
+**Scope:** Re-test after bug fixes. Static code review of `workflows/core/alice-dms-lifecycle.json` (no browser UI -- backend-only feature)
+**Tester:** QA Engineer (AI)
+**Trigger:** Fixes applied for BUG-4 (GraphQL injection) and BUG-7 (missing error handler)
+
+### Bug Fix Verification
+
+#### BUG-4 (Critical): GraphQL injection via file_hash -- VERIFIED FIXED
+- [x] `Code: Weaviate Find by Hash` now sanitizes: `const fileHash = String(rawHash).replace(/[^a-zA-Z0-9:]/g, '')`
+- [x] Warns on sanitization: `console.warn` when sanitized value differs from original
+- [x] Guards against empty hash: throws if sanitized hash is empty string
+- [x] Regex allows valid SHA-256 format (`sha256:<hex>`) while stripping injection characters
+
+#### BUG-7 (Medium): Missing MQTT error handler -- VERIFIED FIXED (with caveat)
+- [x] Error Trigger node added with proper ID
+- [x] Code: Format Error node extracts error metadata (message, node, execution_id, timestamp)
+- [x] MQTT: Publish Error node publishes to `alice/dms/error` with QoS 1 via mqtt-alice credential
+- [x] Connections: Error Trigger -> Code: Format Error -> MQTT: Publish Error
+- [ ] BUG-9: NEW -- `errorWorkflow` setting missing from workflow JSON. The Error Trigger node requires n8n's `Settings > Error Workflow` to point to this workflow's own ID. Without it, the error chain is dead code. See PROJ-21 BUG-9 for details.
+
+### Acceptance Criteria Status (re-verified)
+
+#### AC-1: Workflow exists and is active
+- [x] `workflows/core/alice-dms-lifecycle.json` exists with `"active": true`
+
+#### AC-2: MQTT Trigger on alice/dms/lifecycle
+- [x] MQTT Trigger configured with `topics: "alice/dms/lifecycle"`, credential mqtt-alice (Kqy6cn7hyDDXrBA0)
+
+#### AC-3: Message parsing and action routing
+- [x] `Code: Parse & Validate` parses JSON, validates required fields, discards unknown actions
+
+#### AC-4: action: "add_path"
+- [x] Weaviate lookup across all 6 collections by sanitized `file_hash`
+- [x] PATCH appends to `additionalPaths` with deduplication via `Set`
+- [x] Redis: `HSET path_to_hash` + `SADD hash_to_paths`
+- [x] MQTT done to `alice/dms/done` with `action: "add_path"`
+
+#### AC-5: action: "update_path"
+- [x] Weaviate lookup across all 6 collections by sanitized `file_hash`
+- [x] PATCH sets `filePath` to new path
+- [x] Redis: `HDEL` + `SREM` old paths, `HSET` + `SADD` new path
+- [x] MQTT done to `alice/dms/done` with `action: "update_path"`
+
+#### AC-6: Unknown action handling
+- [x] Returns empty array, logs warning
+
+#### AC-7: Weaviate error handling
+- [x] Weaviate PATCH failure throws error (structurally handled by Error Trigger chain)
+- [ ] BUG-9: Error Trigger chain will not fire until `errorWorkflow` is configured post-deploy
+
+#### AC-8: Weaviate object not found
+- [x] Warning logged, `_weaviate_patched: false`, Redis still updated, done message sent
+
+### Edge Cases Status
+
+#### EC-1: Weaviate object not found
+- [x] Handled: warning logged, Redis updated, done message sent
+
+#### EC-2: Collection search across all 6
+- [x] Sequential search, breaks on first match
+
+#### EC-3: Multiple objects with same hash
+- [x] `limit: 1` returns first match (defensive, PROJ-19 dedup prevents duplicates)
+
+#### EC-4: Malformed MQTT message
+- [x] Missing fields throw error, invalid JSON throws parse error
+
+#### EC-5: Redis not reachable
+- [x] Redis failure throws error, caught by Error Trigger chain (once BUG-9 is resolved)
+
+### Security Audit Results
+
+- [x] GraphQL injection mitigated -- file_hash sanitized (BUG-4 fix verified)
+- [x] No secrets hardcoded -- Redis password from `$env` with try/catch
+- [x] No external-facing endpoints
+- [x] MQTT credential IDs verified correct
+- [x] Weaviate calls internal Docker network only
+
+### New Bugs Found (Re-Test)
+
+#### BUG-9: errorWorkflow setting missing (shared with PROJ-21)
+- See PROJ-21 BUG-9 for full details
+- **Severity:** Medium
+- **Impact:** Error handler chain is structurally correct but inactive until post-deploy configuration
+- **Priority:** Add to deployment checklist
+
+### Previously Reported Bugs -- Final Status
+
+| Bug | Severity | Status |
+|-----|----------|--------|
+| BUG-4 | Critical | FIXED and verified |
+| BUG-7 | Medium | FIXED (structurally), limited by BUG-9 |
+| BUG-9 | Medium | NEW -- deployment config item |
+
+### Summary
+- **Acceptance Criteria:** 8/8 passed (AC-7 structurally fixed, pending deploy config)
+- **Previous Bugs Fixed:** 2/2 verified (BUG-4, BUG-7)
+- **New Bugs Found:** 1 (BUG-9, Medium -- deployment config, not a code defect)
+- **Security:** All previous findings resolved. No new security issues.
+- **Production Ready:** YES (conditional)
+- **Conditions:** BUG-9 must be addressed during deployment (set errorWorkflow in n8n UI after import).
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-03-14
+
+### Deployed Artifacts
+- `workflows/core/alice-dms-lifecycle.json` — new MQTT-triggered workflow
+
+### Post-Deploy Action Required
+After importing into n8n, configure:
+**Settings → Error Workflow → select `alice-dms-lifecycle`** so the Error Trigger node activates on execution failures and publishes to `alice/dms/error`.

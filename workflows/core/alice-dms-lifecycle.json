@@ -31,7 +31,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst fileHash = item.file_hash;\nconst WEAVIATE = 'http://weaviate:8080';\nconst collections = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\nlet foundClass = null;\nlet foundId = null;\nlet foundAdditionalPaths = [];\n\nfor (const cls of collections) {\n  const q = `{ Get { ${cls}(where: { path: [\"fileHash\"], operator: Equal, valueText: \"${fileHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 10000\n    });\n    const hits = r.data?.data?.Get?.[cls];\n    if (hits && hits.length > 0) {\n      foundClass = cls;\n      foundId = hits[0]._additional?.id;\n      foundAdditionalPaths = hits[0].additionalPaths || [];\n      break;\n    }\n  } catch(e) {\n    // continue to next collection\n  }\n}\n\nif (!foundId) {\n  console.warn(`[alice-dms-lifecycle] Object not found in Weaviate for hash: ${fileHash}`);\n}\n\nreturn [{ json: { ...item, _weaviate_class: foundClass, _weaviate_id: foundId, _existing_additional_paths: foundAdditionalPaths } }];"
+        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst rawHash = item.file_hash;\n\n// BUG-4 fix: sanitize file_hash to prevent GraphQL injection\nconst fileHash = String(rawHash).replace(/[^a-zA-Z0-9:]/g, '');\nif (fileHash !== rawHash) {\n  console.warn(`[alice-dms-lifecycle] Sanitized file_hash: '${rawHash}' -> '${fileHash}'`);\n}\nif (!fileHash) {\n  throw new Error('file_hash is empty after sanitization, cannot query Weaviate');\n}\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst collections = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\nlet foundClass = null;\nlet foundId = null;\nlet foundAdditionalPaths = [];\n\nfor (const cls of collections) {\n  const q = `{ Get { ${cls}(where: { path: [\"fileHash\"], operator: Equal, valueText: \"${fileHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 10000\n    });\n    const hits = r.data?.data?.Get?.[cls];\n    if (hits && hits.length > 0) {\n      foundClass = cls;\n      foundId = hits[0]._additional?.id;\n      foundAdditionalPaths = hits[0].additionalPaths || [];\n      break;\n    }\n  } catch(e) {\n    // continue to next collection\n  }\n}\n\nif (!foundId) {\n  console.warn(`[alice-dms-lifecycle] Object not found in Weaviate for hash: ${fileHash}`);\n}\n\nreturn [{ json: { ...item, _weaviate_class: foundClass, _weaviate_id: foundId, _existing_additional_paths: foundAdditionalPaths } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -179,8 +179,8 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, Redis still updated\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-21: Weaviate additionalPaths field on all 6 collections\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
-        "height": 420,
+        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, Redis still updated\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Post-Deploy: Error Workflow Config\nAfter importing, set Settings → Error Workflow to this workflow's\nown ID so the Error Trigger node catches execution errors.\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-21: Weaviate additionalPaths field on all 6 collections\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
+        "height": 520,
         "width": 400,
         "color": 5
       },
@@ -189,6 +189,45 @@
       "position": [200, 100],
       "id": "lifecycle-note-01-alice-dms-lifecycle-v1",
       "name": "Sticky Note"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [200, 900],
+      "id": "lifecycle-error-trigger-01-alice-dms-lifecycle-v1",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const errorData = $input.first().json;\nconst errorMsg = {\n  workflow: 'alice-dms-lifecycle',\n  error: errorData.execution?.error?.message || 'Unknown error',\n  node: errorData.execution?.lastNodeExecuted || 'unknown',\n  timestamp: new Date().toISOString(),\n  execution_id: errorData.execution?.id || null\n};\nreturn [{ json: errorMsg }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 900],
+      "id": "lifecycle-error-format-01-alice-dms-lifecycle-v1",
+      "name": "Code: Format Error"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/error",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [800, 900],
+      "id": "lifecycle-error-mqtt-01-alice-dms-lifecycle-v1",
+      "name": "MQTT: Publish Error",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
     }
   ],
   "connections": {
@@ -292,6 +331,28 @@
         [
           {
             "node": "MQTT: Done (update_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code: Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Format Error": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Error",
             "type": "main",
             "index": 0
           }

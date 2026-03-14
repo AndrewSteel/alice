@@ -1,8 +1,8 @@
 # PROJ-21: DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)
 
-## Status: In Progress
+## Status: Deployed
 **Created:** 2026-03-12
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 
 ## Dependencies
 - Requires: PROJ-17 (DMS Scanner Multi-Queue) — Workflow `alice-dms-scanner` muss deployed sein
@@ -300,7 +300,144 @@ All required tools are already available:
 <!-- Sections below are added by subsequent skills -->
 
 ## QA Test Results
-_To be added by /qa_
+
+### Re-Test #1 (2026-03-13)
+
+**Tested:** 2026-03-13
+**Scope:** Re-test after bug fixes. Static code review of workflow JSON, schema files, and scanner logic (no browser UI -- backend-only feature)
+**Tester:** QA Engineer (AI)
+**Trigger:** Fixes applied for BUG-1, BUG-2, BUG-4, BUG-7 from initial test
+
+### Bug Fix Verification
+
+#### BUG-1 (High): Fall 3 replace action not passed to extractor MQTT messages -- VERIFIED FIXED
+- [x] All four extractor MQTT publish nodes (PDF, OCR, TXT, Office) now include `action: $json._lifecycle_action === 'replace' ? 'replace' : 'new'` and `old_hash: $json._old_hash || null`
+- [x] `Code: Stability Check` merges lifecycle fields from both `Code: Hash + Size` and `Code: Lifecycle Check` via `{ ...hashItem, ...lifecycleItem }`
+- [x] Fields `_lifecycle_action` and `_old_hash` propagate correctly through the stability check and type routing pipeline
+
+#### BUG-2 (Medium): Stale queued_files entries on Fall 3 replace -- VERIFIED FIXED
+- [x] `Code: Mark Queued` now checks `if (item._lifecycle_action === 'replace' && item._old_hash)` and calls `client.sRem('alice:dms:queued_files', item._old_hash)` before adding the new hash
+- [x] Comment in code references the BUG-2 fix explicitly
+
+#### BUG-4 (Critical): GraphQL injection via file_hash -- VERIFIED FIXED
+- [x] `Code: Weaviate Find by Hash` in `alice-dms-lifecycle.json` now sanitizes: `const fileHash = String(rawHash).replace(/[^a-zA-Z0-9:]/g, '')`
+- [x] Logs a warning when sanitization modifies the input value
+- [x] Throws an error if the sanitized hash is empty (prevents empty-string queries)
+- [x] Regex correctly allows SHA-256 hash format `sha256:<hex>` while stripping GraphQL-dangerous characters (`"`, `}`, `{`, `#`, etc.)
+
+#### BUG-7 (Medium): Missing MQTT error handler -- VERIFIED FIXED
+- [x] `Error Trigger` node added (ID: `lifecycle-error-trigger-01-alice-dms-lifecycle-v1`)
+- [x] `Code: Format Error` node extracts error message, last node executed, execution ID, and timestamp
+- [x] `MQTT: Publish Error` node publishes to `alice/dms/error` with QoS 1
+- [x] Connection chain is correct: Error Trigger -> Code: Format Error -> MQTT: Publish Error
+- [ ] BUG-9: NEW -- Error Trigger requires `errorWorkflow` setting in workflow settings to point to this workflow's own ID. Without this setting, the Error Trigger node will never fire. (See BUG-9 below)
+
+### Acceptance Criteria Status (re-verified)
+
+#### AC-1: Scanner -- path_to_hash Lookup per file (HGET with file_path)
+- [x] `Code: Lifecycle Check` performs `client.hGet('alice:dms:path_to_hash', filePath)` after hash computation
+- [x] No entry found and hash not in `processed`: returns `_lifecycle_action: 'new'`
+- [x] Entry found and hash matches: returns `_lifecycle_action: 'already_processed', _skip: true`
+
+#### AC-2: Fall 3 (File content changed) -- same path, different hash
+- [x] Lifecycle Check detects `knownHashForPath !== currentHash` and returns `_lifecycle_action: 'replace'` with `_old_hash`
+- [x] Old hash removed from `alice:dms:processed` via `client.sRem`
+- [x] `action` and `old_hash` included in all extractor MQTT messages (BUG-1 fix verified)
+- [x] Old hash removed from `queued_files` on Fall 3 replace (BUG-2 fix verified)
+
+#### AC-3: Fall 1 (Duplicate) -- hash known, all paths still exist on NAS
+- [x] Lifecycle Check detects hash in `processed`, retrieves `hash_to_paths`, checks NAS file existence
+- [x] When all existing paths still resolve, returns `_lifecycle_action: 'add_path'`
+- [x] Dead paths are cleaned from `hash_to_paths` during duplicate detection
+
+#### AC-4: Fall 2 (Move) -- hash known, no paths exist on NAS anymore
+- [x] When no existing paths resolve on NAS, returns `_lifecycle_action: 'update_path'` with `_old_paths`
+
+#### AC-5: Falls 1 and 2 route to alice/dms/lifecycle queue (no extractor)
+- [x] `MQTT: Publish Lifecycle` node publishes to `alice/dms/lifecycle` topic
+- [x] Lifecycle events go to the `false` branch of `IF: Is Lifecycle Event` (not `new`/`replace`), bypassing extractors
+- [x] Message format matches spec: includes `action`, `file_hash`, `file_path`, `detected_at`
+- [x] `update_path` message includes `old_paths` array
+- [x] QoS 1 configured on lifecycle MQTT publish
+
+#### AC-6: Weaviate Schema -- additionalPaths field on all 6 collections
+- [x] All 6 collections (Invoice, BankStatement, Document, Email, SecuritySettlement, Contract) have `additionalPaths` (text[], non-indexed, non-vectorized)
+- [x] `filePath` remains as primary field in all collections
+
+### Edge Cases Status
+
+#### EC-1: Mixed state (some paths exist, some do not)
+- [x] Handled correctly: treated as Fall 1 (add_path), dead paths removed from hash_to_paths
+
+#### EC-2: hash_to_paths empty despite hash in processed
+- [x] Handled correctly: `knownPaths.length === 0` returns `_lifecycle_action: 'new'`
+
+#### EC-3: NAS path check failure
+- [x] `try { fs.accessSync(p, fs.constants.F_OK); return true; } catch(e) { return false; }` catches all error types (ENOENT, EACCES, etc.)
+
+#### EC-4: Multiple moves in sequence
+- [x] Each scan cycle independently checks `hash_to_paths` and `path_to_hash`, so sequential moves produce correct lifecycle events
+
+### Security Audit Results
+
+- [x] No secrets hardcoded -- Redis password read from `$env.REDIS_PASSWORD` with try/catch fallback
+- [x] No user-facing endpoints exposed -- scheduled internal workflow
+- [x] Credential IDs verified correct (mqtt-alice: Kqy6cn7hyDDXrBA0)
+- [x] GraphQL injection mitigated -- file_hash sanitized with `/[^a-zA-Z0-9:]/g` (BUG-4 fix verified)
+- [x] No external network calls beyond internal Docker network (weaviate:8080, redis:6379)
+- [x] MQTT topics internal only (alice/dms/*), no auth bypass surface
+- [x] Weaviate PATCH URL construction uses class names from hardcoded list and IDs from Weaviate's own response -- no injection vector
+
+### New Bugs Found (Re-Test)
+
+#### BUG-9: Lifecycle workflow Error Trigger requires errorWorkflow setting to activate
+- **Severity:** Medium
+- **Steps to Reproduce:**
+  1. The `alice-dms-lifecycle` workflow includes an Error Trigger node and Error Trigger -> Format Error -> MQTT: Publish Error chain
+  2. n8n's Error Trigger node only fires when the workflow's settings include `"errorWorkflow": "<this-workflow-id>"`
+  3. Current workflow settings: `{ "executionOrder": "v1" }` -- no `errorWorkflow` configured
+  4. Expected: Error handler chain fires on Weaviate/Redis failures and publishes to `alice/dms/error`
+  5. Actual: Error handler chain is dead code -- will never execute until `errorWorkflow` is set post-deploy
+- **Impact:** The BUG-7 fix is structurally correct (nodes + connections exist) but will not function until the workflow is imported to n8n and the `errorWorkflow` setting is configured. The sticky note does mention "Post-Deploy: Error Workflow Config" but this is easy to overlook.
+- **Priority:** Add to deployment checklist. The workflow JSON cannot include the setting pre-deploy because the workflow ID is assigned by n8n on import.
+
+#### BUG-6 (carried over): Redis nodes use `require('redis')` with hardcoded host
+- **Severity:** Medium
+- **Status:** Still present (pre-existing pattern from PROJ-19, not addressed in this fix cycle)
+- **Priority:** Fix in next sprint
+
+### Previously Reported Bugs -- Final Status
+
+| Bug | Severity | Status |
+|-----|----------|--------|
+| BUG-1 | High | FIXED and verified |
+| BUG-2 | Medium | FIXED and verified |
+| BUG-3 | N/A | Withdrawn (false alarm) |
+| BUG-4 | Critical | FIXED and verified |
+| BUG-5 | N/A | Withdrawn (spec terminology, not code bug) |
+| BUG-6 | Medium | Carried over (pre-existing, deferred) |
+| BUG-7 | Medium | FIXED (structurally), limited by BUG-9 |
+| BUG-8 | N/A | Withdrawn (matches spec) |
+| BUG-9 | Medium | NEW -- errorWorkflow setting not in JSON |
+
+### Summary
+- **Acceptance Criteria:** 15/15 passed
+- **Previous Bugs Fixed:** 4/4 verified (BUG-1, BUG-2, BUG-4, BUG-7)
+- **New Bugs Found:** 1 (BUG-9, Medium -- deployment config, not a code defect)
+- **Carried Over:** 1 (BUG-6, Medium -- pre-existing pattern, deferred)
+- **Security:** All previous findings resolved. No new security issues.
+- **Production Ready:** YES (conditional)
+- **Conditions:** BUG-9 must be addressed during deployment (set errorWorkflow in n8n UI after import). BUG-6 is accepted as pre-existing technical debt.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-03-14
+
+### Deployed Artifacts
+- `workflows/core/alice-dms-scanner.json` — lifecycle detection + routing (Fall 1/2/3)
+- `workflows/core/alice-dms-lifecycle.json` — MQTT consumer for `alice/dms/lifecycle`
+- Weaviate schema extended: `additionalPaths` field added to all 6 collections
+
+### Post-Deploy Action Required
+After importing `alice-dms-lifecycle` into n8n, configure:
+**Settings → Error Workflow → select `alice-dms-lifecycle`** (points the error handler to itself so the Error Trigger node activates on execution failures).
