@@ -12,12 +12,12 @@
 
 Behebung von vier Security-Findings aus den QA-Runden von PROJ-15 und PROJ-19. Alle Fixes betreffen n8n-Workflow-Code-Nodes; kein Frontend-Eingriff notwendig. Die Änderungen sind rein defensiver Natur — die betroffenen Endpunkte funktionieren korrekt, haben aber verwundbare oder fragile Sicherheitsmuster.
 
-| Bug | Workflow | Schweregrad | Beschreibung |
-|-----|----------|-------------|--------------|
-| PROJ-15 BUG-8 | `alice-dms-folder-api` | **High** | DELETE-Query nutzt `{{ $json.folderId }}` String-Interpolation statt `$1`-Parameter |
-| PROJ-15 BUG-4 | `alice-dms-folder-api` | Medium | PUT-Query dynamisch als String aufgebaut, via `$json.sql` durch die Pipeline weitergeleitet |
-| PROJ-15 BUG-2 | `alice-dms-folder-api` | Medium | JWT-Rolle per manuellem Base64-Decode ohne Signatur-Verifikation gelesen |
-| PROJ-19 BUG-9 | `alice-dms-processor` | Medium | `file_path` in GraphQL-Query ohne vollständiges Escaping (Newlines, Control-Chars) |
+| Bug           | Workflow               | Schweregrad | Beschreibung                                                                                |
+| ------------- | ---------------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| PROJ-15 BUG-8 | `alice-dms-folder-api` | **High**    | DELETE-Query nutzt `{{ $json.folderId }}` String-Interpolation statt `$1`-Parameter         |
+| PROJ-15 BUG-4 | `alice-dms-folder-api` | Medium      | PUT-Query dynamisch als String aufgebaut, via `$json.sql` durch die Pipeline weitergeleitet |
+| PROJ-15 BUG-2 | `alice-dms-folder-api` | Medium      | JWT-Rolle per manuellem Base64-Decode ohne Signatur-Verifikation gelesen                    |
+| PROJ-19 BUG-9 | `alice-dms-processor`  | Medium      | `file_path` in GraphQL-Query ohne vollständiges Escaping (Newlines, Control-Chars)          |
 
 ## User Stories
 
@@ -181,10 +181,10 @@ Step 3 — Query construction:
 
 ### Workflow Impact Summary
 
-| Workflow | Nodes Changed | New Nodes | Behavior Change |
-|---|---|---|---|
-| `alice-dms-folder-api` | DELETE (verify/fix), PUT Code + PG, all 4 JWT Code nodes | 0–4 PG nodes (Fix 3) | None — identical responses |
-| `alice-dms-processor` | `Code: Build Weaviate Query` | 0 | Documents with bad paths now skipped instead of error |
+| Workflow               | Nodes Changed                                            | New Nodes            | Behavior Change                                       |
+| ---------------------- | -------------------------------------------------------- | -------------------- | ----------------------------------------------------- |
+| `alice-dms-folder-api` | DELETE (verify/fix), PUT Code + PG, all 4 JWT Code nodes | 0–4 PG nodes (Fix 3) | None — identical responses                            |
+| `alice-dms-processor`  | `Code: Build Weaviate Query`                             | 0                    | Documents with bad paths now skipped instead of error |
 
 ### No Changes Needed
 - nginx configuration
@@ -305,4 +305,4 @@ Step 3 — Query construction:
 
 **No frontend changes, no DB migrations, no nginx changes required.**
 
-**Open item:** BUG-1 (cannot explicitly null-out `suggested_type`/`description` via PUT) — tracked for future sprint in PROJ-24.
+**Open item:** BUG-1 (cannot explicitly null-out `suggested_type`/`description` via PUT) — tracked for future sprint in PROJ-25.
