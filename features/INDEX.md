@@ -32,10 +32,12 @@
 | PROJ-17 | DMS Scanner Multi-Queue-Routing (Erweiterung PROJ-16)                       | Deployed | [PROJ-17-dms-scanner-multi-queue-routing.md](PROJ-17-dms-scanner-multi-queue-routing.md)                           | 2026-03-11 |
 | PROJ-18 | DMS Text-Extractor-Container (pdf/ocr/txt/office → plaintext)               | Deployed | [PROJ-18-dms-text-extractor-containers.md](PROJ-18-dms-text-extractor-containers.md)                               | 2026-03-11 |
 | PROJ-19 | DMS Processor Workflow (LLM-Klassifikation + Weaviate)                      | Deployed | [PROJ-19-dms-processor-workflow.md](PROJ-19-dms-processor-workflow.md)                                             | 2026-03-09 |
-| PROJ-20 | DMS Document Search Tool (alice-tool-search)                                | In Review   | [PROJ-20-dms-document-search-tool.md](PROJ-20-dms-document-search-tool.md)                                         | 2026-03-09 |
-| PROJ-21 | DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)        | Deployed  | [PROJ-21-dms-lifecycle-management.md](PROJ-21-dms-lifecycle-management.md)                                         | 2026-03-12 |
-| PROJ-22 | DMS Lifecycle Workflow (alice-dms-lifecycle MQTT Consumer)                   | Deployed  | [PROJ-22-dms-lifecycle-workflow.md](PROJ-22-dms-lifecycle-workflow.md)                                               | 2026-03-12 |
+| PROJ-20 | DMS Document Search Tool (alice-tool-search)                                | Deployed | [PROJ-20-dms-document-search-tool.md](PROJ-20-dms-document-search-tool.md)                                         | 2026-03-09 |
+| PROJ-21 | DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)       | Deployed | [PROJ-21-dms-lifecycle-management.md](PROJ-21-dms-lifecycle-management.md)                                         | 2026-03-12 |
+| PROJ-22 | DMS Lifecycle Workflow (alice-dms-lifecycle MQTT Consumer)                  | Deployed | [PROJ-22-dms-lifecycle-workflow.md](PROJ-22-dms-lifecycle-workflow.md)                                             | 2026-03-12 |
+| PROJ-23 | DMS Security Hardening (Folder-API SQL-Injection & GraphQL-Injection)       | Deployed    | [PROJ-23-dms-security-hardening.md](PROJ-23-dms-security-hardening.md)                                             | 2026-03-15 |
+| PROJ-24 | DMS Operational Improvements (Stats, LLM-Retry, MQTT-Reliability)           | Planned  | [PROJ-24-dms-operational-improvements.md](PROJ-24-dms-operational-improvements.md)                                 | 2026-03-15 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-23
+## Next Available ID: PROJ-25
