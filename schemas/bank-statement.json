@@ -30,7 +30,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -44,7 +44,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -58,7 +58,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -163,7 +163,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -250,7 +250,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -264,7 +264,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,
@@ -278,7 +278,7 @@
       "dataType": ["text"],
       "indexFilterable": true,
       "indexSearchable": false,
-      "tokenization": "keyword",
+      "tokenization": "field",
       "moduleConfig": {
         "text2vec-transformers": {
           "skip": true,

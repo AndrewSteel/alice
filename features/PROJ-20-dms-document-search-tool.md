@@ -154,14 +154,14 @@ DETAILS PATH:
 
 **Weaviate-Datumfelder pro Collection** (für `where`-Filter):
 
-| Collection | Datumfeld |
-|---|---|
-| Invoice | `invoiceDate` |
-| BankStatement | `statementDate` |
-| Contract | `startDate` |
-| Email | `date` |
+| Collection         | Datumfeld         |
+| ------------------ | ----------------- |
+| Invoice            | `invoiceDate`     |
+| BankStatement      | `statementDate`   |
+| Contract           | `startDate`       |
+| Email              | `date`            |
 | SecuritySettlement | `transactionDate` |
-| Document | `documentDate` |
+| Document           | `documentDate`    |
 
 **Einheitliches Rückgabe-Format** (pro Treffer):
 ```
@@ -211,13 +211,13 @@ workflows/
 
 ### Tech-Entscheidungen
 
-| Entscheidung | Wahl | Begründung |
-|---|---|---|
-| Weaviate-Zugriff | HTTP-Request-Node (kein Weaviate-Node) | Weaviate-Node hat kein `where`-Filter-Support für nearText; HTTP-Request gibt volle Kontrolle |
-| Parallele Multi-Collection-Suche | 6 parallele HTTP-Nodes + Merge | Minimiert Latenz; jede Collection ist unabhängig |
-| Score-Filter | Distance ≤ 0.8 (in Code-Node) | Weaviate liefert keine eingebaute Schwelle; wird nach Merge herausgefiltert |
-| Operation-Routing | Switch-Node (search vs. details) | Ein Workflow für beide Funktionen hält die Anzahl Workflows klein |
-| Tool-Integration in Chat-Handler | LangChain toolWorkflow-Node | Native n8n-Pattern für Sub-Workflow-Tools; kein manuelles Tool-Dispatch nötig |
+| Entscheidung                     | Wahl                                   | Begründung                                                                                    |
+| -------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Weaviate-Zugriff                 | HTTP-Request-Node (kein Weaviate-Node) | Weaviate-Node hat kein `where`-Filter-Support für nearText; HTTP-Request gibt volle Kontrolle |
+| Parallele Multi-Collection-Suche | 6 parallele HTTP-Nodes + Merge         | Minimiert Latenz; jede Collection ist unabhängig                                              |
+| Score-Filter                     | Distance ≤ 0.8 (in Code-Node)          | Weaviate liefert keine eingebaute Schwelle; wird nach Merge herausgefiltert                   |
+| Operation-Routing                | Switch-Node (search vs. details)       | Ein Workflow für beide Funktionen hält die Anzahl Workflows klein                             |
+| Tool-Integration in Chat-Handler | LangChain toolWorkflow-Node            | Native n8n-Pattern für Sub-Workflow-Tools; kein manuelles Tool-Dispatch nötig                 |
 
 ---
 
@@ -381,14 +381,14 @@ Keine neuen Packages. Nutzt:
 
 ### Re-test: Bug Fix Verification (2026-03-14)
 
-| Bug | Fix Verified | Method |
-|-----|-------------|--------|
-| BUG-1 (Critical: DMS permission bypass) | YES | Code review: `Check DMS Permissions` node + `Apply DMS Filter` node present, `user_id` passed from both toolWorkflow nodes in chat handler |
-| BUG-2 (Low: Email field name) | YES | Code review: `KEY_FIELDS_MAP.Email` contains `'recipients'` (plural) matching Weaviate Email schema |
-| BUG-3 (Medium: GraphQL injection) | YES | Code review: `escapedQuery` chains `.replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/\t/g, ' ').replace(/[\x00-\x1f]/g, '')` |
-| BUG-4 (Low: Node naming) | YES | Code review + grep: no references to `"Code in JavaScript"` remain, `"Format Response LLM"` found at line 941 |
-| BUG-5 (Medium: SQL string interpolation) | YES | Code review: query now uses `$1` placeholder with `queryReplacement` option -- parameterized query confirmed |
-| BUG-6 (Critical: field name mismatch) | YES | `queryReplacement` now uses `{{ $json.userId }}` (camelCase) matching Input Normalizer output -- permission query executes correctly |
+| Bug                                      | Fix Verified | Method                                                                                                                                     |
+| ---------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| BUG-1 (Critical: DMS permission bypass)  | YES          | Code review: `Check DMS Permissions` node + `Apply DMS Filter` node present, `user_id` passed from both toolWorkflow nodes in chat handler |
+| BUG-2 (Low: Email field name)            | YES          | Code review: `KEY_FIELDS_MAP.Email` contains `'recipients'` (plural) matching Weaviate Email schema                                        |
+| BUG-3 (Medium: GraphQL injection)        | YES          | Code review: `escapedQuery` chains `.replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/\t/g, ' ').replace(/[\x00-\x1f]/g, '')`              |
+| BUG-4 (Low: Node naming)                 | YES          | Code review + grep: no references to `"Code in JavaScript"` remain, `"Format Response LLM"` found at line 941                              |
+| BUG-5 (Medium: SQL string interpolation) | YES          | Code review: query now uses `$1` placeholder with `queryReplacement` option -- parameterized query confirmed                               |
+| BUG-6 (Critical: field name mismatch)    | YES          | `queryReplacement` now uses `{{ $json.userId }}` (camelCase) matching Input Normalizer output -- permission query executes correctly       |
 
 ### Regression Testing
 
@@ -425,4 +425,12 @@ Not applicable -- PROJ-20 is a backend/workflow feature with no UI changes. The 
 - **Production Ready:** YES -- all bugs fixed, no open issues
 
 ## Deployment
-_To be added by /deploy_
+
+**Status:** Deployed
+**Deployed:** 2026-03-14
+**Git Tag:** v1.20.0-PROJ-20
+
+### Deployed Components
+
+- `workflows/core/alice-tool-search.json` — n8n workflow (import via n8n UI)
+- `workflows/core/alice-chat-handler.json` — n8n workflow (import via n8n UI)

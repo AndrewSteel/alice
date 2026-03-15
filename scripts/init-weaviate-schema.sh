@@ -71,15 +71,28 @@ create_collection() {
         return 0
     fi
 
-    # Create collection
-    local response=$(curl -s -X POST \
+    # Create collection — capture both body and HTTP status code
+    local http_body http_code
+    http_body=$(curl -s -o /tmp/weaviate_response.json -w "%{http_code}" -X POST \
         -H "Content-Type: application/json" \
         -d @"$schema_file" \
         "${WEAVIATE_URL}/v1/schema")
+    http_code="$http_body"
+    local response
+    response=$(cat /tmp/weaviate_response.json 2>/dev/null || true)
 
-    # Check for errors
+    # Non-2xx HTTP status → error
+    if [[ "$http_code" != 2* ]]; then
+        echo -e "${RED}ERROR (HTTP ${http_code})${NC}"
+        local error_msg
+        error_msg=$(echo "$response" | jq -r 'if .error then .error[0].message elif .message then .message else . end' 2>/dev/null || echo "$response")
+        echo "   $error_msg"
+        return 1
+    fi
+
+    # Also check for error field in a 200 response (shouldn't happen, but be safe)
     local error
-    error=$(echo "$response" | jq -r '.error // empty' 2>/dev/null || true)
+    error=$(echo "$response" | jq -r 'if (.error // null) != null then .error[0].message else empty end' 2>/dev/null || true)
     if [ -n "$error" ]; then
         echo -e "${RED}ERROR${NC}"
         echo "   $error"
@@ -118,12 +131,30 @@ SCHEMAS=(
     "ha-intent.json"
 )
 
+# Legacy German collection names (replaced by English names in PROJ-19)
+LEGACY_COLLECTIONS=(
+    "Rechnung"
+    "Kontoauszug"
+    "WertpapierAbrechnung"
+    "Dokument"
+    "Vertrag"
+)
+
 # Optional: Reset flag
 if [ "$2" == "--reset" ]; then
     echo ""
     echo -e "${YELLOW}WARNING: RESET MODE — Deleting existing collections...${NC}"
     echo ""
 
+    # Delete legacy German collections if they still exist
+    for legacy_class in "${LEGACY_COLLECTIONS[@]}"; do
+        local_exists=$(curl -s "${WEAVIATE_URL}/v1/schema/${legacy_class}" 2>/dev/null | jq -r '.class // empty' 2>/dev/null || true)
+        if [ -n "$local_exists" ]; then
+            delete_collection "$legacy_class"
+        fi
+    done
+
+    # Delete current collections
     for schema in "${SCHEMAS[@]}"; do
         class_name=$(jq -r '.class' "${SCHEMA_DIR}/${schema}" 2>/dev/null || echo "")
         if [ -n "$class_name" ]; then
