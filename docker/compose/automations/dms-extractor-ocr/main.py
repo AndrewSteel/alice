@@ -239,8 +239,8 @@ def on_disconnect(client, userdata, flags, reason_code, properties):
 
 mqtt_client = mqtt.Client(
     mqtt.CallbackAPIVersion.VERSION2,
-    client_id=f"dms-extractor-ocr-{int(time.time())}",
-    clean_session=True,
+    client_id="dms-extractor-ocr",
+    clean_session=False,
 )
 mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 mqtt_client.on_connect = on_connect

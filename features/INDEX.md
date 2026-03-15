@@ -36,7 +36,7 @@
 | PROJ-21 | DMS Lifecycle Management (Duplikate, Verschiebungen, Dateiänderungen)       | Deployed | [PROJ-21-dms-lifecycle-management.md](PROJ-21-dms-lifecycle-management.md)                                         | 2026-03-12 |
 | PROJ-22 | DMS Lifecycle Workflow (alice-dms-lifecycle MQTT Consumer)                  | Deployed | [PROJ-22-dms-lifecycle-workflow.md](PROJ-22-dms-lifecycle-workflow.md)                                             | 2026-03-12 |
 | PROJ-23 | DMS Security Hardening (Folder-API SQL-Injection & GraphQL-Injection)       | Deployed    | [PROJ-23-dms-security-hardening.md](PROJ-23-dms-security-hardening.md)                                             | 2026-03-15 |
-| PROJ-24 | DMS Operational Improvements (Stats, LLM-Retry, MQTT-Reliability)           | Planned  | [PROJ-24-dms-operational-improvements.md](PROJ-24-dms-operational-improvements.md)                                 | 2026-03-15 |
+| PROJ-24 | DMS Operational Improvements (Stats, LLM-Retry, MQTT-Reliability)           | Deployed  | [PROJ-24-dms-operational-improvements.md](PROJ-24-dms-operational-improvements.md)                                 | 2026-03-15 |
 
 <!-- Add features above this line -->
 

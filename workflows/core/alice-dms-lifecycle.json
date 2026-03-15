@@ -8,8 +8,8 @@
       },
       "type": "n8n-nodes-base.mqttTrigger",
       "typeVersion": 1,
-      "position": [200, 500],
-      "id": "lifecycle-trigger-01-alice-dms-lifecycle-v1",
+      "position": [3408, 896],
+      "id": "6891990e-7703-4cb7-ad51-6754ba6d8ba9",
       "name": "MQTT Trigger: alice/dms/lifecycle",
       "webhookId": "alice-dms-lifecycle-trigger-v1",
       "credentials": {
@@ -25,8 +25,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [500, 500],
-      "id": "lifecycle-parse-01-alice-dms-lifecycle-v1",
+      "position": [3712, 896],
+      "id": "270c3ec9-f0f9-4c97-90dd-768f61c43f1e",
       "name": "Code: Parse & Validate"
     },
     {
@@ -35,8 +35,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [800, 500],
-      "id": "lifecycle-weaviate-find-01-alice-dms-lifecycle-v1",
+      "position": [4016, 896],
+      "id": "2f78a94c-0f3d-42ee-b1a1-f190f37a8327",
       "name": "Code: Weaviate Find by Hash"
     },
     {
@@ -66,8 +66,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1100, 500],
-      "id": "lifecycle-if-add-path-01-alice-dms-lifecycle-v1",
+      "position": [4320, 896],
+      "id": "5206f2c5-7703-47a4-b43a-f69f8f3a9509",
       "name": "IF: Is add_path"
     },
     {
@@ -76,8 +76,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1400, 300],
-      "id": "lifecycle-patch-add-path-01-alice-dms-lifecycle-v1",
+      "position": [4608, 704],
+      "id": "3665cabc-4f8c-455e-a568-f3fa45f1eaee",
       "name": "Code: PATCH additionalPaths"
     },
     {
@@ -86,8 +86,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1700, 300],
-      "id": "lifecycle-redis-add-path-01-alice-dms-lifecycle-v1",
+      "position": [4912, 704],
+      "id": "091aef77-aa23-41fe-9db7-16ee57155492",
       "name": "Code: Redis Update (add_path)"
     },
     {
@@ -98,8 +98,8 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [2000, 300],
-      "id": "lifecycle-done-add-path-01-alice-dms-lifecycle-v1",
+      "position": [5216, 704],
+      "id": "9daf5c5d-9840-4b09-9edd-19bdb538f1b5",
       "name": "MQTT: Done (add_path)",
       "credentials": {
         "mqtt": {
@@ -112,13 +112,11 @@
       "parameters": {
         "conditions": {
           "options": {
-            "version": 2,
             "caseSensitive": true,
-            "typeValidation": "strict",
             "leftValue": "",
-            "rightValue": ""
+            "typeValidation": "strict",
+            "version": 2
           },
-          "combinator": "and",
           "conditions": [
             {
               "id": "check-action-update-path",
@@ -129,14 +127,15 @@
                 "operation": "equals"
               }
             }
-          ]
+          ],
+          "combinator": "and"
         },
         "options": {}
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1400, 700],
-      "id": "lifecycle-if-update-path-01-alice-dms-lifecycle-v1",
+      "position": [4608, 1104],
+      "id": "9774ea74-5968-4ab9-ae23-c9df62d1c4ae",
       "name": "IF: Is update_path"
     },
     {
@@ -145,8 +144,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1700, 700],
-      "id": "lifecycle-patch-update-path-01-alice-dms-lifecycle-v1",
+      "position": [4912, 1104],
+      "id": "faa66ff3-d2ce-44c9-b5ac-04b03bdea0d1",
       "name": "Code: PATCH filePath"
     },
     {
@@ -155,8 +154,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2000, 700],
-      "id": "lifecycle-redis-update-path-01-alice-dms-lifecycle-v1",
+      "position": [5216, 1104],
+      "id": "3ca1ea58-4f42-432b-bc89-64eb0e8926b6",
       "name": "Code: Redis Update (update_path)"
     },
     {
@@ -167,8 +166,8 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [2300, 700],
-      "id": "lifecycle-done-update-path-01-alice-dms-lifecycle-v1",
+      "position": [5520, 1104],
+      "id": "423c9631-e4a9-4010-a3eb-1ffb3101bc34",
       "name": "MQTT: Done (update_path)",
       "credentials": {
         "mqtt": {
@@ -186,16 +185,16 @@
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [200, 100],
-      "id": "lifecycle-note-01-alice-dms-lifecycle-v1",
+      "position": [3408, 496],
+      "id": "71adc790-fb1c-44d5-bb4b-d834fed0a360",
       "name": "Sticky Note"
     },
     {
       "parameters": {},
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [200, 900],
-      "id": "lifecycle-error-trigger-01-alice-dms-lifecycle-v1",
+      "position": [3408, 1296],
+      "id": "b4f70dc9-8b2a-432a-853a-01121dcfa04d",
       "name": "Error Trigger"
     },
     {
@@ -204,8 +203,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [500, 900],
-      "id": "lifecycle-error-format-01-alice-dms-lifecycle-v1",
+      "position": [3712, 1296],
+      "id": "2fed30de-6522-4848-b293-7a894ee6b534",
       "name": "Code: Format Error"
     },
     {
@@ -219,8 +218,8 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [800, 900],
-      "id": "lifecycle-error-mqtt-01-alice-dms-lifecycle-v1",
+      "position": [4016, 1296],
+      "id": "c94c30d1-cce8-47a9-8195-3adc05ba24e2",
       "name": "MQTT: Publish Error",
       "credentials": {
         "mqtt": {
@@ -230,6 +229,7 @@
       }
     }
   ],
+  "pinData": {},
   "connections": {
     "MQTT Trigger: alice/dms/lifecycle": {
       "main": [
@@ -362,9 +362,18 @@
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "po2OuxzG5htVHK6E",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": -1
   },
+  "versionId": "d99e342a-9633-4e4f-a521-9da0bbdda716",
   "meta": {
-    "templateId": "alice-dms-lifecycle-v1"
-  }
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
+  },
+  "id": "po2OuxzG5htVHK6E",
+  "tags": []
 }
