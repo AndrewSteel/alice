@@ -113,7 +113,7 @@ def convert_with_libreoffice(file_path: str, output_format: str) -> str:
         # Copy source file to temp dir (LibreOffice needs write access to the dir)
         src_name = os.path.basename(file_path)
         tmp_src = os.path.join(tmp_dir, src_name)
-        shutil.copy2(file_path, tmp_src)
+        shutil.copy(file_path, tmp_src)
 
         # Run LibreOffice conversion
         cmd = [
@@ -281,8 +281,8 @@ def on_disconnect(client, userdata, flags, reason_code, properties):
 
 mqtt_client = mqtt.Client(
     mqtt.CallbackAPIVersion.VERSION2,
-    client_id=f"dms-extractor-office-{int(time.time())}",
-    clean_session=True,
+    client_id="dms-extractor-office",
+    clean_session=False,
 )
 mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 mqtt_client.on_connect = on_connect

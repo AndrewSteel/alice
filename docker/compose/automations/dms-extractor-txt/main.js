@@ -89,8 +89,8 @@ redis.on("error", (err) =>
 const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}:${MQTT_PORT}`, {
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
-  clientId: `dms-extractor-txt-${Date.now()}`,
-  clean: true,
+  clientId: "dms-extractor-txt",
+  clean: false,
   reconnectPeriod: 5000,
 });
 
