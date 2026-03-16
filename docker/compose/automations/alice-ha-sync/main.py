@@ -706,8 +706,9 @@ def weaviate_batch_insert(utterances: list[dict]) -> tuple[int, int, list[str]]:
                     for utt in batch:
                         batch_inserter.add_object(properties=utt)
 
-                # Check for errors in the batch result
-                failed_count = len(collection.batch.failed_objects) if hasattr(collection.batch, 'failed_objects') else 0
+                # Check for errors using the context manager instance (not collection.batch,
+                # which creates a new empty batch object and always returns failed_objects=[])
+                failed_count = len(getattr(batch_inserter, 'failed_objects', []))
                 succeeded = len(batch) - failed_count
                 total_inserted += succeeded
                 total_failed += failed_count
