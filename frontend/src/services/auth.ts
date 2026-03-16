@@ -10,6 +10,7 @@ export interface AuthUser {
 export interface LoginResponse {
   token: string;
   user: AuthUser;
+  must_change_password?: boolean;
 }
 
 export function getToken(): string | null {
@@ -45,7 +46,12 @@ export async function login(username: string, password: string): Promise<LoginRe
   return res.json();
 }
 
-export async function validate(token: string): Promise<AuthUser> {
+export interface ValidateResponse {
+  user: AuthUser;
+  mustChangePassword: boolean;
+}
+
+export async function validate(token: string): Promise<ValidateResponse> {
   const res = await fetch(`${AUTH_BASE}/validate`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -56,7 +62,7 @@ export async function validate(token: string): Promise<AuthUser> {
     throw new Error("Token ungültig");
   }
   const data = await res.json();
-  return data.user;
+  return { user: data.user, mustChangePassword: data.must_change_password === true };
 }
 
 export async function logout(token: string): Promise<void> {

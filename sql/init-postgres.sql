@@ -30,8 +30,9 @@ CREATE TABLE alice.users (
     
     -- Metadaten
     is_active BOOLEAN DEFAULT TRUE,
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    last_login TIMESTAMPTZ,
+    last_login_at TIMESTAMPTZ,
     failed_login_attempts INT DEFAULT 0,
     locked_until TIMESTAMPTZ
 );
