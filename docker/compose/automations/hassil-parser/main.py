@@ -32,7 +32,7 @@ MQTT_URL = os.environ.get("MQTT_URL", "")
 MAX_PATTERNS_PER_INTENT = int(os.environ.get("MAX_PATTERNS_PER_INTENT", "50"))
 DATA_INBOX_PATH = Path("/data_inbox")
 
-HA_INTENTS_ZIP_URL = "https://github.com/home-assistant/intents/archive/refs/heads/main.zip"
+HA_INTENTS_ZIP_URL = "https://github.com/OHF-Voice/intents/archive/refs/heads/main.zip"
 HA_SENTENCES_PREFIX = "intents-main/sentences/de/"
 
 # ---------------------------------------------------------------------------
@@ -74,19 +74,27 @@ def _publish_mqtt(topic: str, payload: dict) -> None:
     username = parsed.username
     password = parsed.password
 
-    client = mqtt.Client(client_id="hassil-parser", protocol=mqtt.MQTTv311)
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id="hassil-parser",
+        protocol=mqtt.MQTTv311,
+    )
     if username:
         client.username_pw_set(username, password)
 
     try:
+        client.loop_start()  # network loop required so the PUBLISH packet is actually transmitted
         client.connect(host, port, keepalive=30)
         result = client.publish(topic, json.dumps(payload), qos=1)
         result.wait_for_publish(timeout=10)
+        if not result.is_published():
+            raise RuntimeError("MQTT publish timed out (no PUBACK within 10s)")
         logger.info("Published MQTT message to %s: %s", topic, payload)
     except Exception as exc:
         logger.error("Failed to publish MQTT message to %s: %s", topic, exc)
         raise
     finally:
+        client.loop_stop()
         client.disconnect()
 
 
