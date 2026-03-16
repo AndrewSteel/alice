@@ -39,7 +39,8 @@
 | PROJ-24 | DMS Operational Improvements (Stats, LLM-Retry, MQTT-Reliability)           | Deployed  | [PROJ-24-dms-operational-improvements.md](PROJ-24-dms-operational-improvements.md)                                 | 2026-03-15 |
 | PROJ-25 | DMS Folder API — Explicit Null Update für nullable Felder (BUG-1 aus PROJ-23) | Deployed  | [PROJ-25-dms-folder-api-explicit-null-update.md](PROJ-25-dms-folder-api-explicit-null-update.md)                   | 2026-03-15 |
 | PROJ-26 | Admin Nutzerverwaltung (Create/Deactivate/Delete + OTP-Email + First-Login-Flow) | Deployed  | [PROJ-26-admin-user-management.md](PROJ-26-admin-user-management.md)                                               | 2026-03-15 |
+| PROJ-27 | Nutzerprofil selbst bearbeiten (Passwort, E-Mail, Name, Interessen, Präferenzen)  | Deployed  | [PROJ-27-user-profile-self-edit.md](PROJ-27-user-profile-self-edit.md)                                             | 2026-03-16 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-27
+## Next Available ID: PROJ-28

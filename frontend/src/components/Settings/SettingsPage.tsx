@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
+import { MeinProfilSection } from "./MeinProfilSection";
 import { AllgemeinSection } from "./AllgemeinSection";
 import { DmsSection } from "./DmsSection";
 import { NutzerVerwaltungSection } from "./NutzerVerwaltungSection";
@@ -32,10 +33,17 @@ export function SettingsPage() {
 
       {/* Content */}
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6">
-        <Tabs defaultValue="allgemein" orientation="vertical" className="w-full">
+        <Tabs defaultValue="mein-profil" orientation="vertical" className="w-full">
           <div className="flex flex-col md:flex-row md:gap-6">
             {/* Tab Navigation */}
             <TabsList className="flex flex-row md:flex-col w-full md:w-44 shrink-0 overflow-x-auto rounded-md border border-gray-700 bg-gray-800 p-1 md:h-fit md:sticky md:top-20">
+              <TabsTrigger
+                value="mein-profil"
+                className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+              >
+                <span className="md:hidden">Profil</span>
+                <span className="hidden md:inline">Mein Profil</span>
+              </TabsTrigger>
               <TabsTrigger
                 value="allgemein"
                 className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
@@ -63,6 +71,9 @@ export function SettingsPage() {
 
             {/* Tab Content */}
             <div className="mt-4 md:mt-0 flex-1 min-w-0">
+              <TabsContent value="mein-profil" className="mt-0">
+                <MeinProfilSection />
+              </TabsContent>
               <TabsContent value="allgemein" className="mt-0">
                 <AllgemeinSection />
               </TabsContent>
