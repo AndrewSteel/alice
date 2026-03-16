@@ -31,9 +31,15 @@ Alice ist ein lokaler, KI-first und Sprache-first Personal Assistant und Smart H
 | P0 (MVP) | Hassil expansion_rules Compatibility Fix                     | 1.2   | Deployed |
 | P0 (MVP) | HA Sync Python Worker (Ersatz n8n alice-ha-intent-sync)      | 1.2   | Deployed |
 | P1       | JWT Auth / Login Screen                                      | 1.5   | Deployed |
-| P1       | DMS Scanner & NAS-Infrastruktur (PROJ-15)                    | 1.4   | Planned  |
-| P1       | DMS Processor Workflow (PROJ-16)                             | 1.4   | Planned  |
-| P1       | DMS Document Search Tool (PROJ-17)                           | 1.4   | Planned  |
+| P1       | DMS NAS-Ordner-Verwaltung (PROJ-15)                          | 1.4   | Deployed |
+| P1       | DMS Scanner & NAS-Infrastruktur (PROJ-16)                    | 1.4   | Deployed |
+| P1       | DMS Scanner Multi-Queue-Routing (PROJ-17)                    | 1.4   | Deployed |
+| P1       | DMS Text-Extractor-Container (PROJ-18)                       | 1.4   | Deployed |
+| P1       | DMS Processor Workflow (PROJ-19)                             | 1.4   | Deployed |
+| P1       | DMS Document Search Tool (PROJ-20)                           | 1.4   | Deployed |
+| P1       | DMS Lifecycle Management (PROJ-21/22)                        | 1.4   | Deployed |
+| P1       | DMS Security Hardening (PROJ-23/24/25)                       | 1.4   | Deployed |
+| P1       | Admin Nutzerverwaltung (PROJ-26)                             | 1.5   | Deployed |
 | P1       | Memory-Transfer PostgreSQL → Weaviate                        | 1.5   | Planned  |
 | P2       | Speech Gateway (Whisper STT + Piper TTS)                     | 2     | Planned  |
 | P2       | Speaker-ID / Sprechererkennung                               | 2     | Planned  |
@@ -58,7 +64,7 @@ Alice ist ein lokaler, KI-first und Sprache-first Personal Assistant und Smart H
 - **Zugang**: Nur über VPN erreichbar (kein öffentliches Internet)
 - **Sprache**: Primär Deutsch; Docs auf Deutsch, Code/Commits auf Englisch
 - **Team**: Solo-Projekt (Andreas), Hobbyzeit (3-4h/Tag)
-- **Stack**: n8n + Ollama (qwen2.5:14b) + Weaviate + PostgreSQL + React/Vite
+- **Stack**: n8n + Ollama (qwen3:14b) + Weaviate + PostgreSQL + React/Vite
 
 ## Non-Goals
 

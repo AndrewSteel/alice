@@ -23,8 +23,8 @@ export function LoginForm() {
     setError(null);
     setIsLoading(true);
     try {
-      const { token, user } = await loginService(username.trim(), password);
-      login(token, user);
+      const { token, user, must_change_password } = await loginService(username.trim(), password);
+      login(token, user, must_change_password);
       window.location.href = "/";
     } catch (err) {
       if (err instanceof Error && err.message === "NETWORK_ERROR") {

@@ -2,9 +2,10 @@
 
 import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChangePasswordForm } from "./ChangePasswordForm";
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, mustChangePassword, clearMustChangePassword } = useAuth();
 
   if (isLoading) {
     return (
@@ -21,6 +22,10 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!user) {
     // Router-Redirect läuft bereits im AuthProvider
     return null;
+  }
+
+  if (mustChangePassword) {
+    return <ChangePasswordForm onPasswordChanged={clearMustChangePassword} />;
   }
 
   return <>{children}</>;
