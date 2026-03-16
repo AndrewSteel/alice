@@ -12,6 +12,11 @@ Endpoints:
   POST /auth/hash-password                 - Utility: hash a plaintext password (admin use only)
   POST /auth/change-password               - Change password (required when must_change_password=TRUE)
 
+  GET   /auth/profile                      - Read own profile (any authenticated user)
+  PATCH /auth/profile                      - Update own facts + preferences (any authenticated user)
+  PATCH /auth/email                        - Update own email address (any authenticated user)
+  POST  /auth/change-password-voluntary    - Change own password voluntarily (any authenticated user)
+
   GET    /auth/admin/users                 - List all users (admin only)
   POST   /auth/admin/users                 - Create user + OTP + send email (admin only)
   POST   /auth/admin/users/{id}/reset-otp  - Generate new OTP + send email (admin only)
@@ -70,25 +75,57 @@ _rate_buckets: dict[str, list[float]] = collections.defaultdict(list)
 _ADMIN_RATE_LIMIT = 60      # max requests
 _ADMIN_RATE_WINDOW = 60.0   # per second window
 
+# Tighter rate limit for password-sensitive endpoints (brute-force protection)
+_password_rate_lock = threading.Lock()
+_password_rate_buckets: dict[str, list[float]] = collections.defaultdict(list)
+_PASSWORD_RATE_LIMIT = 10     # max requests
+_PASSWORD_RATE_WINDOW = 60.0  # per second window
+
+# Rate limit for profile/email update endpoints (email enumeration protection)
+_profile_rate_lock = threading.Lock()
+_profile_rate_buckets: dict[str, list[float]] = collections.defaultdict(list)
+_PROFILE_RATE_LIMIT = 20      # max requests
+_PROFILE_RATE_WINDOW = 60.0   # per second window
+
+
+def _check_rate_limit(
+    request: Request,
+    lock: threading.Lock,
+    buckets: dict[str, list[float]],
+    limit: int,
+    window: float,
+) -> None:
+    """Generic sliding-window rate limiter. Raises HTTP 429 on excess."""
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with lock:
+        timestamps = buckets[ip]
+        cutoff = now - window
+        buckets[ip] = [t for t in timestamps if t > cutoff]
+        if len(buckets[ip]) >= limit:
+            raise HTTPException(status_code=429, detail="Too many requests — bitte warten.")
+        buckets[ip].append(now)
+
 
 def _check_admin_rate_limit(request: Request) -> None:
     """Raise HTTP 429 if the caller IP exceeds the admin rate limit."""
-    ip = request.client.host if request.client else "unknown"
-    now = time.monotonic()
-    with _rate_lock:
-        timestamps = _rate_buckets[ip]
-        # Evict entries outside the window
-        cutoff = now - _ADMIN_RATE_WINDOW
-        _rate_buckets[ip] = [t for t in timestamps if t > cutoff]
-        if len(_rate_buckets[ip]) >= _ADMIN_RATE_LIMIT:
-            raise HTTPException(status_code=429, detail="Too many requests — bitte warten.")
-        _rate_buckets[ip].append(now)
+    _check_rate_limit(request, _rate_lock, _rate_buckets, _ADMIN_RATE_LIMIT, _ADMIN_RATE_WINDOW)
+
+
+def _check_password_rate_limit(request: Request) -> None:
+    """Raise HTTP 429 if the caller IP exceeds the password endpoint rate limit."""
+    _check_rate_limit(request, _password_rate_lock, _password_rate_buckets, _PASSWORD_RATE_LIMIT, _PASSWORD_RATE_WINDOW)
+
+
+def _check_profile_rate_limit(request: Request) -> None:
+    """Raise HTTP 429 if the caller IP exceeds the profile/email update rate limit."""
+    _check_rate_limit(request, _profile_rate_lock, _profile_rate_buckets, _PROFILE_RATE_LIMIT, _PROFILE_RATE_WINDOW)
 
 
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
-app = FastAPI(title="alice-auth", version="1.1.0")
+app = FastAPI(title="alice-auth", version="1.2.0")
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +157,25 @@ class UpdateStatusRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
+    new_password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    """PATCH /auth/profile — update own facts + preferences."""
+    name: str | None = None
+    interessen: list[str] | None = None
+    anrede: str | None = None
+    sprache: str | None = None
+
+
+class UpdateEmailRequest(BaseModel):
+    """PATCH /auth/email — update own email address."""
+    email: str
+
+
+class VoluntaryPasswordChangeRequest(BaseModel):
+    """POST /auth/change-password-voluntary — change password with old PW verification."""
+    current_password: str
     new_password: str
 
 
@@ -171,6 +227,23 @@ def _require_admin(authorization: str | None) -> dict:
 
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin-Berechtigung erforderlich")
+
+    return payload
+
+
+def _require_auth(authorization: str | None) -> dict:
+    """Validate Bearer token (any role). Returns JWT payload with user_id."""
+    token = _extract_bearer_token(authorization)
+    try:
+        payload = _decode_jwt(token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token abgelaufen")
+    except jwt.InvalidTokenError as exc:
+        logger.warning("Invalid token: %s", exc)
+        raise HTTPException(status_code=401, detail="Token ungültig")
+
+    if not payload.get("user_id"):
+        raise HTTPException(status_code=401, detail="Token ungültig")
 
     return payload
 
@@ -525,6 +598,309 @@ async def change_password(
         raise
     except Exception as exc:
         logger.error("Change-password error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — User profile (self-service, any authenticated user)
+# ---------------------------------------------------------------------------
+@app.get("/auth/profile")
+async def get_profile(authorization: str | None = Header(default=None)):
+    """
+    Read own profile data. Joins alice.users + alice.user_profiles.
+    Returns username, email, facts, and preferences.
+    """
+    payload = _require_auth(authorization)
+    user_id = payload["user_id"]
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.username, u.email,
+                       COALESCE(p.facts, '{}'::jsonb)       AS facts,
+                       COALESCE(p.preferences, '{}'::jsonb)  AS preferences
+                FROM alice.users u
+                LEFT JOIN alice.user_profiles p ON p.user_id = u.id::text
+                WHERE u.id = %s AND u.is_active = TRUE
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Profil nicht gefunden")
+
+        return {
+            "username": row["username"],
+            "email": row["email"],
+            "facts": row["facts"] or {},
+            "preferences": row["preferences"] or {},
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("get_profile error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+@app.patch("/auth/profile")
+async def update_profile(
+    request: Request,
+    body: UpdateProfileRequest,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Update own facts (name, interessen) and preferences (anrede, sprache).
+    Uses UPSERT on alice.user_profiles. Read-only fields (rolle, detailgrad)
+    are never modified by this endpoint.
+    """
+    _check_profile_rate_limit(request)
+    payload = _require_auth(authorization)
+    user_id = payload["user_id"]
+
+    # --- Input validation ---
+    if body.name is not None and len(body.name) > 100:
+        raise HTTPException(status_code=422, detail="Name darf maximal 100 Zeichen lang sein")
+
+    if body.interessen is not None:
+        if len(body.interessen) > 20:
+            raise HTTPException(status_code=422, detail="Maximal 20 Interessen erlaubt")
+        for tag in body.interessen:
+            if not isinstance(tag, str) or len(tag) > 30:
+                raise HTTPException(status_code=422, detail="Jedes Interesse darf maximal 30 Zeichen lang sein")
+            if len(tag.strip()) == 0:
+                raise HTTPException(status_code=422, detail="Leere Tags sind nicht erlaubt")
+        # Deduplicate case-insensitive (keep first occurrence)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for tag in body.interessen:
+            lower = tag.strip().lower()
+            if lower not in seen:
+                seen.add(lower)
+                deduped.append(tag.strip())
+        body.interessen = deduped
+
+    if body.anrede is not None and body.anrede not in ("du", "sie"):
+        raise HTTPException(status_code=422, detail="Ungültige Anrede. Erlaubt: du, sie")
+
+    if body.sprache is not None and body.sprache not in ("deutsch", "englisch"):
+        raise HTTPException(status_code=422, detail="Ungültige Sprache. Erlaubt: deutsch, englisch")
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        # Read existing profile to merge (preserve rolle, detailgrad, etc.)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT facts, preferences
+                FROM alice.user_profiles
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            existing = cur.fetchone()
+
+        facts = dict(existing["facts"]) if existing and existing["facts"] else {}
+        preferences = dict(existing["preferences"]) if existing and existing["preferences"] else {}
+
+        # Update only the fields that were sent
+        if body.name is not None:
+            if body.name.strip() == "":
+                facts.pop("name", None)
+            else:
+                facts["name"] = body.name.strip()
+        # Allow explicitly sending name as empty string to clear it
+        # (handled above: empty string removes the key)
+
+        if body.interessen is not None:
+            facts["interessen"] = body.interessen
+
+        if body.anrede is not None:
+            preferences["anrede"] = body.anrede
+
+        if body.sprache is not None:
+            preferences["sprache"] = body.sprache
+
+        # UPSERT
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO alice.user_profiles (user_id, facts, preferences, last_updated)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    facts = EXCLUDED.facts,
+                    preferences = EXCLUDED.preferences,
+                    last_updated = NOW()
+                """,
+                (user_id, psycopg2.extras.Json(facts), psycopg2.extras.Json(preferences)),
+            )
+        conn.commit()
+
+        logger.info("Profile updated for user_id=%s", user_id)
+        return {"success": True, "facts": facts, "preferences": preferences}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        conn.rollback()
+        logger.error("update_profile error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+@app.patch("/auth/email")
+async def update_email(
+    request: Request,
+    body: UpdateEmailRequest,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Update own email address. Validates format + MX record.
+    Returns HTTP 409 if the email is already taken by another user.
+    """
+    _check_profile_rate_limit(request)
+    payload = _require_auth(authorization)
+    user_id = payload["user_id"]
+
+    email = body.email.strip().lower()
+
+    # Format validation
+    if not _validate_email_format(email):
+        raise HTTPException(status_code=422, detail="Ungültiges E-Mail-Format")
+
+    # MX record check
+    domain = email.split("@", 1)[1]
+    has_mx, timed_out = _check_mx_record(domain)
+    if not has_mx and not timed_out:
+        raise HTTPException(status_code=422, detail="E-Mail-Domain akzeptiert keine E-Mails (kein MX-Record)")
+    if timed_out:
+        logger.warning("MX lookup timeout for domain=%s (best-effort, proceeding)", domain)
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    "UPDATE alice.users SET email = %s WHERE id = %s AND is_active = TRUE RETURNING id",
+                    (email, user_id),
+                )
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback()
+                raise HTTPException(status_code=409, detail="E-Mail-Adresse wird bereits verwendet")
+
+            updated = cur.fetchone()
+
+        if not updated:
+            raise HTTPException(status_code=404, detail="Account nicht gefunden oder deaktiviert")
+
+        conn.commit()
+        logger.info("Email updated for user_id=%s to %s", user_id, email)
+        return {"success": True, "email": email}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        conn.rollback()
+        logger.error("update_email error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+@app.post("/auth/change-password-voluntary")
+async def change_password_voluntary(
+    request: Request,
+    body: VoluntaryPasswordChangeRequest,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Voluntary password change. Requires the current password for verification.
+    Does NOT check or modify must_change_password — this is for regular use.
+    """
+    _check_password_rate_limit(request)
+    payload = _require_auth(authorization)
+    user_id = payload["user_id"]
+
+    current_password = body.current_password
+    new_password = body.new_password
+
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Das Passwort muss mindestens 8 Zeichen lang sein")
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT password_hash, is_active FROM alice.users WHERE id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+
+        if not row or not row["is_active"]:
+            raise HTTPException(status_code=401, detail="Account nicht gefunden oder deaktiviert")
+
+        if not row["password_hash"]:
+            raise HTTPException(status_code=400, detail="Kein Passwort gesetzt — bitte Admin kontaktieren")
+
+        # Verify current password
+        if not bcrypt.checkpw(
+            current_password.encode("utf-8"),
+            row["password_hash"].encode("utf-8"),
+        ):
+            raise HTTPException(status_code=401, detail="Aktuelles Passwort ist falsch")
+
+        # New password must differ from the current one
+        if bcrypt.checkpw(
+            new_password.encode("utf-8"),
+            row["password_hash"].encode("utf-8"),
+        ):
+            raise HTTPException(status_code=400, detail="Neues Passwort muss sich vom aktuellen unterscheiden")
+
+        new_hash = _hash_password(new_password)
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE alice.users SET password_hash = %s WHERE id = %s",
+                (new_hash, user_id),
+            )
+        conn.commit()
+
+        logger.info("Voluntary password change for user_id=%s", user_id)
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        conn.rollback()
+        logger.error("change_password_voluntary error: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
