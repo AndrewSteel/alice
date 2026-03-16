@@ -396,18 +396,18 @@ Not applicable -- PROJ-11 is a backend Python worker with no UI component.
 | BUG-7 | High | CLOSED | `templates_updated` was a no-op for unchanged entities |
 | BUG-8 | Medium | CLOSED | `remove_entity` logged success on Weaviate failure |
 | BUG-9 | Low | CLOSED | DB connection leak on exception paths |
+| BUG-10 | High | CLOSED | `weaviate_batch_insert` silently swallowed all per-object failures |
 
 ### Summary
 
 - **Acceptance Criteria:** 21/23 passed, 2 not testable (post-deployment tasks AC-7)
 - **Previous Bugs Fixed:** 3/3 verified from Re-Test #1 (BUG-7 High, BUG-8 Medium, BUG-9 Low -- all CLOSED)
-- **Total Bugs Closed:** 7 of 9 (BUG-1, BUG-2, BUG-3, BUG-4, BUG-7, BUG-8, BUG-9)
+- **Total Bugs Closed:** 8 of 10 (BUG-1, BUG-2, BUG-3, BUG-4, BUG-7, BUG-8, BUG-9, BUG-10)
 - **Total Bugs Still Open:** 2 (all Low severity, all acceptable)
   - BUG-5 (LOW): No DB connection pooling -- acceptable for low-frequency sync
   - BUG-6 (LOW): Weaviate client not reused -- acceptable for low-frequency sync
-- **New Bugs Found This Round:** 0
 - **Security:** No issues. All secrets via .env, all SQL parameterized, no HTTP surface, DB connections properly managed.
-- **Production Ready:** YES -- no Critical or High bugs remaining. All 3 remaining open bugs are Low severity and do not impact functionality or security.
+- **Production Ready:** YES -- no Critical or High bugs remaining. All remaining open bugs are Low severity and do not impact functionality or security.
 
 ## Deployment
 
@@ -434,6 +434,12 @@ Not applicable -- PROJ-11 is a backend Python worker with no UI component.
 - Fix: Deduplicated to one warning per domain per sync run
 - Makefile: Added `rebuild` target (`docker compose build` + `force-recreate`) for custom image stacks
 
+**Fix 3 — BUG-10: `weaviate_batch_insert` silent failure (2026-03-16)**
+- Root cause: `collection.batch.failed_objects` after the `with` block creates a *new empty* batch object → `failed_count` was always 0 → all batch inserts counted as succeeded regardless of actual per-object errors. Discovered when investigating missing HAIntent entries: `ha_sync_log.intents_generated` was inflated and could not be trusted.
+- Fix: Changed to `getattr(batch_inserter, 'failed_objects', [])` — reads `failed_objects` from the completed context manager instance, which correctly holds the per-object error list after the batch is flushed.
+- Context: Weaviate HAIntent was emptied between 02.03 and 16.03 (likely `init-weaviate-schema.sh --reset` during DMS schema setup). The diff-based sync on 16.03 only regenerated 204 intents for changed entities; the remaining ~2050 entities had no intents in Weaviate. Recovery was done via `mosquitto_pub` with `{"event": "templates_updated"}` which triggers `force_all=True` and regenerated all 2866 intents.
+
 ### Notes
 - AC-7 (n8n workflow deactivation) to be completed post-deploy
 - BUG-5, BUG-6 (no connection pooling) accepted: low-frequency sync does not require pooling
+- **Lesson learned**: If Weaviate HAIntent is reset/emptied, send `{"event": "templates_updated"}` to `alice/ha/sync` to trigger a full force-reinsertion of all intents.
