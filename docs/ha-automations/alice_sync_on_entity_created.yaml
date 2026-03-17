@@ -7,28 +7,32 @@
 # Topic: alice/ha/sync
 # Consumer: n8n workflow alice-ha-intent-sync (Incr Sync branch)
 
-automation:
-  - id: alice_sync_on_entity_created
-    alias: "Alice: Sync on Entity Created"
-    description: >
-      Publishes an incremental sync event when a new entity is created
-      in the entity registry. The 5-second delay ensures the entity
-      is fully persisted before n8n reads its configuration.
-    trigger:
-      - platform: event
-        event_type: entity_registry_updated
-        event_data:
-          action: create
-    condition: []
-    action:
-      - delay:
-          seconds: 5
-      - service: mqtt.publish
-        data:
-          topic: alice/ha/sync
-          payload: >
-            {"event": "entity_created", "entity_id": "{{ trigger.event.data.entity_id }}", "timestamp": "{{ now().isoformat() }}"}
-          qos: 1
-          retain: false
-    mode: queued
-    max: 10
+alias: Sync on Entity Created
+description: >
+  Publishes an incremental sync event when a new entity is created in the entity
+  registry. The 5-second delay ensures the entity is fully persisted before n8n
+  reads its configuration.
+triggers:
+  - trigger: event
+    event_type: entity_registry_updated
+    event_data:
+      action: create
+conditions: []
+actions:
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 5
+      milliseconds: 0
+  - action: mqtt.publish
+    metadata: {}
+    data:
+      qos: "1"
+      retain: false
+      topic: alice/ha/sync
+      payload: >-
+        {"event": "entity_created", "entity_id": "{{
+        trigger.event.data.entity_id }}", "timestamp": "{{ now().isoformat()
+        }}"}
+mode: queued
+max: 10

@@ -6,25 +6,25 @@
 # Topic: alice/ha/sync
 # Consumer: n8n workflow alice-ha-intent-sync
 
-automation:
-  - id: alice_sync_on_start
-    alias: "Alice: Sync on HA Start"
-    description: >
-      Publishes a full-sync event to MQTT 30 seconds after HA startup.
-      Consumed by n8n workflow alice-ha-intent-sync to rebuild the
-      Weaviate HAIntent collection from the current entity registry.
-    trigger:
-      - platform: homeassistant
-        event: start
-    condition: []
-    action:
-      - delay:
-          seconds: 30
-      - service: mqtt.publish
-        data:
-          topic: alice/ha/sync
-          payload: >
-            {"event": "ha_start", "sync_type": "full", "timestamp": "{{ now().isoformat() }}"}
-          qos: 1
-          retain: false
-    mode: single
+alias: Sync on HA Start
+description: ""
+triggers:
+  - trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 30
+      milliseconds: 0
+  - action: mqtt.publish
+    metadata: {}
+    data:
+      qos: "1"
+      retain: false
+      topic: alice/ha/sync
+      payload: >-
+        {"event": "ha_start", "sync_type": "full", "timestamp": "{{
+        now().isoformat() }}"}
+mode: single
