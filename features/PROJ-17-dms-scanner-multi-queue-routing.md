@@ -267,3 +267,42 @@ Der Scanner kann technisch sofort auf die neuen Queues umgestellt werden — jed
 **Deployed:** 2026-03-11
 **Workflow:** `alice-dms-scanner` (imported via n8n UI)
 **Status:** Active — routing to 4 queues: `alice/dms/pdf`, `alice/dms/ocr`, `alice/dms/txt`, `alice/dms/office`
+
+## Post-Deploy Bugfix (2026-03-17): ELOOP + Docker Volume
+
+### Problem
+`Code: Scan All Folders` warf `ELOOP: too many symbolic links encountered` für Pfade unter `/mnt/nas/andreas` und `/mnt/nas/lilly`, und `ENOENT` für alle Pfade unter `/mnt/nas/stan`.
+
+### Root Causes (zwei separate Ursachen)
+
+**1. ELOOP (`/mnt/nas/andreas`, `/mnt/nas/lilly`):**
+Die alten fstab-Einträge mounten NAS-Pfade mit zirkulären Unterpfaden:
+```
+//192.168.178.103/homes/stan/Dokumente/mini/home/stan → /mnt/nas/andreas
+```
+Der Pfad `Dokumente/mini/home/stan` enthält einen serverseitigen CIFS-Symlink (`mini`), der zurück ins Home-Verzeichnis zeigt. Der Linux-Kernel meldet ELOOP sobald `access()` auf diesen Pfad aufgerufen wird. `find -type l` findet den Symlink nicht, weil der CIFS-Client ihn als reguläres Verzeichnis anzeigt.
+
+**2. ENOENT (`/mnt/nas/stan/Dokumente` etc.):**
+Docker mount propagation: `compose.yml` mountete `/mnt/nas:/mnt/nas:ro`. Mit Standard-Propagation `rprivate` sieht der Container die CIFS-Submounts (`/mnt/nas/stan`, `/mnt/nas/andreas`, `/mnt/nas/lilly`) als leere Verzeichnisse — die CIFS-Dateisysteme werden nicht in den Container propagiert.
+
+### Fix
+
+**Code (`Code: Scan All Folders`):**
+- `lstatSync`-basierte Symlink-Prüfung ergänzt (erkennt NFS/CIFS-seitige Symlinks zuverlässiger als `Dirent.isSymbolicLink()`)
+- ELOOP-spezifisches Logging in `readdirSync`-catch hinzugefügt
+- Verbose Error-Logging für alle Fehlerarten
+
+**Infrastruktur (`docker/compose/automations/n8n/compose.yml`):**
+```yaml
+# Vorher (funktioniert nicht — Submounts nicht propagiert):
+- /mnt/nas:/mnt/nas:ro
+
+# Nachher (direktes Bind-Mount des CIFS-Dateisystems):
+- /mnt/nas/stan:/mnt/nas/stan:ro
+```
+Durch direktes Mounten des CIFS-Filesystems (statt des Parent-Verzeichnisses) sieht der Container den Inhalt vollständig.
+
+### Erkenntnisse für künftige NAS-Mounts
+- Immer das CIFS-Filesystem selbst mounten, nicht ein Parent-Verzeichnis das CIFS-Submounts enthält
+- `console.log` in n8n Code Nodes erscheint im **n8n UI Node-Output** (Browser), nicht in Docker Container-Logs
+- Serverseitige CIFS-Symlinks sind mit `find -type l` nicht sichtbar, erzeugen aber ELOOP auf dem Client
