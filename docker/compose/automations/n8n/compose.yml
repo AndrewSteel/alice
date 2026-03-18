@@ -34,11 +34,12 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
     volumes:
       - /srv/warm/n8n/data:/home/node/.n8n
       - /srv/warm/n8n/inbox:/data_inbox
-      - /mnt/nas/user1:/mnt/nas/user1:ro
-      - /mnt/nas/user2:/mnt/nas/user2:ro
     networks:
       frontend:
         aliases: [n8n]
