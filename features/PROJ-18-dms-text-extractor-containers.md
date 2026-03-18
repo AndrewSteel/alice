@@ -404,6 +404,18 @@ docker/compose/automations/dms-extractor-[pdf|ocr|txt|office]/
 - `docker/compose/automations/dms-extractor-office/` — neuer Container
 - `docker/compose/data/database/compose.yml` — Redis AOF-Persistenz
 - `docker/compose/scripts/Makefile` — neue Stacks registriert
+- `docker/compose/automations/nas-volumes.yml` — zentrale NAS-Mount-Datei (alle 5 Container via `extends`)
+
+### NAS-Volumes Zentralisierung (Nachbearbeitung 2026-03-18)
+
+Alle 5 Compose-Files (4 Extractor + n8n) referenzieren NAS-Mounts jetzt über eine zentrale Datei:
+
+```yaml
+# docker/compose/automations/nas-volumes.yml
+# Neuen NAS-Mount nur hier ergänzen — alle 5 Container übernehmen ihn automatisch
+```
+
+Neuen NAS-User-Mount hinzufügen: einzeilige Ergänzung in `nas-volumes.yml` genügt.
 
 ### Deploy-Schritte auf dem Server
 ```bash

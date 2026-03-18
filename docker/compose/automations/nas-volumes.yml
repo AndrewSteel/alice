@@ -1,0 +1,8 @@
+# Central NAS volume mounts for all DMS containers.
+# Edit THIS file when adding/removing NAS mount points.
+# Referenced via `extends: file: ../nas-volumes.yml` in each compose.yml.
+services:
+  nas-base:
+    volumes:
+      - /mnt/nas/andreas:/mnt/nas/andreas:ro
+      - /mnt/nas/lilly:/mnt/nas/lilly:ro
