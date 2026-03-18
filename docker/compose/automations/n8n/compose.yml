@@ -37,7 +37,8 @@ services:
     volumes:
       - /srv/warm/n8n/data:/home/node/.n8n
       - /srv/warm/n8n/inbox:/data_inbox
-      - /mnt/nas/stan:/mnt/nas/stan:ro
+      - /mnt/nas/user1:/mnt/nas/user1:ro
+      - /mnt/nas/user2:/mnt/nas/user2:ro
     networks:
       frontend:
         aliases: [n8n]
