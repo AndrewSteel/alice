@@ -2,12 +2,12 @@
 
 ## Status: Deployed
 **Created:** 2026-03-11
-**Last Updated:** 2026-03-11
+**Last Updated:** 2026-03-19
 
 ## Dependencies
 - Requires: PROJ-17 (DMS Scanner Multi-Queue) — Queues `alice/dms/[pdf,ocr,txt,office]` müssen befüllt werden
 - Redis muss laufen und mit AOF-Persistenz konfiguriert sein (bereits in `docker/compose/data/database/compose.yml` aktiv)
-- NAS-Mount muss in den Extractor-Containern eingebunden sein
+- NAS-Mount muss in den Extractor-Containern eingebunden sein (zentral via `nas-volumes.yml`)
 - MQTT-Broker muss laufen
 
 ## Overview
@@ -41,7 +41,7 @@ Alle Container schreiben via `RPUSH` in dieselbe Redis List `alice:dms:plaintext
 
 ### Alle Container (gemeinsam)
 - [ ] Jeder Container abonniert seine MQTT-Queue (QoS 1)
-- [ ] Jeder Container liest die Originaldatei vom NAS-Mount (`/mnt/nas` read-only)
+- [ ] Jeder Container liest die Originaldatei von den NAS-Mounts (per-User-Pfade via `nas-volumes.yml`, read-only)
 - [ ] Jeder Container schreibt Ergebnis via `RPUSH alice:dms:plaintext` in Redis (JSON-String)
 - [ ] Output-Format ist für alle Container identisch (s.u.)
 - [ ] Bei nicht erreichbarer Datei: `extraction_failed: true`, `plaintext: ""`, trotzdem in Redis schreiben
@@ -75,7 +75,8 @@ Alle Container schreiben via `RPUSH` in dieselbe Redis List `alice:dms:plaintext
 
 ### Compose / Infrastruktur
 - [ ] Alle 4 Container haben separate Compose-Files unter `docker/compose/automations/dms-extractor-[pdf,ocr,txt,office]/compose.yml`
-- [ ] NAS-Mount `/mnt/nas:/mnt/nas:ro` in allen Containern
+- [ ] NAS-Mounts werden zentral in `docker/compose/automations/nas-volumes.yml` definiert und via `extends` in alle Container eingebunden
+- [ ] NAS-Mounts sind per-User aufgeteilt (`/mnt/nas/andreas`, `/mnt/nas/lilly`), read-only
 - [ ] MQTT-Verbindung via Umgebungsvariablen (kein Hardcoding)
 - [ ] Container sind im `backend` Docker-Netzwerk
 
@@ -148,7 +149,7 @@ Optionale Metadaten je Extraktor: `page_count` (pdf/ocr), `language` (ocr), `cha
 - **MQTT-Konfiguration** via Env: `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD` (für Input-Subscription)
 - **Redis-Konfiguration** via Env: `REDIS_HOST`, `REDIS_PORT` (für Output-RPUSH)
 - **Redis List Key**: `alice:dms:plaintext`
-- **NAS-Mount**: `/mnt/nas:/mnt/nas:ro` (read-only)
+- **NAS-Mount**: Zentral in `docker/compose/automations/nas-volumes.yml` definiert; per-User-Pfade (`/mnt/nas/andreas:/mnt/nas/andreas:ro`, `/mnt/nas/lilly:/mnt/nas/lilly:ro`); alle Container binden die Mounts via `extends: file: ../nas-volumes.yml, service: nas-base` ein
 - **Docker-Netzwerk**: `backend`
 - **Restart-Policy**: `unless-stopped`
 
@@ -210,11 +211,13 @@ Container (loop)
 ### Verzeichnisstruktur (je Container)
 
 ```
-docker/compose/automations/dms-extractor-[pdf|ocr|txt|office]/
-├── compose.yml        ← Service-Definition, NAS-Mount, Netzwerk
-├── Dockerfile         ← Base Image + Dependencies
-├── .env               ← MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
-└── main.[js|py]       ← Extraktionslogik
+docker/compose/automations/
+├── nas-volumes.yml    ← Zentrale NAS-Mount-Definition (alle Container via extends)
+└── dms-extractor-[pdf|ocr|txt|office]/
+    ├── compose.yml    ← Service-Definition (extends: nas-volumes.yml), Netzwerk
+    ├── Dockerfile     ← Base Image + Dependencies
+    ├── .env           ← MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
+    └── main.[js|py]   ← Extraktionslogik
 ```
 
 ### Infrastruktur-Entscheidungen
@@ -222,7 +225,7 @@ docker/compose/automations/dms-extractor-[pdf|ocr|txt|office]/
 | Thema | Entscheidung | Begründung |
 |---|---|---|
 | Docker-Netzwerk | `backend` (external) | MQTT-Broker ist im backend-Netz erreichbar |
-| NAS-Mount | `/mnt/nas:/mnt/nas:ro` | Read-only — Container brauchen keinen Schreibzugriff |
+| NAS-Mount | Zentral via `nas-volumes.yml` + `extends`; per-User-Pfade (read-only) | Single-Source-of-Truth -- neuen Mount nur in einer Datei ergaenzen; Container brauchen keinen Schreibzugriff |
 | Restart-Policy | `unless-stopped` | Automatischer Neustart bei Absturz ohne manuelle Intervention |
 | Healthcheck | Heartbeat-Datei (`/tmp/heartbeat`) | Gleicher Ansatz wie `alice-ha-sync` — einfach und bewährt |
 | Watchtower | `enable: false` | Manuelle Updates bevorzugt (schwere Images, keine Auto-Updates) |
@@ -258,7 +261,7 @@ docker/compose/automations/dms-extractor-[pdf|ocr|txt|office]/
 #### AC-1: Alle Container (gemeinsam)
 
 - [x] Jeder Container abonniert seine MQTT-Queue (QoS 1) -- pdf (line 96), ocr (line 227), txt (line 99), office (line 269)
-- [x] Jeder Container liest die Originaldatei vom NAS-Mount (`/mnt/nas` read-only) -- all compose.yml have `/mnt/nas:/mnt/nas:ro`
+- [x] Jeder Container liest die Originaldatei von den NAS-Mounts (per-User-Pfade via `nas-volumes.yml`, read-only) -- all compose.yml use `extends: nas-volumes.yml`
 - [x] Jeder Container schreibt Ergebnis via `RPUSH alice:dms:plaintext` in Redis (JSON-String)
 - [x] Output-Format ist fuer alle Container identisch -- all produce the same JSON structure with all mandatory fields
 - [x] Bei nicht erreichbarer Datei: `extraction_failed: true`, `plaintext: ""`, trotzdem in Redis schreiben
@@ -297,7 +300,8 @@ docker/compose/automations/dms-extractor-[pdf|ocr|txt|office]/
 #### AC-6: Compose / Infrastruktur
 
 - [x] Alle 4 Container haben separate Compose-Files -- confirmed in `docker/compose/automations/dms-extractor-[pdf,ocr,txt,office]/compose.yml`
-- [x] NAS-Mount `/mnt/nas:/mnt/nas:ro` in allen Containern -- all compose.yml confirmed
+- [x] NAS-Mounts werden zentral in `nas-volumes.yml` definiert und via `extends` eingebunden -- all compose.yml use `extends: ../nas-volumes.yml`
+- [x] NAS-Mounts sind per-User aufgeteilt (`/mnt/nas/andreas`, `/mnt/nas/lilly`), read-only
 - [x] MQTT-Verbindung via Umgebungsvariablen (kein Hardcoding) -- all use env vars via .env files
 - [x] Container sind im `backend` Docker-Netzwerk -- all compose.yml confirmed
 - [x] BUG-1: .env files not in .gitignore -- FIXED by user
@@ -398,24 +402,40 @@ docker/compose/automations/dms-extractor-[pdf|ocr|txt|office]/
 **Type:** Docker Compose (4 custom-build containers)
 
 ### Changed Files
-- `docker/compose/automations/dms-extractor-pdf/` — neuer Container
-- `docker/compose/automations/dms-extractor-ocr/` — neuer Container
-- `docker/compose/automations/dms-extractor-txt/` — neuer Container
-- `docker/compose/automations/dms-extractor-office/` — neuer Container
-- `docker/compose/data/database/compose.yml` — Redis AOF-Persistenz
-- `docker/compose/scripts/Makefile` — neue Stacks registriert
-- `docker/compose/automations/nas-volumes.yml` — zentrale NAS-Mount-Datei (alle 5 Container via `extends`)
+- `docker/compose/automations/dms-extractor-pdf/` -- neuer Container
+- `docker/compose/automations/dms-extractor-ocr/` -- neuer Container
+- `docker/compose/automations/dms-extractor-txt/` -- neuer Container
+- `docker/compose/automations/dms-extractor-office/` -- neuer Container
+- `docker/compose/data/database/compose.yml` -- Redis AOF-Persistenz
+- `docker/compose/scripts/Makefile` -- neue Stacks registriert
+- `docker/compose/automations/nas-volumes.yml` -- zentrale NAS-Mount-Datei (per-User-Pfade, alle 5 Container via `extends`)
+- `docker/compose/automations/n8n/compose.yml` -- NAS-Mounts auf `extends: nas-volumes.yml` umgestellt
 
 ### NAS-Volumes Zentralisierung (Nachbearbeitung 2026-03-18)
 
-Alle 5 Compose-Files (4 Extractor + n8n) referenzieren NAS-Mounts jetzt über eine zentrale Datei:
+Alle 5 Compose-Files (4 Extractor + n8n) referenzieren NAS-Mounts jetzt ueber eine zentrale Datei. Statt `/mnt/nas:/mnt/nas:ro` in jedem Compose-File werden per-User-Pfade in einer einzigen Datei definiert:
 
 ```yaml
 # docker/compose/automations/nas-volumes.yml
-# Neuen NAS-Mount nur hier ergänzen — alle 5 Container übernehmen ihn automatisch
+services:
+  nas-base:
+    volumes:
+      - /mnt/nas/andreas:/mnt/nas/andreas:ro
+      - /mnt/nas/lilly:/mnt/nas/lilly:ro
 ```
 
-Neuen NAS-User-Mount hinzufügen: einzeilige Ergänzung in `nas-volumes.yml` genügt.
+Jeder Container bindet die Mounts via Docker Compose `extends` ein:
+
+```yaml
+# In jedem dms-extractor-*/compose.yml:
+services:
+  dms-extractor-xxx:
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
+```
+
+Neuen NAS-User-Mount hinzufuegen: einzeilige Ergaenzung in `nas-volumes.yml` genuegt -- alle 5 Container uebernehmen ihn automatisch.
 
 ### Deploy-Schritte auf dem Server
 ```bash

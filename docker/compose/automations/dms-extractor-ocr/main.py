@@ -11,9 +11,11 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import time
 import threading
+import unicodedata
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
@@ -133,6 +135,84 @@ def extract_text_from_pdf(pdf_path: str) -> tuple[str, dict]:
     return full_text, metadata
 
 
+def clean_ocr_text(text: str) -> tuple[str, dict]:
+    """Remove OCR noise from extracted text while preserving meaningful content.
+
+    Targets noise specific to Tesseract output on PDFs/images:
+    - Repeated identical characters (OCR artefacts like 'nnnnn', 'eeeee')
+    - Lines dominated by non-Latin scripts (Cyrillic etc. with deu+eng model)
+    - Table-of-contents filler sequences ('. . . .', '-----')
+    - Non-printable control characters
+    - Excessive blank lines
+
+    Does NOT modify: numbers, currency symbols, punctuation, umlauts/special
+    Latin characters, structural whitespace (newlines, tabs).
+    """
+    original_len = len(text)
+    lines_in = text.count("\n")
+
+    # 1. Remove non-printable control characters (keep \n, \t, \r)
+    text = re.sub(r"[^\S\n\t\r ]+", " ", text)           # collapse weird whitespace
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)  # control chars
+
+    # 2. Remove runs of 5+ identical characters (OCR artefacts like 'nnnnnnn')
+    #    Exception: keep runs of digits (e.g. account numbers) and meaningful
+    #    punctuation like '...' (up to 4 is fine; 5+ is filler).
+    text = re.sub(r"(.)\1{4,}", lambda m: m.group(1) * 4 if m.group(1) in ".-_=" else "", text)
+
+    # 3. Remove ToC filler: lines that are mostly dots/dashes/underscores
+    #    e.g. "Chapter 1 ................ 5" -> keep the text, drop the filler run
+    text = re.sub(r"[.\-_]{5,}", "", text)
+
+    # 4. Drop lines where >70% of non-space characters are non-Latin/non-digit.
+    #    This targets Cyrillic/Greek/Arabic blocks that Tesseract misread.
+    cleaned_lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            cleaned_lines.append(line)
+            continue
+        non_space = [c for c in stripped if not c.isspace()]
+        if not non_space:
+            cleaned_lines.append(line)
+            continue
+        # Count characters that are Latin letters, digits, or common punctuation
+        def is_useful(c):
+            if c.isdigit() or c in '.,;:!?()[]{}"\'/\\@#$%&*+-=<>^~`|€$£¥°':
+                return True
+            cat = unicodedata.category(c)
+            # Latin letters: Lu/Ll/Lt/Lm + Latin script
+            if cat.startswith("L"):
+                name = unicodedata.name(c, "")
+                return "LATIN" in name or "COMBINING" in name
+            return False
+        useful = sum(1 for c in non_space if is_useful(c))
+        ratio = useful / len(non_space)
+        if ratio >= 0.30 or len(stripped) <= 3:  # keep short lines (dates, codes)
+            cleaned_lines.append(line)
+    text = "\n".join(cleaned_lines)
+
+    # 5. Collapse 3+ consecutive blank lines into 2
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 6. Strip trailing whitespace per line
+    text = "\n".join(line.rstrip() for line in text.splitlines())
+
+    text = text.strip()
+    cleaned_len = len(text)
+    lines_out = text.count("\n")
+
+    stats = {
+        "chars_before_clean": original_len,
+        "chars_after_clean": cleaned_len,
+        "chars_removed": original_len - cleaned_len,
+        "reduction_pct": round((original_len - cleaned_len) / max(original_len, 1) * 100, 1),
+        "lines_before_clean": lines_in,
+        "lines_after_clean": lines_out,
+    }
+    return text, stats
+
+
 def process_file(file_path: str) -> tuple[str, dict]:
     """Determine file type and run appropriate OCR pipeline."""
     ext = os.path.splitext(file_path)[1].lower()
@@ -219,6 +299,15 @@ def _process_payload(payload: dict):
 
     try:
         plaintext, metadata = process_file(file_path)
+
+        # Clean OCR noise (repeated chars, non-Latin garbage, ToC filler)
+        plaintext, clean_stats = clean_ocr_text(plaintext)
+        metadata.update(clean_stats)
+        log("info", "OCR text cleaned",
+            file_path=file_path,
+            chars_before=clean_stats["chars_before_clean"],
+            chars_after=clean_stats["chars_after_clean"],
+            reduction_pct=clean_stats["reduction_pct"])
 
         # Truncate if too long
         if len(plaintext) > PLAINTEXT_MAX_CHARS:
