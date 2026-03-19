@@ -10,6 +10,7 @@ Multi-page PDFs are processed page by page and results are concatenated.
 import json
 import logging
 import os
+import queue
 import sys
 import time
 import threading
@@ -63,6 +64,8 @@ PLAINTEXT_MAX_CHARS = 50000
 HEARTBEAT_FILE = "/tmp/heartbeat"
 HEARTBEAT_INTERVAL = 30  # seconds
 OCR_LANGUAGES = "deu+eng"
+DEDUP_KEY = "alice:dms:ocr:processing"
+DEDUP_TTL = 3600  # 1 hour TTL for dedup entries
 
 # ---------------------------------------------------------------------------
 # Heartbeat
@@ -144,9 +147,14 @@ def process_file(file_path: str) -> tuple[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# MQTT message handler
+# Work queue: on_message enqueues, worker thread processes
 # ---------------------------------------------------------------------------
+work_queue = queue.Queue()
+
+
 def on_message(client, userdata, msg):
+    """Enqueue the message and return immediately so the MQTT network loop
+    stays responsive (keepalive pings, PUBACK, etc.)."""
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -156,16 +164,52 @@ def on_message(client, userdata, msg):
 
     file_path = payload.get("file_path", "")
     file_hash = payload.get("file_hash", "")
-    file_type = payload.get("file_type", "ocr")
-    file_size = payload.get("file_size", 0)
-    suggested_type = payload.get("suggested_type", "")
-    priority = payload.get("priority", "normal")
-    detected_at = payload.get("detected_at", datetime.now(timezone.utc).isoformat())
 
     if not file_path or not file_path.startswith("/mnt/nas/"):
         log("error", "Rejected message with invalid file_path (must start with /mnt/nas/)",
             file_path=file_path)
         return
+
+    # Deduplication: skip if this file_hash is already being processed or was
+    # recently processed.  SETNX returns True only if the key did not exist.
+    dedup_field = file_hash or file_path
+    if dedup_field:
+        try:
+            is_new = redis_client.set(
+                f"{DEDUP_KEY}:{dedup_field}", "1",
+                nx=True, ex=DEDUP_TTL,
+            )
+            if not is_new:
+                log("info", "Skipping duplicate message (already processing or recently done)",
+                    file_path=file_path, file_hash=file_hash)
+                return
+        except Exception as e:
+            log("warn", "Dedup check failed, processing anyway", error=str(e))
+
+    log("info", "Enqueued OCR job", file_path=file_path, file_hash=file_hash)
+    work_queue.put(payload)
+
+
+def worker_loop():
+    """Process OCR jobs from the work queue in a dedicated thread."""
+    while True:
+        payload = work_queue.get()
+        try:
+            _process_payload(payload)
+        except Exception as e:
+            log("error", "Unhandled error in worker", error=str(e))
+        finally:
+            work_queue.task_done()
+
+
+def _process_payload(payload: dict):
+    file_path = payload.get("file_path", "")
+    file_hash = payload.get("file_hash", "")
+    file_type = payload.get("file_type", "ocr")
+    file_size = payload.get("file_size", 0)
+    suggested_type = payload.get("suggested_type", "")
+    priority = payload.get("priority", "normal")
+    detected_at = payload.get("detected_at", datetime.now(timezone.utc).isoformat())
 
     log("info", "Processing OCR file", file_path=file_path, file_hash=file_hash)
 
@@ -224,6 +268,10 @@ def on_message(client, userdata, msg):
     write_heartbeat()
 
 
+# Start worker thread
+threading.Thread(target=worker_loop, daemon=True, name="ocr-worker").start()
+
+
 # ---------------------------------------------------------------------------
 # MQTT setup
 # ---------------------------------------------------------------------------
@@ -240,7 +288,7 @@ def on_disconnect(client, userdata, flags, reason_code, properties):
 mqtt_client = mqtt.Client(
     mqtt.CallbackAPIVersion.VERSION2,
     client_id="dms-extractor-ocr",
-    clean_session=False,
+    clean_session=True,
 )
 mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 mqtt_client.on_connect = on_connect
@@ -253,5 +301,5 @@ log("info", "dms-extractor-ocr starting",
     mqtt_host=MQTT_HOST, mqtt_topic=MQTT_TOPIC,
     redis_host=REDIS_HOST, redis_key=REDIS_KEY)
 
-mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=300)
 mqtt_client.loop_forever()

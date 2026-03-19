@@ -27,6 +27,8 @@ const REDIS_KEY = "alice:dms:plaintext";
 const PLAINTEXT_MAX_CHARS = 50000;
 const HEARTBEAT_FILE = "/tmp/heartbeat";
 const HEARTBEAT_INTERVAL_MS = 30000;
+const DEDUP_KEY_PREFIX = "alice:dms:pdf:processing";
+const DEDUP_TTL_SEC = 3600; // 1 hour
 
 // ---------------------------------------------------------------------------
 // Logging (structured JSON)
@@ -87,8 +89,9 @@ const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}:${MQTT_PORT}`, {
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
   clientId: "dms-extractor-pdf",
-  clean: false,
+  clean: true,
   reconnectPeriod: 5000,
+  keepalive: 300,
 });
 
 mqttClient.on("connect", () => {
@@ -137,6 +140,23 @@ mqttClient.on("message", async (_topic, messageBuffer) => {
     return;
   }
 
+  // Deduplication: skip if this file_hash was already processed recently
+  const dedupField = file_hash || file_path;
+  try {
+    const isNew = await redis.set(
+      `${DEDUP_KEY_PREFIX}:${dedupField}`, "1",
+      "NX", "EX", DEDUP_TTL_SEC
+    );
+    if (!isNew) {
+      log("info", "Skipping duplicate message (already processing or recently done)", {
+        file_path, file_hash,
+      });
+      return;
+    }
+  } catch (err) {
+    log("warn", "Dedup check failed, processing anyway", { error: err.message });
+  }
+
   log("info", "Processing PDF", { file_path, file_hash });
 
   let plaintext = "";
@@ -144,8 +164,8 @@ mqttClient.on("message", async (_topic, messageBuffer) => {
   const metadata = {};
 
   try {
-    // Read file from NAS mount
-    const buffer = fs.readFileSync(file_path);
+    // Read file from NAS mount (async to avoid blocking the event loop)
+    const buffer = await fs.promises.readFile(file_path);
     const result = await pdfParse(buffer);
 
     plaintext = result.text || "";

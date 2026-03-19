@@ -30,6 +30,8 @@ const REDIS_KEY = "alice:dms:plaintext";
 const PLAINTEXT_MAX_CHARS = 50000;
 const HEARTBEAT_FILE = "/tmp/heartbeat";
 const HEARTBEAT_INTERVAL_MS = 30000;
+const DEDUP_KEY_PREFIX = "alice:dms:txt:processing";
+const DEDUP_TTL_SEC = 3600; // 1 hour
 
 // ---------------------------------------------------------------------------
 // Logging (structured JSON)
@@ -90,8 +92,9 @@ const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}:${MQTT_PORT}`, {
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
   clientId: "dms-extractor-txt",
-  clean: false,
+  clean: true,
   reconnectPeriod: 5000,
+  keepalive: 300,
 });
 
 mqttClient.on("connect", () => {
@@ -117,9 +120,7 @@ mqttClient.on("reconnect", () => log("warn", "MQTT reconnecting"));
 // ---------------------------------------------------------------------------
 // Encoding detection helper
 // ---------------------------------------------------------------------------
-function readFileWithEncoding(filePath) {
-  const buffer = fs.readFileSync(filePath);
-
+function readFileWithEncoding(buffer) {
   // Detect encoding
   const detected = chardet.detect(buffer);
   let encoding = "utf-8";
@@ -164,6 +165,23 @@ mqttClient.on("message", async (_topic, messageBuffer) => {
     return;
   }
 
+  // Deduplication: skip if this file_hash was already processed recently
+  const dedupField = file_hash || file_path;
+  try {
+    const isNew = await redis.set(
+      `${DEDUP_KEY_PREFIX}:${dedupField}`, "1",
+      "NX", "EX", DEDUP_TTL_SEC
+    );
+    if (!isNew) {
+      log("info", "Skipping duplicate message (already processing or recently done)", {
+        file_path, file_hash,
+      });
+      return;
+    }
+  } catch (err) {
+    log("warn", "Dedup check failed, processing anyway", { error: err.message });
+  }
+
   log("info", "Processing text file", { file_path, file_hash });
 
   let plaintext = "";
@@ -171,7 +189,9 @@ mqttClient.on("message", async (_topic, messageBuffer) => {
   const metadata = {};
 
   try {
-    const { text, encoding } = readFileWithEncoding(file_path);
+    // Read file async to avoid blocking the event loop
+    const buffer = await fs.promises.readFile(file_path);
+    const { text, encoding } = readFileWithEncoding(buffer);
     plaintext = text;
     metadata.encoding = encoding;
     metadata.char_count = plaintext.length;
