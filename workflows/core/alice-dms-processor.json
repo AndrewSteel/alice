@@ -15,10 +15,10 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        18000,
-        3888
+        22080,
+        -2400
       ],
-      "id": "b0000001-0000-0000-0000-000000000001",
+      "id": "aacc7e4e-e98e-44a0-8f35-f26b94c06835",
       "name": "Schedule: Nightly 02:00"
     },
     {
@@ -28,10 +28,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        18300,
-        3888
+        22384,
+        -2400
       ],
-      "id": "b0000002-0000-0000-0000-000000000001",
+      "id": "97b60784-30ee-4d1e-b33d-12832ce38e02",
       "name": "Code: Init"
     },
     {
@@ -41,10 +41,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        18600,
-        3888
+        22688,
+        -2400
       ],
-      "id": "b0000003-0000-0000-0000-000000000001",
+      "id": "724b038d-7713-4063-9ac2-cdd1e17277fe",
       "name": "Code: Fetch Batch"
     },
     {
@@ -75,10 +75,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        18900,
-        3888
+        22992,
+        -2400
       ],
-      "id": "b0000004-0000-0000-0000-000000000001",
+      "id": "3941b411-ca98-466f-abd4-02a2543142bd",
       "name": "IF: Queue Empty"
     },
     {
@@ -88,10 +88,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        19200,
-        4200
+        23280,
+        -2096
       ],
-      "id": "b0000005-0000-0000-0000-000000000001",
+      "id": "5443ca99-4a27-4bae-a036-c301826a78b6",
       "name": "Code: Final Log"
     },
     {
@@ -99,10 +99,10 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        19500,
-        4200
+        23584,
+        -2096
       ],
-      "id": "b0000006-0000-0000-0000-000000000001",
+      "id": "2ce5de0e-0ca8-484d-9d3a-efce6e5ec11d",
       "name": "End: Empty Queue"
     },
     {
@@ -114,10 +114,10 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        19200,
-        3888
+        23280,
+        -2400
       ],
-      "id": "b0000007-0000-0000-0000-000000000001",
+      "id": "4ca7aab7-ae6e-42b6-bb83-2f5387158875",
       "name": "Split In Batches"
     },
     {
@@ -127,10 +127,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        19500,
-        3888
+        23584,
+        -2400
       ],
-      "id": "b0000008-0000-0000-0000-000000000001",
+      "id": "b40eb301-c0bc-4706-ae17-c53bfb8e79a1",
       "name": "Code: Time Check"
     },
     {
@@ -161,10 +161,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        19800,
-        3888
+        23888,
+        -2400
       ],
-      "id": "b0000009-0000-0000-0000-000000000001",
+      "id": "5e552438-fa6c-4e09-b2f0-7df8030858df",
       "name": "IF: Time Limit Reached"
     },
     {
@@ -174,10 +174,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        20100,
-        4200
+        24192,
+        -2096
       ],
-      "id": "b000000a-0000-0000-0000-000000000001",
+      "id": "9cd45418-5b95-4395-903f-3f28fa72c270",
       "name": "Code: Final Log (Time)"
     },
     {
@@ -185,10 +185,10 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        20400,
-        4200
+        24480,
+        -2096
       ],
-      "id": "b000000b-0000-0000-0000-000000000001",
+      "id": "8c259e11-52b6-48e7-90fd-76d87674b212",
       "name": "End: Time Limit"
     },
     {
@@ -198,10 +198,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        19500,
-        3588
+        23584,
+        -2704
       ],
-      "id": "b000000c-0000-0000-0000-000000000001",
+      "id": "9c991a6b-b25a-4dde-ab54-55cf6385bb68",
       "name": "Code: Parse + Dedup Check"
     },
     {
@@ -232,10 +232,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        19800,
-        3588
+        23888,
+        -2704
       ],
-      "id": "b000000d-0000-0000-0000-000000000001",
+      "id": "85176e37-19f4-4a9c-8c39-520853f7c59e",
       "name": "IF: Skip Item"
     },
     {
@@ -266,10 +266,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        20100,
-        3588
+        24192,
+        -2704
       ],
-      "id": "b000000e-0000-0000-0000-000000000001",
+      "id": "92b8e2c7-8475-4092-b8d0-31cd30c4476f",
       "name": "IF: Extraction Failed"
     },
     {
@@ -279,10 +279,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        20400,
-        3400
+        24480,
+        -2896
       ],
-      "id": "b000000f-0000-0000-0000-000000000001",
+      "id": "4274e0a3-e4c1-4810-b733-e499b50abf4b",
       "name": "Code: Handle Failed"
     },
     {
@@ -297,10 +297,10 @@
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
       "position": [
-        20700,
-        3400
+        24784,
+        -2896
       ],
-      "id": "b0000010-0000-0000-0000-000000000001",
+      "id": "4fccceee-4590-4d2e-94ee-abdd07c84514",
       "name": "MQTT: Publish Error",
       "credentials": {
         "mqtt": {
@@ -337,10 +337,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        20400,
-        3588
+        24480,
+        -2704
       ],
-      "id": "b0000011-0000-0000-0000-000000000001",
+      "id": "536aa739-6d59-438b-8cc3-6b91c04af94d",
       "name": "IF: Auto Classify"
     },
     {
@@ -357,10 +357,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        20700,
-        3600
+        24784,
+        -2688
       ],
-      "id": "b0000012-0000-0000-0000-000000000001",
+      "id": "4edd1fd0-39cf-4fbb-a5b5-febd19accc56",
       "name": "HTTP: Ollama Classify",
       "continueOnFail": true
     },
@@ -371,10 +371,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        21000,
-        3600
+        25088,
+        -2688
       ],
-      "id": "b0000013-0000-0000-0000-000000000001",
+      "id": "0ff9f259-298a-4bb9-bde4-86c1875755c1",
       "name": "Code: Parse Classify Result"
     },
     {
@@ -384,10 +384,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        20700,
-        3888
+        24784,
+        -2400
       ],
-      "id": "b0000014-0000-0000-0000-000000000001",
+      "id": "6ea2a8dc-0567-4da8-8963-88dff82be874",
       "name": "Code: Use Suggested Type"
     },
     {
@@ -397,10 +397,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        21300,
-        3888
+        25392,
+        -2400
       ],
-      "id": "b0000015-0000-0000-0000-000000000001",
+      "id": "02a41efd-a9c2-47f5-a823-e2008803d017",
       "name": "Code: Build Extraction Prompt"
     },
     {
@@ -417,24 +417,24 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        21600,
-        3888
+        25680,
+        -2400
       ],
-      "id": "b0000016-0000-0000-0000-000000000001",
+      "id": "bfc458b1-578f-452e-964c-b3941a5d362c",
       "name": "HTTP: Ollama Extract",
       "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "const axios = require('axios');\nconst redis = require('redis');\nconst item = $input.first().json;\nlet extracted = {};\nlet retried = false;\nlet retryFailed = false;\n\ntry {\n  const response = item.response || item.body?.response || '';\n  extracted = JSON.parse(response);\n} catch(e) {\n  // Retry: re-call Ollama with same extraction prompt\n  retried = true;\n  try {\n    const prompt = item._extraction_prompt || '';\n    const retryResp = await axios.post('http://ollama-3090:11434/api/generate', { model: 'qwen3:14b', prompt, stream: false, format: 'json', options: { temperature: 0 } }, { timeout: 30000 });\n    extracted = JSON.parse(retryResp.data.response || '{}');\n  } catch(retryErr) {\n    retryFailed = true;\n    extracted = {};\n  }\n}\n\nif (retried) {\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  await client.connect();\n  try {\n    await client.hIncrBy('alice:dms:run:stats', 'llm_retries', 1);\n    if (retryFailed) await client.hIncrBy('alice:dms:run:stats', 'llm_retry_failures', 1);\n  } finally {\n    await client.quit();\n  }\n}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\n\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(val);\n  return isNaN(n) ? null : n;\n}\n\nconst result = { ...item, _extracted: extracted, _toISODate: toISODate.toString(), _extraction_ok: true };\nif (retryFailed) result._llm_retry_failed = true;\nreturn [{ json: result }];"
+        "jsCode": "const axios = require('axios');\nconst redis = require('redis');\nconst item = $input.first().json;\nlet extracted = {};\nlet retried = false;\nlet retryFailed = false;\n\ntry {\n  const response = item.response || item.body?.response || '';\n  extracted = JSON.parse(response);\n} catch(e) {\n  // Retry: re-call Ollama with same extraction prompt\n  retried = true;\n  try {\n    const prompt = item._extraction_prompt || '';\n    const retryResp = await axios.post('http://ollama-3090:11434/api/generate', { model: 'qwen3:14b', prompt, stream: false, format: 'json', options: { temperature: 0 } }, { timeout: 30000 });\n    extracted = JSON.parse(retryResp.data.response || '{}');\n  } catch(retryErr) {\n    retryFailed = true;\n    extracted = {};\n  }\n}\n\nif (retried) {\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  await client.connect();\n  try {\n    await client.hIncrBy('alice:dms:run:stats', 'llm_retries', 1);\n    if (retryFailed) await client.hIncrBy('alice:dms:run:stats', 'llm_retry_failures', 1);\n  } finally {\n    await client.quit();\n  }\n}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\n\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(val);\n  return isNaN(n) ? null : n;\n}\n\nconst result = { ...item, _extracted: extracted, _extraction_ok: true };\nif (retryFailed) result._llm_retry_failed = true;\nreturn [{ json: result }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        21900,
-        3888
+        25984,
+        -2400
       ],
-      "id": "b0000017-0000-0000-0000-000000000001",
+      "id": "d7a4ee9b-fd75-43bd-9371-a7fe08efb776",
       "name": "Code: Parse Extract Result"
     },
     {
@@ -444,10 +444,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        22200,
-        3888
+        26288,
+        -2400
       ],
-      "id": "b0000018-0000-0000-0000-000000000001",
+      "id": "1548ac24-6a5f-4061-93b5-eb1dcc7fc2d8",
       "name": "Code: Build Weaviate Query"
     },
     {
@@ -462,10 +462,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        22500,
-        3888
+        26592,
+        -2400
       ],
-      "id": "b0000019-0000-0000-0000-000000000001",
+      "id": "25ddd589-1bf1-4e78-8a9a-61ebaa97c330",
       "name": "HTTP: Weaviate Search",
       "continueOnFail": true
     },
@@ -476,10 +476,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        22800,
-        3888
+        26880,
+        -2400
       ],
-      "id": "b000001a-0000-0000-0000-000000000001",
+      "id": "1ea71c14-a3c1-4d16-93c1-347934701c4c",
       "name": "Code: Check Existing Entry"
     },
     {
@@ -510,10 +510,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        23100,
-        3888
+        27184,
+        -2400
       ],
-      "id": "b000001b-0000-0000-0000-000000000001",
+      "id": "d222e8ce-6df3-4423-b12f-b297483743fd",
       "name": "IF: Has Existing Entry"
     },
     {
@@ -525,10 +525,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        23400,
-        3600
+        27488,
+        -2688
       ],
-      "id": "b000001c-0000-0000-0000-000000000001",
+      "id": "67449a61-84aa-4d7b-ba64-bcd0401afce3",
       "name": "HTTP: Weaviate Delete",
       "continueOnFail": true
     },
@@ -539,10 +539,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        23700,
-        3888
+        27792,
+        -2400
       ],
-      "id": "b000001d-0000-0000-0000-000000000001",
+      "id": "97f760f4-6cc0-4a44-84f1-d654b32f3d9c",
       "name": "Code: Build Weaviate Payload"
     },
     {
@@ -557,10 +557,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        24000,
-        3888
+        28080,
+        -2400
       ],
-      "id": "b000001e-0000-0000-0000-000000000001",
+      "id": "15c8f42d-343c-48d6-83ae-3f470d8b7fec",
       "name": "HTTP: Weaviate Insert",
       "continueOnFail": true
     },
@@ -571,10 +571,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        24300,
-        3888
+        28384,
+        -2400
       ],
-      "id": "b000001f-0000-0000-0000-000000000001",
+      "id": "4a6f505a-3428-49d7-9478-ff35a0248ab0",
       "name": "Code: Redis State Update"
     },
     {
@@ -589,10 +589,10 @@
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
       "position": [
-        24900,
-        3888
+        28992,
+        -2400
       ],
-      "id": "b0000020-0000-0000-0000-000000000001",
+      "id": "7392c766-b95c-4289-8e30-a3c6ea7f4d5a",
       "name": "MQTT: Publish Done",
       "credentials": {
         "mqtt": {
@@ -629,10 +629,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        24600,
-        3588
+        28688,
+        -2704
       ],
-      "id": "b0000022-0000-0000-0000-000000000001",
+      "id": "55c64eca-9459-4c42-97ea-c53c7fd241e9",
       "name": "IF: Insert Success"
     },
     {
@@ -647,10 +647,10 @@
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
       "position": [
-        24900,
-        3400
+        28992,
+        -2896
       ],
-      "id": "b0000023-0000-0000-0000-000000000001",
+      "id": "3f66accc-33cd-41e1-9647-4e74791b6b1f",
       "name": "MQTT: Publish Error (Weaviate)",
       "credentials": {
         "mqtt": {
@@ -666,10 +666,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        25200,
-        3400
+        29280,
+        -2896
       ],
-      "id": "b0000024-0000-0000-0000-000000000001",
+      "id": "52490565-c0ad-4872-92a5-dd6c00ef2f28",
       "name": "Code: Abort Run"
     },
     {
@@ -681,11 +681,45 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        18000,
-        3280
+        22080,
+        -3008
       ],
-      "id": "b0000021-0000-0000-0000-000000000001",
+      "id": "e8841505-a93e-4147-b1b2-cce5a4b542b4",
       "name": "Sticky: Overview"
+    },
+    {
+      "id": "aabb1234-skip-weav-iate-000000000001",
+      "name": "IF: Weaviate Skip",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        26440,
+        -2400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-weaviate-skip",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
     }
   ],
   "pinData": {},
@@ -967,7 +1001,7 @@
       "main": [
         [
           {
-            "node": "HTTP: Weaviate Search",
+            "node": "IF: Weaviate Skip",
             "type": "main",
             "index": 0
           }
@@ -1092,6 +1126,24 @@
         [
           {
             "node": "Code: Abort Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Weaviate Skip": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP: Weaviate Search",
             "type": "main",
             "index": 0
           }
