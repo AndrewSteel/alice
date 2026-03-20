@@ -9,12 +9,15 @@ services:
       - OLLAMA_KEEP_ALIVE=-1
       - HF_HOME=/data/hf
       - XDG_CACHE_HOME=/data/cache
+    extends:
+      file: ../../automations/nas-volumes.yml
+      service: nas-base
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"]  # RTX 3090
+              device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"] # RTX 3090
               capabilities: ["gpu"]
     volumes:
       - /srv/hot/models/ollama:/root/.ollama/models
@@ -35,12 +38,15 @@ services:
       - OLLAMA_KEEP_ALIVE=-1
       - HF_HOME=/data/hf
       - XDG_CACHE_HOME=/data/cache
+    extends:
+      file: ../../automations/nas-volumes.yml
+      service: nas-base
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"]  # TITAN X
+              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
               capabilities: ["gpu"]
     volumes:
       - /srv/hot/models/ollama:/root/.ollama/models
