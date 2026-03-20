@@ -268,7 +268,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst crypto = require('crypto');\n\nconst item = $input.first().json;\nconst filePath = item.file_path;\n\ntry {\n  const fileBuffer = fs.readFileSync(filePath);\n  const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');\n\n  return [{\n    json: {\n      ...item,\n      file_hash: 'sha256:' + hash,\n      original_size: item.file_size\n    }\n  }];\n} catch(e) {\n  // File unreadable - skip it\n  return [{\n    json: {\n      ...item,\n      file_hash: null,\n      _skip: true,\n      _skip_reason: 'hash_error: ' + e.message\n    }\n  }];\n}"
+        "jsCode": "const fs = require('fs');\nconst crypto = require('crypto');\nconst redis = require('redis');\n\nconst item = $input.first().json;\nconst filePath = item.file_path;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet redisOk = false;\ntry { await client.connect(); redisOk = true; } catch(ce) {}\n\ntry {\n  if (redisOk) await client.incr('alice:dms:scanner:stats:scanned_files').catch(() => {});\n\n  const fileBuffer = fs.readFileSync(filePath);\n  const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');\n\n  return [{\n    json: {\n      ...item,\n      file_hash: 'sha256:' + hash,\n      original_size: item.file_size\n    }\n  }];\n} catch(e) {\n  if (redisOk) {\n    await client.rPush('alice:dms:scanner:stats:errors', 'hash_error:' + filePath + ':' + e.message).catch(() => {});\n    await client.incr('alice:dms:scanner:stats:skipped_files').catch(() => {});\n  }\n  return [{\n    json: {\n      ...item,\n      file_hash: null,\n      _skip: true,\n      _skip_reason: 'hash_error: ' + e.message\n    }\n  }];\n} finally {\n  if (redisOk) await client.quit().catch(() => {});\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -315,7 +315,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst fs = require('fs');\nconst item = $input.first().json;\nconst filePath = item.file_path;\nconst currentHash = item.file_hash;\n\nif (!currentHash) {\n  return [{ json: { ...item, _lifecycle_action: 'skip', _skip: true } }];\n}\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  // Check 1: Known path -> hash mapping\n  const knownHashForPath = await client.hGet('alice:dms:path_to_hash', filePath);\n  \n  if (knownHashForPath) {\n    if (knownHashForPath === currentHash) {\n      return [{ json: { ...item, _lifecycle_action: 'already_processed', _skip: true } }];\n    } else {\n      // File changed: same path, different hash\n      await client.sRem('alice:dms:processed', knownHashForPath);\n      return [{ json: { ...item, _lifecycle_action: 'replace', _old_hash: knownHashForPath } }];\n    }\n  }\n  \n  // Check 2: Is this hash already processed (potentially at a different path)?\n  const isProcessed = await client.sIsMember('alice:dms:processed', currentHash);\n  \n  if (isProcessed) {\n    const knownPaths = await client.sMembers(`alice:dms:hash_to_paths:${currentHash}`);\n    \n    if (knownPaths.length === 0) {\n      return [{ json: { ...item, _lifecycle_action: 'new' } }];\n    }\n    \n    const existingPaths = knownPaths.filter(p => {\n      try { fs.accessSync(p, fs.constants.F_OK); return true; } catch(e) { return false; }\n    });\n    \n    if (existingPaths.length === 0) {\n      return [{ json: { ...item, _lifecycle_action: 'update_path', _old_paths: knownPaths } }];\n    } else {\n      const deadPaths = knownPaths.filter(p => !existingPaths.includes(p));\n      for (const p of deadPaths) {\n        await client.sRem(`alice:dms:hash_to_paths:${currentHash}`, p);\n      }\n      return [{ json: { ...item, _lifecycle_action: 'add_path', _known_paths: existingPaths } }];\n    }\n  }\n  \n  // Check 3: Is hash currently in the processing queue?\n  const isQueued = await client.sIsMember('alice:dms:queued_files', currentHash);\n  if (isQueued) {\n    return [{ json: { ...item, _lifecycle_action: 'already_queued', _skip: true } }];\n  }\n  \n  return [{ json: { ...item, _lifecycle_action: 'new' } }];\n  \n} finally {\n  await client.quit();\n}"
+        "jsCode": "const redis = require('redis');\nconst fs = require('fs');\nconst item = $input.first().json;\nconst filePath = item.file_path;\nconst currentHash = item.file_hash;\n\nif (!currentHash) {\n  return [{ json: { ...item, _lifecycle_action: 'skip', _skip: true } }];\n}\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(connErr) {\n  return [{ json: { ...item, _lifecycle_action: 'skip', _skip: true, _skip_reason: 'redis_connect_error: ' + connErr.message } }];\n}\ntry {\n  // Check 1: Known path -> hash mapping\n  const knownHashForPath = await client.hGet('alice:dms:path_to_hash', filePath);\n\n  if (knownHashForPath) {\n    if (knownHashForPath === currentHash) {\n      await client.incr('alice:dms:scanner:stats:skipped_files');\n      return [{ json: { ...item, _lifecycle_action: 'already_processed', _skip: true } }];\n    } else {\n      // File changed: same path, different hash\n      await client.sRem('alice:dms:processed', knownHashForPath);\n      return [{ json: { ...item, _lifecycle_action: 'replace', _old_hash: knownHashForPath } }];\n    }\n  }\n\n  // Check 2: Is this hash already processed (potentially at a different path)?\n  const isProcessed = await client.sIsMember('alice:dms:processed', currentHash);\n\n  if (isProcessed) {\n    const knownPaths = await client.sMembers('alice:dms:hash_to_paths:' + currentHash);\n\n    if (knownPaths.length === 0) {\n      return [{ json: { ...item, _lifecycle_action: 'new' } }];\n    }\n\n    const existingPaths = knownPaths.filter(p => {\n      try { fs.accessSync(p, fs.constants.F_OK); return true; } catch(e) { return false; }\n    });\n\n    if (existingPaths.length === 0) {\n      return [{ json: { ...item, _lifecycle_action: 'update_path', _old_paths: knownPaths } }];\n    } else {\n      const deadPaths = knownPaths.filter(p => !existingPaths.includes(p));\n      for (const p of deadPaths) {\n        await client.sRem('alice:dms:hash_to_paths:' + currentHash, p);\n      }\n      return [{ json: { ...item, _lifecycle_action: 'add_path', _known_paths: existingPaths } }];\n    }\n  }\n\n  // Check 3: Is hash currently in the processing queue?\n  const isQueued = await client.sIsMember('alice:dms:queued_files', currentHash);\n  if (isQueued) {\n    await client.incr('alice:dms:scanner:stats:skipped_files');\n    return [{ json: { ...item, _lifecycle_action: 'already_queued', _skip: true } }];\n  }\n\n  return [{ json: { ...item, _lifecycle_action: 'new' } }];\n\n} catch(e) {\n  await client.rPush('alice:dms:scanner:stats:errors', 'lifecycle_error:' + filePath + ':' + e.message).catch(() => {});\n  return [{ json: { ...item, _lifecycle_action: 'skip', _skip: true, _skip_reason: 'lifecycle_error: ' + e.message } }];\n} finally {\n  await client.quit();\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -441,7 +441,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst hashItem = $('Code: Hash + Size').first().json;\nconst lifecycleItem = $('Code: Lifecycle Check').first().json;\n// Merge hash data with lifecycle fields (_lifecycle_action, _old_hash)\nconst item = { ...hashItem, ...lifecycleItem };\nlet size_stable = false;\ntry {\n  const stat = fs.statSync(item.file_path);\n  size_stable = (stat.size === item.original_size);\n} catch(e) {\n  size_stable = false;\n}\nreturn [{ json: { ...item, size_stable } }];"
+        "jsCode": "const fs = require('fs');\nconst redis = require('redis');\nconst hashItem = $('Code: Hash + Size').first().json;\nconst lifecycleItem = $('Code: Lifecycle Check').first().json;\n// Merge hash data with lifecycle fields (_lifecycle_action, _old_hash)\nconst item = { ...hashItem, ...lifecycleItem };\nlet size_stable = false;\ntry {\n  const stat = fs.statSync(item.file_path);\n  size_stable = (stat.size === item.original_size);\n} catch(e) {\n  size_stable = false;\n}\nif (!size_stable) {\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  try {\n    await client.connect();\n    await client.incr('alice:dms:scanner:stats:skipped_files');\n  } catch(e) { /* ignore counter error */ } finally {\n    await client.quit();\n  }\n}\nreturn [{ json: { ...item, size_stable } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -845,7 +845,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (!item.file_hash) {\n  return [{ json: item }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  // BUG-2 fix: remove stale old hash from queued_files on Fall 3 replace\n  if (item._lifecycle_action === 'replace' && item._old_hash) {\n    await client.sRem('alice:dms:queued_files', item._old_hash);\n  }\n  await client.sAdd('alice:dms:queued_files', item.file_hash);\n} finally {\n  await client.quit();\n}\nreturn [{ json: item }];"
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (!item.file_hash) {\n  return [{ json: item }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  // BUG-2 fix: remove stale old hash from queued_files on Fall 3 replace\n  if (item._lifecycle_action === 'replace' && item._old_hash) {\n    await client.sRem('alice:dms:queued_files', item._old_hash);\n  }\n  await client.sAdd('alice:dms:queued_files', item.file_hash);\n  await client.incr('alice:dms:scanner:stats:new_files');\n} finally {\n  await client.quit();\n}\nreturn [{ json: item }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -858,7 +858,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Summary Stats: aggregate counters from all loop iterations\nconst allItems = $('Code: Lifecycle Check').all();\nconst hashItems = $('Code: Hash + Size').all();\nconst folders = $('PG: Active Folders').all();\n\nconst scannedDirs = folders.length;\nconst scannedFiles = hashItems.length;\n\nlet newFiles = 0;\nlet skippedFiles = 0;\nconst errors = [];\n\nfor (const item of allItems) {\n  const action = item.json._lifecycle_action;\n  if (action === 'already_processed' || action === 'already_queued') {\n    skippedFiles++;\n  } else if (action === 'new' || action === 'replace' || action === 'update_path' || action === 'add_path') {\n    newFiles++;\n  } else if (item.json._skip) {\n    skippedFiles++;\n  }\n}\n\n// Count hash errors\nfor (const item of hashItems) {\n  if (item.json._skip && item.json._skip_reason) {\n    skippedFiles++;\n    errors.push(item.json._skip_reason);\n  }\n}\n\n// Runtime: estimate from execution start to now\nlet runtimeSeconds = 0;\ntry {\n  const startMs = new Date($execution.startedAt).getTime();\n  runtimeSeconds = Math.round((Date.now() - startMs) / 1000);\n} catch(e) { runtimeSeconds = 0; }\n\nconsole.log(`Summary: dirs=${scannedDirs} files=${scannedFiles} new=${newFiles} skipped=${skippedFiles} errors=${errors.length} runtime=${runtimeSeconds}s`);\nreturn [{ json: { scanned_dirs: scannedDirs, scanned_files: scannedFiles, new_files: newFiles, skipped_files: skippedFiles, errors: errors, runtime_seconds: runtimeSeconds } }];"
+        "jsCode": "const redis = require('redis');\nconst folders = $('PG: Active Folders').all();\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n\nlet scannedFiles = 0, newFiles = 0, skippedFiles = 0, lifecycleFiles = 0, errors = [], startMs = 0;\ntry {\n  await client.connect();\n  const [sf, nf, sk, lf, errLen, startStr] = await Promise.all([\n    client.get('alice:dms:scanner:stats:scanned_files'),\n    client.get('alice:dms:scanner:stats:new_files'),\n    client.get('alice:dms:scanner:stats:skipped_files'),\n    client.get('alice:dms:scanner:stats:lifecycle_files'),\n    client.lLen('alice:dms:scanner:stats:errors'),\n    client.get('alice:dms:scanner:run_start')\n  ]);\n  scannedFiles = parseInt(sf || '0', 10);\n  newFiles = parseInt(nf || '0', 10);\n  skippedFiles = parseInt(sk || '0', 10);\n  lifecycleFiles = parseInt(lf || '0', 10);\n  startMs = parseInt(startStr || '0', 10);\n  if (errLen > 0) {\n    errors = await client.lRange('alice:dms:scanner:stats:errors', 0, -1);\n  }\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n}\n\nconst completedAt = new Date().toISOString();\nconst startedAt = startMs > 0 ? new Date(startMs).toISOString() : completedAt;\nconst runtimeSeconds = startMs > 0 ? Math.round((Date.now() - startMs) / 1000) : 0;\n\nreturn [{ json: {\n  scanned_dirs: folders.length,\n  scanned_files: scannedFiles,\n  new_files: newFiles,\n  skipped_files: skippedFiles,\n  lifecycle_files: lifecycleFiles,\n  errors: errors,\n  runtime_seconds: runtimeSeconds,\n  started_at: startedAt,\n  completed_at: completedAt\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -871,7 +871,7 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-scanner\n\nScheduled hourly (07:00-22:00).\n\nScans NAS folders from alice.dms_watched_folders,\nfinds new documents, checks lifecycle via redis,\nverifies file stability (5s wait),\nchecks PDF text layer for OCR needs,\nroutes to type-specific MQTT queues:\n- alice/dms/pdf (PDF with text layer)\n- alice/dms/ocr (PDF needing OCR)\n- alice/dms/txt (TXT, MD)\n- alice/dms/office (DOCX, DOC, ODT, XLSX, XLS, ODS)\n\n### Redis Key Pattern (PROJ-21)\n- `alice:dms:processed` — Set of processed file hashes\n- `alice:dms:queued_files` — Set of in-flight file hashes\n- `alice:dms:path_to_hash` — Hash map: file_path -> file_hash\n- `alice:dms:hash_to_paths:<hash>` — Set of known paths per hash\n\n### Lifecycle Detection (PROJ-21)\nUses redis Code nodes for Set/Hash operations.\nDetects: new files, duplicates (add_path),\nmoved files (update_path), changed files (replace).\nPublishes lifecycle events to alice/dms/lifecycle.",
+        "content": "## alice-dms-scanner\n\nScheduled hourly (07:00-22:00).\n\nScans NAS folders from alice.dms_watched_folders,\nfinds new documents, checks lifecycle via redis,\nverifies file stability (5s wait),\nchecks PDF text layer for OCR needs,\nroutes to type-specific MQTT queues:\n- alice/dms/pdf (PDF with text layer)\n- alice/dms/ocr (PDF needing OCR)\n- alice/dms/txt (TXT, MD)\n- alice/dms/office (DOCX, DOC, ODT, XLSX, XLS, ODS)\n\n### Redis Key Pattern (PROJ-21)\n- `alice:dms:processed` — Set of processed file hashes\n- `alice:dms:queued_files` — Set of in-flight file hashes\n- `alice:dms:path_to_hash` — Hash map: file_path -> file_hash\n- `alice:dms:hash_to_paths:<hash>` — Set of known paths per hash\n\n### Run Stats Redis Keys (PROJ-17)\n- `alice:dms:scanner:run_start` — Epoch ms of run start\n- `alice:dms:scanner:stats:scanned_files` — Counter: files entering loop\n- `alice:dms:scanner:stats:new_files` — Counter: files successfully queued\n- `alice:dms:scanner:stats:skipped_files` — Counter: skipped files\n- `alice:dms:scanner:stats:lifecycle_files` — Counter: lifecycle events (update_path, add_path)\n- `alice:dms:scanner:stats:errors` — List of error strings\nCounters reset at start of each run. Stats published to alice/dms/scanner/stats.\n\n### Lifecycle Detection (PROJ-21)\nUses redis Code nodes for Set/Hash operations.\nDetects: new files, duplicates (add_path),\nmoved files (update_path), changed files (replace).\nPublishes lifecycle events to alice/dms/lifecycle.",
         "height": 440,
         "width": 380
       },
@@ -883,11 +883,85 @@
       ],
       "id": "2fdda6a4-a9cc-470f-98ab-e42f7f19fd37",
       "name": "Sticky: Overview"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  await client.del([\n    'alice:dms:scanner:stats:scanned_files',\n    'alice:dms:scanner:stats:new_files',\n    'alice:dms:scanner:stats:skipped_files',\n    'alice:dms:scanner:stats:lifecycle_files',\n    'alice:dms:scanner:stats:errors'\n  ]);\n  await client.set('alice:dms:scanner:run_start', String(Date.now()));\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n  console.log('Redis unavailable for stats init, continuing scan: ' + e.message);\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        30512,
+        3888
+      ],
+      "id": "set-start-time-01-alice-dms-scanner",
+      "name": "Set: Start Time"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/scanner/stats",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        37392,
+        3888
+      ],
+      "id": "mqtt-publish-stats-01-alice-dms-scanner",
+      "name": "MQTT: Publish Stats",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  await client.incr('alice:dms:scanner:stats:lifecycle_files');\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        33808,
+        4200
+      ],
+      "id": "code-count-lifecycle-01-alice-dms-scanner",
+      "name": "Code: Count Lifecycle"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  await client.incr('alice:dms:scanner:stats:skipped_files');\n  await client.rPush('alice:dms:scanner:stats:errors', 'unknown_type:' + item.file_path + ':' + item.file_type);\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n}\nconsole.log('Unknown file type dropped by switch fallback: ' + item.file_type + ' for ' + item.file_path);\nreturn [{ json: item }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        36528,
+        4400
+      ],
+      "id": "code-fallback-handler-01-alice-dms-scanner",
+      "name": "Code: Unknown Type Fallback"
     }
   ],
   "pinData": {},
   "connections": {
     "Schedule: Hourly 07-22": {
+      "main": [
+        [
+          {
+            "node": "Set: Start Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Start Time": {
       "main": [
         [
           {
@@ -1076,6 +1150,17 @@
       "main": [
         [
           {
+            "node": "Code: Count Lifecycle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Count Lifecycle": {
+      "main": [
+        [
+          {
             "node": "Loop: Files",
             "type": "main",
             "index": 0
@@ -1203,6 +1288,24 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Code: Unknown Type Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Unknown Type Fallback": {
+      "main": [
+        [
+          {
+            "node": "Loop: Files",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1255,6 +1358,17 @@
         [
           {
             "node": "Loop: Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Summary Stats": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Stats",
             "type": "main",
             "index": 0
           }
