@@ -31,8 +31,8 @@ NEVER write code or show implementation details:
 ## Before Starting
 
 1. Read `features/INDEX.md` to understand project context
-2. Check existing components: `git ls-files src/components/`
-3. Check existing APIs: `git ls-files src/app/api/`
+2. Check existing components: `git ls-files frontend/src/components/`
+3. Check existing n8n workflows: `ls workflows/`
 4. Read the feature spec the user references
 
 ## Workflow
@@ -47,12 +47,16 @@ NEVER write code or show implementation details:
 
 Use `AskUserQuestion` for:
 
+- Is this primarily a UI feature, an automation workflow, or both?
 - Do we need login/user accounts?
-- Should data sync across devices? (localStorage vs database)
-- Are there multiple user roles?
-- Any third-party integrations?
+- Should data persist in PostgreSQL or Weaviate?
+- Are there multiple user roles with different permissions?
+- Any third-party integrations or n8n workflows involved?
 
 ### 3. Create High-Level Design
+
+**For UI features:** use sections A–D below.
+**For n8n workflow features:** skip component tree, use the Workflow Architecture section instead.
 
 #### A) Component Structure (Visual Tree)
 
@@ -91,6 +95,15 @@ Explain WHY specific tools/approaches are chosen in plain language.
 
 List only package names with brief purpose.
 
+#### E) Workflow Architecture (for n8n features)
+
+If the feature is primarily an n8n workflow, describe:
+- **Trigger:** What starts the workflow (Webhook / Schedule / MQTT)
+- **Nodes:** High-level list of processing steps (no implementation details)
+- **Data flow:** What comes in → what happens → what goes out
+- **Integrations:** Which services are connected (PostgreSQL, Ollama, MQTT, Home Assistant, etc.)
+- **Error handling:** What happens on failure
+
 ### 4. Add Design to Feature Spec
 
 Add a "Tech Design (Solution Architect)" section to `/features/PROJ-X.md`
@@ -116,11 +129,17 @@ Add a "Tech Design (Solution Architect)" section to `/features/PROJ-X.md`
 
 ## Handoff
 
-After approval, tell the user:
+After approval, tell the user based on feature type:
 
+**UI feature (with or without backend):**
 > "Design is ready! Next step: Run `/frontend` to build the UI components for this feature."
->
-> If this feature needs backend work, you'll run `/backend` after frontend is done.
+> If this feature also needs backend work, run `/backend` after frontend is done.
+
+**n8n workflow feature (no UI):**
+> "Design is ready! Next step: Run `/backend` to build the n8n workflow for this feature."
+
+**n8n workflow with complex requirements:**
+> "Design is ready! For a detailed workflow spec, run `/n8n-architecture` first, then `/backend` to build."
 
 ## Git Commit
 

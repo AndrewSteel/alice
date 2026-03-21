@@ -29,10 +29,19 @@ Add this section to the END of the feature spec `/features/PROJ-X.md`:
 - [ ] BUG: Not handled (describe expected vs actual behavior)
 
 ### Security Audit Results
+
+**UI features:**
 - [x] Authentication: Cannot access without login
 - [x] Authorization: Users cannot access other users' data
 - [x] Input validation: XSS attempts blocked
 - [x] Rate limiting: Excessive requests handled
+
+**n8n workflow features:**
+- [x] Authentication: JWT verification required (missing/invalid token returns 401)
+- [x] Authorization: user_id sourced from JWT, not user input; RLS policies enforced
+- [x] Input validation: malformed payloads handled gracefully
+- [x] No secrets visible in n8n execution logs
+
 - [ ] BUG: [Security issue description]
 
 ### Bugs Found

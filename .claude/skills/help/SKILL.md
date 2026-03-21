@@ -31,9 +31,9 @@ Read these files to understand where the project stands:
    - Deployment section exists (added by /deploy)
 
 4. **Check Codebase:** Quick scan of what's been built
-   - `ls src/components/*.tsx 2>/dev/null` → Custom components
-   - `ls src/app/api/ 2>/dev/null` → API routes
-   - `ls src/components/ui/` → Installed shadcn components
+   - `ls frontend/src/components/ 2>/dev/null` → Custom React components
+   - `ls frontend/src/components/ui/ 2>/dev/null` → Installed shadcn components
+   - `ls workflows/ 2>/dev/null` → n8n workflow JSONs
 
 ### Step 2: Determine Next Action
 
@@ -58,8 +58,9 @@ Based on the state analysis, determine what the user should do next:
 **If features have Tech Design but no implementation:**
 
 > Feature PROJ-X has a tech design and is ready for implementation.
-> Run `/frontend` to build the UI for `features/PROJ-X-name.md`
-> (If backend is needed, run `/backend` after frontend is done)
+> - If it's a UI feature: Run `/frontend` to build the UI for `features/PROJ-X-name.md`
+> - If it's an n8n workflow feature: Run `/backend` to build the workflow
+> - If it's both: Run `/frontend` first, then `/backend`
 
 **If features are implemented but no QA:**
 

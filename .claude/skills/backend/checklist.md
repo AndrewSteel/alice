@@ -1,33 +1,33 @@
 # Backend Implementation Checklist
 
 ## Core Checklist
-- [ ] Checked existing tables/APIs via git before creating new ones
-- [ ] Database tables created in postgresql
+- [ ] Checked existing workflows (`ls workflows/`) before creating new ones
+- [ ] Checked existing tables via git before creating new ones
+- [ ] Database tables created in `alice` PostgreSQL schema (if needed)
 - [ ] Row Level Security enabled on ALL new tables
 - [ ] RLS policies created for SELECT, INSERT, UPDATE, DELETE
 - [ ] Indexes created on performance-critical columns
 - [ ] Foreign keys set with appropriate ON DELETE behavior
-- [ ] All planned API endpoints implemented in `/src/app/api/`
-- [ ] Authentication verified (no access without valid session)
-- [ ] Input validation with Zod on all POST/PUT requests
-- [ ] Meaningful error messages with correct HTTP status codes
-- [ ] No TypeScript errors in API routes
-- [ ] All endpoints tested manually
-- [ ] No hardcoded secrets in source code
-- [ ] Frontend connected to real API endpoints
+- [ ] n8n workflow logic implements all acceptance criteria
+- [ ] JWT authentication verified in workflow (no access without valid token)
+- [ ] Input validation in workflow (IF-node checks or Code node with Zod-style validation)
+- [ ] Meaningful error responses with correct HTTP status codes
+- [ ] Error handling: `onError: "continueRegularOutput"` + IF node for edge cases
+- [ ] Workflow JSON saved to `workflows/`
+- [ ] No hardcoded secrets — all credentials via n8n credential store
 - [ ] User has reviewed and approved
+- [ ] User notified: "Deploy n8n-workflow `<name>`"
 
 ## Verification (run before marking complete)
-- [ ] `npm run build` passes without errors
-- [ ] All acceptance criteria from feature spec addressed in API
-- [ ] All API endpoints return correct status codes (test with curl or browser)
+- [ ] Workflow validated via n8n-mcp `validate_workflow`
+- [ ] All acceptance criteria from feature spec addressed
+- [ ] Triggers and endpoints return correct status codes (test with curl)
 - [ ] `features/INDEX.md` status updated to "In Progress"
 - [ ] Code committed to git
 
 ## Performance Checklist
-- [ ] All frequently filtered columns have indexes
-- [ ] No N+1 queries (use postgresql joins instead of loops)
-- [ ] All list queries use `.limit()`
-- [ ] Zod validation on all write endpoints
-- [ ] Slow queries cached where appropriate (optional for MVP)
-- [ ] Rate limiting on public-facing APIs (optional for MVP)
+- [ ] Frequently filtered PostgreSQL columns have indexes
+- [ ] No N+1 queries — use PostgreSQL joins or `splitInBatches` node
+- [ ] All list queries use LIMIT
+- [ ] Retry logic on external API calls (optional for MVP)
+- [ ] Rate limiting configured on public-facing webhooks (optional for MVP)

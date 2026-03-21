@@ -4,80 +4,80 @@
 # PRD: [Workflow Name]
 
 **Status:** Draft
-**Erstellt:** [Datum]
-**Autor:** [Name]
+**Created:** [Date]
+**Author:** [Name]
 
 ---
 
-## 1. Ziel & Kontext
+## 1. Goal & Context
 
-**Was soll automatisiert werden?**
-[1-3 Saetze die das Ziel beschreiben]
+**What should be automated?**
+[1-3 sentences describing the goal]
 
-**Warum wird diese Automatisierung gebraucht?**
-[Business-Kontext, Zeitersparnis, aktueller manueller Prozess]
+**Why is this automation needed?**
+[Business context, time savings, current manual process]
 
-**Wer nutzt das Ergebnis?**
-[Zielgruppe/Empfaenger des Outputs]
+**Who uses the result?**
+[Target audience / recipients of the output]
 
 ---
 
-## 2. Trigger & Zeitplan
+## 2. Trigger & Schedule
 
-| Eigenschaft | Wert |
+| Property | Value |
 |---|---|
-| Trigger-Typ | [Webhook / Schedule / Manual / Event] |
-| Zeitplan | [z.B. Jeden Montag 9:00 / Echtzeit / Bei Bedarf] |
-| Zeitzone | [z.B. Europe/Berlin] |
-| Erwartetes Volumen | [z.B. 10-50 Ausfuehrungen pro Tag] |
+| Trigger Type | [Webhook / Schedule / Manual / Event] |
+| Schedule | [e.g. Every Monday 9:00 / Real-time / On demand] |
+| Timezone | [e.g. Europe/Berlin] |
+| Expected Volume | [e.g. 10-50 executions per day] |
 
 ---
 
-## 3. Datenfluss
+## 3. Data Flow
 
 ### Input
-- **Quelle:** [Service/API/Webhook]
+- **Source:** [Service/API/Webhook]
 - **Format:** [JSON / Form Data / CSV / etc.]
-- **Beispiel-Payload:**
+- **Example Payload:**
 ```json
 {
-  "beispiel": "daten"
+  "example": "data"
 }
 ```
 
-### Verarbeitung
-1. [Schritt 1: Was passiert mit den Daten]
-2. [Schritt 2: Transformation/Anreicherung]
-3. [Schritt n: ...]
+### Processing
+1. [Step 1: What happens to the data]
+2. [Step 2: Transformation/enrichment]
+3. [Step n: ...]
 
 ### Output
-- **Ziel:** [Service/API/E-Mail/Sheet]
-- **Format:** [Beschreibung des Outputs]
-- **Empfaenger:** [Wer bekommt das Ergebnis]
+- **Destination:** [Service/API/Email/Sheet]
+- **Format:** [Description of output]
+- **Recipients:** [Who receives the result]
 
 ---
 
-## 4. Beteiligte Services & Credentials
+## 4. Services & Credentials
 
-| Service | Zweck | Credential-Typ | Status |
+| Service | Purpose | Credential Type | Status |
 |---|---|---|---|
-| [z.B. YouTube] | [Videos abrufen] | [OAuth2] | [Vorhanden / Fehlt] |
-| [z.B. Anthropic] | [AI-Verarbeitung] | [API Key] | [Vorhanden / Fehlt] |
-| [z.B. Gmail] | [E-Mail senden] | [OAuth2] | [Vorhanden / Fehlt] |
+| [e.g. PostgreSQL] | [Query data] | [postgres] | [Available / Missing] |
+| [e.g. Ollama] | [LLM processing] | [ollamaApi] | [Available / Missing] |
+| [e.g. MQTT] | [Event queue] | [mqtt] | [Available / Missing] |
 
 ---
 
-## 5. Workflow-Architektur
+## 5. Workflow Architecture
 
-### Node-Uebersicht (empfohlen)
+### Node Overview (recommended)
 
-| # | Node-Name | Node-Typ | Funktion |
+| # | Node Name | Node Type | Function |
 |---|---|---|---|
-| 1 | [Name] | [n8n-nodes-base.xyz] | [Was macht der Node] |
-| 2 | [Name] | [n8n-nodes-base.xyz] | [Was macht der Node] |
+| 1 | [Name] | [n8n-nodes-base.xyz] | [What the node does] |
+| 2 | [Name] | [n8n-nodes-base.xyz] | [What the node does] |
 | ... | ... | ... | ... |
 
-### Datenfluss-Diagramm
+### Data Flow Diagram
 
 ```
 [Trigger] -> [Node 2] -> [Node 3] -> ... -> [Output]
@@ -87,69 +87,70 @@
 ```
 
 ### Aggregation & Batching
-- [Muessen Daten aggregiert werden bevor sie verarbeitet werden?]
-- [Gibt es Batch-Verarbeitung?]
-- [Wie viele Items werden erwartet pro Durchlauf?]
+- [Does data need to be aggregated before processing?]
+- [Is batch processing needed?]
+- [How many items are expected per run?]
 
 ---
 
 ## 6. Error Handling & Edge Cases
 
-### Fehlerbehandlung
+### Error Handling
 
-| Fehlertyp | Reaktion |
+| Error Type | Response |
 |---|---|
-| API nicht erreichbar | [z.B. Retry 3x, dann Benachrichtigung] |
-| Leere Daten | [z.B. Info-Mail senden, Workflow beenden] |
-| Rate Limit erreicht | [z.B. Warten und erneut versuchen] |
-| Ungueltige Eingabe | [z.B. Validierung, Fehlermeldung] |
+| API unreachable | [e.g. Retry 3x, then notify] |
+| Empty data | [e.g. Send info notification, end workflow] |
+| Rate limit reached | [e.g. Wait and retry] |
+| Invalid input | [e.g. Validate, return error message] |
 
-### Bekannte Edge Cases
-- [Edge Case 1: Beschreibung + gewuenschtes Verhalten]
-- [Edge Case 2: Beschreibung + gewuenschtes Verhalten]
+### Known Edge Cases
+- [Edge Case 1: Description + desired behavior]
+- [Edge Case 2: Description + desired behavior]
 
-### Benachrichtigung bei Fehler
-- **Kanal:** [E-Mail / Slack / etc.]
-- **Empfaenger:** [Wer wird benachrichtigt]
-- **Inhalt:** [Was soll in der Fehlermeldung stehen]
+### Error Notifications
+- **Channel:** [Email / Slack / etc.]
+- **Recipients:** [Who gets notified]
+- **Content:** [What the error message should include]
 
 ---
 
-## 7. n8n-spezifische Hinweise
+## 7. n8n-Specific Notes
 
-### Datenstruktur-Warnungen
-- [z.B. YouTube getAll gibt id als Objekt zurueck: $json.id.videoId statt $json.id]
-- [z.B. Webhook-Daten liegen unter $json.body, nicht $json]
+### Data Structure Warnings
+- [e.g. YouTube getAll returns id as object: $json.id.videoId not $json.id]
+- [e.g. Webhook data is under $json.body, not $json]
 
-### Expression-Einschraenkungen
-- Kein Optional Chaining (?.) in n8n Expressions - nur in Code Nodes
-- Expressions muessen mit = Prefix beginnen wenn sie dynamisch sind
+### Expression Constraints
+- No optional chaining (?.) in n8n Expressions — only in Code Nodes
+- Expressions must start with = prefix when dynamic
+- Wrap all `$env` reads in try/catch with fallback values
 
 ### Aggregation
-- [Muessen Items vor AI/E-Mail-Nodes aggregiert werden?]
-- [Code Node mit "Run Once for All Items" fuer Aggregation nutzen]
+- [Do items need to be aggregated before AI/email nodes?]
+- [Use Code Node with "Run Once for All Items" for aggregation]
 
 ### Error Handling Pattern
-- `onError: "continueRegularOutput"` statt deprecated `continueOnFail: true`
-- IF-Node fuer Edge Cases (z.B. keine Daten vorhanden)
+- `onError: "continueRegularOutput"` instead of deprecated `continueOnFail: true`
+- IF node for edge cases (e.g. no data present)
 
 ---
 
-## 8. Akzeptanzkriterien
+## 8. Acceptance Criteria
 
-- [ ] [Kriterium 1: Was muss funktionieren]
-- [ ] [Kriterium 2: Was muss funktionieren]
-- [ ] [Kriterium 3: Was muss funktionieren]
-- [ ] Error Handling getestet (leere Daten, API-Fehler)
-- [ ] Workflow-Validierung ohne Errors (Warnings akzeptabel)
-- [ ] E2E-Test mit echten Daten erfolgreich
+- [ ] [Criterion 1: What must work]
+- [ ] [Criterion 2: What must work]
+- [ ] [Criterion 3: What must work]
+- [ ] Error handling tested (empty data, API failures)
+- [ ] Workflow validation passes without errors (warnings acceptable)
+- [ ] End-to-end test with real data successful
 
 ---
 
-## 9. Offene Fragen
+## 9. Open Questions
 
-- [Frage 1: Was noch geklaert werden muss]
-- [Frage 2: Was noch geklaert werden muss]
+- [Question 1: What still needs clarification]
+- [Question 2: What still needs clarification]
 ```
 
 ---
@@ -166,13 +167,13 @@
 
 ### DON'T:
 - Skip the clarifying questions phase
-- Assume services or credentials - always ask
+- Assume services or credentials — always ask
 - Generate vague requirements ("handle errors somehow")
 - Include implementation details like exact expressions or code
-- Create the workflow - this PRD is INPUT for the build phase
+- Create the workflow — this PRD is INPUT for the build phase
 
 ### Quality Checklist (verify before delivering):
-- [ ] Every service has a credential status (Vorhanden/Fehlt)
+- [ ] Every service has a credential status (Available/Missing)
 - [ ] Error handling is specified for each external API call
 - [ ] Aggregation needs are explicitly stated
 - [ ] Data flow is clear: what comes in, what goes out
@@ -184,16 +185,15 @@
 ## Integration with Other Skills
 
 ### Build Phase (after PRD is approved):
-Once the user approves the PRD, they can use the n8n-mcp tools to build:
-1. `search_nodes` - Find the right nodes
-2. `get_node` - Check node configuration
-3. `n8n_create_workflow` - Build the workflow
-4. `n8n_validate_workflow` - Validate
-5. `n8n_autofix_workflow` - Auto-fix issues
-6. `n8n_executions` - Debug runs
+Once the user approves the PRD, use n8n-mcp tools to build:
+1. `search_nodes` — Find the right nodes
+2. `get_node_essentials` — Check node configuration
+3. `n8n_create_workflow` — Build the workflow
+4. `n8n_validate_workflow` — Validate
+5. `n8n_autofix_workflow` — Auto-fix issues
+6. `n8n_list_executions` — Debug runs
 
 ### Related Skills:
-- **n8n-workflow-patterns** - Architectural patterns for the workflow design
-- **n8n-node-configuration** - Detailed node setup guidance
-- **n8n-expression-syntax** - Expression rules for n8n
-- **n8n-validation-expert** - Validation and debugging
+- `/backend` — Build the workflow after this PRD is approved
+- `/qa` — Test the workflow against acceptance criteria
+- `/deploy` — Deploy to production
