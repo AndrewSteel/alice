@@ -40,7 +40,8 @@
 | PROJ-25 | DMS Folder API — Explicit Null Update für nullable Felder (BUG-1 aus PROJ-23) | Deployed  | [PROJ-25-dms-folder-api-explicit-null-update.md](PROJ-25-dms-folder-api-explicit-null-update.md)                   | 2026-03-15 |
 | PROJ-26 | Admin Nutzerverwaltung (Create/Deactivate/Delete + OTP-Email + First-Login-Flow) | Deployed  | [PROJ-26-admin-user-management.md](PROJ-26-admin-user-management.md)                                               | 2026-03-15 |
 | PROJ-27 | Nutzerprofil selbst bearbeiten (Passwort, E-Mail, Name, Interessen, Präferenzen)  | Deployed  | [PROJ-27-user-profile-self-edit.md](PROJ-27-user-profile-self-edit.md)                                             | 2026-03-16 |
+| PROJ-28 | DMS Verzeichnis-Reihenfolge (sort_order + Drag-and-Drop + Scanner-Sortierung)     | Deployed  | [PROJ-28-dms-folder-sort-order.md](PROJ-28-dms-folder-sort-order.md)                                               | 2026-03-22 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-28
+## Next Available ID: PROJ-29
