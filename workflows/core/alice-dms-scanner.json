@@ -24,7 +24,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, path, suggested_type FROM alice.dms_watched_folders WHERE enabled = true",
+        "query": "SELECT id, path, suggested_type FROM alice.dms_watched_folders WHERE enabled = true ORDER BY sort_order ASC, id ASC",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",

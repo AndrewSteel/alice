@@ -5,6 +5,7 @@ import { Plus, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 import { useDmsFolders } from "@/hooks/useDmsFolders";
 import { FoldersTable } from "./FoldersTable";
 import { AddFolderDialog } from "./AddFolderDialog";
@@ -16,14 +17,17 @@ export function DmsSection() {
   const {
     folders,
     isLoading,
+    isReordering,
     error,
     addFolder,
     editFolder,
     removeFolder,
     toggleFolder,
+    reorderFolders,
     clearError,
   } = useDmsFolders();
 
+  const { toast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<DmsFolder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DmsFolder | null>(null);
@@ -67,6 +71,18 @@ export function DmsSection() {
       await toggleFolder(folder.id, !folder.enabled);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Fehler beim Umschalten.");
+    }
+  }
+
+  async function handleReorder(reorderedFolders: DmsFolder[]) {
+    try {
+      await reorderFolders(reorderedFolders);
+    } catch (err) {
+      toast({
+        title: "Fehler",
+        description: err instanceof Error ? err.message : "Reihenfolge konnte nicht gespeichert werden.",
+        variant: "destructive",
+      });
     }
   }
 
@@ -141,9 +157,11 @@ export function DmsSection() {
       ) : (
         <FoldersTable
           folders={folders}
+          isReordering={isReordering}
           onEdit={setEditTarget}
           onDelete={setDeleteTarget}
           onToggle={handleToggle}
+          onReorder={handleReorder}
         />
       )}
 

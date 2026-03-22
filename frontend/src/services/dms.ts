@@ -10,8 +10,14 @@ export interface DmsFolder {
   suggested_type: string | null;
   description: string | null;
   enabled: boolean;
+  sort_order: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReorderEntry {
+  id: number;
+  sort_order: number;
 }
 
 export interface CreateFolderInput {
@@ -174,6 +180,51 @@ export async function updateFolder(
   }
 
   return res.json();
+}
+
+/**
+ * Reorders DMS watched folders by updating their sort_order values.
+ */
+export async function reorderFolders(order: ReorderEntry[]): Promise<DmsFolder[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${DMS_FOLDERS_ENDPOINT}/reorder`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ order }),
+    });
+  } catch {
+    throw new Error("Netzwerkfehler -- Reihenfolge konnte nicht gespeichert werden.");
+  }
+
+  handleAuthError(res);
+
+  if (res.status === 403) {
+    throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
+  }
+
+  if (res.status === 400) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Ungueltige Eingabe.");
+  }
+
+  if (!res.ok) {
+    throw new Error(`Serverfehler (${res.status}) beim Speichern der Reihenfolge.`);
+  }
+
+  const body = await res.json();
+
+  // Same unwrapping logic as getFolders
+  if (Array.isArray(body) && body.length > 0 && Array.isArray(body[0]?.folders)) {
+    return body[0].folders;
+  }
+  if (Array.isArray(body)) {
+    return body;
+  }
+  if (body && Array.isArray(body.folders)) {
+    return body.folders;
+  }
+  return [];
 }
 
 /**

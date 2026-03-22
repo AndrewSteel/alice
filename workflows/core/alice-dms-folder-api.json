@@ -65,7 +65,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', id, 'path', path, 'suggested_type', suggested_type, 'description', description, 'enabled', enabled, 'created_at', created_at::text, 'updated_at', updated_at::text) ORDER BY path), '[]'::json) AS folders FROM alice.dms_watched_folders",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', id, 'path', path, 'suggested_type', suggested_type, 'description', description, 'enabled', enabled, 'sort_order', sort_order, 'created_at', created_at::text, 'updated_at', updated_at::text) ORDER BY sort_order ASC, id ASC), '[]'::json) AS folders FROM alice.dms_watched_folders",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -217,7 +217,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO alice.dms_watched_folders (path, suggested_type, description) VALUES ($1, $2, $3) RETURNING id, path, suggested_type, description, enabled, created_at::text, updated_at::text",
+        "query": "INSERT INTO alice.dms_watched_folders (path, suggested_type, description, sort_order) VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM alice.dms_watched_folders)) RETURNING id, path, suggested_type, description, enabled, sort_order, created_at::text, updated_at::text",
         "options": {
           "queryReplacement": "={{ [$json.path, $json.suggestedType, $json.description] }}"
         }
@@ -450,7 +450,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE alice.dms_watched_folders SET path = COALESCE($1, path), suggested_type = CASE WHEN $6 THEN NULL ELSE COALESCE($2, suggested_type) END, description = CASE WHEN $7 THEN NULL ELSE COALESCE($3, description) END, enabled = COALESCE($4, enabled) WHERE id = $5 RETURNING id, path, suggested_type, description, enabled, created_at::text, updated_at::text",
+        "query": "UPDATE alice.dms_watched_folders SET path = COALESCE($1, path), suggested_type = CASE WHEN $6 THEN NULL ELSE COALESCE($2, suggested_type) END, description = CASE WHEN $7 THEN NULL ELSE COALESCE($3, description) END, enabled = COALESCE($4, enabled) WHERE id = $5 RETURNING id, path, suggested_type, description, enabled, sort_order, created_at::text, updated_at::text",
         "options": {
           "queryReplacement": "={{ [$json.path, $json.suggestedType, $json.description, $json.enabled, $json.folderId, $json.clearSuggestedType, $json.clearDescription] }}"
         }
@@ -807,6 +807,201 @@
       "position": [288, 1696],
       "id": "1bcf6491-04ae-4ccc-97b1-72987253357b",
       "name": "Respond: DELETE 403"
+    },
+    {
+      "parameters": {
+        "httpMethod": "PATCH",
+        "path": "dms/folders/reorder",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 2000],
+      "id": "b1a0f5e1-1c2d-4a3b-8e4f-5d6c7b8a9e0f",
+      "name": "Webhook: PATCH Reorder",
+      "webhookId": "dms-f5-patch-reorder",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// SECURITY NOTE: JWT signature is validated by n8n's Webhook node (JWT Auth account credential).\n// This base64 decode extracts the role claim only — it is NOT an authentication check.\n// Requests with invalid signatures are rejected at the Webhook level before reaching this node.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst order = body.order;\n\n// Validate: order must be a non-empty array of { id: int, sort_order: int }\nif (!Array.isArray(order) || order.length === 0) {\n  return [{ json: { _validationError: 'order must be a non-empty array of { id, sort_order }' } }];\n}\n\nif (order.length > 100) {\n  return [{ json: { _validationError: 'order array must not exceed 100 entries' } }];\n}\n\nconst ids = [];\nconst sortOrders = [];\nfor (const entry of order) {\n  const id = parseInt(entry.id, 10);\n  const so = parseInt(entry.sort_order, 10);\n  if (!id || isNaN(id) || isNaN(so)) {\n    return [{ json: { _validationError: 'Each entry must have integer id and sort_order' } }];\n  }\n  if (so < 0) {\n    return [{ json: { _validationError: 'sort_order must be a non-negative integer' } }];\n  }\n  ids.push(id);\n  sortOrders.push(so);\n}\n\nreturn [{ json: { role: payload.role, ids, sortOrders } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 2000],
+      "id": "c2b1e6f2-2d3e-5b4c-9f50-6e7d8c9b0a1e",
+      "name": "JWT+Validate: PATCH Reorder"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f5-forbidden-check",
+              "leftValue": "={{ $json._forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-288, 2000],
+      "id": "d3c2f7a3-3e4f-6c5d-0a61-7f8e9d0c1b2f",
+      "name": "IF: PATCH Admin"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f5-validation-check",
+              "leftValue": "={{ $json._validationError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [0, 1920],
+      "id": "e4d3a8b4-4f50-7d6e-1b72-8a9f0e1d2c3a",
+      "name": "IF: PATCH Valid"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE alice.dms_watched_folders AS t SET sort_order = v.sort_order FROM (SELECT UNNEST($1::int[]) AS id, UNNEST($2::int[]) AS sort_order) AS v WHERE t.id = v.id",
+        "options": {
+          "queryReplacement": "={{ ['{' + $json.ids.join(',') + '}', '{' + $json.sortOrders.join(',') + '}'] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [288, 1840],
+      "id": "f5e4b9c5-5a61-8e7f-2c83-9b0a1f2e3d4b",
+      "name": "PG: Reorder Folders",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', id, 'path', path, 'suggested_type', suggested_type, 'description', description, 'enabled', enabled, 'sort_order', sort_order, 'created_at', created_at::text, 'updated_at', updated_at::text) ORDER BY sort_order ASC, id ASC), '[]'::json) AS folders FROM alice.dms_watched_folders",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [560, 1840],
+      "id": "a6f5c0d6-6b72-9f8a-3d94-0c1b2a3f4e5c",
+      "name": "PG: List After Reorder",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      folders: $json.folders || []\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [848, 1840],
+      "id": "b7a6d1e7-7c83-0a9b-4e05-1d2c3b4a5f6d",
+      "name": "Aggregate: Reorder"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 1840],
+      "id": "c8b7e2f8-8d94-1b0c-5f16-2e3d4c5b6a7e",
+      "name": "Respond: PATCH 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._validationError || 'Validation failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 2000],
+      "id": "d9c8f3a9-9e05-2c1d-6a27-3f4e5d6c7b8f",
+      "name": "Body: PATCH 400"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [560, 2000],
+      "id": "e0d9a4b0-0f16-3d2e-7b38-4a5f6e7d8c9a",
+      "name": "Respond: PATCH 400"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden: admin role required' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [16, 2176],
+      "id": "f1e0b5c1-1a27-4e3f-8c49-5b6a7f8e9d0b",
+      "name": "Body: PATCH 403"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [288, 2176],
+      "id": "a2f1c6d2-2b38-5f4a-9d50-6c7b8a9f0e1c",
+      "name": "Respond: PATCH 403"
     }
   ],
   "pinData": {},
@@ -1260,6 +1455,119 @@
         [
           {
             "node": "Respond: DELETE 404",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: PATCH Reorder": {
+      "main": [
+        [
+          {
+            "node": "JWT+Validate: PATCH Reorder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT+Validate: PATCH Reorder": {
+      "main": [
+        [
+          {
+            "node": "IF: PATCH Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: PATCH Admin": {
+      "main": [
+        [
+          {
+            "node": "IF: PATCH Valid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: PATCH 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: PATCH Valid": {
+      "main": [
+        [
+          {
+            "node": "PG: Reorder Folders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: PATCH 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Reorder Folders": {
+      "main": [
+        [
+          {
+            "node": "PG: List After Reorder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: List After Reorder": {
+      "main": [
+        [
+          {
+            "node": "Aggregate: Reorder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate: Reorder": {
+      "main": [
+        [
+          {
+            "node": "Respond: PATCH 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: PATCH 400": {
+      "main": [
+        [
+          {
+            "node": "Respond: PATCH 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: PATCH 403": {
+      "main": [
+        [
+          {
+            "node": "Respond: PATCH 403",
             "type": "main",
             "index": 0
           }
