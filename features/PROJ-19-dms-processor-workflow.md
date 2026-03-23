@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-03-09
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-23
 
 ## Dependencies
 - Requires: PROJ-18 (DMS Extractor Container) — Redis List `alice:dms:plaintext` muss mit extrahierten Texten befüllt sein

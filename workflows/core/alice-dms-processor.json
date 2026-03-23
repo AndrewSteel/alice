@@ -347,7 +347,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL_DMS || 'qwen3:14b', prompt: $json._extraction_prompt, stream: false, format: 'json', options: { temperature: 0 } }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 300000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -359,11 +359,73 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-extract-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [56432, -3840],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "IF: Extract Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst item = $('Code: Build Extraction Prompt').first().json;\nconst errorMsg = $input.first().json.error?.message || 'Ollama extraction timeout/error';\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item.file_hash) {\n    await client.sRem('alice:dms:queued_files', item.file_hash);\n  }\n  await client.hIncrBy('alice:dms:run:stats', 'failed', 1);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { ...item, _error_reason: errorMsg } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [56736, -4144],
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Code: Handle Extract Error"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/error",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, error: $json._error_reason || 'ollama_extract_error', timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [57040, -4144],
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "MQTT: Publish Error (Extract)",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
         "jsCode": "const axios = require('axios');\nconst redis = require('redis');\nconst ollamaResp = $input.first().json;\nconst originalItem = $('Code: Build Extraction Prompt').first().json;\nlet extracted = {};\nlet retried = false;\nlet retryFailed = false;\nlet ollamaModel = 'qwen3:14b'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\n\ntry {\n  const response = ollamaResp.response || ollamaResp.body?.response || '';\n  extracted = JSON.parse(response);\n} catch(e) {\n  // Retry: re-call Ollama with same extraction prompt\n  retried = true;\n  try {\n    const prompt = originalItem._extraction_prompt || '';\n    const retryResp = await axios.post('http://ollama-3090:11434/api/generate', { model: ollamaModel, prompt, stream: false, format: 'json', options: { temperature: 0 } }, { timeout: 30000 });\n    extracted = JSON.parse(retryResp.data.response || '{}');\n  } catch(retryErr) {\n    retryFailed = true;\n    extracted = {};\n  }\n}\n\nif (retried) {\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  await client.connect();\n  try {\n    await client.hIncrBy('alice:dms:run:stats', 'llm_retries', 1);\n    if (retryFailed) await client.hIncrBy('alice:dms:run:stats', 'llm_retry_failures', 1);\n  } finally {\n    await client.quit();\n  }\n}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\n\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(val);\n  return isNaN(n) ? null : n;\n}\n\nconst result = { ...originalItem, _extracted: extracted, _extraction_ok: true };\nif (retryFailed) result._llm_retry_failed = true;\nreturn [{ json: result }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [56432, -3840],
+      "position": [56736, -3840],
       "id": "88b2fa59-ed79-4a08-b55b-bd82e324c0f1",
       "name": "Code: Parse Extract Result"
     },
@@ -373,7 +435,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [56736, -3840],
+      "position": [57040, -3840],
       "id": "6ef29f54-0d0a-48e8-b85a-0de3b1d3250d",
       "name": "Code: Build Weaviate Query"
     },
@@ -388,7 +450,7 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [57088, -3840],
+      "position": [57392, -3840],
       "id": "be60d4fd-1622-4327-98a7-0a25f89c2cf3",
       "name": "HTTP: Weaviate Search",
       "continueOnFail": true
@@ -399,7 +461,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [57328, -3840],
+      "position": [57632, -3840],
       "id": "596c8300-2749-43e6-99af-500bf2710bf4",
       "name": "Code: Check Existing Entry"
     },
@@ -411,7 +473,7 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [57936, -4128],
+      "position": [58240, -4128],
       "id": "5a46dd3d-2583-40ca-98fd-bd22ab4ac243",
       "name": "HTTP: Weaviate Delete",
       "continueOnFail": true
@@ -422,7 +484,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [58240, -3840],
+      "position": [58544, -3840],
       "id": "4af92ff0-4d1e-4ea0-a97d-c8384829924e",
       "name": "Code: Build Weaviate Payload"
     },
@@ -437,7 +499,7 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [58528, -3840],
+      "position": [58832, -3840],
       "id": "4c6f7463-3769-4d92-94ee-de4cdfe27457",
       "name": "HTTP: Weaviate Insert",
       "continueOnFail": true
@@ -448,7 +510,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [58832, -3840],
+      "position": [59136, -3840],
       "id": "c380c331-6f93-4c65-86e6-a5bb4fe257e4",
       "name": "Code: Redis State Update"
     },
@@ -463,7 +525,7 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [59440, -3840],
+      "position": [59744, -3840],
       "id": "482e3b2c-c3f9-4a2b-bc2c-478d383d8754",
       "name": "MQTT: Publish Done",
       "credentials": {
@@ -499,7 +561,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [59136, -4144],
+      "position": [59440, -4144],
       "id": "90f33720-edf5-42d9-9a14-aff814fddfc2",
       "name": "IF: Insert Success"
     },
@@ -514,7 +576,7 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [59440, -4336],
+      "position": [59744, -4336],
       "id": "e732a0e2-66de-48e1-9512-cda4c698fcf8",
       "name": "MQTT: Publish Error (Weaviate)",
       "credentials": {
@@ -565,7 +627,7 @@
       "name": "IF: Weaviate Skip",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [56896, -3840]
+      "position": [57200, -3840]
     },
     {
       "parameters": {
@@ -594,7 +656,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [57584, -3840],
+      "position": [57888, -3840],
       "id": "c818983d-fd61-475c-8db5-3463448dd955",
       "name": "If: Has Existing Entry"
     }
@@ -856,7 +918,47 @@
       "main": [
         [
           {
+            "node": "IF: Extract Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Extract Error": {
+      "main": [
+        [
+          {
+            "node": "Code: Handle Extract Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Code: Parse Extract Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Handle Extract Error": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Error (Extract)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Error (Extract)": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
             "type": "main",
             "index": 0
           }
