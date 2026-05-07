@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:dms:run:start_time', Date.now().toString());\n  await client.del('alice:dms:run:stats');\n  await client.hSet('alice:dms:run:stats', { processed: '0', failed: '0', skipped: '0', llm_classified: '0', used_suggested_type: '0', batches_run: '0', llm_retries: '0', llm_retry_failures: '0' });\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _start_info: 'DMS Processor started', BATCH_SIZE: 50, MAX_RUNTIME_SECONDS: 7200 } }];"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:dms:run:start_time', Date.now().toString());\n  await client.del('alice:dms:run:stats');\n  await client.hSet('alice:dms:run:stats', { processed: '0', failed: '0', skipped: '0', llm_classified: '0', used_suggested_type: '0', batches_run: '0', llm_retries: '0', llm_retry_failures: '0', transactions_indexed: '0', phase_b_chunk_retries: '0', phase_b_chunk_failures: '0' });\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _start_info: 'DMS Processor started', BATCH_SIZE: 50, MAX_RUNTIME_SECONDS: 7200 } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -30,7 +30,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const items = await client.lRange('alice:dms:plaintext', 0, 49);\n  if (items.length === 0) {\n    return [{ json: { _empty: true } }];\n  }\n  await client.lTrim('alice:dms:plaintext', items.length, -1);\n  await client.hIncrBy('alice:dms:run:stats', 'batches_run', 1);\n  const results = [];\n  for (const raw of items) {\n    try {\n      const parsed = JSON.parse(raw);\n      results.push({ json: { ...parsed, _empty: false } });\n    } catch(e) {\n      results.push({ json: { _empty: false, _parse_error: true, extraction_failed: true, file_hash: null, file_path: raw.slice(0, 200), plaintext: '' } });\n    }\n  }\n  return results;\n} finally {\n  await client.quit();\n}"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const items = await client.lRange('alice:dms:plaintext', 0, -1);\n  if (items.length === 0) {\n    return [{ json: { _empty: true } }];\n  }\n  // Items stay in alice:dms:plaintext until individually processed (LREM in Parse+Dedup Check).\n  // This ensures unprocessed items survive a time-limit abort and are picked up on the next run.\n  await client.hIncrBy('alice:dms:run:stats', 'batches_run', 1);\n  const results = [];\n  for (const raw of items) {\n    try {\n      const parsed = JSON.parse(raw);\n      results.push({ json: { ...parsed, _empty: false, _raw_json: raw } });\n    } catch(e) {\n      results.push({ json: { _empty: false, _parse_error: true, extraction_failed: true, file_hash: null, file_path: raw.slice(0, 200), plaintext: '', _raw_json: raw } });\n    }\n  }\n  return results;\n} finally {\n  await client.quit();\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -70,7 +70,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    transactions_indexed: parseInt(stats.transactions_indexed || '0'),\n    phase_b_chunk_retries: parseInt(stats.phase_b_chunk_retries || '0'),\n    phase_b_chunk_failures: parseInt(stats.phase_b_chunk_failures || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -100,7 +100,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n    console.log(`DMS Processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _time_limit_reached: timeLimitReached } }];"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n    console.log(`DMS Processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -141,7 +141,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    reason: 'time_limit_reached',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    reason: 'time_limit_reached',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    transactions_indexed: parseInt(stats.transactions_indexed || '0'),\n    phase_b_chunk_retries: parseInt(stats.phase_b_chunk_retries || '0'),\n    phase_b_chunk_failures: parseInt(stats.phase_b_chunk_failures || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -159,7 +159,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (item._parse_error || !item.file_hash) {\n  return [{ json: { ...item, _skip: false } }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const isProcessed = await client.sIsMember('alice:dms:processed', item.file_hash);\n  if (isProcessed) {\n    await client.hIncrBy('alice:dms:run:stats', 'skipped', 1);\n    return [{ json: { ...item, _skip: true, _skip_reason: 'already_processed' } }];\n  }\n  return [{ json: { ...item, _skip: false } }];\n} finally {\n  await client.quit();\n}"
+        "jsCode": "const redis = require('redis');\nconst item = $input.first().json;\nif (item._parse_error || !item.file_hash) {\n  return [{ json: { ...item, _skip: false } }];\n}\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  // Remove from queue now that we're committing to process this item.\n  // If the time check before this node aborted, the item stays in the queue for the next run.\n  if (item._raw_json) {\n    await client.lRem('alice:dms:plaintext', 0, item._raw_json);\n  }\n  const isProcessed = await client.sIsMember('alice:dms:processed', item.file_hash);\n  if (isProcessed) {\n    await client.hIncrBy('alice:dms:run:stats', 'skipped', 1);\n    return [{ json: { ...item, _skip: true, _skip_reason: 'already_processed' } }];\n  }\n  return [{ json: { ...item, _skip: false } }];\n} finally {\n  await client.quit();\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -431,7 +431,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\n\n// className allowlist — prevents GraphQL injection via manipulated _document_type\nconst validClasses = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst className = item._document_type;\nif (!className || !validClasses.includes(className)) {\n  console.warn(`[Build Weaviate Query] Invalid className: ${className} — skipping document`);\n  return [{ json: { ...item, _skip: true, _skip_reason: `Invalid className: ${className}` } }];\n}\n\n// Full escape for filePath — prevents GraphQL string injection via control characters\nconst rawPath = item.file_path || '';\nconst filePath = rawPath\n  .replace(/\\\\/g, '\\\\\\\\')\n  .replace(/\"/g, '\\\\\"')\n  .replace(/\\n/g, '\\\\n')\n  .replace(/\\r/g, '\\\\r')\n  .replace(/\\t/g, '\\\\t')\n  .replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n\nif (!filePath) {\n  console.warn('[Build Weaviate Query] Empty filePath after escaping — skipping document');\n  return [{ json: { ...item, _skip: true, _skip_reason: 'Empty filePath after escaping' } }];\n}\n\nconst query = `{ Get { ${className}(where: { path: [\"filePath\"], operator: Equal, valueText: \"${filePath}\" }, limit: 1) { _additional { id } } } }`;\nreturn [{ json: { ...item, _weaviate_query: query } }];"
+        "jsCode": "const item = $input.first().json;\n\n// className allowlist \u2014 prevents GraphQL injection via manipulated _document_type\nconst validClasses = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst className = item._document_type;\nif (!className || !validClasses.includes(className)) {\n  console.warn(`[Build Weaviate Query] Invalid className: ${className} \u2014 skipping document`);\n  return [{ json: { ...item, _skip: true, _skip_reason: `Invalid className: ${className}` } }];\n}\n\n// Full escape for filePath \u2014 prevents GraphQL string injection via control characters\nconst rawPath = item.file_path || '';\nconst filePath = rawPath\n  .replace(/\\\\/g, '\\\\\\\\')\n  .replace(/\"/g, '\\\\\"')\n  .replace(/\\n/g, '\\\\n')\n  .replace(/\\r/g, '\\\\r')\n  .replace(/\\t/g, '\\\\t')\n  .replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n\nif (!filePath) {\n  console.warn('[Build Weaviate Query] Empty filePath after escaping \u2014 skipping document');\n  return [{ json: { ...item, _skip: true, _skip_reason: 'Empty filePath after escaping' } }];\n}\n\nconst query = `{ Get { ${className}(where: { path: [\"filePath\"], operator: Equal, valueText: \"${filePath}\" }, limit: 1) { _additional { id } } } }`;\nreturn [{ json: { ...item, _weaviate_query: query } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -506,7 +506,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\n// HTTP: Weaviate Insert response (for status check)\nconst httpResp = $input.first().json;\n// Original document data (preserved through Code: Check Existing Entry)\nconst originalItem = $('Code: Check Existing Entry').first().json;\n\nconst insertSuccess = !httpResp.error && (httpResp.statusCode === 200 || httpResp.statusCode === 201 || !httpResp.statusCode);\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (insertSuccess) {\n    if (originalItem.file_hash) {\n      await client.sRem('alice:dms:queued_files', originalItem.file_hash);\n      await client.sAdd('alice:dms:processed', originalItem.file_hash);\n      if (originalItem.file_path) {\n        const oldHash = await client.hGet('alice:dms:path_to_hash', originalItem.file_path);\n        if (oldHash && oldHash !== originalItem.file_hash) {\n          await client.hDel('alice:dms:path_to_hash', originalItem.file_path);\n          await client.sRem(`alice:dms:hash_to_paths:${oldHash}`, originalItem.file_path);\n        }\n        await client.hSet('alice:dms:path_to_hash', originalItem.file_path, originalItem.file_hash);\n        await client.sAdd(`alice:dms:hash_to_paths:${originalItem.file_hash}`, originalItem.file_path);\n      }\n    }\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1);\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1);\n  }\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { ...originalItem, _weaviate_inserted: insertSuccess } }];"
+        "jsCode": "const redis = require('redis');\n// HTTP: Weaviate Insert response (for status check)\nconst httpResp = $input.first().json;\n// Original document data (preserved through Code: Check Existing Entry)\nconst originalItem = $('Code: Check Existing Entry').first().json;\n\nconst insertSuccess = !httpResp.error && (httpResp.statusCode === 200 || httpResp.statusCode === 201 || !httpResp.statusCode);\n\n// Capture the new Weaviate UUID for the parent BankStatement (used in Phase B for BankTransaction objects)\nlet newWeaviateId = null;\ntry {\n  const respBody = httpResp.body || httpResp;\n  const data = (typeof respBody === 'string') ? JSON.parse(respBody) : respBody;\n  newWeaviateId = data?.id || null;\n} catch(e) {}\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (insertSuccess) {\n    if (originalItem.file_hash) {\n      await client.sRem('alice:dms:queued_files', originalItem.file_hash);\n      await client.sAdd('alice:dms:processed', originalItem.file_hash);\n      if (originalItem.file_path) {\n        const oldHash = await client.hGet('alice:dms:path_to_hash', originalItem.file_path);\n        if (oldHash && oldHash !== originalItem.file_hash) {\n          await client.hDel('alice:dms:path_to_hash', originalItem.file_path);\n          await client.sRem(`alice:dms:hash_to_paths:${oldHash}`, originalItem.file_path);\n        }\n        await client.hSet('alice:dms:path_to_hash', originalItem.file_path, originalItem.file_hash);\n        await client.sAdd(`alice:dms:hash_to_paths:${originalItem.file_hash}`, originalItem.file_path);\n      }\n    }\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1);\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1);\n  }\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { ...originalItem, _weaviate_inserted: insertSuccess, _new_weaviate_id: newWeaviateId } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -516,16 +516,77 @@
     },
     {
       "parameters": {
-        "topic": "alice/dms/done",
+        "jsCode": "// PROJ-29 Phase B: BankTransaction chunk extraction + batch indexing\n// Runs only when the parent document is a BankStatement that was just inserted.\n// For all other doc types this node is a passthrough.\n//\n// Bug fixes:\n//   BUG-3: Use GraphQL Get + DELETE-by-ID instead of delete-by-where (more reliable; body\n//          on DELETE is dropped by some HTTP stacks).\n//   BUG-13: Cascade-delete BankTransaction children for the OLD parent UUID when this is a\n//          replace (same path, different hash) \u2014 prevents orphans.\n//   BUG-4: Add 1\u00d7 retry per chunk on Ollama failure / unparseable JSON.\n//   BUG-5: Skip transactions with null transactionDate (do not pollute the collection).\n//   BUG-6: Drop empty purpose so it is not embedded as an empty-string vector.\n//   BUG-8: Emit _phase_b_failure flag so downstream MQTT nodes can publish a Phase B\n//          summary to alice/dms/error on partial failure (mqtt module is not in\n//          NODE_FUNCTION_ALLOW_EXTERNAL — published via dedicated n8n MQTT nodes).\n\nconst axios = require('axios');\nconst redis = require('redis');\n\nconst item = $input.first().json;\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst CHUNK_SIZE = 8000;\nconst OLLAMA_TIMEOUT_MS = 180000; // 3 min per chunk\n\n// Passthrough for non-BankStatement or failed inserts\nif (item._document_type !== 'BankStatement' || !item._weaviate_inserted || !item._new_weaviate_id) {\n  return [{ json: item }];\n}\n\nconst parentId = item._new_weaviate_id;\n// BUG-13: capture OLD parent UUID if this was a replace (existing class was BankStatement)\nconst oldParentId = (item._existing_weaviate_class === 'BankStatement' && item._existing_weaviate_id && item._existing_weaviate_id !== parentId)\n  ? item._existing_weaviate_id\n  : null;\nconst plaintext = item.plaintext || '';\nconst extractedHeader = item._extracted || {};\nconst bankName = extractedHeader.bankName || null;\nconst accountIban = extractedHeader.iban || null;\nconst statementCurrency = extractedHeader.currency || 'EUR';\nconst now = new Date().toISOString();\n\nlet ollamaModel = 'qwen3:14b';\ntry { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(String(val).replace(',', '.'));\n  return isNaN(n) ? null : Math.abs(n);\n}\nfunction normDirection(val) {\n  if (!val) return null;\n  const v = String(val).toLowerCase().trim();\n  if (['credit', 'eingang', 'in', 'gutschrift', '+'].includes(v)) return 'credit';\n  if (['debit', 'ausgang', 'out', 'lastschrift', 'belastung', '-'].includes(v)) return 'debit';\n  return null;\n}\n\n// BUG-3 helper: resolve all BankTransaction children for a given parentStatementId via\n// GraphQL Get (paged), then DELETE each by UUID. This is more reliable than delete-by-where\n// because (a) HTTP DELETE bodies are dropped by some HTTP stacks, (b) Weaviate batch-delete\n// API formats vary across versions, and (c) per-ID delete returns explicit per-object status.\n// Returns { deleted, failed }.\nasync function cascadeDeleteChildren(pid) {\n  let deleted = 0;\n  let failed = 0;\n  if (!pid) return { deleted, failed };\n  // Sanitize: only allow UUID-shaped strings (defensive \u2014 pid comes from internal sources only)\n  const safePid = String(pid).replace(/[^a-zA-Z0-9-]/g, '');\n  if (!safePid || safePid !== pid) {\n    console.warn(`[Phase B] cascadeDeleteChildren: invalid parent UUID '${pid}' \u2014 skipping cascade`);\n    return { deleted, failed };\n  }\n  const PAGE = 100;\n  // Loop until no more results returned\n  while (true) {\n    const gql = `{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"${safePid}\" }, limit: ${PAGE}) { _additional { id } } } }`;\n    let ids = [];\n    try {\n      const r = await axios.post(`${WEAVIATE_URL}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 15000\n      });\n      const hits = r.data?.data?.Get?.BankTransaction || [];\n      ids = hits.map(h => h?._additional?.id).filter(Boolean);\n    } catch(e) {\n      console.warn(`[Phase B] cascadeDeleteChildren GraphQL Get failed for parent ${safePid}: ${e.message}`);\n      break;\n    }\n    if (ids.length === 0) break;\n    for (const id of ids) {\n      try {\n        await axios.delete(`${WEAVIATE_URL}/v1/objects/BankTransaction/${id}`, { timeout: 10000 });\n        deleted++;\n      } catch(e) {\n        // 404 means already deleted \u2014 not an error\n        if (e.response?.status === 404) {\n          deleted++;\n        } else {\n          failed++;\n          console.warn(`[Phase B] cascadeDeleteChildren: delete failed for ${id}: ${e.message}`);\n        }\n      }\n    }\n    // If less than page size returned we are done\n    if (ids.length < PAGE) break;\n  }\n  return { deleted, failed };\n}\n\n// 1a. BUG-13: Cascade-delete children of the OLD parent UUID on replace\nlet oldDeleted = 0;\nif (oldParentId) {\n  const r = await cascadeDeleteChildren(oldParentId);\n  oldDeleted = r.deleted;\n  console.log(`[Phase B] Cascade-deleted ${r.deleted} BankTransactions of replaced parent ${oldParentId} (${r.failed} failed)`);\n}\n\n// 1b. BUG-3: Delete any pre-existing children of the NEW parent UUID (idempotency for re-processing)\nconst { deleted: newDeleted } = await cascadeDeleteChildren(parentId);\nif (newDeleted > 0) {\n  console.log(`[Phase B] Deleted ${newDeleted} pre-existing BankTransactions for new parent ${parentId}`);\n}\n\n// 2. Split plaintext into chunks at newline boundaries\nfunction splitChunks(text, maxLen) {\n  if (!text) return [];\n  if (text.length <= maxLen) return [text];\n  const chunks = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + maxLen, text.length);\n    if (end < text.length) {\n      // Try to find the last newline within the window\n      const lastNl = text.lastIndexOf('\\n', end);\n      if (lastNl > start + Math.floor(maxLen / 2)) {\n        end = lastNl + 1;\n      }\n    }\n    chunks.push(text.slice(start, end));\n    start = end;\n  }\n  return chunks;\n}\n\nconst chunks = splitChunks(plaintext, CHUNK_SIZE);\nconsole.log(`[Phase B] BankStatement ${parentId}: ${chunks.length} chunk(s) of plaintext (${plaintext.length} chars)`);\n\n// 3. Per-chunk Ollama call to extract a JSON array of transactions (with 1\u00d7 retry, BUG-4)\nconst extractionPromptHeader = `You are a bank-statement transaction extractor. From the following text fragment of a bank statement, extract every individual booking line as a JSON array. Respond ONLY with a JSON object {\"transactions\": [...]} \u2014 no prose, no explanation.\n\nEach element MUST be an object with these fields:\n  \"transactionDate\":  \"YYYY-MM-DD\"  (booking date, required)\n  \"valueDate\":        \"YYYY-MM-DD\"  (Wertstellung, optional, null if absent)\n  \"amount\":           number         (always POSITIVE, sign goes into 'direction')\n  \"currency\":         string         (e.g. \"EUR\")\n  \"direction\":        \"credit\" or \"debit\"  (credit = Eingang/Gutschrift, debit = Ausgang/Lastschrift)\n  \"counterparty\":     string         (sender name on credits, recipient name on debits)\n  \"purpose\":          string         (Verwendungszweck / booking text; empty string if absent)\n  \"counterpartyIban\": string or null (IBAN of the other side if present)\n  \"balanceAfter\":     number or null (account balance after this booking if present)\n  \"rawText\":          string         (the original booking line as-is)\n\nIMPORTANT:\n- Ignore lines that look like statement headers, totals, page footers, opening/closing balances.\n- Ignore incomplete transactions at the very start or end of the fragment that look truncated.\n- Dates must be ISO format YYYY-MM-DD. If only DD.MM. is present, use the year from context if obvious; otherwise null.\n- Numbers must be plain JSON numbers (use \".\" as decimal separator, no thousands separators).\n- If no transactions are visible in the fragment, return {\"transactions\": []}.\n\nText fragment:\n`;\n\nasync function extractChunk(chunkText) {\n  const ollamaResp = await axios.post('http://ollama-3090:11434/api/generate', {\n    model: ollamaModel,\n    prompt: extractionPromptHeader + chunkText,\n    stream: false,\n    format: 'json',\n    options: { temperature: 0 }\n  }, { timeout: OLLAMA_TIMEOUT_MS });\n  const respText = ollamaResp.data?.response || '';\n  const parsed = JSON.parse(respText); // throws if invalid JSON \u2014 caught by caller\n  if (!Array.isArray(parsed.transactions)) throw new Error('response missing transactions array');\n  return parsed.transactions;\n}\n\nlet allTx = [];\nlet chunkRetries = 0;\nlet chunkFailures = 0;\nfor (let i = 0; i < chunks.length; i++) {\n  const chunkText = chunks[i];\n  let txs = null;\n  try {\n    txs = await extractChunk(chunkText);\n  } catch(e1) {\n    console.warn(`[Phase B] chunk ${i + 1}/${chunks.length} attempt 1 failed: ${e1.message} \u2014 retrying once`);\n    chunkRetries++;\n    try {\n      txs = await extractChunk(chunkText);\n    } catch(e2) {\n      chunkFailures++;\n      console.warn(`[Phase B] chunk ${i + 1}/${chunks.length} retry failed: ${e2.message} \u2014 dropping chunk`);\n      continue;\n    }\n  }\n  console.log(`[Phase B] chunk ${i + 1}/${chunks.length}: ${txs.length} transactions extracted`);\n  allTx.push(...txs);\n}\n\n// 4. Deduplicate by (transactionDate, amount, counterparty)\nconst seen = new Set();\nconst dedup = [];\nfor (const tx of allTx) {\n  const date = tx.transactionDate || '';\n  const amount = tx.amount != null ? String(tx.amount) : '';\n  const cp = (tx.counterparty || '').trim().toLowerCase();\n  const key = `${date}|${amount}|${cp}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n  dedup.push(tx);\n}\nconsole.log(`[Phase B] Deduplicated: ${allTx.length} -> ${dedup.length} transactions`);\n\n// 5. Empty-list handling: log warning, do not fail. Downstream MQTT routing emits the\n// summary based on _phase_b_failure flag (set below).\nif (dedup.length === 0) {\n  console.warn(`[Phase B] WARN: No transactions extracted from BankStatement ${parentId} (file=${item.file_path})`);\n  return [{ json: {\n    ...item,\n    _transactions_indexed: 0,\n    _transactions_failed: 0,\n    _transactions_extracted: 0,\n    _phase_b_chunk_failures: chunkFailures,\n    _phase_b_chunk_retries: chunkRetries,\n    _phase_b_chunks_total: chunks.length,\n    _phase_b_skipped_null_date: 0,\n    _phase_b_old_children_deleted: oldDeleted,\n    // chunkFailures with zero extracted is a partial failure signal for MQTT routing\n    _phase_b_failure: chunkFailures > 0\n  } }];\n}\n\n// 6. Build BankTransaction objects + batch insert via Weaviate /v1/batch/objects\nlet skippedNullDate = 0;\nconst objects = [];\nfor (const tx of dedup) {\n  const txDate = toISODate(tx.transactionDate);\n  // BUG-5: skip transactions without a valid transactionDate (required field)\n  if (!txDate) {\n    skippedNullDate++;\n    console.warn(`[Phase B] Skipping transaction with null transactionDate (parent=${parentId}): ${JSON.stringify({ amount: tx.amount, counterparty: tx.counterparty }).slice(0, 200)}`);\n    continue;\n  }\n  const purposeStr = (tx.purpose || '').toString().trim();\n  const props = {\n    parentStatementId: parentId,\n    transactionDate: txDate,\n    valueDate: toISODate(tx.valueDate),\n    amount: toNum(tx.amount),\n    currency: tx.currency || statementCurrency,\n    direction: normDirection(tx.direction),\n    counterparty: (tx.counterparty || '').toString(),\n    // BUG-6: drop purpose entirely when empty (avoids embedding an empty-string vector)\n    purpose: purposeStr || null,\n    counterpartyIban: tx.counterpartyIban || null,\n    balanceAfter: toNum(tx.balanceAfter),\n    bankName,\n    accountIban,\n    rawText: (tx.rawText || '').toString(),\n    createdBy: 'alice-dms-processor',\n    createdAt: now\n  };\n  // Drop null/undefined values \u2014 Weaviate does not accept null for typed fields\n  const cleaned = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  objects.push({ class: 'BankTransaction', properties: cleaned });\n}\nif (skippedNullDate > 0) {\n  console.warn(`[Phase B] Skipped ${skippedNullDate} transactions with missing transactionDate`);\n}\n\nlet successCount = 0;\nlet failCount = 0;\nif (objects.length > 0) {\n  try {\n    const batchResp = await axios.post(`${WEAVIATE_URL}/v1/batch/objects`, {\n      objects\n    }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 60000\n    });\n    const results = Array.isArray(batchResp.data) ? batchResp.data : [];\n    for (const r of results) {\n      const errs = r?.result?.errors?.error;\n      if (errs && errs.length) {\n        failCount++;\n        console.warn(`[Phase B] BankTransaction insert error: ${JSON.stringify(errs)}`);\n      } else {\n        successCount++;\n      }\n    }\n    // Fallback: if results array missing, treat HTTP-200 as full success\n    if (results.length === 0 && objects.length > 0) {\n      successCount = objects.length;\n    }\n  } catch(e) {\n    console.warn(`[Phase B] Weaviate batch insert failed: ${e.message}`);\n    failCount = objects.length;\n  }\n}\n\n// 7. Update Redis stats counter\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst rclient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait rclient.connect();\ntry {\n  if (successCount > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'transactions_indexed', successCount);\n  }\n  if (chunkFailures > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'phase_b_chunk_failures', chunkFailures);\n  }\n  if (chunkRetries > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'phase_b_chunk_retries', chunkRetries);\n  }\n} finally {\n  await rclient.quit();\n}\n\n// 8. BUG-8: Set partial/full-failure flag so downstream MQTT node can publish to alice/dms/error\nconst phaseBFailure = (failCount > 0) || (chunkFailures > 0) || (objects.length > 0 && successCount === 0);\n\nconsole.log(`[Phase B] BankTransaction batch insert: ${successCount} ok, ${failCount} failed (parent=${parentId}, chunkFailures=${chunkFailures})`);\nreturn [{ json: {\n  ...item,\n  _transactions_indexed: successCount,\n  _transactions_failed: failCount,\n  _transactions_extracted: dedup.length,\n  _phase_b_chunk_failures: chunkFailures,\n  _phase_b_chunk_retries: chunkRetries,\n  _phase_b_chunks_total: chunks.length,\n  _phase_b_skipped_null_date: skippedNullDate,\n  _phase_b_old_children_deleted: oldDeleted,\n  _phase_b_failure: phaseBFailure\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [59616, -3840],
+      "id": "f29a1c01-b5e6-4f2e-9d5a-bktx29phase2",
+      "name": "Code: BankTransaction Phase B"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-phase-b-failure",
+              "leftValue": "={{ $json._phase_b_failure }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [59920, -3680],
+      "id": "a7c3fae0-1b2d-4c9f-94a1-bktx29phase2b",
+      "name": "IF: Phase B Failure"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/error",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, document_type: $json._document_type, llm_classified: $json._llm_classified, inserted: $json._weaviate_inserted, timestamp: new Date().toISOString() }) }}",
+        "message": "={{ JSON.stringify({ workflow: 'alice-dms-processor', phase: 'B', file_path: $json.file_path, file_hash: $json.file_hash, parent_statement_id: $json._new_weaviate_id, transactions_extracted: $json._transactions_extracted || 0, transactions_indexed: $json._transactions_indexed || 0, transactions_failed: $json._transactions_failed || 0, skipped_null_date: $json._phase_b_skipped_null_date || 0, chunks_total: $json._phase_b_chunks_total || 0, chunk_retries: $json._phase_b_chunk_retries || 0, chunk_failures: $json._phase_b_chunk_failures || 0, old_children_deleted: $json._phase_b_old_children_deleted || 0, error: 'phase_b_partial_or_full_failure', timestamp: new Date().toISOString() }) }}",
         "options": {
           "qos": 1
         }
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [59744, -3840],
+      "position": [60224, -3680],
+      "id": "b8d4f0a1-2c3e-4d5f-94a2-bktx29phase2c",
+      "name": "MQTT: Phase B Error",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, document_type: $json._document_type, llm_classified: $json._llm_classified, inserted: $json._weaviate_inserted, transactions_indexed: $json._transactions_indexed || 0, timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [59920, -3840],
       "id": "482e3b2c-c3f9-4a2b-bc2c-478d383d8754",
       "name": "MQTT: Publish Done",
       "credentials": {
@@ -561,7 +622,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [59440, -4144],
+      "position": [59312, -3840],
       "id": "90f33720-edf5-42d9-9a14-aff814fddfc2",
       "name": "IF: Insert Success"
     },
@@ -576,7 +637,7 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [59744, -4336],
+      "position": [59616, -4144],
       "id": "e732a0e2-66de-48e1-9512-cda4c698fcf8",
       "name": "MQTT: Publish Error (Weaviate)",
       "credentials": {
@@ -588,7 +649,7 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-processor\n\nNightly batch processor (02:00).\n\nReads plaintext items from Redis list `alice:dms:plaintext`,\nclassifies via LLM (Ollama, model from OLLAMA_MODEL_DMS env),\nextracts structured data per document type,\nstores to Weaviate collections.\n\n### Document Types\n- Invoice, BankStatement, Document\n- Email, SecuritySettlement, Contract\n\n### Redis Keys\n- `alice:dms:plaintext` — input queue (List)\n- `alice:dms:processed` — processed hashes (Set)\n- `alice:dms:queued_files` — in-flight hashes (Set)\n- `alice:dms:path_to_hash` — path->hash map (Hash)\n- `alice:dms:hash_to_paths:<hash>` — hash->paths (Set)\n- `alice:dms:run:start_time` — run timestamp (String)\n- `alice:dms:run:stats` — run counters (Hash)\n\n### Safety\n- BATCH_SIZE = 50\n- MAX_RUNTIME = 2h\n- Dedup check before processing\n- Upsert: delete existing Weaviate entry before insert\n- Weaviate failure: MQTT error published, item skipped, batch continues\n- Stats: processed/failed/skipped/llm_classified/etc.",
+        "content": "## alice-dms-processor\n\nNightly batch processor (02:00).\n\nReads plaintext items from Redis list `alice:dms:plaintext`,\nclassifies via LLM (Ollama, model from OLLAMA_MODEL_DMS env),\nextracts structured data per document type,\nstores to Weaviate collections.\n\n### Document Types\n- Invoice, BankStatement, Document\n- Email, SecuritySettlement, Contract\n- BankTransaction (Phase B child of BankStatement, PROJ-29)\n\n### PROJ-29: BankStatement \u2192 BankTransaction\nAfter a BankStatement object is inserted, Phase B runs:\n1. Cascade-delete BankTransaction children of OLD parent UUID on replace (BUG-13)\n2. Delete pre-existing children of NEW parent UUID via GraphQL Get + DELETE-by-ID (BUG-3)\n3. Split plaintext into ~8000-char chunks at line breaks\n4. Per-chunk Ollama call (1\u00d7 retry on failure, BUG-4) \u2192 JSON array of transactions\n5. Dedup by (transactionDate, amount, counterparty)\n6. Skip transactions with null transactionDate (BUG-5); drop empty purpose (BUG-6)\n7. Batch insert via /v1/batch/objects \u2192 BankTransaction collection\n8. Increment Redis stats: transactions_indexed, phase_b_chunk_failures, phase_b_chunk_retries\n9. On any failure (BUG-8) \u2192 IF: Phase B Failure routes to MQTT alice/dms/error\n\n### Redis Keys\n- `alice:dms:plaintext` \u2014 input queue (List)\n- `alice:dms:processed` \u2014 processed hashes (Set)\n- `alice:dms:queued_files` \u2014 in-flight hashes (Set)\n- `alice:dms:path_to_hash` \u2014 path->hash map (Hash)\n- `alice:dms:hash_to_paths:<hash>` \u2014 hash->paths (Set)\n- `alice:dms:run:start_time` \u2014 run timestamp (String)\n- `alice:dms:run:stats` \u2014 run counters (Hash, incl. transactions_indexed,\n  phase_b_chunk_failures, phase_b_chunk_retries)\n\n### Safety\n- BATCH_SIZE = 50\n- MAX_RUNTIME = 2h\n- Dedup check before processing\n- Upsert: delete existing Weaviate entry before insert\n- Weaviate failure: MQTT error published, item skipped, batch continues\n- Phase B failures: warn-logged, parent BankStatement still indexed,\n  alice/dms/error MQTT signal published\n- Stats: processed/failed/skipped/llm_classified/transactions_indexed/etc.",
         "height": 520,
         "width": 380
       },
@@ -729,14 +790,14 @@
       "main": [
         [
           {
-            "node": "Code: Time Check",
+            "node": "Code: Final Log",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Code: Parse + Dedup Check",
+            "node": "Code: Time Check",
             "type": "main",
             "index": 0
           }
@@ -765,7 +826,7 @@
         ],
         [
           {
-            "node": "Code: Fetch Batch",
+            "node": "Code: Parse + Dedup Check",
             "type": "main",
             "index": 0
           }
@@ -1057,7 +1118,7 @@
       "main": [
         [
           {
-            "node": "MQTT: Publish Done",
+            "node": "Code: BankTransaction Phase B",
             "type": "main",
             "index": 0
           }
@@ -1069,6 +1130,34 @@
             "index": 0
           }
         ]
+      ]
+    },
+    "Code: BankTransaction Phase B": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Done",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF: Phase B Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Phase B Failure": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Phase B Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     },
     "MQTT: Publish Done": {
@@ -1130,7 +1219,7 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
@@ -1139,7 +1228,7 @@
     "timezone": "Europe/Berlin",
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "e4b79a51-55ed-4cb4-8d86-51e44382e044",
+  "versionId": "f8b2a3c0-1d4e-4f5b-9e2a-proj29bktx003",
   "meta": {
     "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
   },

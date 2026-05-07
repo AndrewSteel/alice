@@ -41,7 +41,8 @@
 | PROJ-26 | Admin Nutzerverwaltung (Create/Deactivate/Delete + OTP-Email + First-Login-Flow) | Deployed  | [PROJ-26-admin-user-management.md](PROJ-26-admin-user-management.md)                                               | 2026-03-15 |
 | PROJ-27 | Nutzerprofil selbst bearbeiten (Passwort, E-Mail, Name, Interessen, Präferenzen)  | Deployed  | [PROJ-27-user-profile-self-edit.md](PROJ-27-user-profile-self-edit.md)                                             | 2026-03-16 |
 | PROJ-28 | DMS Verzeichnis-Reihenfolge (sort_order + Drag-and-Drop + Scanner-Sortierung)     | Deployed  | [PROJ-28-dms-folder-sort-order.md](PROJ-28-dms-folder-sort-order.md)                                               | 2026-03-22 |
+| PROJ-29 | BankStatement Transaction Indexing (BankTransaction Collection)                    | Deployed    | [PROJ-29-bank-transaction-indexing.md](PROJ-29-bank-transaction-indexing.md)                                       | 2026-04-28 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-29
+## Next Available ID: PROJ-30
