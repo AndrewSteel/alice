@@ -574,8 +574,9 @@
     },
     {
       "parameters": {
-        "systemMessage": "Du bist Alice, ein persönlicher Assistent und Smart-Home-Controller. Du hast Zugriff auf folgende Tools:\n\n**search_documents** — Durchsucht das Dokumentenarchiv (Rechnungen, Kontoauszüge, Verträge, E-Mails, Wertpapierabrechnungen). Nutze dieses Tool wenn der Nutzer nach Dokumenten oder Finanzdaten fragt.\n\n**get_document_details** — Ruft alle Details zu einem Dokument ab (per weaviate_id aus search_documents). Nutze dieses Tool wenn der Nutzer mehr Details zu einem gefundenen Dokument möchte.\n\nAntworte immer auf Deutsch. Sei präzise und hilfreich.",
-        "options": {}
+        "options": {
+          "systemMessage": "Du bist Alice, ein persönlicher Assistent und Smart-Home-Controller. Du hast Zugriff auf folgende Tools:\n\n**search_documents** — Durchsucht das Dokumentenarchiv (Rechnungen, Kontoauszüge, Transaktionen, Verträge, E-Mails, Wertpapierabrechnungen). Nutze dieses Tool wenn der Nutzer nach Dokumenten oder Finanzdaten fragt.\n\n**get_document_details** — Ruft alle Details zu einem Dokument ab (per weaviate_id aus search_documents). Nutze dieses Tool wenn der Nutzer mehr Details zu einem gefundenen Dokument möchte.\n\nAntworte immer auf Deutsch. Sei präzise und hilfreich."
+        }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 1.7,
@@ -586,7 +587,9 @@
     {
       "parameters": {
         "model": "={{ $env.OLLAMA_MODEL }}",
-        "options": {}
+        "options": {
+          "think": false
+        }
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
@@ -602,7 +605,7 @@
     },
     {
       "parameters": {
-        "description": "Durchsucht das Dokumentenarchiv semantisch nach Rechnungen, Kontoauszügen, Verträgen, E-Mails oder Wertpapierabrechnungen. Gibt eine Liste von Dokumenten mit Metadaten und Score zurück.",
+        "description": "Durchsucht das Dokumentenarchiv semantisch nach Rechnungen, Kontoauszügen, einzelnen Buchungen/Transaktionen (BankTransaction), Verträgen, E-Mails oder Wertpapierabrechnungen. Für Fragen nach konkreten Zahlungen, Überweisungen oder Buchungsvorgängen (z.B. 'Wann hat X gezahlt?', 'Letzter Zahlungseingang von Y') doc_type='BankTransaction' verwenden. Bei BankTransaction kann mit direction='credit' (Eingang) oder 'debit' (Ausgang) gefiltert werden. Gibt eine Liste von Dokumenten mit Metadaten und Score zurück.",
         "workflowId": {
           "__rl": true,
           "mode": "list",
@@ -615,10 +618,11 @@
             "operation": "search",
             "user_id": "={{ $('Input Validator').first().json.userId }}",
             "query": "={{ $fromAI('query', 'Suchbegriff oder Frage auf Deutsch', 'string') }}",
-            "doc_type": "={{ $fromAI('doc_type', 'Dokumenttyp: Rechnung | Kontoauszug | Dokument | Email | WertpapierAbrechnung | Vertrag | alle (optional)', 'string') }}",
-            "date_from": "={{ $fromAI('date_from', 'Startdatum im Format YYYY-MM-DD (optional)', 'string') }}",
-            "date_to": "={{ $fromAI('date_to', 'Enddatum im Format YYYY-MM-DD (optional)', 'string') }}",
-            "limit": "={{ $fromAI('limit', 'Anzahl Ergebnisse 1–20 (optional, Standard: 5)', 'number') }}"
+            "doc_type": "={{ $fromAI('doc_type', 'Dokumenttyp: Rechnung | Kontoauszug | BankTransaction | Dokument | Email | WertpapierAbrechnung | Vertrag | alle. WICHTIG: Für Suchen nach einzelnen Buchungen, Zahlungen oder Überweisungen (z.B. Zahlungseingang von X, letzter Einkauf bei Y) immer BankTransaction verwenden – NICHT Kontoauszug. Kontoauszug nur für Fragen nach dem Auszugsdokument selbst (z.B. Gibt es einen Kontoauszug vom März?). Leer lassen für alle Typen.', 'string', '') }}",
+            "date_from": "={{ $fromAI('date_from', 'Startdatum im Format YYYY-MM-DD (optional, leer lassen wenn nicht angegeben)', 'string', '') }}",
+            "date_to": "={{ $fromAI('date_to', 'Enddatum im Format YYYY-MM-DD (optional, leer lassen wenn nicht angegeben)', 'string', '') }}",
+            "direction": "={{ $fromAI('direction', 'Nur für doc_type=BankTransaction: Richtung der Buchung. credit = Geldeingang/Gutschrift/Einnahme (z.B. Zahlungseingang, Gehalt). debit = Geldausgang/Lastschrift/Ausgabe (z.B. Zahlungsausgang, Überweisung an X, Einkauf, Miete). Leer lassen für beide Richtungen.', 'string', '') }}",
+            "limit": "={{ $fromAI('limit', 'Anzahl Ergebnisse 1–20 (optional, Standard: 5). Bei zeitlichen Anfragen (letzter, neuester, aktuellster, wie oft) mindestens 10 verwenden – mehrere Treffer werden benötigt, um das aktuellste Datum aus den Ergebnissen zu bestimmen.', 'number', 5) }}"
           },
           "schema": [
             {
@@ -672,6 +676,15 @@
               "display": true,
               "required": false,
               "displayName": "date_to",
+              "defaultMatch": false,
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "direction",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "direction",
               "defaultMatch": false,
               "canBeUsedToMatch": false
             },
@@ -2246,7 +2259,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "versionId": "3e9882c7-e8e2-480f-8504-b792d8268a90",
+  "versionId": "3e9882c7-e8e2-480f-8504-b792d8proj29bug9",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"

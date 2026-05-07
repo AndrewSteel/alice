@@ -1,0 +1,203 @@
+{
+  "class": "BankTransaction",
+  "description": "Single transaction line item from a bank statement (one object per booking)",
+  "vectorizer": "text2vec-transformers",
+  "vectorIndexConfig": {
+    "distance": "cosine"
+  },
+  "moduleConfig": {
+    "text2vec-transformers": {
+      "vectorizeClassName": false
+    }
+  },
+  "properties": [
+    {
+      "name": "parentStatementId",
+      "description": "UUID of the parent BankStatement object this transaction belongs to",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "transactionDate",
+      "description": "Booking date of the transaction",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "valueDate",
+      "description": "Value date (Wertstellungsdatum), if different from transactionDate",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "amount",
+      "description": "Transaction amount, always positive (sign is encoded in 'direction')",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "currency",
+      "description": "Transaction currency (e.g. EUR)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "direction",
+      "description": "Direction: 'credit' (Eingang) or 'debit' (Ausgang)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "counterparty",
+      "description": "Name of the sender or recipient of the transaction (vectorized — primary search field)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "purpose",
+      "description": "Purpose / Verwendungszweck / booking text (vectorized — primary search field)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": true
+    },
+    {
+      "name": "counterpartyIban",
+      "description": "IBAN of the counterparty, if available (exact-match filter)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "balanceAfter",
+      "description": "Account balance after this transaction (optional)",
+      "dataType": ["number"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "bankName",
+      "description": "Bank name, copied from the parent BankStatement",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "accountIban",
+      "description": "IBAN of the account this transaction belongs to (copied from parent)",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "rawText",
+      "description": "Original booking line text (not vectorized; used for debugging and exact-match search)",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdBy",
+      "description": "User or process that created this object",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "createdAt",
+      "description": "Timestamp when this object was created",
+      "dataType": ["date"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    }
+  ]
+}

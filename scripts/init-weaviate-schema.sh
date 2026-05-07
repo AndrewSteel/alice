@@ -124,6 +124,7 @@ SCHEMAS=(
     "alice-memory.json"
     "invoice.json"
     "bank-statement.json"
+    "bank-transaction.json"
     "security-settlement.json"
     "document.json"
     "email.json"

@@ -57,6 +57,7 @@ secrets.yaml
 # Persönliche Daten / Seed-Files
 sql/seed-users.sql
 seed-users.sql
+scripts/del_alice_dms_plaintext.py
 
 # Passwort-Dateien
 *.password
