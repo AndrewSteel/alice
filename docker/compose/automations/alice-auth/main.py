@@ -31,6 +31,7 @@ import re
 import secrets
 import smtplib
 import string
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -47,9 +48,17 @@ from pydantic import BaseModel
 # Configuration
 # ---------------------------------------------------------------------------
 POSTGRES_CONNECTION = os.environ.get("POSTGRES_CONNECTION", "")
-JWT_SECRET = os.environ.get("JWT_SECRET", "")
-JWT_ALGORITHM = "HS256"
+
+# JWT (RS256, key files). The private key signs; the public key verifies and
+# may be distributed read-only to other services (e.g. alice-chat-stream).
+JWT_PRIVATE_KEY_PATH = os.environ.get("JWT_PRIVATE_KEY_PATH", "")
+JWT_PUBLIC_KEY_PATH = os.environ.get("JWT_PUBLIC_KEY_PATH", "")
+JWT_ALGORITHM = "RS256"
 JWT_EXPIRY_HOURS = 24
+
+# Cached key contents (loaded once at startup, then re-used).
+_private_key: str | None = None
+_public_key: str | None = None
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
@@ -125,7 +134,7 @@ def _check_profile_rate_limit(request: Request) -> None:
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
-app = FastAPI(title="alice-auth", version="1.2.0")
+app = FastAPI(title="alice-auth", version="1.3.0")
 
 
 # ---------------------------------------------------------------------------
@@ -188,9 +197,32 @@ def _get_db_connection():
     return psycopg2.connect(POSTGRES_CONNECTION, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
+def _load_private_key() -> str:
+    """Load the RSA private key from disk. Cached after first read."""
+    global _private_key
+    if _private_key is not None:
+        return _private_key
+    if not JWT_PRIVATE_KEY_PATH:
+        raise RuntimeError("JWT_PRIVATE_KEY_PATH environment variable is not set")
+    with open(JWT_PRIVATE_KEY_PATH) as f:
+        _private_key = f.read()
+    return _private_key
+
+
+def _load_public_key() -> str:
+    """Load the RSA public key from disk. Cached after first read."""
+    global _public_key
+    if _public_key is not None:
+        return _public_key
+    if not JWT_PUBLIC_KEY_PATH:
+        raise RuntimeError("JWT_PUBLIC_KEY_PATH environment variable is not set")
+    with open(JWT_PUBLIC_KEY_PATH) as f:
+        _public_key = f.read()
+    return _public_key
+
+
 def _create_jwt(user_id: str, username: str, role: str) -> str:
-    if not JWT_SECRET:
-        raise RuntimeError("JWT_SECRET environment variable is not set")
+    private_key = _load_private_key()
     now = datetime.now(timezone.utc)
     payload = {
         "user_id": user_id,
@@ -199,13 +231,12 @@ def _create_jwt(user_id: str, username: str, role: str) -> str:
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(hours=JWT_EXPIRY_HOURS)).timestamp()),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
 
 
 def _decode_jwt(token: str) -> dict:
-    if not JWT_SECRET:
-        raise RuntimeError("JWT_SECRET environment variable is not set")
-    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    public_key = _load_public_key()
+    return jwt.decode(token, public_key, algorithms=[JWT_ALGORITHM])
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -322,6 +353,18 @@ Alice"""
 
 
 # ---------------------------------------------------------------------------
+# Startup key check — fail fast if RSA keys are missing or unreadable.
+# ---------------------------------------------------------------------------
+try:
+    _load_private_key()
+    _load_public_key()
+    logger.info("JWT RSA key pair loaded successfully (algorithm=%s)", JWT_ALGORITHM)
+except Exception as _key_exc:
+    logger.critical("JWT key load failed on startup: %s", _key_exc)
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Endpoints — Health
 # ---------------------------------------------------------------------------
 @app.get("/health")
@@ -335,10 +378,12 @@ async def health():
     except Exception:
         pass
 
-    if not JWT_SECRET:
-        return {"status": "degraded", "db": db_ok, "jwt_secret": False}
+    # If we got here, the startup check already confirmed the keys are loadable;
+    # report the private key path presence as the auth-readiness signal.
+    if not JWT_PRIVATE_KEY_PATH:
+        return {"status": "degraded", "db": db_ok, "jwt_private_key": False}
 
-    return {"status": "healthy" if db_ok else "degraded", "db": db_ok, "jwt_secret": True}
+    return {"status": "healthy" if db_ok else "degraded", "db": db_ok, "jwt_private_key": True}
 
 
 # ---------------------------------------------------------------------------

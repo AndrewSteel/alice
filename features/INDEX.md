@@ -46,7 +46,7 @@
 | PROJ-31 | Frontend Streaming-UI (Token-Rendering, Tool-Status, Stopp-Button)                 | In Review    | [PROJ-31-frontend-streaming-ui.md](PROJ-31-frontend-streaming-ui.md)                                               | 2026-05-07 |
 | PROJ-32 | nginx Streaming-Konfiguration (SSE-Proxy, Buffering off, Rate-Limiting)            | In Review    | [PROJ-32-nginx-streaming-config.md](PROJ-32-nginx-streaming-config.md)                                             | 2026-05-07 |
 | PROJ-33 | Phase-2-Vorbereitung — Speech Streaming Interface (WebSocket, TTS-Segmentierung)   | Planned  | [PROJ-33-phase2-speech-streaming-interface.md](PROJ-33-phase2-speech-streaming-interface.md)                       | 2026-05-07 |
-| PROJ-34 | alice-auth RS256 Migration (HS256 → RS256, RSA Key Pair, Public Key Distribution)  | In Progress  | [PROJ-34-alice-auth-rs256.md](PROJ-34-alice-auth-rs256.md)                                                         | 2026-05-09 |
+| PROJ-34 | alice-auth RS256 Migration (HS256 → RS256, RSA Key Pair, Public Key Distribution)  | Deployed  | [PROJ-34-alice-auth-rs256.md](PROJ-34-alice-auth-rs256.md)                                                         | 2026-05-09 |
 
 <!-- Add features above this line -->
 

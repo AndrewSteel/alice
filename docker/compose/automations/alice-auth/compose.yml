@@ -1,3 +1,21 @@
+# ---------------------------------------------------------------------------
+# alice-auth — JWT issuer for Alice (RS256 since PROJ-34).
+#
+# One-time key generation on the host (run as root or with sudo):
+#
+#   mkdir -p /srv/warm/alice/keys
+#   openssl genrsa -out /srv/warm/alice/keys/jwt_private.pem 4096
+#   openssl rsa   -in  /srv/warm/alice/keys/jwt_private.pem \
+#                 -pubout -out /srv/warm/alice/keys/jwt_public.pem
+#   chmod 600 /srv/warm/alice/keys/jwt_private.pem
+#   chmod 644 /srv/warm/alice/keys/jwt_public.pem
+#
+# Rollout sequence (zero forced-logout):
+#   1. Generate the key pair on the server (command block above).
+#   2. Deploy alice-auth — issues RS256 tokens from this point on.
+#   3. Existing HS256 tokens expire naturally within 24 h.
+#   4. Deploy alice-chat-stream — RS256 verification active.
+# ---------------------------------------------------------------------------
 services:
   alice-auth:
     build:
@@ -8,6 +26,11 @@ services:
       - "com.centurylinklabs.watchtower.enable=false"
     env_file:
       - .env
+    volumes:
+      # Private key — only alice-auth has read access (mode 600 on the host).
+      - /srv/warm/alice/keys/jwt_private.pem:/run/secrets/jwt_private.pem:ro
+      # Public key — same path that verifying services (alice-chat-stream) mount.
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
     healthcheck:
       test:
         [

@@ -1,6 +1,6 @@
 # PROJ-34: alice-auth RS256 Migration
 
-**Status:** 🔵 Planned
+**Status:** ✅ Deployed
 **Created:** 2026-05-09
 **Last Updated:** 2026-05-09
 
