@@ -319,6 +319,22 @@ export function useChatSessions() {
             if (prev.some((t) => t.tool === tool)) return prev;
             return [...prev, { tool, status }];
           });
+          // If the current streaming placeholder already has content (LLM produced
+          // text before the tool call), freeze it as a permanent bubble and open a
+          // new empty placeholder for the post-tool answer.  If the placeholder is
+          // still empty the LLM went straight to the tool — keep the single slot.
+          setMessagesBySession((prev) => {
+            const current = prev[sessionId] ?? [];
+            if (current.length === 0) return prev;
+            const last = current[current.length - 1];
+            if (last.role !== "assistant" || last.content.length === 0) return prev;
+            const newPlaceholder: Message = {
+              role: "assistant",
+              content: "",
+              timestamp: new Date(),
+            };
+            return { ...prev, [sessionId]: [...current, newPlaceholder] };
+          });
         },
         onToolEnd: (tool) => {
           setActiveTools((prev) => prev.filter((t) => t.tool !== tool));
