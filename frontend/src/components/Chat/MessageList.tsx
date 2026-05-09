@@ -88,27 +88,28 @@ export function MessageList({
   }
 
   // Show the typing indicator when waiting for the first token (no assistant
-  // bubble yet OR the bubble is empty), but suppress it once tokens arrive.
+  // bubble yet OR the bubble is empty), but suppress it once tokens arrive
+  // or a tool is running (ToolStatusChip takes over the "working" signal).
   const lastAssistantContent =
     lastAssistantIdx >= 0 ? messages[lastAssistantIdx].content : "";
   const showTypingIndicator =
     (isLoading && !isStreaming) ||
-    (isStreaming && lastAssistantContent.length === 0);
+    (isStreaming && lastAssistantContent.length === 0 && activeTools.length === 0);
 
   return (
     <div ref={scrollContainerRef} className="flex flex-col flex-1 overflow-y-auto py-4" role="log" aria-label="Chatverlauf">
-      {messages.map((msg, i) => (
-        <MessageBubble
-          key={i}
-          role={msg.role}
-          content={msg.content}
-          streaming={
-            isStreaming &&
-            i === lastAssistantIdx &&
-            lastAssistantContent.length > 0
-          }
-        />
-      ))}
+      {messages.map((msg, i) => {
+        // Don't render the empty streaming placeholder — TypingIndicator covers this state.
+        if (isStreaming && i === lastAssistantIdx && msg.content === "") return null;
+        return (
+          <MessageBubble
+            key={i}
+            role={msg.role}
+            content={msg.content}
+            streaming={isStreaming && i === lastAssistantIdx}
+          />
+        );
+      })}
       {isStreaming && activeTools.length > 0 && (
         <ToolStatusChip tools={activeTools} />
       )}
