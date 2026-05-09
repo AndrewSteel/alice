@@ -5,10 +5,12 @@ import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import { ToolStatusChip, ActiveTool } from "./ToolStatusChip";
 import { MessageSquare, Loader2 } from "lucide-react";
+import { MessageSegment } from "@/hooks/useChatSessions";
 
 interface Message {
   role: "user" | "assistant" | "error";
   content: string;
+  segments?: MessageSegment[];
   timestamp: Date;
 }
 
@@ -106,6 +108,7 @@ export function MessageList({
             key={i}
             role={msg.role}
             content={msg.content}
+            segments={msg.segments}
             streaming={isStreaming && i === lastAssistantIdx}
           />
         );
