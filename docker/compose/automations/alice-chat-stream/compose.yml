@@ -1,0 +1,35 @@
+services:
+  alice-chat-stream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-chat-stream
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8003/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-chat-stream]
+      backend:
+        aliases: [alice-chat-stream]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

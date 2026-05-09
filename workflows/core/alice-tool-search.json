@@ -16,7 +16,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Input Normalizer — validates and normalizes all inputs\nconst input = $json;\nconst operation = input.operation || 'search';\n\nconst DOC_TYPE_MAP = {\n  'Rechnung': 'Invoice',\n  'Kontoauszug': 'BankStatement',\n  'Dokument': 'Document',\n  'Email': 'Email',\n  'WertpapierAbrechnung': 'SecuritySettlement',\n  'Vertrag': 'Contract',\n  'BankTransaction': 'BankTransaction',\n  'Buchung': 'BankTransaction',\n  'Transaktion': 'BankTransaction'\n};\n\nconst ALL_COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\n// Determine which collections to search\nlet collections = ALL_COLLECTIONS;\nif (operation === 'search') {\n  const docType = input.doc_type;\n  if (docType && docType !== 'alle' && DOC_TYPE_MAP[docType]) {\n    collections = [DOC_TYPE_MAP[docType]];\n  }\n}\n\n// Normalize limit (1–20, default 5)\nlet limit = parseInt(input.limit) || 5;\nif (limit > 20) limit = 20;\nif (limit < 1) limit = 1;\n\n// Normalize dates — swap if inverted\nlet dateFrom = input.date_from || null;\nlet dateTo = input.date_to || null;\nif (dateFrom && dateTo && dateFrom > dateTo) {\n  const tmp = dateFrom;\n  dateFrom = dateTo;\n  dateTo = tmp;\n}\n\n// AC-3 / BUG-9: Normalize direction filter for BankTransaction (allowlisted, optional)\nfunction normDirection(val) {\n  if (val === null || val === undefined) return null;\n  const v = String(val).toLowerCase().trim();\n  if (v === '' || v === 'alle' || v === 'any' || v === 'both') return null;\n  if (['credit', 'eingang', 'gutschrift', 'in', 'einnahme', 'einnahmen', 'zahlungseingang'].includes(v)) return 'credit';\n  if (['debit', 'ausgang', 'lastschrift', 'belastung', 'out', 'ausgabe', 'ausgaben', 'zahlungsausgang'].includes(v)) return 'debit';\n  return null; // unknown value → ignore filter\n}\nconst direction = normDirection(input.direction);\n\nreturn [{ json: {\n  operation,\n  userId: input.user_id || null,\n  query: input.query || '',\n  collections,\n  dateFrom,\n  dateTo,\n  direction,\n  limit,\n  weaviateId: input.weaviate_id || null,\n  collection: input.collection || null\n}}];"
+        "jsCode": "// Input Normalizer — validates and normalizes all inputs\nconst input = $json;\nconst operation = input.operation || 'search';\n\nconst DOC_TYPE_MAP = {\n  'Rechnung': 'Invoice',\n  'Kontoauszug': 'BankStatement',\n  'Dokument': 'Document',\n  'Email': 'Email',\n  'WertpapierAbrechnung': 'SecuritySettlement',\n  'Vertrag': 'Contract',\n  'BankTransaction': 'BankTransaction',\n  'Buchung': 'BankTransaction',\n  'Transaktion': 'BankTransaction'\n};\n\nconst ALL_COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\n// Determine which collections to search\nlet collections = ALL_COLLECTIONS;\nif (operation === 'search') {\n  const docType = input.doc_type;\n  if (docType && docType !== 'alle' && DOC_TYPE_MAP[docType]) {\n    collections = [DOC_TYPE_MAP[docType]];\n  }\n}\n\n// Normalize limit (1–20, default 5)\nlet limit = parseInt(input.limit) || 5;\nif (limit > 20) limit = 20;\nif (limit < 1) limit = 1;\n\n// Normalize dates — swap if inverted\nlet dateFrom = input.date_from || null;\nlet dateTo = input.date_to || null;\nif (dateFrom && dateTo && dateFrom > dateTo) {\n  const tmp = dateFrom;\n  dateFrom = dateTo;\n  dateTo = tmp;\n}\n\n// AC-3 / BUG-9: Normalize direction filter for BankTransaction (allowlisted, optional)\nfunction normDirection(val) {\n  if (val === null || val === undefined) return null;\n  const v = String(val).toLowerCase().trim();\n  if (v === '' || v === 'alle' || v === 'any' || v === 'both') return null;\n  if (['credit', 'eingang', 'gutschrift', 'in', 'einnahme', 'einnahmen', 'zahlungseingang'].includes(v)) return 'credit';\n  if (['debit', 'ausgang', 'lastschrift', 'belastung', 'out', 'ausgabe', 'ausgaben', 'zahlungsausgang'].includes(v)) return 'debit';\n  return null; // unknown value → ignore filter\n}\nconst direction = normDirection(input.direction);\n\nreturn [{ json: {\n  operation,\n  userId: input.user_id || null,\n  query: input.query || '',\n  collections,\n  dateFrom,\n  dateTo,\n  direction,\n  limit,\n  weaviateId: input.weaviate_id || null,\n  collection: input.collection || null,\n  __via_webhook: input.__via_webhook === true\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -176,6 +176,128 @@
           "name": "mqtt-alice"
         }
       }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-tool-search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -880,
+        384
+      ],
+      "id": "f5a1c0e0-7b31-4a99-90d6-tool-search-wh",
+      "name": "Webhook Trigger",
+      "webhookId": "a1b2c3d4-tool-search-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Webhook Adapter — flatten POST body to top-level fields and tag the execution so downstream nodes know to respond via HTTP.\nconst body = $json.body || {};\nreturn [{ json: { ...body, __via_webhook: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        384
+      ],
+      "id": "f5a1c0e0-7b31-4a99-90d6-tool-search-ad",
+      "name": "Webhook Adapter"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "via-wh-1",
+              "leftValue": "={{ $('Input Normalizer').first().json.__via_webhook }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        -16
+      ],
+      "id": "f5a1c0e0-7b31-4a99-90d6-tool-search-i1",
+      "name": "Respond? (Search)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "via-wh-2",
+              "leftValue": "={{ $('Input Normalizer').first().json.__via_webhook }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        272
+      ],
+      "id": "f5a1c0e0-7b31-4a99-90d6-tool-search-i2",
+      "name": "Respond? (Details)"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1184,
+        -64
+      ],
+      "id": "f5a1c0e0-7b31-4a99-90d6-tool-search-r1",
+      "name": "Respond Search"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        224
+      ],
+      "id": "f5a1c0e0-7b31-4a99-90d6-tool-search-r2",
+      "name": "Respond Details"
     }
   ],
   "pinData": {},
@@ -256,8 +378,70 @@
             "node": "MQTT: Debug Search",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Respond? (Search)",
+            "type": "main",
+            "index": 0
           }
         ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Webhook Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Adapter": {
+      "main": [
+        [
+          {
+            "node": "Input Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weaviate Details": {
+      "main": [
+        [
+          {
+            "node": "Respond? (Details)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond? (Search)": {
+      "main": [
+        [
+          {
+            "node": "Respond Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Respond? (Details)": {
+      "main": [
+        [
+          {
+            "node": "Respond Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     }
   },
@@ -267,7 +451,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "d8e1a5b2-0c9f-4a3a-b9e2-proj29bktx002",
+  "versionId": "e9f3b6c4-1d2e-4f5a-b8e7-proj30strm001",
   "meta": {
     "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
   },

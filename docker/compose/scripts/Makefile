@@ -14,6 +14,7 @@ STACKS ?= \
   automations/hassil-parser \
   automations/alice-ha-sync \
   automations/alice-auth \
+  automations/alice-chat-stream \
   automations/mqtt \
   automations/weaviate \
   automations/dms-extractor-pdf \

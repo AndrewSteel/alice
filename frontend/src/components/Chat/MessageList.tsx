@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
+import { ToolStatusChip, ActiveTool } from "./ToolStatusChip";
 import { MessageSquare, Loader2 } from "lucide-react";
 
 interface Message {
@@ -15,17 +16,46 @@ interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
   messagesLoading?: boolean;
+  /** True while a streaming response is being received (PROJ-31). */
+  isStreaming?: boolean;
+  /** Currently active tools for the in-flight stream. */
+  activeTools?: ActiveTool[];
 }
 
-export function MessageList({ messages, isLoading, messagesLoading }: MessageListProps) {
+export function MessageList({
+  messages,
+  isLoading,
+  messagesLoading,
+  isStreaming = false,
+  activeTools = [],
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
+  const prevMessageCount = useRef(0);
 
-  // Auto-scroll to bottom on new messages or when loading state changes
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      userScrolledUp.current = scrollTop + clientHeight < scrollHeight - 100;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, []);
 
-  // Messages loading from backend (AC-C2)
+  useEffect(() => {
+    const lengthChanged = messages.length !== prevMessageCount.current;
+    prevMessageCount.current = messages.length;
+    if (lengthChanged || !isStreaming) {
+      userScrolledUp.current = false;
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else if (!userScrolledUp.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isLoading, isStreaming]);
+
   if (messagesLoading) {
     return (
       <div className="flex flex-1 items-center justify-center h-full">
@@ -37,8 +67,7 @@ export function MessageList({ messages, isLoading, messagesLoading }: MessageLis
     );
   }
 
-  // Empty state for sessions without messages (AC-C10)
-  if (messages.length === 0 && !isLoading) {
+  if (messages.length === 0 && !isLoading && !isStreaming) {
     return (
       <div className="flex flex-1 items-center justify-center h-full">
         <div className="text-center space-y-3">
@@ -49,12 +78,41 @@ export function MessageList({ messages, isLoading, messagesLoading }: MessageLis
     );
   }
 
+  // Identify the last assistant message -- it's the one currently streaming.
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+
+  // Show the typing indicator when waiting for the first token (no assistant
+  // bubble yet OR the bubble is empty), but suppress it once tokens arrive.
+  const lastAssistantContent =
+    lastAssistantIdx >= 0 ? messages[lastAssistantIdx].content : "";
+  const showTypingIndicator =
+    (isLoading && !isStreaming) ||
+    (isStreaming && lastAssistantContent.length === 0);
+
   return (
-    <div className="flex flex-col flex-1 overflow-y-auto py-4" role="log" aria-label="Chatverlauf">
+    <div ref={scrollContainerRef} className="flex flex-col flex-1 overflow-y-auto py-4" role="log" aria-label="Chatverlauf">
       {messages.map((msg, i) => (
-        <MessageBubble key={i} role={msg.role} content={msg.content} />
+        <MessageBubble
+          key={i}
+          role={msg.role}
+          content={msg.content}
+          streaming={
+            isStreaming &&
+            i === lastAssistantIdx &&
+            lastAssistantContent.length > 0
+          }
+        />
       ))}
-      {isLoading && <TypingIndicator />}
+      {isStreaming && activeTools.length > 0 && (
+        <ToolStatusChip tools={activeTools} />
+      )}
+      {showTypingIndicator && <TypingIndicator />}
       <div ref={bottomRef} />
     </div>
   );

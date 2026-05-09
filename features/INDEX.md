@@ -42,7 +42,13 @@
 | PROJ-27 | Nutzerprofil selbst bearbeiten (Passwort, E-Mail, Name, Interessen, Präferenzen)  | Deployed  | [PROJ-27-user-profile-self-edit.md](PROJ-27-user-profile-self-edit.md)                                             | 2026-03-16 |
 | PROJ-28 | DMS Verzeichnis-Reihenfolge (sort_order + Drag-and-Drop + Scanner-Sortierung)     | Deployed  | [PROJ-28-dms-folder-sort-order.md](PROJ-28-dms-folder-sort-order.md)                                               | 2026-03-22 |
 | PROJ-29 | BankStatement Transaction Indexing (BankTransaction Collection)                    | Deployed    | [PROJ-29-bank-transaction-indexing.md](PROJ-29-bank-transaction-indexing.md)                                       | 2026-04-28 |
+| PROJ-30 | Streaming Chat Backend (alice-chat-stream Python/FastAPI, SSE-Endpunkt)            | In Review    | [PROJ-30-streaming-chat-backend.md](PROJ-30-streaming-chat-backend.md)                                             | 2026-05-08 |
+| PROJ-31 | Frontend Streaming-UI (Token-Rendering, Tool-Status, Stopp-Button)                 | In Review    | [PROJ-31-frontend-streaming-ui.md](PROJ-31-frontend-streaming-ui.md)                                               | 2026-05-07 |
+| PROJ-32 | nginx Streaming-Konfiguration (SSE-Proxy, Buffering off, Rate-Limiting)            | In Review    | [PROJ-32-nginx-streaming-config.md](PROJ-32-nginx-streaming-config.md)                                             | 2026-05-07 |
+| PROJ-33 | Phase-2-Vorbereitung — Speech Streaming Interface (WebSocket, TTS-Segmentierung)   | Planned  | [PROJ-33-phase2-speech-streaming-interface.md](PROJ-33-phase2-speech-streaming-interface.md)                       | 2026-05-07 |
+| PROJ-34 | alice-auth RS256 Migration (HS256 → RS256, RSA Key Pair, Public Key Distribution)  | Planned  | [PROJ-34-alice-auth-rs256.md](PROJ-34-alice-auth-rs256.md)                                                         | 2026-05-09 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-30
+## Next Available ID: PROJ-35
+

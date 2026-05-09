@@ -21,11 +21,14 @@ export function AppShell() {
     activeSessionId,
     messages,
     isLoading,
+    isStreaming,
+    activeTools,
     createNewSession,
     selectSession,
     renameSession,
     deleteSession,
     sendMessage,
+    stopStreaming,
   } = useChatSessions();
 
   // Auto-start: always begin with a fresh empty chat on app load.
@@ -129,7 +132,10 @@ export function AppShell() {
                 messages={messages}
                 isLoading={isLoading}
                 messagesLoading={messagesLoading}
+                isStreaming={isStreaming}
+                activeTools={activeTools}
                 onSend={sendMessage}
+                onStop={stopStreaming}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">

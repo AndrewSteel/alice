@@ -28,13 +28,13 @@ Home Assistant (Smart Home)  +  NAS (Dokumente)  +  MQTT  +  Redis
 
 ## 2. Entwicklungsphasen
 
-| Phase | Inhalt | Status |
-|-------|--------|--------|
-| Phase 0 | Hardware-Setup | ✅ Abgeschlossen |
-| Phase 1 | Chat MVP (n8n + React + Home Assistant + DMS) | ✅ Abgeschlossen |
-| Phase 1.5 | JWT-Authentifizierung + Login-Screen | ✅ Abgeschlossen |
-| Phase 2 | Speech Gateway (Whisper STT + Piper TTS + Speaker-ID) | Geplant |
-| Phase 3 | Multi-User, Display-Routing, Security Hardening | Geplant |
+| Phase     | Inhalt                                                | Status          |
+| --------- | ----------------------------------------------------- | --------------- |
+| Phase 0   | Hardware-Setup                                        | ✅ Abgeschlossen |
+| Phase 1   | Chat MVP (n8n + React + Home Assistant + DMS)         | ✅ Abgeschlossen |
+| Phase 1.5 | JWT-Authentifizierung + Login-Screen                  | ✅ Abgeschlossen |
+| Phase 2   | Speech Gateway (Whisper STT + Piper TTS + Speaker-ID) | Geplant         |
+| Phase 3   | Multi-User, Display-Routing, Security Hardening       | Geplant         |
 
 ---
 
@@ -176,11 +176,11 @@ n8n-Workflow `alice-dms-scanner` (Schedule: `0 7-22 * * *`):
 #### PROJ-17 — DMS Scanner Multi-Queue-Routing
 Erweiterung von PROJ-16: statt einer einzigen Queue `alice/dms/new` werden Dateien typenspezifisch geroutet:
 
-| Datei | Queue |
-|-------|-------|
-| PDF mit Textebene | `alice/dms/pdf` |
-| PDF ohne Textebene | `alice/dms/ocr` |
-| TXT, MD | `alice/dms/txt` |
+| Datei                          | Queue              |
+| ------------------------------ | ------------------ |
+| PDF mit Textebene              | `alice/dms/pdf`    |
+| PDF ohne Textebene             | `alice/dms/ocr`    |
+| TXT, MD                        | `alice/dms/txt`    |
 | DOCX, DOC, ODT, XLSX, XLS, ODS | `alice/dms/office` |
 
 Zusätzlich: Redis-basierte Stats-Counter (scanned_files, new_files, skipped_files), publiziert als JSON auf `alice/dms/scanner/stats` nach jedem Scan-Lauf. Bugfix für ELOOP-Fehler bei CIFS-Symlinks (NAS-seitige zirkuläre Links) durch direkte Mount-Point-Bindung statt Parent-Verzeichnis.
@@ -222,11 +222,11 @@ Sicherheit: Der Sub-Workflow prüft `alice.permissions_dms` per parameterisierte
 #### PROJ-21 + PROJ-22 — DMS Lifecycle Management
 Erkennung und Behandlung von drei Datei-Lifecycle-Ereignissen ohne erneuten LLM-Aufruf:
 
-| Fall | Erkennung | Behandlung |
-|------|-----------|------------|
-| **Duplikat** (gleicher Inhalt, neuer Pfad, Original noch vorhanden) | Scanner: Hash bekannt, alle alten Pfade existieren noch | Weaviate: `additional_paths` erweitern |
-| **Verschiebung** (gleicher Inhalt, neuer Pfad, Original weg) | Scanner: Hash bekannt, keine alten Pfade mehr vorhanden | Weaviate: `original_path` aktualisieren |
-| **Dateiänderung** (gleicher Pfad, anderer Hash) | Scanner: `path_to_hash`-Lookup zeigt anderen Hash | Alter Eintrag löschen, neues Dokument vollständig verarbeiten (mit LLM) |
+| Fall                                                                | Erkennung                                               | Behandlung                                                              |
+| ------------------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **Duplikat** (gleicher Inhalt, neuer Pfad, Original noch vorhanden) | Scanner: Hash bekannt, alle alten Pfade existieren noch | Weaviate: `additional_paths` erweitern                                  |
+| **Verschiebung** (gleicher Inhalt, neuer Pfad, Original weg)        | Scanner: Hash bekannt, keine alten Pfade mehr vorhanden | Weaviate: `original_path` aktualisieren                                 |
+| **Dateiänderung** (gleicher Pfad, anderer Hash)                     | Scanner: `path_to_hash`-Lookup zeigt anderen Hash       | Alter Eintrag löschen, neues Dokument vollständig verarbeiten (mit LLM) |
 
 Der Scanner publiziert Lifecycle-Events auf `alice/dms/lifecycle`. Der neue MQTT-getriebene Workflow `alice-dms-lifecycle` (PROJ-22) konsumiert diese Events und führt Weaviate-PATCH-Operationen + Redis-Updates durch — komplett ohne LLM, in Echtzeit nach dem nächsten Scanner-Lauf.
 
@@ -348,32 +348,32 @@ PROJ-19 (DMS Processor)
 
 ## 5. Technologie-Stack (deployed)
 
-| Kategorie | Komponenten |
-|-----------|-------------|
-| **AI / LLM** | Ollama qwen3:14b (RTX 3090), text2vec-transformers (Weaviate-Embedding) |
-| **Orchestrierung** | n8n (9 aktive Workflows), LangChain-Tool-Use |
-| **Datenbank** | PostgreSQL 15+ (`alice`-Schema, 14+ Tabellen), Weaviate (8 Collections), Redis (AOF-Persistenz) |
-| **Messaging** | Mosquitto MQTT (QoS 1, persistente Sessions) |
-| **Backend-Services** | alice-auth (FastAPI), alice-ha-sync (Python), hassil-parser (FastAPI), 4× DMS Extractor |
-| **Frontend** | React + TypeScript + Vite + Tailwind CSS + shadcn/ui + @dnd-kit (Drag-and-Drop) |
-| **Infrastruktur** | nginx (Reverse Proxy, Rate-Limiting, Security Headers), Docker Compose (15+ Container) |
-| **GPU** | NVIDIA RTX 3090 (LLM-Inferenz + Weaviate-Embedding), TITAN X (multi2vec-clip) |
+| Kategorie            | Komponenten                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| **AI / LLM**         | Ollama qwen3:14b (RTX 3090), text2vec-transformers (Weaviate-Embedding)                         |
+| **Orchestrierung**   | n8n (9 aktive Workflows), LangChain-Tool-Use                                                    |
+| **Datenbank**        | PostgreSQL 15+ (`alice`-Schema, 14+ Tabellen), Weaviate (8 Collections), Redis (AOF-Persistenz) |
+| **Messaging**        | Mosquitto MQTT (QoS 1, persistente Sessions)                                                    |
+| **Backend-Services** | alice-auth (FastAPI), alice-ha-sync (Python), hassil-parser (FastAPI), 4× DMS Extractor         |
+| **Frontend**         | React + TypeScript + Vite + Tailwind CSS + shadcn/ui + @dnd-kit (Drag-and-Drop)                 |
+| **Infrastruktur**    | nginx (Reverse Proxy, Rate-Limiting, Security Headers), Docker Compose (15+ Container)          |
+| **GPU**              | NVIDIA RTX 3090 (LLM-Inferenz + Weaviate-Embedding), TITAN X (multi2vec-clip)                   |
 
 ---
 
 ## 6. n8n Workflows (Übersicht)
 
-| Workflow | Trigger | Zweck |
-|----------|---------|-------|
-| `alice-chat-handler` | Webhook POST `/webhook/alice` | Haupt-Chat-Logik, Memory, Tool-Use |
-| `alice-tool-search` | Execute Workflow | Semantische Dokumentensuche in Weaviate |
-| `alice-tool-ha` | Execute Workflow | Home Assistant REST API |
-| `alice-memory-transfer` | Schedule (täglich) | PostgreSQL → Weaviate Langzeit-Gedächtnis |
-| `alice-dms-scanner` | Schedule (stündl. 07-22) | NAS-Scan → MQTT-Queues |
-| `alice-dms-processor` | Schedule (nächtlich) | Redis → LLM → Weaviate |
-| `alice-dms-lifecycle` | MQTT Trigger | Duplikate + Verschiebungen ohne LLM |
-| `alice-dms-folder-api` | Webhook | Ordner-CRUD + Reorder für Admins |
-| Auth-Workflows (4×) | Webhook | Login / Validate / Refresh / Logout |
+| Workflow                | Trigger                       | Zweck                                     |
+| ----------------------- | ----------------------------- | ----------------------------------------- |
+| `alice-chat-handler`    | Webhook POST `/webhook/alice` | Haupt-Chat-Logik, Memory, Tool-Use        |
+| `alice-tool-search`     | Execute Workflow              | Semantische Dokumentensuche in Weaviate   |
+| `alice-tool-ha`         | Execute Workflow              | Home Assistant REST API                   |
+| `alice-memory-transfer` | Schedule (täglich)            | PostgreSQL → Weaviate Langzeit-Gedächtnis |
+| `alice-dms-scanner`     | Schedule (stündl. 07-22)      | NAS-Scan → MQTT-Queues                    |
+| `alice-dms-processor`   | Schedule (nächtlich)          | Redis → LLM → Weaviate                    |
+| `alice-dms-lifecycle`   | MQTT Trigger                  | Duplikate + Verschiebungen ohne LLM       |
+| `alice-dms-folder-api`  | Webhook                       | Ordner-CRUD + Reorder für Admins          |
+| Auth-Workflows (4×)     | Webhook                       | Login / Validate / Refresh / Logout       |
 
 ---
 
@@ -381,11 +381,11 @@ PROJ-19 (DMS Processor)
 
 Alice pflegt ein dreistufiges Gedächtnis-Modell:
 
-| Tier | Speicher | Inhalt | Retention |
-|------|----------|--------|-----------|
-| **Working Memory** | PostgreSQL `alice.messages` | Letzte 20 Nachrichten der aktiven Session | Session-Dauer |
-| **Long-term Memory** | Weaviate `AliceMemory` | Semantisch durchsuchbare Gesprächshistorie | Dauerhaft |
-| **User Profile** | PostgreSQL `alice.user_profiles` | Fakten + Präferenzen (Name, Interessen, Anrede, Sprache) | Dauerhaft |
+| Tier                 | Speicher                         | Inhalt                                                   | Retention     |
+| -------------------- | -------------------------------- | -------------------------------------------------------- | ------------- |
+| **Working Memory**   | PostgreSQL `alice.messages`      | Letzte 20 Nachrichten der aktiven Session                | Session-Dauer |
+| **Long-term Memory** | Weaviate `AliceMemory`           | Semantisch durchsuchbare Gesprächshistorie               | Dauerhaft     |
+| **User Profile**     | PostgreSQL `alice.user_profiles` | Fakten + Präferenzen (Name, Interessen, Anrede, Sprache) | Dauerhaft     |
 
 ---
 
