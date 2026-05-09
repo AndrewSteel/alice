@@ -1,8 +1,8 @@
 # PROJ-32: nginx Streaming-Konfiguration
 
-**Status:** 🟡 In Review
+**Status:** 🟢 Deployed
 **Created:** 2026-05-07
-**Last Updated:** 2026-05-08
+**Last Updated:** 2026-05-09
 
 ## Kontext & Motivation
 
@@ -25,29 +25,29 @@ Außerdem muss ein neuer Proxy-Block für den `alice-chat-stream`-Service (PROJ-
 ## Acceptance Criteria
 
 ### SSE-Proxy-Konfiguration
-- [ ] Neuer Location-Block `/api/stream/` leitet zu `http://alice-chat-stream:8003` weiter
-- [ ] `proxy_buffering off` ist im Stream-Location-Block gesetzt
-- [ ] `proxy_cache off` ist im Stream-Location-Block gesetzt
-- [ ] Response-Header `X-Accel-Buffering: no` wird vom Upstream gesetzt oder von nginx hinzugefügt
-- [ ] `proxy_read_timeout` ist auf mindestens `120s` gesetzt (Streaming-Verbindungen leben länger)
-- [ ] `proxy_send_timeout` ist auf mindestens `120s` gesetzt
-- [ ] `chunked_transfer_encoding on` ist aktiv (Standard, explizit dokumentiert)
+- [x] Neuer Location-Block `/api/stream/` leitet zu `http://alice-chat-stream:8003` weiter
+- [x] `proxy_buffering off` ist im Stream-Location-Block gesetzt
+- [x] `proxy_cache off` ist im Stream-Location-Block gesetzt
+- [x] Response-Header `X-Accel-Buffering: no` wird vom Upstream gesetzt oder von nginx hinzugefügt
+- [x] `proxy_read_timeout` ist auf mindestens `120s` gesetzt (Streaming-Verbindungen leben länger)
+- [x] `proxy_send_timeout` ist auf mindestens `120s` gesetzt
+- [x] `chunked_transfer_encoding on` ist aktiv (Standard, explizit dokumentiert)
 
 ### Verbindungs-Management
-- [ ] `proxy_http_version 1.1` ist gesetzt (HTTP/1.1 für Keep-Alive)
-- [ ] `proxy_set_header Connection ""` entfernt den `Connection: close`-Header (Keep-Alive)
-- [ ] `proxy_set_header X-Real-IP $remote_addr` wird weitergeleitet
-- [ ] `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` wird weitergeleitet
+- [x] `proxy_http_version 1.1` ist gesetzt (HTTP/1.1 für Keep-Alive)
+- [x] `proxy_set_header Connection ""` entfernt den `Connection: close`-Header (Keep-Alive)
+- [x] `proxy_set_header X-Real-IP $remote_addr` wird weitergeleitet
+- [x] `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` wird weitergeleitet
 
 ### Bestehende Konfiguration unverändert
-- [ ] `/api/webhook/` → n8n (Port 5678): unverändert (300s Timeout, Buffering nach wie vor aus)
-- [ ] `/api/auth/` → alice-auth (Port 8002): unverändert
-- [ ] Statische Dateien (`/`): unverändert
-- [ ] Rate-Limiting auf `/api/webhook/` (20 Req/min): unverändert
-- [ ] Security-Headers-Snippet: unverändert
+- [x] `/api/webhook/` → n8n (Port 5678): unverändert (300s Timeout, Buffering nach wie vor aus)
+- [x] `/api/auth/` → alice-auth (Port 8002): unverändert
+- [x] Statische Dateien (`/`): unverändert
+- [x] Rate-Limiting auf `/api/webhook/` (20 Req/min): unverändert
+- [x] Security-Headers-Snippet: unverändert
 
 ### Rate-Limiting für Streaming
-- [ ] Neuer `limit_req_zone` für `/api/stream/`: 10 Req/min pro IP (SSE-Verbindungen sind langlebig)
+- [x] Neuer `limit_req_zone` für `/api/stream/`: 10 Req/min pro IP (SSE-Verbindungen sind langlebig)
 - [x] HTTP 429-Antwort ist plaintext (kein SSE) mit `Retry-After`-Header
 
 ## Edge Cases
@@ -211,8 +211,24 @@ nginx/
 
 ### Deliverables
 
-- [ ] nginx `alice.conf` um `/api/stream/`-Location-Block erweitert
-- [ ] `limit_req_zone` für Stream-Rate-Limiting hinzugefügt
-- [ ] Konfiguration via `nginx -t` validiert
-- [ ] `scripts/sync-compose.sh` stellt sicher, dass nginx-Config deployed wird
+- [x] nginx `alice.conf` um `/api/stream/`-Location-Block erweitert
+- [x] `limit_req_zone` für Stream-Rate-Limiting hinzugefügt
+- [x] Konfiguration via `nginx -t` validiert
+- [x] `scripts/sync-compose.sh` stellt sicher, dass nginx-Config deployed wird
+
+### Live-QA (2026-05-09)
+
+**Methode:** Direkttests auf ki.lan gegen laufenden nginx-Container
+
+| Test | Ergebnis |
+|---|---|
+| `nginx -t` Syntax-Check | PASS — `syntax is ok / test is successful` |
+| `proxy_buffering off` im `/api/stream/`-Block | PASS — verifiziert in `/etc/nginx/conf.d/alice.conf` |
+| `proxy_cache off`, `chunked_transfer_encoding on` | PASS |
+| `proxy_http_version 1.1`, `Connection ""` | PASS |
+| `X-Accel-Buffering: no` am Client | PASS — Header in OPTIONS-Preflight sichtbar |
+| Rate-Limit `stream_limit` 10r/m mit `Retry-After: 60` | PASS — verifiziert in `rate-limit.conf` |
+| Security Headers auf `/api/stream/` | PASS — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` |
+| HTTPS-Edge → nginx → Backend 401 (kein Token) | PASS |
+| Bestehende Routen (`/api/auth/`, `/api/webhook/`) unverändert | PASS |
 

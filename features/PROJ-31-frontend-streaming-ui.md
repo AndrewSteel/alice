@@ -1,8 +1,8 @@
 # PROJ-31: Frontend Streaming-UI
 
-**Status:** 🟡 In Review
+**Status:** 🟢 Deployed
 **Created:** 2026-05-07
-**Last Updated:** 2026-05-08
+**Last Updated:** 2026-05-09
 
 ## Kontext & Motivation
 
@@ -515,11 +515,32 @@ Die Medium-Bugs (MED-2 insbesondere) sollten priorisiert werden, sind aber nicht
 5. **LOW-1** (Spec-Drift) — Spec aktualisieren auf `NEXT_PUBLIC_STREAM_API_URL`
 6. **LOW-2 - LOW-5** — optional vor Deploy oder als Followup
 
-### Nächste Schritte
+### Live-QA (2026-05-09) — Bundle-Verifikation nach Deploy
 
-Nach Behebung der High-Bugs:
-- Re-Test mit laufendem PROJ-30-Backend und PROJ-32-nginx-Routing
-- Manueller Cross-Browser-Test (Chrome, Firefox, Safari)
-- Manueller Responsive-Test (375px, 768px, 1440px)
-- Performance-Messung mit langer (>5000 Char) Antwort
+**Methode:** Minified-Bundle-Analyse des deployed Chunks (`page-7bd4340636569b1f.js`) auf ki.lan
+
+#### HIGH-1 — Auto-Scroll: BEHOBEN ✅
+
+Bundle enthält Scroll-Position-Prüfung:
+```javascript
+let{scrollTop:t,scrollHeight:r,clientHeight:a}=e;
+d.current=t+a<r-100  // userScrolledUp ref
+```
+Passiver Scroll-Listener aktiv. Auto-Scroll feuert nur am Ende der Liste.
+
+#### HIGH-2 — Session-Wechsel während Streaming: BEHOBEN ✅
+
+`selectSession` sichert `streamingSessionRef.current` lokal vor dem Clears:
+```javascript
+let e=v.current;   // streaming session — nicht die neue Session
+v.current=null;
+...
+i(t=>{...t[e]...}) // [Abgebrochen] in der richtigen Session
+```
+
+#### Offene Punkte (kein Blocker)
+
+- Cross-Browser-Test (Chrome, Firefox, Safari) — nicht automatisiert durchführbar
+- Responsive-Test (375px, 768px, 1440px) — nicht automatisiert durchführbar
+- Performance bei >5000 Zeichen — nicht automatisiert messbar
 

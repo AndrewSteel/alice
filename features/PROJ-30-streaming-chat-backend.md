@@ -1,8 +1,8 @@
 # PROJ-30: Streaming Chat Backend (alice-chat-stream)
 
-**Status:** 🟡 In Review
+**Status:** 🟢 Deployed
 **Created:** 2026-05-07
-**Last Updated:** 2026-05-08
+**Last Updated:** 2026-05-09
 
 ## Kontext & Motivation
 
@@ -338,8 +338,22 @@ Signing-Seite (alice-auth) wird in PROJ-34 migriert.
 
 #### ~~BUG-4~~ — BEHOBEN: `.env`-Datei vorhanden.
 
-### Nicht verifizierbar ohne Live-System
+### Live-QA (2026-05-09)
 
-- HA_FAST-Pfad Latenz < 300ms
-- n8n-Workflow `alice-chat-handler` deaktiviert
+**Methode:** Direkttests gegen deployed Service auf ki.lan
+
+| Test | Ergebnis | Evidenz |
+|---|---|---|
+| `GET /health` | PASS | `{"status":"ok","db":true,"jwt_public_key":true}` |
+| `GET /metrics` | PASS | `chat_requests_total`, `chat_tokens_total`, `chat_latency_seconds` vorhanden (3 LLM_ONLY, 1 HA_FAST, 131 Tokens) |
+| `POST /stream/chat` ohne Token | PASS | HTTP 401 |
+| `POST /stream/chat` mit Fake-Bearer | PASS | HTTP 401 |
+| RS256 Public Key gemountet | PASS | `/run/secrets/jwt_public.pem`, 800 Bytes |
+| Container-Netzwerke | PASS | `automation` + `backend`, Status `running` |
+| Kein Port 8003 am Host exponiert | PASS | Nur über nginx-Netzwerk erreichbar |
+
+### Nicht verifizierbar ohne Live-Token
+
+- HA_FAST-Pfad Latenz < 300ms (Metriken zeigen HA_FAST bei 46ms — AC erfüllt)
+- n8n-Workflow `alice-chat-handler` deaktiviert (manuell zu prüfen)
 
