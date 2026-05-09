@@ -158,6 +158,39 @@ volumes:
 
 Kein neues Schema. `alice.auth_sessions` ist bereits vorhanden und wird nicht berührt.
 
+## Tech Design (Solution Architect)
+
+### Architecture Overview
+
+Pure backend/infrastructure migration — no UI changes, no database schema changes, no n8n workflow changes.
+
+**Key Distribution Model:**
+```
+[HOST: /srv/warm/alice/keys/]
+  jwt_private.pem (mode 600)  ──→  alice-auth only (signing)
+  jwt_public.pem  (mode 644)  ──→  alice-auth + alice-chat-stream + future services (verification)
+```
+
+**Services Changed:**
+
+| Service | Change |
+|---|---|
+| `alice-auth` main.py | HS256 → RS256; `JWT_SECRET` → key file reads; fail-fast startup check |
+| `alice-auth` compose.yml | Add private + public key volumes; remove `JWT_SECRET` env |
+| `alice-chat-stream` compose.yml | Mount same public key path (service is already coded for RS256) |
+
+**Rollout sequence (zero forced-logout):**
+```
+1. Generate RSA key pair on server (one-time admin command)
+2. Deploy alice-auth → issues RS256 tokens from now on
+3. Existing HS256 tokens expire within 24h naturally
+4. Deploy alice-chat-stream → RS256 verification active
+```
+
+**Not changed:** PostgreSQL schema, n8n workflows, nginx, frontend. Frontend stores and forwards JWTs opaquely — algorithm change is invisible to it.
+
+**Dependencies added:** `cryptography>=42,<44` to alice-auth requirements (alice-chat-stream already has it).
+
 ### Deliverables
 
 - [ ] `docker/compose/automations/alice-auth/main.py` — RS256-Implementierung
