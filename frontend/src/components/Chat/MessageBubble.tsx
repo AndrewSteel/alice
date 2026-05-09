@@ -4,10 +4,12 @@ import { AlertCircle } from "lucide-react";
 import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { MessageSegment } from "@/hooks/useChatSessions";
 
 interface MessageBubbleProps {
   role: "user" | "assistant" | "error";
   content: string;
+  segments?: MessageSegment[];
   streaming?: boolean;
 }
 
@@ -40,7 +42,7 @@ const markdownComponents: Components = {
   pre: ({ children }) => <pre className="not-prose my-2">{children}</pre>,
 };
 
-export function MessageBubble({ role, content, streaming = false }: MessageBubbleProps) {
+export function MessageBubble({ role, content, segments, streaming = false }: MessageBubbleProps) {
   if (role === "error") {
     return (
       <div className="flex items-start gap-3 px-4 py-2">
@@ -74,6 +76,33 @@ export function MessageBubble({ role, content, streaming = false }: MessageBubbl
       >
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap break-words">{content}</p>
+        ) : segments && segments.length > 0 ? (
+          <div className="space-y-2">
+            {segments.map((seg, idx) => {
+              const isLast = idx === segments.length - 1;
+              return (
+                <div
+                  key={idx}
+                  className={cn(
+                    "prose prose-invert prose-sm max-w-none break-words",
+                    "prose-p:my-1.5 prose-p:leading-relaxed",
+                    "prose-headings:text-gray-100 prose-headings:font-semibold",
+                    "prose-a:text-blue-400 hover:prose-a:text-blue-300",
+                    "prose-blockquote:border-gray-600 prose-blockquote:text-gray-300",
+                    "prose-hr:border-gray-700",
+                    "prose-table:text-xs prose-th:border prose-th:border-gray-700 prose-td:border prose-td:border-gray-700",
+                    seg.italic && "italic text-gray-400",
+                    streaming && isLast &&
+                      "after:content-[''] after:inline-block after:w-[2px] after:h-[1em] after:bg-gray-300 after:ml-0.5 after:align-text-bottom after:animate-pulse"
+                  )}
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {seg.content || ""}
+                  </ReactMarkdown>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div
             className={cn(
