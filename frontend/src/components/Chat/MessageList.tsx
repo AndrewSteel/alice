@@ -1,27 +1,18 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { MessageBubble } from "./MessageBubble";
-import { TypingIndicator } from "./TypingIndicator";
-import { ToolStatusChip, ActiveTool } from "./ToolStatusChip";
+import { useEffect, useRef, useCallback } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
-import { MessageSegment } from "@/hooks/useChatSessions";
+import { MessageRenderer } from "./MessageRenderer";
+import { TypingIndicator } from "./TypingIndicator";
+import { Message } from "./types";
 
-interface Message {
-  role: "user" | "assistant" | "error";
-  content: string;
-  segments?: MessageSegment[];
-  timestamp: Date;
-}
+const NEAR_BOTTOM_PX = 150;
 
 interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
   messagesLoading?: boolean;
-  /** True while a streaming response is being received (PROJ-31). */
   isStreaming?: boolean;
-  /** Currently active tools for the in-flight stream. */
-  activeTools?: ActiveTool[];
 }
 
 export function MessageList({
@@ -29,34 +20,45 @@ export function MessageList({
   isLoading,
   messagesLoading,
   isStreaming = false,
-  activeTools = [],
 }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const userScrolledUp = useRef(false);
-  const prevMessageCount = useRef(0);
+  const prevCount = useRef(0);
 
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  }, []);
+
+  // Auto-scroll contract:
+  //  - Always scroll when a new message is appended (count grew). Token-append
+  //    during streaming mutates content without changing the array length, so
+  //    countChanged precisely captures "a new message began" — even when two
+  //    messages are added in the same render burst (user + assistant placeholder).
+  //  - During streaming token-append: only scroll when user is within
+  //    NEAR_BOTTOM_PX of the bottom.
+  //  - After stream end: do NOT force scroll.
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const onScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      userScrolledUp.current = scrollTop + clientHeight < scrollHeight - 100;
-    };
-    container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-  }, []);
 
-  useEffect(() => {
-    const lengthChanged = messages.length !== prevMessageCount.current;
-    prevMessageCount.current = messages.length;
-    if (lengthChanged || !isStreaming) {
-      userScrolledUp.current = false;
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    } else if (!userScrolledUp.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const countChanged = messages.length !== prevCount.current;
+
+    prevCount.current = messages.length;
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const nearBottom = distanceFromBottom <= NEAR_BOTTOM_PX;
+
+    if (countChanged) {
+      scrollToBottom();
+      return;
     }
-  }, [messages, isLoading, isStreaming]);
+
+    if (isStreaming && nearBottom) {
+      scrollToBottom();
+    }
+  }, [messages, isStreaming, scrollToBottom]);
 
   if (messagesLoading) {
     return (
@@ -80,44 +82,37 @@ export function MessageList({
     );
   }
 
-  // Identify the last assistant message -- it's the one currently streaming.
-  let lastAssistantIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "assistant") {
-      lastAssistantIdx = i;
-      break;
-    }
-  }
-
-  // Show the typing indicator when waiting for the first token (no assistant
-  // bubble yet OR the bubble is empty), but suppress it once tokens arrive
-  // or a tool is running (ToolStatusChip takes over the "working" signal).
-  const lastAssistantContent =
-    lastAssistantIdx >= 0 ? messages[lastAssistantIdx].content : "";
+  // Show typing indicator until the first token of an assistant/thinking
+  // message arrives or a tool_call message is emitted.
+  const lastMsg = messages[messages.length - 1];
+  const lastIsEmptyAssistant =
+    !!lastMsg &&
+    (lastMsg.role === "assistant" || lastMsg.role === "thinking") &&
+    lastMsg.content.length === 0;
   const showTypingIndicator =
-    (isLoading && !isStreaming) ||
-    (isStreaming && lastAssistantContent.length === 0 && activeTools.length === 0);
+    (isLoading && !isStreaming) || (isStreaming && lastIsEmptyAssistant);
 
   return (
-    <div ref={scrollContainerRef} className="flex flex-col flex-1 overflow-y-auto py-4" role="log" aria-label="Chatverlauf">
-      {messages.map((msg, i) => {
-        // Don't render the empty streaming placeholder — TypingIndicator covers this state.
-        if (isStreaming && i === lastAssistantIdx && msg.content === "") return null;
-        return (
-          <MessageBubble
-            key={i}
-            role={msg.role}
-            content={msg.content}
-            segments={msg.segments}
-            streaming={isStreaming && i === lastAssistantIdx}
-          />
-        );
-      })}
-      {isStreaming && activeTools.length > 0 && (
-        <ToolStatusChip tools={activeTools} />
-      )}
-      {showTypingIndicator && <TypingIndicator />}
-      <div ref={bottomRef} />
+    <div
+      ref={scrollContainerRef}
+      className="flex-1 min-h-0 overflow-y-auto"
+      role="log"
+      aria-label="Chatverlauf"
+    >
+      <div className="mx-auto w-full max-w-[760px] py-4">
+        {messages.map((msg) => {
+          // Suppress empty streaming placeholder — TypingIndicator covers it.
+          if (
+            isStreaming &&
+            (msg.role === "assistant" || msg.role === "thinking") &&
+            msg.content.length === 0
+          ) {
+            return null;
+          }
+          return <MessageRenderer key={msg.id} message={msg} />;
+        })}
+        {showTypingIndicator && <TypingIndicator />}
+      </div>
     </div>
   );
 }

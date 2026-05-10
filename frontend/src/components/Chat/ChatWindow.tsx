@@ -1,21 +1,14 @@
 "use client";
 
 import { MessageList } from "./MessageList";
-import { ChatInputArea } from "./ChatInputArea";
-import { ActiveTool } from "./ToolStatusChip";
-
-interface Message {
-  role: "user" | "assistant" | "error";
-  content: string;
-  timestamp: Date;
-}
+import { InputArea } from "./InputArea";
+import { Message } from "./types";
 
 interface ChatWindowProps {
   messages: Message[];
   isLoading: boolean;
   messagesLoading?: boolean;
   isStreaming?: boolean;
-  activeTools?: ActiveTool[];
   onSend: (text: string) => void;
   onStop?: () => void;
 }
@@ -25,7 +18,6 @@ export function ChatWindow({
   isLoading,
   messagesLoading,
   isStreaming = false,
-  activeTools = [],
   onSend,
   onStop,
 }: ChatWindowProps) {
@@ -36,9 +28,8 @@ export function ChatWindow({
         isLoading={isLoading}
         messagesLoading={messagesLoading}
         isStreaming={isStreaming}
-        activeTools={activeTools}
       />
-      <ChatInputArea
+      <InputArea
         onSend={onSend}
         disabled={isLoading || !!messagesLoading}
         isStreaming={isStreaming}

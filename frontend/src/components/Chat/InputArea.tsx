@@ -1,29 +1,49 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-interface ChatInputAreaProps {
+// ~6 lines @ ~24px line-height + vertical padding
+const MAX_TEXTAREA_HEIGHT_PX = 168;
+
+interface InputAreaProps {
   onSend: (text: string) => void;
   disabled: boolean;
-  /** True while a streaming response is in flight (PROJ-31). */
   isStreaming?: boolean;
-  /** Called when the user clicks the Stop button during a stream. */
   onStop?: () => void;
 }
 
-export function ChatInputArea({
+export function InputArea({
   onSend,
   disabled,
   isStreaming = false,
   onStop,
-}: ChatInputAreaProps) {
+}: InputAreaProps) {
   const [value, setValue] = useState("");
+  const [stopping, setStopping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const canSend = value.trim().length > 0 && !disabled && !isStreaming;
+
+  // Restore focus after streaming ends or loading completes.
+  useEffect(() => {
+    if (!isStreaming && !disabled) {
+      textareaRef.current?.focus();
+    }
+  }, [isStreaming, disabled]);
+
+  // Reset transient stopping flag once the stream has actually ended.
+  useEffect(() => {
+    if (!isStreaming) setStopping(false);
+  }, [isStreaming]);
+
+  const handleStop = useCallback(() => {
+    if (stopping) return;
+    setStopping(true);
+    onStop?.();
+  }, [onStop, stopping]);
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
@@ -36,7 +56,7 @@ export function ChatInputArea({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Enter during streaming must NOT trigger a new request (AC).
+      // Enter sends, Shift+Enter inserts newline. Enter during streaming is ignored.
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (isStreaming) return;
@@ -51,32 +71,36 @@ export function ChatInputArea({
       setValue(e.target.value);
       const el = e.target;
       el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 200) + "px";
+      el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX) + "px";
     },
     []
   );
 
   return (
     <div className="bg-gray-800 px-4 pb-4 pt-2">
-      <div className="flex items-end gap-2 max-w-3xl mx-auto">
+      <div className="mx-auto flex w-full max-w-[760px] items-end gap-2">
         <Textarea
           ref={textareaRef}
           value={value}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder={isStreaming ? "Alice antwortet..." : "Nachricht eingeben..."}
+          placeholder={
+            isStreaming ? "Alice antwortet..." : "Nachricht eingeben..."
+          }
           disabled={disabled || isStreaming}
           rows={1}
-          className="flex-1 resize-none bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-400 focus-visible:ring-gray-500 min-h-[44px] max-h-[200px]"
+          style={{ maxHeight: MAX_TEXTAREA_HEIGHT_PX }}
+          className="flex-1 resize-none bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-400 focus-visible:ring-gray-500 min-h-[44px] overflow-y-auto"
           aria-label="Nachricht eingeben"
         />
         {isStreaming ? (
           <Button
             type="button"
-            onClick={onStop}
+            onClick={handleStop}
+            disabled={stopping}
             size="icon"
             variant="destructive"
-            className="h-[44px] w-[44px] shrink-0"
+            className="h-[44px] w-[44px] shrink-0 disabled:opacity-60"
             aria-label="Antwort abbrechen"
           >
             <Square className="h-4 w-4" fill="currentColor" />

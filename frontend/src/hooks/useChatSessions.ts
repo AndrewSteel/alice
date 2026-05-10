@@ -11,7 +11,7 @@ import {
   renameSessionApi,
   deleteSessionApi,
 } from "@/services/api";
-import { ActiveTool } from "@/components/Chat/ToolStatusChip";
+import { Message } from "@/components/Chat/types";
 
 // ---------- Types ----------
 
@@ -23,19 +23,7 @@ export interface SessionMeta {
   persisted: boolean;
 }
 
-export interface MessageSegment {
-  content: string;
-  italic: boolean;
-}
-
-interface Message {
-  role: "user" | "assistant" | "error";
-  content: string;
-  segments?: MessageSegment[];
-  timestamp: Date;
-}
-
-// ---------- localStorage migration ----------
+// ---------- Helpers ----------
 
 const LEGACY_STORAGE_KEY = "alice_sessions";
 
@@ -48,6 +36,13 @@ function clearLegacyStorage(): void {
   }
 }
 
+function newId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 // ---------- Hook ----------
 
 export function useChatSessions() {
@@ -58,12 +53,10 @@ export function useChatSessions() {
   >({});
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [activeTools, setActiveTools] = useState<ActiveTool[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [messagesLoading, setMessagesLoading] = useState(false);
 
-  // Ref to track if initial load happened
   const initialized = useRef(false);
   const abortRef = useRef<(() => void) | null>(null);
   const streamingSessionRef = useRef<string | null>(null);
@@ -77,7 +70,7 @@ export function useChatSessions() {
     };
   }, []);
 
-  // Load sessions from backend API on mount
+  // Load sessions from backend on mount.
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
@@ -96,7 +89,7 @@ export function useChatSessions() {
         clearLegacyStorage();
       })
       .catch(() => {
-        // On error, sessions stay empty
+        // ignore — sessions stay empty on error
       })
       .finally(() => {
         setSessionsLoading(false);
@@ -104,15 +97,14 @@ export function useChatSessions() {
       });
   }, []);
 
-  // Active session messages
   const messages = activeSessionId
     ? messagesBySession[activeSessionId] ?? []
     : [];
 
-  // ---------- Actions ----------
+  // ---------- Session actions ----------
 
   const createNewSession = useCallback(() => {
-    const id = crypto.randomUUID();
+    const id = newId();
     const newSession: SessionMeta = {
       id,
       title: "Neuer Chat",
@@ -122,6 +114,40 @@ export function useChatSessions() {
     setSessions((prev) => [newSession, ...prev]);
     setActiveSessionId(id);
     return id;
+  }, []);
+
+  const markStreamAborted = useCallback((sessionId: string) => {
+    setMessagesBySession((prev) => {
+      const current = prev[sessionId];
+      if (!current || current.length === 0) return prev;
+      const next = current.slice();
+
+      // Stop any in-flight tool_call spinners — they would otherwise stay running
+      // forever after an abort.
+      for (let i = 0; i < next.length; i++) {
+        const m = next[i];
+        if (m.role === "tool_call" && m.toolStatus === "running") {
+          next[i] = { ...m, toolStatus: "error" };
+        }
+      }
+
+      const lastIdx = next.length - 1;
+      const last = next[lastIdx];
+      // Mark last assistant message as aborted; otherwise append a status message.
+      if (last.role === "assistant") {
+        const suffix =
+          last.content.length > 0 ? "\n\n*[Abgebrochen]*" : "*[Abgebrochen]*";
+        next[lastIdx] = { ...last, content: last.content + suffix, streaming: false };
+      } else {
+        next.push({
+          id: newId(),
+          role: "status",
+          content: "[Abgebrochen]",
+          createdAt: Date.now(),
+        });
+      }
+      return { ...prev, [sessionId]: next };
+    });
   }, []);
 
   const selectSession = useCallback(
@@ -134,19 +160,8 @@ export function useChatSessions() {
         isStreamingRef.current = false;
         abort?.();
         setIsStreaming(false);
-        setActiveTools([]);
         if (streamingSession) {
-          setMessagesBySession((prev) => {
-            const current = prev[streamingSession];
-            if (!current || current.length === 0) return prev;
-            const next = current.slice();
-            const lastIdx = next.length - 1;
-            const last = next[lastIdx];
-            if (last.role !== "assistant") return prev;
-            const suffix = last.content.length > 0 ? "\n\n*[Abgebrochen]*" : "*[Abgebrochen]*";
-            next[lastIdx] = { ...last, content: last.content + suffix };
-            return { ...prev, [streamingSession]: next };
-          });
+          markStreamAborted(streamingSession);
         }
       }
       setActiveSessionId(id);
@@ -158,9 +173,10 @@ export function useChatSessions() {
           fetchSessionMessages(id)
             .then((apiMessages) => {
               const mapped: Message[] = apiMessages.map((m) => ({
-                role: m.role as "user" | "assistant",
+                id: newId(),
+                role: m.role === "user" ? "user" : "assistant",
                 content: m.content,
-                timestamp: new Date(m.timestamp),
+                createdAt: new Date(m.timestamp).getTime(),
               }));
               setMessagesBySession((prev) => ({ ...prev, [id]: mapped }));
             })
@@ -173,7 +189,7 @@ export function useChatSessions() {
         }
       }
     },
-    [messagesBySession, sessions]
+    [messagesBySession, sessions, markStreamAborted]
   );
 
   const renameSession = useCallback((id: string, newTitle: string) => {
@@ -188,7 +204,7 @@ export function useChatSessions() {
       const session = prev.find((s) => s.id === id);
       if (session?.persisted) {
         renameSessionApi(id, trimmed).catch(() => {
-          // keep optimistic
+          // keep optimistic update
         });
       }
       return prev;
@@ -204,7 +220,6 @@ export function useChatSessions() {
         isStreamingRef.current = false;
         abort?.();
         setIsStreaming(false);
-        setActiveTools([]);
       }
 
       const session = sessions.find((s) => s.id === id);
@@ -218,31 +233,30 @@ export function useChatSessions() {
 
       if (session?.persisted) {
         deleteSessionApi(id).catch(() => {
-          // session already removed from UI
+          // already removed from UI
         });
       }
 
       if (activeSessionId === id) {
-        const newId = crypto.randomUUID();
+        const fresh = newId();
         const newSession: SessionMeta = {
-          id: newId,
+          id: fresh,
           title: "Neuer Chat",
           updatedAt: new Date(),
           persisted: false,
         };
         setSessions((prev) => [newSession, ...prev]);
-        setActiveSessionId(newId);
+        setActiveSessionId(fresh);
       }
     },
     [activeSessionId, sessions]
   );
 
-  // ---------- Helpers shared by streaming + legacy paths ----------
+  // ---------- Message turn helpers ----------
 
   /**
    * Adds the user message and updates session metadata.
-   * Returns the trimmed content + the conversation history before this turn
-   * (used for the legacy non-streaming endpoint).
+   * Returns the trimmed text plus the prior history (used by the legacy path).
    */
   const beginUserTurn = useCallback(
     (
@@ -253,9 +267,10 @@ export function useChatSessions() {
       const history = messagesBySession[sessionId] ?? [];
 
       const userMessage: Message = {
+        id: newId(),
         role: "user",
         content: trimmed,
-        timestamp: new Date(),
+        createdAt: Date.now(),
       };
 
       setMessagesBySession((prev) => {
@@ -267,8 +282,7 @@ export function useChatSessions() {
         prev.map((s) => {
           if (s.id !== sessionId) return s;
           const isFirstMessage =
-            s.title === "Neuer Chat" &&
-            !history.some((m) => m.role === "user");
+            s.title === "Neuer Chat" && !history.some((m) => m.role === "user");
           return {
             ...s,
             title: isFirstMessage ? trimmed.slice(0, 40) : s.title,
@@ -283,20 +297,22 @@ export function useChatSessions() {
     [messagesBySession]
   );
 
-  // ---------- Streaming send (PROJ-31) ----------
+  // ---------- Streaming send (PROJ-30/31, redesigned in PROJ-35) ----------
 
   const streamingSend = useCallback(
     (sessionId: string, text: string) => {
       const { trimmed } = beginUserTurn(sessionId, text);
 
       // Append an empty assistant placeholder; tokens will fill it in-place.
+      const assistantId = newId();
       setMessagesBySession((prev) => {
         const current = prev[sessionId] ?? [];
         const placeholder: Message = {
+          id: assistantId,
           role: "assistant",
           content: "",
-          segments: [{ content: "", italic: false }],
-          timestamp: new Date(),
+          createdAt: Date.now(),
+          streaming: true,
         };
         return { ...prev, [sessionId]: [...current, placeholder] };
       });
@@ -304,8 +320,12 @@ export function useChatSessions() {
       streamingSessionRef.current = sessionId;
       isStreamingRef.current = true;
       setIsStreaming(true);
-      setActiveTools([]);
 
+      // ---- SSE event handlers ----
+
+      // Append a token to the last assistant/thinking message in the session.
+      // If the last message is a tool_call (or anything else), open a new
+      // assistant bubble for the post-tool answer.
       const appendToken = (token: string) => {
         setMessagesBySession((prev) => {
           const current = prev[sessionId];
@@ -313,74 +333,140 @@ export function useChatSessions() {
           const next = current.slice();
           const lastIdx = next.length - 1;
           const last = next[lastIdx];
-          if (last.role !== "assistant") return prev;
-          const segs = last.segments ? last.segments.slice() : [{ content: last.content, italic: false }];
-          const lastSeg = { ...segs[segs.length - 1], content: segs[segs.length - 1].content + token };
-          segs[segs.length - 1] = lastSeg;
-          next[lastIdx] = { ...last, content: last.content + token, segments: segs };
+
+          if (last.role === "assistant" || last.role === "thinking") {
+            next[lastIdx] = { ...last, content: last.content + token };
+          } else {
+            // Open a new assistant message after a tool_call (or other role).
+            next.push({
+              id: newId(),
+              role: "assistant",
+              content: token,
+              createdAt: Date.now(),
+              streaming: true,
+            });
+          }
           return { ...prev, [sessionId]: next };
         });
       };
 
+      // tool_start: insert a new tool_call message (status=running).
+      const handleToolStart = (tool: string, status?: string) => {
+        setMessagesBySession((prev) => {
+          const current = prev[sessionId] ?? [];
+          // Close streaming on the previous assistant message (it's done writing
+          // pre-tool text) so the cursor moves to the tool_call line.
+          const closed = current.map((m, i) =>
+            i === current.length - 1 && m.role === "assistant" && m.streaming
+              ? { ...m, streaming: false }
+              : m
+          );
+          const toolMsg: Message = {
+            id: newId(),
+            role: "tool_call",
+            content: status ?? "",
+            createdAt: Date.now(),
+            toolName: tool,
+            toolStatus: "running",
+          };
+          return { ...prev, [sessionId]: [...closed, toolMsg] };
+        });
+      };
+
+      // tool_end: update the matching running tool_call to status=done/error.
+      const handleToolEnd = (tool: string) => {
+        setMessagesBySession((prev) => {
+          const current = prev[sessionId];
+          if (!current) return prev;
+          // Find the most recent running tool_call for this tool name.
+          const next = current.slice();
+          for (let i = next.length - 1; i >= 0; i--) {
+            const m = next[i];
+            if (
+              m.role === "tool_call" &&
+              m.toolName === tool &&
+              m.toolStatus === "running"
+            ) {
+              next[i] = { ...m, toolStatus: "done" };
+              break;
+            }
+          }
+          return { ...prev, [sessionId]: next };
+        });
+      };
+
+      const finishStream = () => {
+        streamingSessionRef.current = null;
+        isStreamingRef.current = false;
+        abortRef.current = null;
+        setIsStreaming(false);
+        // Clear streaming flag on the last assistant message.
+        setMessagesBySession((prev) => {
+          const current = prev[sessionId];
+          if (!current || current.length === 0) return prev;
+          const next = current.slice();
+          for (let i = next.length - 1; i >= 0; i--) {
+            if (next[i].streaming) {
+              next[i] = { ...next[i], streaming: false };
+              break;
+            }
+          }
+          return { ...prev, [sessionId]: next };
+        });
+      };
+
+      const handleError = (errMsg: string) => {
+        setMessagesBySession((prev) => {
+          const current = prev[sessionId];
+          if (!current || current.length === 0) return prev;
+          const next = current.slice();
+          const lastIdx = next.length - 1;
+          const last = next[lastIdx];
+
+          // Mark any in-flight tool_call as errored.
+          for (let i = next.length - 1; i >= 0; i--) {
+            const m = next[i];
+            if (m.role === "tool_call" && m.toolStatus === "running") {
+              next[i] = { ...m, toolStatus: "error" };
+              break;
+            }
+          }
+
+          // If the last message is the empty assistant placeholder, replace it
+          // with the error; otherwise push a new error message.
+          if (last.role === "assistant" && last.content.length === 0) {
+            next[lastIdx] = {
+              ...last,
+              role: "error",
+              content: errMsg,
+              streaming: false,
+            };
+          } else {
+            // Stop streaming flag on assistant first.
+            if (last.role === "assistant" && last.streaming) {
+              next[lastIdx] = { ...last, streaming: false };
+            }
+            next.push({
+              id: newId(),
+              role: "error",
+              content: errMsg,
+              createdAt: Date.now(),
+            });
+          }
+          return { ...prev, [sessionId]: next };
+        });
+        streamingSessionRef.current = null;
+        isStreamingRef.current = false;
+        abortRef.current = null;
+        setIsStreaming(false);
+      };
+
       const handle = streamChat(sessionId, trimmed, {
         onToken: appendToken,
-        onToolStart: (tool, status) => {
-          setActiveTools((prev) => {
-            if (prev.some((t) => t.tool === tool)) return prev;
-            return [...prev, { tool, status }];
-          });
-          // Mark whatever text was produced before this tool call as italic,
-          // then open a fresh normal segment for the post-tool answer.
-          setMessagesBySession((prev) => {
-            const current = prev[sessionId] ?? [];
-            if (current.length === 0) return prev;
-            const last = current[current.length - 1];
-            if (last.role !== "assistant") return prev;
-            const segs = last.segments ? last.segments.slice() : [{ content: last.content, italic: false }];
-            // Mark last segment italic (it holds pre-tool LLM text).
-            segs[segs.length - 1] = { ...segs[segs.length - 1], italic: true };
-            // Open a new empty normal segment for the response after the tool.
-            segs.push({ content: "", italic: false });
-            return { ...prev, [sessionId]: [...current.slice(0, -1), { ...last, segments: segs }] };
-          });
-        },
-        onToolEnd: (tool) => {
-          setActiveTools((prev) => prev.filter((t) => t.tool !== tool));
-        },
-        onDone: () => {
-          streamingSessionRef.current = null;
-          isStreamingRef.current = false;
-          abortRef.current = null;
-          setIsStreaming(false);
-          setActiveTools([]);
-        },
-        onError: (msg) => {
-          // If we never received any content, surface the error in the
-          // assistant placeholder; otherwise keep partial content and
-          // append a separate error bubble.
-          setMessagesBySession((prev) => {
-            const current = prev[sessionId];
-            if (!current || current.length === 0) return prev;
-            const next = current.slice();
-            const lastIdx = next.length - 1;
-            const last = next[lastIdx];
-            if (last.role === "assistant" && last.content.length === 0) {
-              next[lastIdx] = { ...last, role: "error", content: msg };
-            } else {
-              next.push({
-                role: "error",
-                content: msg,
-                timestamp: new Date(),
-              });
-            }
-            return { ...prev, [sessionId]: next };
-          });
-          streamingSessionRef.current = null;
-          isStreamingRef.current = false;
-          abortRef.current = null;
-          setIsStreaming(false);
-          setActiveTools([]);
-        },
+        onToolStart: handleToolStart,
+        onToolEnd: handleToolEnd,
+        onDone: finishStream,
+        onError: handleError,
       });
 
       abortRef.current = handle.abort;
@@ -399,22 +485,11 @@ export function useChatSessions() {
 
     abort?.();
     setIsStreaming(false);
-    setActiveTools([]);
 
     if (sessionId) {
-      setMessagesBySession((prev) => {
-        const current = prev[sessionId];
-        if (!current || current.length === 0) return prev;
-        const next = current.slice();
-        const lastIdx = next.length - 1;
-        const last = next[lastIdx];
-        if (last.role !== "assistant") return prev;
-        const suffix = last.content.length > 0 ? "\n\n*[Abgebrochen]*" : "*[Abgebrochen]*";
-        next[lastIdx] = { ...last, content: last.content + suffix };
-        return { ...prev, [sessionId]: next };
-      });
+      markStreamAborted(sessionId);
     }
-  }, []);
+  }, [markStreamAborted]);
 
   // ---------- Legacy non-streaming send (fallback) ----------
 
@@ -427,7 +502,7 @@ export function useChatSessions() {
       try {
         const allMessages: ChatMessage[] = [
           ...history
-            .filter((m) => m.role !== "error")
+            .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => ({
               role: m.role as "user" | "assistant",
               content: m.content,
@@ -438,9 +513,10 @@ export function useChatSessions() {
         const reply = await apiSendMessage(allMessages, sessionId);
 
         const assistantMessage: Message = {
+          id: newId(),
           role: "assistant",
           content: reply,
-          timestamp: new Date(),
+          createdAt: Date.now(),
         };
 
         setMessagesBySession((prev) => {
@@ -449,12 +525,13 @@ export function useChatSessions() {
         });
       } catch (err) {
         const errorMessage: Message = {
+          id: newId(),
           role: "error",
           content:
             err instanceof Error
               ? err.message
               : "Ein unbekannter Fehler ist aufgetreten.",
-          timestamp: new Date(),
+          createdAt: Date.now(),
         };
 
         setMessagesBySession((prev) => {
@@ -491,7 +568,6 @@ export function useChatSessions() {
     messages,
     isLoading,
     isStreaming,
-    activeTools,
     createNewSession,
     selectSession,
     renameSession,
