@@ -22,7 +22,6 @@ export function AppShell() {
     messages,
     isLoading,
     isStreaming,
-    activeTools,
     createNewSession,
     selectSession,
     renameSession,
@@ -133,7 +132,6 @@ export function AppShell() {
                 isLoading={isLoading}
                 messagesLoading={messagesLoading}
                 isStreaming={isStreaming}
-                activeTools={activeTools}
                 onSend={sendMessage}
                 onStop={stopStreaming}
               />
