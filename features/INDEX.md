@@ -48,8 +48,9 @@
 | PROJ-33 | Phase-2-Vorbereitung — Speech Streaming Interface (WebSocket, TTS-Segmentierung)   | Planned  | [PROJ-33-phase2-speech-streaming-interface.md](PROJ-33-phase2-speech-streaming-interface.md)                       | 2026-05-07 |
 | PROJ-34 | alice-auth RS256 Migration (HS256 → RS256, RSA Key Pair, Public Key Distribution)  | Deployed  | [PROJ-34-alice-auth-rs256.md](PROJ-34-alice-auth-rs256.md)                                                         | 2026-05-09 |
 | PROJ-35 | Chat Frontend Redesign — Nachrichten- und Eingabebereich (Markdown, Syntax Highlighting, 760px, kein Segment-Hack) | Deployed | [PROJ-35-chat-frontend-redesign.md](PROJ-35-chat-frontend-redesign.md) | 2026-05-10 |
+| PROJ-36 | RS256 Migration — Vollständige Umstellung aller Komponenten (n8n Credential, Sidebar 403, DMS 403) | Deployed | [PROJ-36-rs256-migration-completion.md](PROJ-36-rs256-migration-completion.md) | 2026-05-10 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-36
+## Next Available ID: PROJ-37
 
