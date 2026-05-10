@@ -47,8 +47,9 @@
 | PROJ-32 | nginx Streaming-Konfiguration (SSE-Proxy, Buffering off, Rate-Limiting)            | Deployed  | [PROJ-32-nginx-streaming-config.md](PROJ-32-nginx-streaming-config.md)                                             | 2026-05-07 |
 | PROJ-33 | Phase-2-Vorbereitung — Speech Streaming Interface (WebSocket, TTS-Segmentierung)   | Planned  | [PROJ-33-phase2-speech-streaming-interface.md](PROJ-33-phase2-speech-streaming-interface.md)                       | 2026-05-07 |
 | PROJ-34 | alice-auth RS256 Migration (HS256 → RS256, RSA Key Pair, Public Key Distribution)  | Deployed  | [PROJ-34-alice-auth-rs256.md](PROJ-34-alice-auth-rs256.md)                                                         | 2026-05-09 |
+| PROJ-35 | Chat Frontend Redesign — Nachrichten- und Eingabebereich (Markdown, Syntax Highlighting, 760px, kein Segment-Hack) | Planned | [PROJ-35-chat-frontend-redesign.md](PROJ-35-chat-frontend-redesign.md) | 2026-05-10 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-35
+## Next Available ID: PROJ-36
 
