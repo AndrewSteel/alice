@@ -3,8 +3,9 @@ Ollama streaming generator with tool-use.
 
 Outputs SSE events:
   data: {"type":"token","content":"..."}        — every text chunk
-  data: {"type":"tool_start","tool":"...","status":"..."}
-  data: {"type":"tool_end","tool":"...","ok":true}
+  data: {"type":"thinking","content":"..."}     — reasoning chunk (PROJ-37)
+  data: {"type":"tool_start","tool":"...","status":"...","query":"..."}
+  data: {"type":"tool_end","tool":"...","ok":true,"summary":"..."}
   data: {"type":"error","message":"..."}
   data: {"type":"done","usage":{...}}
   data: [DONE]
@@ -30,20 +31,136 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
 OLLAMA_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60"))
 
+# PROJ-37: stream Ollama reasoning tokens (message.thinking) to the client.
+# Set to "false" / "0" / "no" to disable without a code change.
+OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "true").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+    "",
+)
+
 MAX_TOOL_ROUNDS = 4
 
-# Friendly status text shown to the user while a tool runs
-TOOL_STATUS_TEXT = {
-    "search_documents": "Suche in Dokumenten…",
-    "get_document_details": "Lade Dokumentdetails…",
-    "home_assistant": "Steuere Smart Home…",
-    "recall": "Suche in Erinnerungen…",
-    "remember": "Merke mir das…",
-}
+# Hard caps for user-visible tool status and summary strings.
+TOOL_STATUS_MAX_LEN = 80
+TOOL_SUMMARY_MAX_LEN = 80
+TOOL_ERROR_DETAIL_MAX_LEN = 60
 
 
 def _sse(event: dict) -> bytes:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def _truncate(text: str, max_len: int) -> str:
+    """Hard cap with ellipsis (single-char …)."""
+    if not text:
+        return ""
+    text = text.strip()
+    if len(text) <= max_len:
+        return text
+    # Reserve one char for the ellipsis.
+    return text[: max_len - 1].rstrip() + "…"
+
+
+def _build_tool_status(tool_name: str, args: dict[str, Any]) -> str:
+    """
+    Dynamic, user-friendly status text shown while a tool runs.
+    Falls back to a generic "Führe {tool} aus…" for unknown tools.
+    """
+    if tool_name == "search_documents":
+        query = str(args.get("query") or "").strip()
+        if query:
+            return _truncate(f"Suche nach '{query}'…", TOOL_STATUS_MAX_LEN)
+        return "Suche in Dokumenten…"
+
+    if tool_name == "get_document_details":
+        doc_id = (
+            str(args.get("weaviate_id") or "").strip()
+            or str(args.get("document_id") or "").strip()
+        )
+        if doc_id:
+            return _truncate(f"Lade Dokument {doc_id}…", TOOL_STATUS_MAX_LEN)
+        return "Lade Dokumentdetails…"
+
+    if tool_name == "home_assistant":
+        command = str(args.get("command") or "").strip()
+        if command:
+            return _truncate(f"Smart Home: {command}…", TOOL_STATUS_MAX_LEN)
+        return "Steuere Smart Home…"
+
+    if tool_name == "recall":
+        query = str(args.get("query") or "").strip()
+        if query:
+            return _truncate(f"Erinnere mich an '{query}'…", TOOL_STATUS_MAX_LEN)
+        return "Suche in Erinnerungen…"
+
+    if tool_name == "remember":
+        key = str(args.get("key") or "").strip()
+        value_raw = args.get("value")
+        value = "" if value_raw is None else str(value_raw).strip()
+        fact_raw = str(args.get("fact") or "").strip()
+        if key and value:
+            return _truncate(f"Merke: {key} = {value}…", TOOL_STATUS_MAX_LEN)
+        if fact_raw:
+            return _truncate(f"Merke: '{fact_raw}'…", TOOL_STATUS_MAX_LEN)
+        return "Merke mir das…"
+
+    return _truncate(f"Führe {tool_name} aus…", TOOL_STATUS_MAX_LEN)
+
+
+def _result_count(result: dict[str, Any]) -> int | None:
+    """Best-effort hit-count extraction from a tool result."""
+    for key in ("count", "total", "n", "num_results"):
+        v = result.get(key)
+        if isinstance(v, int):
+            return v
+    for key in ("results", "hits", "documents", "items", "memories"):
+        v = result.get(key)
+        if isinstance(v, list):
+            return len(v)
+    return None
+
+
+def _build_tool_summary(tool_name: str, ok: bool, result: dict[str, Any]) -> str:
+    """
+    Short German summary of the tool outcome, shown after tool_end.
+    Returns "" if there's nothing useful to say.
+    """
+    if not ok:
+        err = str(result.get("error") or "").strip()
+        if err and err != "timeout":
+            return _truncate(
+                f"Fehler: {_truncate(err, TOOL_ERROR_DETAIL_MAX_LEN)}",
+                TOOL_SUMMARY_MAX_LEN,
+            )
+        if err == "timeout":
+            return "Fehler: Zeitüberschreitung"
+        return "Fehler"
+
+    if tool_name == "search_documents":
+        n = _result_count(result)
+        if n is None or n <= 0:
+            return "Keine Dokumente gefunden"
+        return f"{n} Dokument{'e' if n != 1 else ''} gefunden"
+
+    if tool_name == "recall":
+        n = _result_count(result)
+        if n is None or n <= 0:
+            return "Keine Erinnerungen gefunden"
+        return f"{n} Erinnerung{'en' if n != 1 else ''} gefunden"
+
+    if tool_name == "remember":
+        return "Gespeichert"
+
+    if tool_name == "home_assistant":
+        return "Ausgeführt"
+
+    if tool_name == "get_document_details":
+        return "Geladen"
+
+    return ""
 
 
 async def stream_chat(
@@ -76,7 +193,9 @@ async def stream_chat(
                 "messages": messages,
                 "stream": True,
                 "tools": tools.tool_schema(),
-                "options": {"think": False},
+                # PROJ-37: top-level `think` toggles Ollama's reasoning stream.
+                # We emit message.thinking chunks as a separate SSE event.
+                "think": OLLAMA_THINK,
             }
 
             pending_tool_calls: list[dict] = []
@@ -105,6 +224,13 @@ async def stream_chat(
                             continue
 
                         msg = chunk.get("message") or {}
+                        # PROJ-37: emit thinking BEFORE content (Ollama orders them this way).
+                        # Thinking tokens are NEVER added to accumulated_text and NEVER counted
+                        # in chat_tokens_total — they are flushed to the client and forgotten.
+                        thinking = msg.get("thinking") or ""
+                        if thinking:
+                            yield (_sse({"type": "thinking", "content": thinking}), {})
+
                         content = msg.get("content") or ""
                         if content:
                             assistant_chunk_text += content
@@ -164,7 +290,8 @@ async def stream_chat(
                 else:
                     args = {}
 
-                status_text = TOOL_STATUS_TEXT.get(tool_name, f"Führe {tool_name} aus…")
+                # PROJ-37: dynamic status text built from the tool arguments.
+                status_text = _build_tool_status(tool_name, args)
                 query_hint = args.get("query") or args.get("command") or ""
                 yield (_sse({
                     "type": "tool_start",
@@ -199,11 +326,16 @@ async def stream_chat(
                     tool_msg["tool_call_id"] = tc_id
                 messages.append(tool_msg)
 
-                yield (_sse({
+                # PROJ-37: short German outcome summary in the tool_end event.
+                end_evt: dict[str, Any] = {
                     "type": "tool_end",
                     "tool": tool_name,
                     "ok": ok,
-                }), {})
+                }
+                summary = _build_tool_summary(tool_name, ok, result)
+                if summary:
+                    end_evt["summary"] = summary
+                yield (_sse(end_evt), {})
 
             if not done_flag:
                 # Some Ollama versions don't set done=true on the chunk that contains
