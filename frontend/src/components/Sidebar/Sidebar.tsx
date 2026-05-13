@@ -44,7 +44,7 @@ export function Sidebar({
         <ChatSearch value={search} onChange={setSearch} />
       </div>
 
-      <ScrollArea className="flex-1 overflow-y-auto py-1">
+      <ScrollArea className="flex-1 overflow-y-auto py-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full">
         <ChatList
           sessions={sessions}
           activeId={activeSessionId}

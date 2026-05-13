@@ -20,6 +20,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export interface ChatSession {
@@ -39,6 +44,11 @@ interface ChatListItemProps {
 export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }: ChatListItemProps) {
   const [hovered, setHovered] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [supportsHover, setSupportsHover] = useState(false);
+
+  useEffect(() => {
+    setSupportsHover(window.matchMedia("(hover: hover)").matches);
+  }, []);
   const [draft, setDraft] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -87,7 +97,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => { if (!menuOpen) setHovered(false); }}
         className={cn(
-          "group flex items-center justify-between rounded-md px-3 py-2 text-sm cursor-pointer select-none transition-colors",
+          "group flex items-center min-w-0 rounded-md px-3 py-2 text-sm cursor-pointer select-none transition-colors",
           isActive
             ? "bg-gray-700 text-gray-100"
             : "text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"
@@ -110,7 +120,18 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
           />
         ) : (
           <>
-            <span className="truncate flex-1">{session.title}</span>
+            {supportsHover ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="truncate flex-1 min-w-0">{session.title}</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-white text-black border-gray-200">
+                  {session.title}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <span className="truncate flex-1 min-w-0">{session.title}</span>
+            )}
             {(hovered || menuOpen) && (
               <div className="flex items-center ml-1 shrink-0">
                 <DropdownMenu open={menuOpen} onOpenChange={(open) => {
