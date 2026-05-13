@@ -51,8 +51,9 @@
 | PROJ-36 | RS256 Migration — Vollständige Umstellung aller Komponenten (n8n Credential, Sidebar 403, DMS 403) | Deployed | [PROJ-36-rs256-migration-completion.md](PROJ-36-rs256-migration-completion.md) | 2026-05-10 |
 
 | PROJ-37 | Streaming Verbosity — Thinking-Support und angereicherte Tool-Events | Deployed | [PROJ-37-streaming-verbosity.md](PROJ-37-streaming-verbosity.md) | 2026-05-13 |
+| PROJ-38 | Sidebar Text-Truncation & Context-Menu Regression Fix (PROJ-35-Nachfolge) | Deployed | [PROJ-38-sidebar-text-truncation-and-context-menu-fix.md](PROJ-38-sidebar-text-truncation-and-context-menu-fix.md) | 2026-05-13 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-38
+## Next Available ID: PROJ-39
 
