@@ -50,7 +50,9 @@
 | PROJ-35 | Chat Frontend Redesign — Nachrichten- und Eingabebereich (Markdown, Syntax Highlighting, 760px, kein Segment-Hack) | Deployed | [PROJ-35-chat-frontend-redesign.md](PROJ-35-chat-frontend-redesign.md) | 2026-05-10 |
 | PROJ-36 | RS256 Migration — Vollständige Umstellung aller Komponenten (n8n Credential, Sidebar 403, DMS 403) | Deployed | [PROJ-36-rs256-migration-completion.md](PROJ-36-rs256-migration-completion.md) | 2026-05-10 |
 
+| PROJ-37 | Streaming Verbosity — Thinking-Support und angereicherte Tool-Events | Deployed | [PROJ-37-streaming-verbosity.md](PROJ-37-streaming-verbosity.md) | 2026-05-13 |
+
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-37
+## Next Available ID: PROJ-38
 

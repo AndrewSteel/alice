@@ -129,6 +129,10 @@ export function useChatSessions() {
         if (m.role === "tool_call" && m.toolStatus === "running") {
           next[i] = { ...m, toolStatus: "error" };
         }
+        // PROJ-37: close any open thinking-message so it stops blinking.
+        if (m.role === "thinking" && m.streaming) {
+          next[i] = { ...m, streaming: false };
+        }
       }
 
       const lastIdx = next.length - 1;
@@ -323,9 +327,10 @@ export function useChatSessions() {
 
       // ---- SSE event handlers ----
 
-      // Append a token to the last assistant/thinking message in the session.
-      // If the last message is a tool_call (or anything else), open a new
-      // assistant bubble for the post-tool answer.
+      // Append a token to the last assistant message in the session.
+      // PROJ-37: thinking→token transition opens a NEW assistant bubble so
+      // reasoning text and answer text stay in separate messages. Anything
+      // else (tool_call, error, …) also opens a new assistant bubble.
       const appendToken = (token: string) => {
         setMessagesBySession((prev) => {
           const current = prev[sessionId];
@@ -334,10 +339,13 @@ export function useChatSessions() {
           const lastIdx = next.length - 1;
           const last = next[lastIdx];
 
-          if (last.role === "assistant" || last.role === "thinking") {
+          if (last.role === "assistant") {
             next[lastIdx] = { ...last, content: last.content + token };
           } else {
-            // Open a new assistant message after a tool_call (or other role).
+            // Close an open thinking-message before opening the answer bubble.
+            if (last.role === "thinking" && last.streaming) {
+              next[lastIdx] = { ...last, streaming: false };
+            }
             next.push({
               id: newId(),
               role: "assistant",
@@ -350,14 +358,54 @@ export function useChatSessions() {
         });
       };
 
+      // PROJ-37: thinking event — either convert the empty assistant placeholder
+      // to a thinking bubble, append to the last thinking message, or insert a
+      // new one. This keeps the chat tidy (no empty assistant + thinking pair).
+      const appendThinking = (chunk: string) => {
+        setMessagesBySession((prev) => {
+          const current = prev[sessionId];
+          if (!current || current.length === 0) return prev;
+          const next = current.slice();
+          const lastIdx = next.length - 1;
+          const last = next[lastIdx];
+
+          if (
+            last.role === "assistant" &&
+            last.content.length === 0 &&
+            last.streaming
+          ) {
+            // In-place conversion of the empty placeholder.
+            next[lastIdx] = {
+              ...last,
+              role: "thinking",
+              content: chunk,
+            };
+          } else if (last.role === "thinking" && last.streaming) {
+            next[lastIdx] = { ...last, content: last.content + chunk };
+          } else {
+            next.push({
+              id: newId(),
+              role: "thinking",
+              content: chunk,
+              createdAt: Date.now(),
+              streaming: true,
+            });
+          }
+          return { ...prev, [sessionId]: next };
+        });
+      };
+
       // tool_start: insert a new tool_call message (status=running).
       const handleToolStart = (tool: string, status?: string) => {
         setMessagesBySession((prev) => {
           const current = prev[sessionId] ?? [];
-          // Close streaming on the previous assistant message (it's done writing
-          // pre-tool text) so the cursor moves to the tool_call line.
+          // Close streaming on the previous assistant OR thinking message so the
+          // cursor moves to the tool_call line. PROJ-37: also handles the case
+          // where Ollama interleaves a tool call inside a thinking block.
           const closed = current.map((m, i) =>
-            i === current.length - 1 && m.role === "assistant" && m.streaming
+            i === current.length - 1 &&
+            (m.role === "assistant" || m.role === "thinking") &&
+            m.streaming
               ? { ...m, streaming: false }
               : m
           );
@@ -374,7 +422,9 @@ export function useChatSessions() {
       };
 
       // tool_end: update the matching running tool_call to status=done/error.
-      const handleToolEnd = (tool: string) => {
+      // PROJ-37: when the backend ships a `summary`, also overwrite the
+      // tool_call message content with it (e.g. "3 Dokumente gefunden").
+      const handleToolEnd = (tool: string, summary?: string) => {
         setMessagesBySession((prev) => {
           const current = prev[sessionId];
           if (!current) return prev;
@@ -387,7 +437,11 @@ export function useChatSessions() {
               m.toolName === tool &&
               m.toolStatus === "running"
             ) {
-              next[i] = { ...m, toolStatus: "done" };
+              next[i] = {
+                ...m,
+                toolStatus: "done",
+                content: summary && summary.length > 0 ? summary : m.content,
+              };
               break;
             }
           }
@@ -463,6 +517,7 @@ export function useChatSessions() {
 
       const handle = streamChat(sessionId, trimmed, {
         onToken: appendToken,
+        onThinking: appendThinking,
         onToolStart: handleToolStart,
         onToolEnd: handleToolEnd,
         onDone: finishStream,

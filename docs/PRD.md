@@ -41,6 +41,7 @@ Alice ist ein lokaler, KI-first und Sprache-first Personal Assistant und Smart H
 | P1       | DMS Security Hardening (PROJ-23/24/25)                       | 1.4   | Deployed |
 | P1       | Admin Nutzerverwaltung (PROJ-26)                             | 1.5   | Deployed |
 | P1       | Memory-Transfer PostgreSQL → Weaviate                        | 1.5   | Planned  |
+| P1       | Streaming Verbosity — Thinking + angereicherte Tool-Events (PROJ-37) | 1.6 | Deployed |
 | P2       | Speech Gateway (Whisper STT + Piper TTS)                     | 2     | Planned  |
 | P2       | Speaker-ID / Sprechererkennung                               | 2     | Planned  |
 | P3       | Multi-User-Handling & Display-Routing                        | 3     | Planned  |

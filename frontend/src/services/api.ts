@@ -265,8 +265,11 @@ export async function sendMessage(
 
 export interface StreamCallbacks {
   onToken: (text: string) => void;
+  /** PROJ-37: reasoning-token chunk emitted before the answer text. */
+  onThinking: (text: string) => void;
   onToolStart: (tool: string, status?: string) => void;
-  onToolEnd: (tool: string) => void;
+  /** PROJ-37: tool_end now carries an optional German outcome summary. */
+  onToolEnd: (tool: string, summary?: string) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -276,10 +279,17 @@ export interface StreamHandle {
 }
 
 interface SseEvent {
-  type: "token" | "tool_start" | "tool_end" | "done" | "error";
+  type:
+    | "token"
+    | "thinking"
+    | "tool_start"
+    | "tool_end"
+    | "done"
+    | "error";
   content?: string;
   tool?: string;
   status?: string;
+  summary?: string;
   message?: string;
 }
 
@@ -397,8 +407,13 @@ export function streamChat(
 
           switch (evt.type) {
             case "token":
-              if (typeof evt.content === "string") {
+              if (typeof evt.content === "string" && evt.content.length > 0) {
                 callbacks.onToken(evt.content);
+              }
+              break;
+            case "thinking":
+              if (typeof evt.content === "string") {
+                callbacks.onThinking(evt.content);
               }
               break;
             case "tool_start":
@@ -408,7 +423,7 @@ export function streamChat(
               break;
             case "tool_end":
               if (evt.tool) {
-                callbacks.onToolEnd(evt.tool);
+                callbacks.onToolEnd(evt.tool, evt.summary);
               }
               break;
             case "error":
