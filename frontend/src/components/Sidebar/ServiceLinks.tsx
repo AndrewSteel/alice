@@ -4,11 +4,13 @@ import {
   Workflow,
   MessageSquare,
   Home,
-  Hammer,
+  ChartNoAxesCombined,
   KanbanSquare,
   NotebookPen,
   Upload,
   ExternalLink,
+  HardDrive,
+  Server,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -39,9 +41,21 @@ const SERVICES: ServiceLink[] = [
     external: true,
   },
   {
-    label: "HA Development",
-    url: "http://hassdev.lan:8123",
-    icon: Hammer,
+    label: "Knox",
+    url: "http://knox.lan:5000",
+    icon: HardDrive,
+    external: true,
+  },
+  {
+    label: "Grafana",
+    url: "http://grafana.lan:3000",
+    icon: ChartNoAxesCombined,
+    external: true,
+  },
+  {
+    label: "PVE",
+    url: "http://pve.lan:8006",
+    icon: Server,
     external: true,
   },
   {
