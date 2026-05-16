@@ -12,6 +12,7 @@ Event types:
   entity_removed    -> Remove entity from Weaviate + deactivate in PG
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ import paho.mqtt.client as mqtt
 import psycopg2
 import psycopg2.extras
 import requests
+import websockets
 import weaviate
 from weaviate.classes.query import Filter
 
@@ -36,6 +38,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("alice-ha-sync")
 
 # ---------------------------------------------------------------------------
@@ -427,17 +430,191 @@ def _ha_headers() -> dict:
     return {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
 
 
+def _ha_ws_url() -> str:
+    """Convert HA_URL (http/https) into a ws/wss WebSocket URL for /api/websocket."""
+    parsed = urlparse(HA_URL)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    netloc = parsed.netloc or parsed.path  # tolerate values without scheme
+    return f"{scheme}://{netloc}/api/websocket"
+
+
 class HAFetchError:
-    """Sentinel returned by fetch_ha_entities on failure to distinguish error types."""
+    """Sentinel returned by fetch helpers on failure to distinguish error types."""
 
     def __init__(self, reason: str, detail: str = ""):
-        self.reason = reason  # "invalid_token" or "ha_unreachable"
+        self.reason = reason  # "invalid_token" | "ha_unreachable" | "expose_unavailable"
         self.detail = detail
 
 
-def fetch_ha_entities() -> list[dict] | HAFetchError:
-    """Fetch entities from HA /api/states (REST, all HA versions). Area info fetched
-    optionally from area registry and gracefully omitted if unavailable."""
+async def _ha_ws_fetch(
+    ws_url: str, token: str
+) -> tuple[set[str], dict[str, str | None], dict[str, str | None], dict[str, list[str]], dict[str, str]]:
+    """Open a single WebSocket session, authenticate, and run the commands
+    required for the overhauled sync.
+
+    config/entity_registry/list omits aliases (lightweight format). Aliases are
+    fetched individually via config/entity_registry/get for each exposed entity only.
+
+    Returns: (expose_set, entity_area_map, device_area_map, entity_aliases_map, area_name_map)
+    """
+    expose_set: set[str] = set()
+    entity_area_map: dict[str, str | None] = {}
+    device_area_map: dict[str, str | None] = {}
+    entity_aliases_map: dict[str, list[str]] = {}
+    area_name_map: dict[str, str] = {}
+
+    # 10 s connect + per-message timeouts inside the protocol calls below.
+    async with websockets.connect(ws_url, open_timeout=10, close_timeout=5, max_size=16 * 1024 * 1024) as ws:
+        # 1) auth_required handshake
+        greeting = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+        if greeting.get("type") != "auth_required":
+            raise RuntimeError(f"unexpected greeting from HA WS: {greeting}")
+
+        await ws.send(json.dumps({"type": "auth", "access_token": token}))
+        auth_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+        if auth_resp.get("type") != "auth_ok":
+            # auth_invalid -> raise so caller maps it to "invalid_token"
+            raise PermissionError(
+                f"HA WS auth failed: {auth_resp.get('message') or auth_resp}"
+            )
+
+        async def _call(msg_id: int, payload: dict):
+            await ws.send(json.dumps({"id": msg_id, **payload}))
+            while True:
+                raw = await asyncio.wait_for(ws.recv(), timeout=20)
+                data = json.loads(raw)
+                if data.get("id") != msg_id:
+                    # ignore unrelated frames (events, other results)
+                    continue
+                if data.get("type") != "result":
+                    continue
+                if not data.get("success", False):
+                    err = data.get("error", {})
+                    raise RuntimeError(
+                        f"HA WS command {payload.get('type')} failed: "
+                        f"{err.get('code')} {err.get('message')}"
+                    )
+                return data.get("result")
+
+        # 2) expose list — keyed by entity_id, value contains per-assistant flags.
+        #    Shape: { "exposed_entities": { "<entity_id>": { "conversation": true, ... } } }
+        expose_raw = await _call(1, {"type": "homeassistant/expose_entity/list"})
+        if isinstance(expose_raw, dict):
+            exposed = expose_raw.get("exposed_entities") or {}
+            if isinstance(exposed, dict):
+                for eid, info in exposed.items():
+                    if isinstance(info, dict) and info.get("conversation"):
+                        expose_set.add(eid)
+
+        # 3) entity registry — entity_id -> area_id (may be None)
+        #    The list response is a lightweight format and does NOT include aliases.
+        entity_reg = await _call(2, {"type": "config/entity_registry/list"})
+        if isinstance(entity_reg, list):
+            for row in entity_reg:
+                if not isinstance(row, dict):
+                    continue
+                eid = row.get("entity_id")
+                if not eid:
+                    continue
+                entity_area_map[eid] = row.get("area_id")
+                # Stash device_id alongside under a private key so the caller
+                # can resolve area via device registry without a second pass.
+                entity_area_map.setdefault(f"__device__:{eid}", row.get("device_id"))
+
+        # 4) device registry — device_id -> area_id (may be None)
+        device_reg = await _call(3, {"type": "config/device_registry/list"})
+        if isinstance(device_reg, list):
+            for row in device_reg:
+                if not isinstance(row, dict):
+                    continue
+                did = row.get("id")
+                if not did:
+                    continue
+                device_area_map[did] = row.get("area_id")
+
+        # 5) area registry — area_id -> area name
+        area_reg = await _call(4, {"type": "config/area_registry/list"})
+        if isinstance(area_reg, list):
+            for row in area_reg:
+                if not isinstance(row, dict):
+                    continue
+                aid = row.get("area_id")
+                if aid:
+                    area_name_map[aid] = row.get("name", "")
+
+        # 6) aliases — config/entity_registry/get (extended format) for exposed entities only.
+        #    The list command omits aliases; get returns the full _entry_ext_dict including them.
+        #    Exposed entities are typically 20–100, so sequential calls are fast enough.
+        for i, eid in enumerate(expose_set):
+            try:
+                entry = await _call(5 + i, {"type": "config/entity_registry/get", "entity_id": eid})
+                if isinstance(entry, dict):
+                    aliases_raw = entry.get("aliases", [])
+                    entity_aliases_map[eid] = aliases_raw if isinstance(aliases_raw, list) else []
+            except Exception as exc:
+                logger.debug("Could not fetch aliases for %s: %s", eid, exc)
+                entity_aliases_map.setdefault(eid, [])
+
+    return expose_set, entity_area_map, device_area_map, entity_aliases_map, area_name_map
+
+
+def fetch_ha_websocket_data() -> (
+    tuple[set[str], dict[str, str | None], dict[str, str | None], dict[str, list[str]], dict[str, str]] | HAFetchError
+):
+    """Synchronous wrapper around the async WebSocket fetch. Returns the four
+    lookup structures, or an HAFetchError if the API is unreachable / rejects auth.
+
+    The expose set is the master allow-list. If this call fails the caller MUST
+    abort the sync (no fallback to "all entities")."""
+    ws_url = _ha_ws_url()
+    logger.info("fetch_ha_websocket_data: connecting to %s", ws_url)
+    try:
+        result = asyncio.run(_ha_ws_fetch(ws_url, HA_TOKEN))
+        logger.info("fetch_ha_websocket_data: success, expose_count=%d", len(result[0]))
+        return result
+    except PermissionError as e:
+        logger.error("fetch_ha_websocket_data: invalid_token: %s", e)
+        return HAFetchError("invalid_token", str(e)[:500])
+    except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as e:
+        logger.error("fetch_ha_websocket_data: ha_unreachable: %s", e)
+        return HAFetchError("ha_unreachable", str(e)[:500])
+    except Exception as e:  # noqa: BLE001 - protocol/parse errors all map here
+        logger.error("fetch_ha_websocket_data: expose_unavailable: %s", e)
+        return HAFetchError("expose_unavailable", str(e)[:500])
+
+
+def _resolve_area_for_entity(
+    entity_id: str,
+    entity_area_map: dict[str, str | None],
+    device_area_map: dict[str, str | None],
+) -> str | None:
+    """Look up area_id for an entity using entity registry first, then fall back
+    to the area_id of the entity's device."""
+    area_id = entity_area_map.get(entity_id)
+    if area_id:
+        return area_id
+    device_id = entity_area_map.get(f"__device__:{entity_id}")
+    if device_id:
+        return device_area_map.get(device_id)
+    return None
+
+
+def fetch_ha_entities(
+    expose_set: set[str],
+    entity_area_map: dict[str, str | None],
+    device_area_map: dict[str, str | None],
+    entity_aliases_map: dict[str, list[str]],
+    area_name_map: dict[str, str],
+) -> tuple[list[dict], int] | HAFetchError:
+    """Fetch entities from HA /api/states, filter to conversation-exposed only,
+    and enrich with area data from the registries.
+
+    Returns a tuple `(entities, filtered_count)` on success, where
+    `filtered_count` is the number of /api/states entries that were dropped
+    because they were not in the expose set. On error returns HAFetchError.
+
+    The expose_set parameter is the master allow-list (from the WebSocket fetch).
+    Entities not in the set are dropped — they are not indexed in HAIntent."""
     try:
         states_resp = requests.get(
             f"{HA_URL}/api/states",
@@ -455,28 +632,20 @@ def fetch_ha_entities() -> list[dict] | HAFetchError:
         logger.error("HA API error: %s", e)
         return HAFetchError("ha_unreachable", str(e)[:500])
 
-    # Area registry is optional — not available on all HA versions/configurations.
-    # If unavailable, entities will get name-only utterances (no area context).
-    area_map: dict[str, str] = {}
-    try:
-        area_resp = requests.get(
-            f"{HA_URL}/api/config/area_registry/list",
-            headers=_ha_headers(),
-            timeout=15,
-        )
-        if area_resp.ok:
-            area_map = {a["area_id"]: a["name"] for a in area_resp.json()}
-    except requests.RequestException:
-        pass
-
     entities = []
+    filtered_count = 0
     for s in all_states:
         entity_id = s.get("entity_id", "")
+        if entity_id not in expose_set:
+            filtered_count += 1
+            continue  # not conversation-exposed -> skip
         domain = entity_id.split(".")[0] if "." in entity_id else ""
         attrs = s.get("attributes", {})
         friendly_name = attrs.get("friendly_name") or _fallback_name(entity_id)
-        area_id = attrs.get("area_id")
-        area_name = area_map.get(area_id) if area_id else None
+        area_id = _resolve_area_for_entity(
+            entity_id, entity_area_map, device_area_map
+        )
+        area_name = area_name_map.get(area_id) if area_id else None
 
         entities.append(
             {
@@ -485,16 +654,24 @@ def fetch_ha_entities() -> list[dict] | HAFetchError:
                 "friendly_name": friendly_name,
                 "area_id": area_id,
                 "area_name": area_name,
-                "aliases": [],
+                "aliases": entity_aliases_map.get(entity_id, []),
                 "device_class": attrs.get("device_class"),
             }
         )
 
-    return entities
+    return entities, filtered_count
 
 
-def fetch_single_entity(entity_id: str) -> dict | None:
-    """Fetch a single entity from HA /api/states/{entity_id}. Returns None on error."""
+def fetch_single_entity(
+    entity_id: str,
+    entity_area_map: dict[str, str | None],
+    device_area_map: dict[str, str | None],
+    entity_aliases_map: dict[str, list[str]],
+    area_name_map: dict[str, str],
+) -> dict | None:
+    """Fetch a single entity from HA /api/states/{entity_id} and enrich with
+    area data from the supplied registries. Returns None if the entity does
+    not exist in HA or the request fails."""
     try:
         state_resp = requests.get(
             f"{HA_URL}/api/states/{entity_id}",
@@ -512,22 +689,9 @@ def fetch_single_entity(entity_id: str) -> dict | None:
     attrs = s.get("attributes", {})
     domain = entity_id.split(".")[0] if "." in entity_id else ""
     friendly_name = attrs.get("friendly_name") or _fallback_name(entity_id)
-    area_id = attrs.get("area_id")
+    area_id = _resolve_area_for_entity(entity_id, entity_area_map, device_area_map)
 
-    area_name = None
-    if area_id:
-        try:
-            area_resp = requests.get(
-                f"{HA_URL}/api/config/area_registry/list",
-                headers=_ha_headers(),
-                timeout=15,
-            )
-            if area_resp.ok:
-                areas = area_resp.json()
-                match = next((a for a in areas if a["area_id"] == area_id), None)
-                area_name = match["name"] if match else None
-        except requests.RequestException:
-            pass
+    area_name = area_name_map.get(area_id) if area_id else None
 
     return {
         "entity_id": entity_id,
@@ -535,7 +699,7 @@ def fetch_single_entity(entity_id: str) -> dict | None:
         "friendly_name": friendly_name,
         "area_id": area_id,
         "area_name": area_name,
-        "aliases": [],
+        "aliases": entity_aliases_map.get(entity_id, []),
         "device_class": attrs.get("device_class"),
     }
 
@@ -562,8 +726,56 @@ def build_template_map(templates: list[dict]) -> dict[str, list[dict]]:
     return tmap
 
 
+# Expansion tables for value placeholders. {message} is intentionally absent —
+# free-text payloads (notify) are still skipped.
+PERCENT_VALUES = (10, 25, 50, 75, 100)
+TEMPERATURE_VALUES = (16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)
+
+# Domain -> (placeholder key in the rendered utterance, parameter key in the
+# Weaviate `parameters` JSON, list of values, value type).
+_DOMAIN_VALUE_EXPANSIONS: dict[str, tuple[str, tuple[int, ...]]] = {
+    "climate": ("temperature", TEMPERATURE_VALUES),
+    "light": ("brightness_pct", PERCENT_VALUES),
+    "media_player": ("volume_level_pct", PERCENT_VALUES),
+}
+
+
+def _value_expansion_for(pattern: str, domain: str) -> tuple[str, tuple[int, ...]] | None:
+    """Return (parameter_key, values) for a pattern that needs value-expansion.
+
+    Selection order:
+      1. {temperature} placeholder -> temperature values
+      2. {value} + "Grad"/"°C" in pattern OR domain == climate -> temperature
+      3. {value} + domain-specific table (light/media_player/...) -> percent
+      4. {value} fallback -> percent
+    Returns None for patterns without an expandable placeholder."""
+    has_value = "{value}" in pattern
+    has_temp = "{temperature}" in pattern
+
+    if not (has_value or has_temp):
+        return None
+
+    if has_temp:
+        return ("temperature", TEMPERATURE_VALUES)
+
+    # has_value below
+    lower = pattern.lower()
+    if "grad" in lower or "°c" in lower or domain == "climate":
+        return ("temperature", TEMPERATURE_VALUES)
+
+    domain_cfg = _DOMAIN_VALUE_EXPANSIONS.get(domain)
+    if domain_cfg:
+        return domain_cfg
+
+    return ("value", PERCENT_VALUES)
+
+
 def generate_utterances(entity: dict, template_map: dict[str, list[dict]]) -> list[dict]:
-    """Generate Weaviate HAIntent utterance objects for a single entity."""
+    """Generate Weaviate HAIntent utterance objects for a single entity.
+
+    Patterns containing {value} or {temperature} are expanded into one utterance
+    per representative value (see PROJ-39 AC-3/AC-4). Patterns containing
+    {message} are still skipped — free-text payloads are not enumerable."""
     domain = entity["domain"]
     name = entity.get("friendly_name") or _fallback_name(entity["entity_id"])
     area = entity.get("area_name")
@@ -588,58 +800,88 @@ def generate_utterances(entity: dict, template_map: dict[str, list[dict]]) -> li
         if not isinstance(patterns, list):
             continue
 
+        default_params = tpl.get("default_parameters", {})
+        if isinstance(default_params, str):
+            try:
+                default_params = json.loads(default_params)
+            except json.JSONDecodeError:
+                default_params = {}
+        if not isinstance(default_params, dict):
+            default_params = {}
+
         for pattern in patterns:
             if not isinstance(pattern, str):
                 continue
-            # Skip patterns with value placeholders
-            if any(p in pattern for p in ("{value}", "{message}", "{temperature}")):
+            # {message} stays unsupported — no enumeration of free text.
+            if "{message}" in pattern:
                 continue
 
+            expansion = _value_expansion_for(pattern, domain)
+            # For non-expandable patterns we render one utterance per name/area
+            # combination. For expandable patterns we additionally render one
+            # utterance per expansion value (both placeholder spellings are
+            # substituted by the literal number).
+            if expansion is None:
+                value_iterations: list[tuple[str, int | None]] = [("", None)]
+            else:
+                param_key, values = expansion
+                value_iterations = [(str(v), v) for v in values]
+
             for n in names:
-                variants = []
+                for value_str, value_num in value_iterations:
+                    # Substitute the numeric placeholder first (if any).
+                    rendered_pattern = pattern
+                    if expansion is not None:
+                        rendered_pattern = rendered_pattern.replace(
+                            "{value}", value_str
+                        ).replace("{temperature}", value_str)
 
-                if "{where}" in pattern:
-                    variants.append(pattern.replace("{where}", n))
-                    if area:
-                        variants.append(pattern.replace("{where}", area))
-                elif "{name}" in pattern and "{area}" in pattern:
-                    if area:
-                        variants.append(
-                            pattern.replace("{name}", n).replace("{area}", area)
+                    variants = []
+
+                    if "{where}" in rendered_pattern:
+                        variants.append(rendered_pattern.replace("{where}", n))
+                        if area:
+                            variants.append(rendered_pattern.replace("{where}", area))
+                    elif "{name}" in rendered_pattern and "{area}" in rendered_pattern:
+                        if area:
+                            variants.append(
+                                rendered_pattern.replace("{name}", n).replace(
+                                    "{area}", area
+                                )
+                            )
+                    elif "{name}" in rendered_pattern:
+                        variants.append(rendered_pattern.replace("{name}", n))
+                    elif "{area}" in rendered_pattern:
+                        if area:
+                            variants.append(rendered_pattern.replace("{area}", area))
+                    else:
+                        variants.append(rendered_pattern + " " + n)
+
+                    # Merge per-value parameter into the template defaults.
+                    if expansion is not None and value_num is not None:
+                        params = dict(default_params)
+                        params[expansion[0]] = value_num
+                    else:
+                        params = default_params
+
+                    for utt in variants:
+                        utt = utt.strip()
+                        if not utt or utt in seen:
+                            continue
+                        seen.add(utt)
+
+                        utterances.append(
+                            {
+                                "utterance": utt,
+                                "entityId": entity["entity_id"],
+                                "domain": domain,
+                                "service": tpl["service"],
+                                "parameters": json.dumps(params or {}),
+                                "language": tpl.get("language", "de"),
+                                "intentTemplate": f"{domain}:{tpl['intent']}",
+                                "certaintyThreshold": CERTAINTY_THRESHOLD,
+                            }
                         )
-                elif "{name}" in pattern:
-                    variants.append(pattern.replace("{name}", n))
-                elif "{area}" in pattern:
-                    if area:
-                        variants.append(pattern.replace("{area}", area))
-                else:
-                    variants.append(pattern + " " + n)
-
-                for utt in variants:
-                    utt = utt.strip()
-                    if not utt or utt in seen:
-                        continue
-                    seen.add(utt)
-
-                    default_params = tpl.get("default_parameters", {})
-                    if isinstance(default_params, str):
-                        try:
-                            default_params = json.loads(default_params)
-                        except json.JSONDecodeError:
-                            default_params = {}
-
-                    utterances.append(
-                        {
-                            "utterance": utt,
-                            "entityId": entity["entity_id"],
-                            "domain": domain,
-                            "service": tpl["service"],
-                            "parameters": json.dumps(default_params or {}),
-                            "language": tpl.get("language", "de"),
-                            "intentTemplate": f"{domain}:{tpl['intent']}",
-                            "certaintyThreshold": CERTAINTY_THRESHOLD,
-                        }
-                    )
 
     return utterances
 
@@ -799,17 +1041,42 @@ def full_sync(mqtt_client: MQTTClient, trigger_source: str, force_all: bool = Fa
         message=f"Full sync started (trigger: {trigger_source})",
     )
 
-    # 1. Fetch entities from HA
-    ha_entities = fetch_ha_entities()
-    if isinstance(ha_entities, HAFetchError):
+    # 1a. Fetch WebSocket data: expose list + entity/device registries.
+    #     Expose list is the master allow-list. Any failure here aborts the
+    #     sync — there is no fallback to "all entities".
+    ws_result = fetch_ha_websocket_data()
+    if isinstance(ws_result, HAFetchError):
         publish_error(
             mqtt_client,
-            ha_entities.reason,
-            message=ha_entities.detail or f"HA API error: {ha_entities.reason}",
-            detail=ha_entities.detail,
+            ws_result.reason,
+            message=ws_result.detail or f"HA WS error: {ws_result.reason}",
+            detail=ws_result.detail,
         )
-        update_sync_log(log_id, "error", error_message=ha_entities.detail[:500] if ha_entities.detail else ha_entities.reason)
+        update_sync_log(
+            log_id,
+            "error",
+            error_message=(ws_result.detail or ws_result.reason)[:500],
+            details={"phase": "websocket_fetch", "reason": ws_result.reason},
+        )
         return
+    expose_set, entity_area_map, device_area_map, entity_aliases_map, area_name_map = ws_result
+
+    # 1b. Fetch entities from HA REST states, filtered to conversation-exposed.
+    fetch_result = fetch_ha_entities(expose_set, entity_area_map, device_area_map, entity_aliases_map, area_name_map)
+    if isinstance(fetch_result, HAFetchError):
+        publish_error(
+            mqtt_client,
+            fetch_result.reason,
+            message=fetch_result.detail or f"HA API error: {fetch_result.reason}",
+            detail=fetch_result.detail,
+        )
+        update_sync_log(
+            log_id,
+            "error",
+            error_message=fetch_result.detail[:500] if fetch_result.detail else fetch_result.reason,
+        )
+        return
+    ha_entities, filtered_count = fetch_result
 
     # 2. Load existing entities from DB for diff
     existing = load_existing_entities()
@@ -897,7 +1164,12 @@ def full_sync(mqtt_client: MQTTClient, trigger_source: str, force_all: bool = Fa
         intents_generated=weaviate_inserted,
         intents_removed=weaviate_deleted,
         error_message="; ".join(all_errors)[:500] if all_errors else None,
-        details={"warnings": warnings, "batch_errors": all_errors},
+        details={
+            "warnings": warnings,
+            "batch_errors": all_errors,
+            "expose_count": len(expose_set),
+            "filtered_count": filtered_count,
+        },
     )
 
     # 11. Publish result
@@ -966,21 +1238,47 @@ def incremental_sync(mqtt_client: MQTTClient, entity_id: str):
     if log_id is None:
         return
 
+    # Fetch WebSocket data: required for both the expose check and the
+    # area-registry lookup. A failure aborts the sync.
+    ws_result = fetch_ha_websocket_data()
+    if isinstance(ws_result, HAFetchError):
+        publish_error(
+            mqtt_client,
+            ws_result.reason,
+            message=ws_result.detail or f"HA WS error: {ws_result.reason}",
+            detail=ws_result.detail,
+        )
+        update_sync_log(
+            log_id,
+            "error",
+            error_message=(ws_result.detail or ws_result.reason)[:500],
+            details={"phase": "websocket_fetch", "entity_id": entity_id},
+        )
+        return
+    expose_set, entity_area_map, device_area_map, entity_aliases_map, area_name_map = ws_result
+
+    # Expose check: only index conversation-exposed entities.
+    if entity_id not in expose_set:
+        logger.info(
+            "Incremental sync skipped for %s: not conversation-exposed", entity_id
+        )
+        update_sync_log(
+            log_id,
+            "success",
+            entities_added=0,
+            details={
+                "skip_reason": "not_conversation_exposed",
+                "entity_id": entity_id,
+            },
+        )
+        return
+
     # Fetch entity from HA
-    entity_data = fetch_single_entity(entity_id)
+    entity_data = fetch_single_entity(entity_id, entity_area_map, device_area_map, entity_aliases_map, area_name_map)
     if entity_data is None:
         error_msg = f"HA API error for {entity_id}"
         publish_error(mqtt_client, "ha_unreachable", message=error_msg)
         update_sync_log(log_id, "error", error_message=error_msg)
-        return
-
-    if entity_data.get("_skip"):
-        reason = entity_data.get("reason", "not_exposed")
-        logger.info("Incremental sync skipped for %s: %s", entity_id, reason)
-        update_sync_log(
-            log_id, "success", entities_added=0,
-            details={"skip_reason": reason, "entity_id": entity_id},
-        )
         return
 
     # Check for no-op (no changes)

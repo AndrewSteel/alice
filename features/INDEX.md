@@ -53,7 +53,9 @@
 | PROJ-37 | Streaming Verbosity — Thinking-Support und angereicherte Tool-Events | Deployed | [PROJ-37-streaming-verbosity.md](PROJ-37-streaming-verbosity.md) | 2026-05-13 |
 | PROJ-38 | Sidebar Text-Truncation & Context-Menu Regression Fix (PROJ-35-Nachfolge) | Deployed | [PROJ-38-sidebar-text-truncation-and-context-menu-fix.md](PROJ-38-sidebar-text-truncation-and-context-menu-fix.md) | 2026-05-13 |
 
+| PROJ-39 | alice-ha-sync Overhaul — Conversation Filter, Area Registry, Value Placeholder Expansion | Deployed | [PROJ-39-ha-sync-overhaul.md](PROJ-39-ha-sync-overhaul.md) | 2026-05-15 |
+
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-39
+## Next Available ID: PROJ-40
 
