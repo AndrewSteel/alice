@@ -124,3 +124,18 @@ If bugs found:
 ```
 test(PROJ-X): Add QA test results for [feature name]
 ```
+
+---
+
+## After Skill Completion (Instructions for orchestrating Claude)
+
+After this skill returns its result, Claude MUST immediately present the full QA report to the user — do not just confirm "done". The report must include:
+
+1. **Full AC table** — every sub-check with PASS/FAIL (same structure as written to the feature spec)
+2. **All bugs** — each bug with severity, root cause, and reproduction steps
+3. **Security audit verdict** — brief summary
+4. **Production-ready decision** — READY or NOT READY, with justification
+
+Then confirm: "QA results have been documented in `features/PROJ-XX-....md`."
+
+Do NOT summarize or shorten the AC table. The user needs the full detail to prioritize fixes.
