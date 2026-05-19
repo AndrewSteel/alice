@@ -6,49 +6,89 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 
 ## Development Status
 
-| Phase         | Status     | Description                                              |
-| ------------- | ---------- | -------------------------------------------------------- |
-| Phase 0       | ✅ Deployed | Hardware setup, GPU configuration, storage layout        |
-| Phase 1.1     | ✅ Deployed | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA |
-| Phase 1.2     | ✅ Deployed | HA-first intent routing with semantic matching           |
-| **Phase 1.5** | ✅ Deployed | JWT authentication, login screen, services sidebar       |
-| Phase 2       | 🗓 Planned  | Speech gateway: Whisper STT + Piper TTS + Speaker-ID     |
-| Phase 3       | 🗓 Planned  | Multi-user, display routing, security hardening          |
+| Phase         | Status          | Description                                                              |
+| ------------- | --------------- | ------------------------------------------------------------------------ |
+| Phase 0       | ✅ Deployed      | Hardware setup, GPU configuration, storage layout                        |
+| Phase 1.1     | ✅ Deployed      | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA                 |
+| Phase 1.2     | ✅ Deployed      | HA-first intent routing with semantic matching                           |
+| Phase 1.5     | ✅ Deployed      | JWT authentication, login screen, services sidebar                       |
+| **Phase 1.6** | ✅ Deployed      | DMS pipeline v2, user management, streaming infrastructure, RS256 auth   |
+| Phase 2       | 🗓 Planned       | Speech gateway: Whisper STT + Piper TTS + Speaker-ID                     |
+| Phase 3       | 🗓 Planned       | Multi-user, display routing, security hardening                          |
 
 ### Phase 1.2 Features
 
-| ID     | Feature                                                             | Status      |
-| ------ | ------------------------------------------------------------------- | ----------- |
-| PROJ-1 | HA Intent Infrastructure (DB schema + Weaviate HAIntent collection) | ✅ Deployed  |
-| PROJ-2 | FastAPI container + hassil intent expansion                         | ✅ Deployed  |
-| PROJ-3 | HA-first chat handler with intent routing                           | ✅ Deployed  |
-| PROJ-4 | HA auto-sync (MQTT → n8n → Weaviate)                                | ✅ Deployed  |
-| PROJ-5 | Hassil native library integration (expansion engine upgrade)        | ✅ Deployed  |
-| PROJ-6 | Hassil expansion_rules compatibility fix (all intents via hassil)   | ✅ Deployed  |
+| ID      | Feature                                                             | Status     |
+| ------- | ------------------------------------------------------------------- | ---------- |
+| PROJ-1  | HA Intent Infrastructure (DB schema + Weaviate HAIntent collection) | ✅ Deployed |
+| PROJ-2  | FastAPI container + hassil intent expansion                         | ✅ Deployed |
+| PROJ-3  | HA-first chat handler with intent routing                           | ✅ Deployed |
+| PROJ-4  | HA auto-sync (MQTT → n8n → Weaviate)                                | ✅ Deployed |
+| PROJ-5  | Hassil native library integration (expansion engine upgrade)        | ✅ Deployed |
+| PROJ-6  | Hassil expansion_rules compatibility fix (all intents via hassil)   | ✅ Deployed |
 
 ### Phase 1.5 Features
 
-| ID      | Feature                                                                         | Status      |
-| ------- | ------------------------------------------------------------------------------- | ----------- |
-| PROJ-7  | JWT auth / login screen (bcrypt passwords, JWT sessions, ProtectedRoute)        | ✅ Deployed  |
-| PROJ-8  | Services sidebar & landing page migration (old HTML dashboard → Alice sidebar)  | ✅ Deployed  |
-| PROJ-9  | Chat-handler JWT protection (webhook auth guard + token validation)             | ✅ Deployed  |
-| PROJ-10 | Weaviate intent lookup — migration to native n8n nodes                          | ✅ Deployed  |
-| PROJ-11 | HA sync Python worker (replaces n8n alice-ha-intent-sync, credentials in .env) | ✅ Deployed  |
-| PROJ-12 | Phase 2 security & UX hardening (nginx headers, rate-limiting, chat rename)     | ✅ Deployed  |
-| PROJ-13 | Auth-endpoint rate-limiting (login brute-force protection)                      | ✅ Deployed  |
-| PROJ-14 | Sidebar context-menu & session persistence                                      | ✅ Deployed  |
+| ID      | Feature                                                                        | Status     |
+| ------- | ------------------------------------------------------------------------------ | ---------- |
+| PROJ-7  | JWT auth / login screen (bcrypt passwords, JWT sessions, ProtectedRoute)       | ✅ Deployed |
+| PROJ-8  | Services sidebar & landing page migration (old HTML dashboard → Alice sidebar) | ✅ Deployed |
+| PROJ-9  | Chat-handler JWT protection (webhook auth guard + token validation)            | ✅ Deployed |
+| PROJ-10 | Weaviate intent lookup — migration to native n8n nodes                         | ✅ Deployed |
+| PROJ-11 | HA sync Python worker (replaces n8n alice-ha-intent-sync)                      | ✅ Deployed |
+| PROJ-12 | Phase 2 security & UX hardening (nginx headers, rate-limiting, chat rename)    | ✅ Deployed |
+| PROJ-13 | Auth-endpoint rate-limiting (login brute-force protection)                     | ✅ Deployed |
+| PROJ-14 | Sidebar context-menu & session persistence                                     | ✅ Deployed |
 
 ### DMS Pipeline Features
 
-| ID      | Feature                                                                         | Status      |
-| ------- | ------------------------------------------------------------------------------- | ----------- |
-| PROJ-15 | DMS NAS folder management (CRUD via REST API + frontend)                        | ✅ Deployed  |
-| PROJ-16 | DMS scanner & NAS multi-format scan                                             | ✅ Deployed  |
-| PROJ-17 | DMS scanner multi-queue routing (PROJ-16 extension)                             | ✅ Deployed  |
-| PROJ-18 | DMS text-extractor containers (pdf/ocr/txt/office → plaintext)                 | ✅ Deployed  |
-| PROJ-19 | DMS processor workflow (LLM classification + Weaviate storage)                  | ✅ Deployed  |
-| PROJ-20 | DMS document search tool (alice-tool-search)                                    | 🗓 Planned  |
+| ID      | Feature                                                                       | Status     |
+| ------- | ----------------------------------------------------------------------------- | ---------- |
+| PROJ-15 | DMS NAS folder management (CRUD via REST API + frontend)                      | ✅ Deployed |
+| PROJ-16 | DMS scanner & NAS multi-format scan                                           | ✅ Deployed |
+| PROJ-17 | DMS scanner multi-queue routing (PROJ-16 extension)                           | ✅ Deployed |
+| PROJ-18 | DMS text-extractor containers (pdf/ocr/txt/office → plaintext)                | ✅ Deployed |
+| PROJ-19 | DMS processor workflow (LLM classification + Weaviate storage)                | ✅ Deployed |
+| PROJ-20 | DMS document search tool (alice-tool-search)                                  | ✅ Deployed |
+| PROJ-21 | DMS lifecycle management (duplicates, moves, content changes)                 | ✅ Deployed |
+| PROJ-22 | DMS lifecycle workflow (alice-dms-lifecycle MQTT consumer, no LLM)            | ✅ Deployed |
+| PROJ-23 | DMS security hardening (SQL injection + GraphQL injection fixes)              | ✅ Deployed |
+| PROJ-24 | DMS operational improvements (scan stats, LLM retry, MQTT persistent sessions)| ✅ Deployed |
+| PROJ-25 | DMS folder API — explicit null update for nullable fields                     | ✅ Deployed |
+| PROJ-28 | DMS folder sort order (drag-and-drop, `sort_order` column, scanner ordering)  | ✅ Deployed |
+| PROJ-29 | BankTransaction indexing (per-transaction Weaviate objects, chunked extraction)| ✅ Deployed |
+
+### User Management Features
+
+| ID      | Feature                                                                              | Status     |
+| ------- | ------------------------------------------------------------------------------------ | ---------- |
+| PROJ-26 | Admin user management (create/deactivate/delete, OTP email, forced first-login flow) | ✅ Deployed |
+| PROJ-27 | User profile self-edit (password, email, name, interests, preferences)               | ✅ Deployed |
+
+### Streaming Infrastructure
+
+| ID      | Feature                                                                              | Status     |
+| ------- | ------------------------------------------------------------------------------------ | ---------- |
+| PROJ-30 | Streaming chat backend (alice-chat-stream Python/FastAPI, SSE endpoint)              | ✅ Deployed |
+| PROJ-31 | Frontend streaming UI (token rendering, tool-status chips, stop button)              | ✅ Deployed |
+| PROJ-32 | nginx streaming configuration (SSE proxy, buffering off, proxy_read_timeout)         | ✅ Deployed |
+| PROJ-33 | Phase-2 speech streaming interface (WebSocket, TTS sentence segmentation)            | 🗓 Planned  |
+| PROJ-34 | alice-auth RS256 migration (HS256 → RSA key pair, public key distribution)           | ✅ Deployed |
+| PROJ-36 | RS256 migration completion (n8n JWT credential update, fixes sidebar/DMS 403)        | ✅ Deployed |
+
+### Frontend & UX
+
+| ID      | Feature                                                                              | Status     |
+| ------- | ------------------------------------------------------------------------------------ | ---------- |
+| PROJ-35 | Chat frontend redesign (Markdown, syntax highlighting, 760 px max-width, no hacks)   | ✅ Deployed |
+| PROJ-37 | Streaming verbosity (thinking stream, enriched tool-call events with context)        | ✅ Deployed |
+| PROJ-38 | Sidebar text-truncation & context-menu regression fix                                | ✅ Deployed |
+
+### HA Sync
+
+| ID      | Feature                                                                              | Status     |
+| ------- | ------------------------------------------------------------------------------------ | ---------- |
+| PROJ-39 | alice-ha-sync overhaul (conversation filter, area registry, value placeholder expand)| ✅ Deployed |
 
 ---
 
@@ -59,12 +99,18 @@ CLIENT (React PWA, HA Voice Devices)
     ↓
 SPEECH GATEWAY [Phase 2] (Python: Whisper STT, Speaker-ID, Piper TTS)
     ↓
-ORCHESTRATION (n8n + Ollama qwen3:14b via Tool-Use)
+CHAT SERVICE (alice-chat-stream — Python/FastAPI, SSE streaming)
+    ↓
+ORCHESTRATION (Ollama qwen3:14b via tool-use; n8n sub-workflows for HA + DMS)
     ↓
 DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 ```
 
 **Core principle:** One LLM call with native tool-use — no two-step routing. The model directly selects and executes tools: `home_assistant`, `search_documents`, `get_document_details`, `remember`, `recall`.
+
+**Streaming:** `alice-chat-stream` (PROJ-30) streams LLM tokens to the browser via Server-Sent Events. Tool status events and (optionally) reasoning tokens are pushed inline. The legacy `alice-chat-handler` n8n workflow remains as a fallback.
+
+**Authentication:** JWTs are issued by `alice-auth` using RS256 (RSA key pair). The private key stays in alice-auth; other services (alice-chat-stream, n8n) verify tokens with the public key only — no shared secret crosses container boundaries.
 
 ---
 
@@ -109,23 +155,24 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 ### Docker Services
 
-| Service                 | Purpose                                    |
-| ----------------------- | ------------------------------------------ |
-| `n8n`                   | AI orchestration, workflow engine          |
-| `ollama-titan`          | LLM inference (TITAN X)                    |
-| `weaviate`              | Vector search                              |
-| `weaviate-transformers` | text2vec-transformers inference (RTX 3090) |
-| `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)      |
-| `alice-ha-sync`         | HA entity sync worker (MQTT-triggered Python, replaces PROJ-4 n8n workflow) |
-| `alice-dms-pdf`         | DMS text extractor: PDF → plaintext (pdfminer)                              |
-| `alice-dms-ocr`         | DMS text extractor: image/scanned PDF → plaintext (Tesseract OCR)           |
-| `alice-dms-office`      | DMS text extractor: Office documents → plaintext (LibreOffice headless)     |
-| `alice-dms-txt`         | DMS text extractor: plain text passthrough                                  |
-| `alice-auth`            | JWT authentication (FastAPI, bcrypt)       |
-| `postgres`              | Structured data, alice schema, auth        |
-| `redis`                 | Session cache, message queue               |
-| `mqtt`                  | Event bus (alice/# topics)                 |
-| `nginx`                 | Reverse proxy, React static files          |
+| Service                 | Purpose                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `alice-chat-stream`     | Primary chat endpoint: FastAPI/SSE streaming, JWT RS256 verification (PROJ-30)  |
+| `alice-auth`            | JWT issuance (RS256), bcrypt password verification, OTP email (PROJ-7/34)       |
+| `alice-ha-sync`         | HA entity sync: conversation-filter, area registry, value placeholder expansion (PROJ-11/39) |
+| `alice-dms-pdf`         | DMS text extractor: PDF → plaintext (pdfminer)                                  |
+| `alice-dms-ocr`         | DMS text extractor: scanned PDF/image → plaintext (Tesseract OCR)               |
+| `alice-dms-office`      | DMS text extractor: Office documents → plaintext (LibreOffice headless)         |
+| `alice-dms-txt`         | DMS text extractor: plain text passthrough                                      |
+| `n8n`                   | Workflow engine: sub-workflows for HA + DMS tools, DMS pipeline, auth webhooks  |
+| `ollama-titan`          | LLM inference (TITAN X GPU)                                                     |
+| `weaviate`              | Vector search                                                                   |
+| `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                      |
+| `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)                                           |
+| `postgres`              | Structured data: alice schema, auth sessions, user profiles                     |
+| `redis`                 | DMS state (hash index, queued files), session cache                             |
+| `mqtt`                  | Event bus (alice/# topics) — DMS pipeline, HA sync                              |
+| `nginx`                 | Reverse proxy, React static files, SSE proxy (buffering disabled)               |
 
 ---
 
@@ -141,36 +188,68 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 ## n8n Workflows
 
-Workflows live in `workflows/`. Import via n8n UI or CLI. The main endpoint is `POST /webhook/alice`.
+Workflows live in `workflows/`. Import via n8n UI. The streaming endpoint is `POST /api/stream/chat`; the legacy webhook fallback is `POST /webhook/alice`.
 
-| Workflow                | Trigger                       | Purpose                        |
-| ----------------------- | ----------------------------- | ------------------------------ |
-| `alice-chat-handler`    | Webhook POST `/webhook/alice` | Main chat logic + memory       |
-| `alice-tool-ha`         | Workflow call                 | Home Assistant REST API        |
-| `alice-tool-search`     | Workflow call                 | Weaviate document search       |
-| `alice-memory-transfer` | Schedule (daily)              | PostgreSQL → Weaviate transfer |
-| `alice-dms-scanner`     | Schedule (hourly)             | NAS scan → MQTT queue          |
-| `alice-dms-processor`   | Schedule (nightly)            | MQTT queue → Weaviate          |
+| Workflow                | Trigger                          | Purpose                                        |
+| ----------------------- | -------------------------------- | ---------------------------------------------- |
+| `alice-chat-handler`    | Webhook POST `/webhook/alice`    | Legacy chat logic + memory (fallback)          |
+| `alice-tool-ha`         | Workflow call                    | Home Assistant REST API tool                   |
+| `alice-tool-search`     | Workflow call                    | Weaviate document + transaction search tool    |
+| `alice-memory-transfer` | Schedule (daily)                 | PostgreSQL → Weaviate long-term memory         |
+| `alice-dms-scanner`     | Schedule (hourly)                | NAS scan → lifecycle detection → MQTT queues   |
+| `alice-dms-processor`   | Schedule (nightly)               | MQTT queue → LLM classify + extract → Weaviate |
+| `alice-dms-lifecycle`   | MQTT `alice/dms/lifecycle`       | Duplicate/move events: Weaviate PATCH, no LLM  |
+| `alice-dms-folder-api`  | Webhook `/webhook/dms/folders`   | Admin CRUD for NAS watched folders             |
+| Auth workflows          | Webhook                          | Login / validate / refresh / logout            |
+
+---
+
+## DMS Pipeline
+
+The Document Management System pipeline runs fully automated:
+
+```text
+NAS inbox folders (configured via admin UI)
+    ↓ hourly — alice-dms-scanner (n8n)
+    ↓ detects: new / duplicate / moved / changed
+    ↓
+MQTT queues (alice/dms/<type> per format)   MQTT alice/dms/lifecycle
+    ↓                                            ↓
+alice-dms-{pdf,ocr,txt,office}             alice-dms-lifecycle (n8n)
+    → plaintext extraction                      → Weaviate PATCH, Redis update
+    ↓
+MQTT alice/dms/extracted
+    ↓ nightly — alice-dms-processor (n8n)
+    → LLM classification (qwen3:14b, 1× retry)
+    → field extraction per document type
+    → Weaviate storage (per-collection)
+    → BankTransaction chunking for bank statements
+```
+
+**Weaviate collections:** `Invoice`, `BankStatement`, `BankTransaction`, `Document`, `Email`, `SecuritySettlement`, `Contract`
+
+**Redis state:** `alice:dms:path_to_hash`, `alice:dms:hash_to_paths:<hash>`, `alice:dms:processed`, `alice:dms:queued_files`
 
 ---
 
 ## Domain Coverage
 
-| Domain          | Capability                                                      |
-| --------------- | --------------------------------------------------------------- |
-| Smart Home      | Lights, climate, covers, locks, media players, switches, vacuum |
-| Documents (DMS) | Invoices, bank statements, contracts, emails, securities        |
-| Memory          | Persistent facts, conversation history, user preferences        |
-| Finances        | [Phase 1.2+]                                                    |
-| Calendar & Mail | [Phase 2+]                                                      |
+| Domain          | Capability                                                                         |
+| --------------- | ---------------------------------------------------------------------------------- |
+| Smart Home      | Lights, climate, covers, locks, media players, switches, vacuum — conversation-exposed entities only |
+| Documents (DMS) | Invoices, bank statements (+ per-transaction search), contracts, emails, securities |
+| Memory          | Persistent facts, conversation history, user preferences                           |
+| User Management | Admin: create/deactivate/delete users, OTP reset; self-service: password, email, profile |
+| Finances        | Bank transaction search (PROJ-29); deeper analysis planned                         |
+| Calendar & Mail | [Phase 2+]                                                                         |
 
 ---
 
 ## Latency Targets
 
-| Phase                       | Target         | Maximum        |
+| Scenario                    | Target         | Maximum        |
 | --------------------------- | -------------- | -------------- |
-| LLM first token             | < 800 ms       | 1,500 ms       |
+| LLM first token (streaming) | < 800 ms       | 1,500 ms       |
 | LLM full response           | < 2,000 ms     | 4,000 ms       |
 | HA tool execution           | < 300 ms       | 500 ms         |
 | **End-to-end (text)**       | **< 3,000 ms** | **< 5,000 ms** |
@@ -184,19 +263,22 @@ Workflows live in `workflows/`. Import via n8n UI or CLI. The main endpoint is `
 alice/
 ├── docker/compose/          # Docker Compose files per service category
 │   ├── ai/                  # Ollama, Whisper, Piper, OpenWebUI
-│   ├── automations/         # n8n, Weaviate, MQTT
-│   ├── data/                # PostgreSQL
+│   ├── automations/         # n8n, Weaviate, MQTT, alice-chat-stream
+│   ├── data/                # PostgreSQL, Redis
 │   └── infra/               # nginx, Prometheus, Grafana, Gotify
-├── docs/                    # Architecture docs and planning
-│   └── planning/            # Concept documents (German)
 ├── features/                # Feature specs (PROJ-N-*.md) + INDEX.md
 ├── frontend/                # React + TypeScript + Tailwind PWA
 ├── schemas/                 # Weaviate collection schemas (JSON)
-├── scripts/                 # Setup and init scripts
-├── sql/                     # PostgreSQL schema migrations
-├── workflows/               # n8n workflow exports (JSON)
-├── scripts/                 # Operational scripts (sync, deploy, init)
+├── scripts/                 # Setup and operational scripts
+│   ├── setup-database.sh    # Create DB + apply init-schema.sql
+│   ├── set-initial-passwords.sh  # Interactive bcrypt password setup
+│   ├── init-weaviate-schema.sh   # Initialize Weaviate collections
+│   ├── deploy-frontend.sh   # Build + copy to nginx html/
 │   └── sync-compose.sh      # Sync compose files to production server
+├── sql/
+│   ├── init-schema.sql      # Consolidated schema (Phase 1 final)
+│   └── seed-users.example.sql  # Template for initial users (copy → seed-users.sql)
+├── workflows/               # n8n workflow exports (JSON)
 └── .env.n8n.example         # Required n8n environment variables
 ```
 
@@ -208,16 +290,21 @@ alice/
 # 1. Copy and fill in environment file
 cp .env.n8n.example docker/compose/automations/n8n/.env
 
-# 2. Apply PostgreSQL schema
-docker exec postgres psql -U alice_user -d alice -f sql/init-postgres.sql
+# 2. Apply PostgreSQL schema (consolidated Phase 1 final)
+docker exec -i postgres psql -U user -d alice < sql/init-schema.sql
 
-# 3. Initialize Weaviate collections
-./scripts/init-weaviate-schema.sh http://weaviate:8080
+# 3. Seed users (copy example, fill in real names/emails)
+cp sql/seed-users.example.sql sql/seed-users.sql
+# edit sql/seed-users.sql, then:
+docker exec -i postgres psql -U user -d alice < sql/seed-users.sql
 
-# 4. Set initial passwords for alice.users
+# 4. Set initial passwords interactively
 ./scripts/set-initial-passwords.sh
 
-# 5. Start frontend dev server
+# 5. Initialize Weaviate collections
+./scripts/init-weaviate-schema.sh http://weaviate:8080
+
+# 6. Start frontend dev server
 cd frontend && npm ci && npm run dev
 ```
 
