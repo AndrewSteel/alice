@@ -17,7 +17,7 @@
 set -euo pipefail
 
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-postgres}"
-DB_USER="${DB_USER:-user}"
+DB_USER="${DB_USER:-alice_user}"
 DB_NAME="${DB_NAME:-alice}"
 
 echo "============================================================"
