@@ -61,28 +61,38 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+---
+
 ## Project Overview
 
-**Alice** is a local-first, AI-first, speech-first personal assistant and smart home controller. The system uses n8n as the central AI orchestrator with Ollama (qwen3:14b) for LLM inference, with Weaviate for vector search and PostgreSQL for structured data/memory. Access is only via VPN.
+**Alice** is a local-first, AI-first, speech-first personal assistant and smart home controller. All inference runs on local hardware via Ollama (qwen3:14b). Access is only via VPN.
 
 Docs are in German; code comments and commit messages should be in English.
+
+→ **See `README.md`** for architecture, infrastructure, Docker services, n8n workflows, DMS pipeline, and full feature list.
+
+---
+
+## Development Commands
 
 ### Frontend (React/Vite)
 
 ```bash
 cd frontend && npm ci          # Install dependencies
 cd frontend && npm run build   # Build for production
-./scripts/deploy-frontend.sh   # Build + deploy to nginx html/ (root, finance_upload excluded)
+./scripts/deploy-frontend.sh   # Build + deploy to nginx html/
+./scripts/sync-compose.sh      # Sync compose files to production server
 ```
 
 ### Database
 
 ```bash
-# Initialize PostgreSQL schema (alice.* schema)
-docker exec postgres psql -U user -d alice -f /path/to/sql/init-postgres.sql
+# Apply consolidated schema (Phase 1 final)
+docker exec -i postgres psql -U user -d alice < sql/init-schema.sql
 
-# Seed users (kept out of git - create separately)
-docker exec postgres psql -U user -d alice -f /path/to/sql/seed-users.sql
+# Seed users (copy example, edit, then run)
+cp sql/seed-users.example.sql sql/seed-users.sql
+docker exec -i postgres psql -U user -d alice < sql/seed-users.sql
 
 # Initialize Weaviate collections
 ./scripts/init-weaviate-schema.sh
@@ -90,92 +100,76 @@ docker exec postgres psql -U user -d alice -f /path/to/sql/seed-users.sql
 
 ### n8n Workflows
 
-Workflows are stored as JSON in `workflows/`. Don't deploy n8n-workflow. Tell user: 'Deploy n8n-workflow {name}'. The main chat endpoint is `POST /webhook/alice`.
+Workflows are stored as JSON in `workflows/`. Don't deploy n8n-workflows directly — tell the user: `Deploy n8n-workflow {name}`.
+
+Primary chat endpoint: `POST /api/stream/chat` (alice-chat-stream).
+Legacy fallback: `POST /webhook/alice` (alice-chat-handler n8n workflow).
 
 ### Docker
 
-Each service has its own compose file under `docker/compose/<category>/`. Use `scipts/sync-compose.sh` to sync compose files to the server.
+Each service has its own compose file under `docker/compose/<category>/`. Use `./scripts/sync-compose.sh` to sync compose files to the server.
 
-## Architecture
+---
 
-### Layered System
+## Code Reference
 
-```text
-CLIENT (React PWA, HA Voice Devices)
-    ↓
-SPEECH GATEWAY [Phase 2] (Python: Whisper STT, Speaker-ID, Piper TTS)
-    ↓
-ORCHESTRATION (n8n + Ollama qwen3:14b via Tool-Use)
-    ↓
-DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
-```
+### Frontend source structure (`frontend/src/`)
 
-### Principle: One LLM call with Tool-Use (not two-step router)
+- `components/Auth/` — AuthProvider (Context), LoginScreen, ProtectedRoute
+- `components/Chat/` — ChatContainer, MessageList, MessageRenderer, InputArea
+- `components/Sidebar/` — session list with context-menu
+- `components/Settings/` — SettingsPage (tabs: profile, user management, DMS folders)
+- `hooks/useChatSessions.ts` — SSE stream handling, tool-status events, thinking tokens
+- `services/api.js` — streaming chat API; `services/auth.js` — auth (JWT in localStorage)
+- `services/dms.ts` — DMS folder CRUD
 
-The LLM uses native function calling to directly select and execute tools. Available tools: `home_assistant`, `search_documents`, `get_document_details`, `remember`, `recall`.
+### PostgreSQL schema (`alice`)
 
-### Three-Tier Memory
+All tables live in the `alice` schema. Schema source: `sql/init-schema.sql`.
 
-- **Tier 1 (Working)**: PostgreSQL `alice.messages` — last 20 messages of active session
-- **Tier 2 (Long-term)**: Weaviate `AliceMemory` — semantic search over past conversations
-- **Tier 3 (Profile)**: PostgreSQL `alice.user_profiles` — permanent user facts/preferences
-
-### n8n Workflows (in `workflows/`)
-
-| Workflow                | Trigger                       | Purpose                                   |
-| ----------------------- | ----------------------------- | ----------------------------------------- |
-| `alice-chat-handler`    | Webhook POST `/webhook/alice` | Main chat logic + memory                  |
-| `alice-tool-ha`         | Workflow call                 | Home Assistant REST API                   |
-| `alice-tool-search`     | Workflow call                 | Weaviate document search                  |
-| `alice-memory-transfer` | Schedule (daily)              | PostgreSQL → Weaviate transfer            |
-| `alice-dms-scanner`     | Schedule (hourly)             | NAS scan → MQTT queue                     |
-| `alice-dms-processor`   | Schedule (nightly)            | MQTT queue → Weaviate                     |
-| Auth workflows          | Webhook                       | Login/validate/refresh/logout (Phase 1.5) |
-
-### DMS Pipeline
-
-NAS inbox folders → `alice/dms/new` MQTT topic → PDF extraction + LLM classification → Weaviate collections (Invoice, BankStatement, Document, Email, SecuritySettlement, Contract).
-
-### PostgreSQL Schema (`alice`)
-
-All tables live in the `alice` schema. Key tables:
-- `alice.users` — users with role (`admin`/`user`/`guest`/`child`)
+Key tables:
+- `alice.users` — users with role (`admin`/`user`/`guest`/`child`), bcrypt password, must_change_password
 - `alice.permissions_home_assistant` — per-domain HA permissions with optional area/entity/time filters
-- `alice.permissions_dms` — per-doc-type DMS permissions
+- `alice.permissions_dms` — per-doc-type DMS permissions (doc_types: Invoice, BankStatement, BankTransaction, SecuritySettlement, Document, Email, Contract, *)
 - `alice.permissions_system` / `alice.permissions_assistant` — system and chat feature permissions
 - `alice.role_templates` — seeded permission templates; applied via `alice.init_user_permissions(user_id, role)`
 - `alice.messages` / `alice.sessions` / `alice.user_profiles` — agent memory
 - `alice.auth_sessions` / `alice.webauthn_challenges` — authentication
+- `alice.dms_watched_folders` — NAS folders watched by DMS scanner (with sort_order)
+- `alice.ha_entities` / `alice.ha_intent_templates` / `alice.ha_sync_log` — HA sync state
 
-Permission checks use PL/pgSQL functions: `alice.check_ha_permission()` and `alice.check_dms_permission()`.
-
-### Weaviate Collections
-
-Defined in `schemas/` directory as JSON files. Key collections: `AliceMemory`, `Invoice`, `BankStatement`, `BankTransaction`, `Document`, `Email`, `SecuritySettlement`, `Contract`. Vectorizer: `text2vec-transformers` on the TITAN X GPU.
-
-### Frontend (in `frontend/src/`)
-
-React + TypeScript + Tailwind CSS. Key structure:
-- `components/Auth/` — AuthProvider (Context), LoginScreen, ProtectedRoute
-- `components/Chat/` — ChatContainer, MessageList, MessageBubble, InputArea
-- `components/Sidebar/` — session list
-- `hooks/useChat.js` — sends messages with `user_id` from AuthContext
-- `services/api.js` — chat API; `services/auth.js` — auth (JWT in localStorage)
-
-### Infrastructure
-
-- **nginx** (`docker/compose/infra/`) — reverse proxy + serves React static files from `nginx/html/alice/`; `/api/webhook/*` → n8n (300s timeout, no buffering for streaming)
-- **Docker networks**: `frontend`, `backend`, `automation` (external, defined in `docker/compose/infra/networks/`)
-- **Storage**: Hot (`/srv/hot`) for AI models/Weaviate index; Warm ZFS-mirror (`/srv/warm`) for persistent data (n8n, postgres, logs)
-- **Monitoring**: Prometheus + Grafana + node_exporter + cadvisor + DCGM (GPU)
+Permission check functions: `alice.check_ha_permission()`, `alice.check_dms_permission()`.
 
 ### Key Environment Variables
 
-n8n needs: `HA_URL`, `HA_TOKEN`, `OLLAMA_URL`, `WEAVIATE_URL`, `POSTGRES_CONNECTION`, `REDIS_URL`, `MQTT_URL`, `JWT_SECRET`
+| Variable            | Used by           | Purpose                                      |
+| ------------------- | ----------------- | -------------------------------------------- |
+| `HA_URL`            | n8n, alice-ha-sync | Home Assistant base URL                     |
+| `HA_TOKEN`          | n8n, alice-ha-sync | Long-lived HA access token                  |
+| `OLLAMA_URL`        | alice-chat-stream | Ollama inference endpoint                    |
+| `WEAVIATE_URL`      | n8n, alice-ha-sync | Weaviate HTTP endpoint                      |
+| `POSTGRES_CONNECTION` | n8n             | PostgreSQL connection string                 |
+| `REDIS_URL`         | n8n               | Redis connection URL                         |
+| `MQTT_URL`          | n8n, extractors   | MQTT broker URL                              |
+| `JWT_PUBLIC_KEY_PATH` | alice-chat-stream | RS256 public key for JWT verification      |
+
+Full variable list: see `.env.n8n.example` and each container's `.env` file.
+
+### nginx routing
+
+Config lives in `docker/compose/infra/nginx/`. Key proxy rules:
+- `/api/stream/` → `alice-chat-stream:8003` (SSE: buffering off, `proxy_read_timeout 300s`)
+- `/api/webhook/` → `n8n:5678` (300s timeout)
+- `/api/auth/` → `alice-auth:8001`
+- Static files served from `nginx/html/alice/`
+
+---
 
 ## Feature Tracking
 
 All features are tracked in `features/INDEX.md`. Read it before starting any new feature. Feature specs go in `features/PROJ-X-feature-name.md`. Use `/requirements` skill to create new specs.
+
+---
 
 ## Workflow Skills
 
