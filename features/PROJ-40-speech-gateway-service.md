@@ -53,8 +53,11 @@
 ### Modus 2 — Full-Voice-Pipeline (WebApp, Audio-Icon)
 - [ ] Der Gateway exponiert einen WebSocket-Endpunkt (z.B. `/ws/voice`) für
       die vollständige Sprachkonversation
-- [ ] Client sendet fertig aufgezeichnete Audio-Datei; Gateway übernimmt
-      STT → alice-chat-stream → Piper TTS → Audio zurück
+- [ ] Der Client streamt Audio kontinuierlich ab dem Moment des Button-Drucks;
+      kein Push-to-Talk, keine serverseitige Vorab-Pufferung der vollständigen Aufnahme
+- [ ] Die Session endet ausschließlich durch explizite User-Aktion (Stop-Button,
+      erkannte Abschluss-Phrase) oder Silence-Timeout — nicht durch Audio-Inhalt allein
+- [ ] Gateway übernimmt STT → alice-chat-stream → Piper TTS → Audio zurück
 - [ ] Keine Textausgabe — ausschließlich Audio-Antwort
 - [ ] Authentifizierung via JWT
 
@@ -77,12 +80,27 @@
       (Pipeline-Parallelismus)
 
 ### Barge-In / Interrupt (Modus 2 + 3)
-- [ ] Client kann jederzeit während eines laufenden TTS-Streams Audio senden
-      (WebApp: explizites `interrupt`-Event; HA Voice: eingehende Audio-Aktivität)
-- [ ] Gateway bricht sofort ab: laufender Ollama-Stream wird gestoppt,
-      ausstehende TTS-Chunks werden verworfen
-- [ ] Gateway startet unmittelbar den STT-Prozess für die neue Eingabe
-- [ ] Die Konversations-Session bleibt erhalten (gleiche session_id)
+- [ ] Während einer laufenden TTS-Ausgabe empfängt der Gateway weiterhin
+      Audio-Chunks vom Client
+- [ ] Stufe 1 — VAD-Vorfilter: Ein leichtgewichtiger Voice-Activity-Detector
+      (z.B. WebRTC VAD oder silero-vad) prüft eingehende Chunks; offensichtliche
+      Stille und Hintergrundgeräusche werden verworfen, ohne Whisper aufzurufen
+- [ ] Stufe 2 — STT: Sprachähnliche Segmente werden durch Whisper transkribiert
+- [ ] Stufe 3 — Intent-Klassifikation (regelbasiert, MVP): Das Transkript wird
+      gegen eine konfigurierbare Liste deutscher Interrupt-Phrasen geprüft
+      (z.B. "Stop", "Stopp", "Halt", "warte mal", "Moment",
+      "Ich habe eine Frage", "kurze Nachfrage", "da widerspreche ich");
+      nur bei einem Treffer wird ein Interrupt ausgelöst
+- [ ] Transkripte ohne Interrupt-Intent (Fernseher, Radio, Hintergrundgespräche)
+      werden stillschweigend verworfen — die laufende Pipeline läuft weiter
+- [ ] Bei erkanntem Interrupt: Ollama-Stream wird gestoppt, ausstehende
+      TTS-Chunks werden verworfen; das Interrupt-Transkript wird unmittelbar
+      als neue Eingabe in die Pipeline eingespeist
+- [ ] Die Konversations-Session bleibt bei Interrupt erhalten (gleiche session_id)
+- [ ] [PROJ-43 Hook] Die Architektur sieht einen optionalen vierten Schritt vor:
+      Speaker-Verifikation — Interrupt wird nur ausgelöst wenn das Barge-In-Audio
+      vom selben User stammt wie die laufende Session; dieser Schritt ist deaktiviert
+      bis PROJ-43 integriert ist
 
 ### Continued Conversation (Modus 2 + 3)
 - [ ] Nach vollständiger TTS-Ausgabe bleibt die Session offen und wartet
@@ -122,6 +140,12 @@
   andere laufende Sessions bleiben unberührt
 - **Barge-In bei letztem TTS-Satz**: Bereits gesendete Audio-Chunks werden
   im Client zu Ende abgespielt; keine weiteren Chunks werden gesendet
+- **Barge-In-Kandidat ohne Interrupt-Intent**: Whisper transkribiert Audio
+  eines Fernsehers oder Radios — Intent-Klassifikator findet keine Interrupt-Phrase
+  → Segment wird verworfen, TTS läuft weiter; kein false positive
+- **Barge-In-Kandidat mit leerem Whisper-Transkript**: VAD hat fälschlicherweise
+  ein Segment als sprachähnlich markiert → leeres Transkript → kein Intent-Check,
+  kein Interrupt
 - **conversation_end während Barge-In**: Laufende neue Eingabe hat Vorrang;
   conversation_end wird ignoriert
 - **Silence-Timeout feuert während Nutzer gerade beginnt zu sprechen**:
@@ -171,11 +195,15 @@ alice-speech-gateway (Python, ports 10300 + 10301)
 │   └── /ws/voice → VoicePipeline session
 │
 ├── VoicePipeline (one per active session)
-│   ├── STT Engine          ← faster-whisper large-v3, shared GPU model
-│   ├── Chat Client         ← calls alice-chat-stream SSE endpoint
+│   ├── STT Engine           ← faster-whisper large-v3, shared GPU model
+│   ├── Chat Client          ← calls alice-chat-stream SSE endpoint
 │   ├── Sentence Accumulator ← splits token stream at . ! ? newline
-│   ├── TTS Client          ← calls wyoming-piper via Wyoming protocol
-│   └── Barge-In Controller ← cancels in-flight tasks on interrupt
+│   ├── TTS Client           ← calls wyoming-piper via Wyoming protocol
+│   └── Barge-In Controller  ← 3-stage filter: VAD → Whisper → Intent classifier
+│       ├── VAD Pre-filter   ← rejects silence/noise without Whisper call
+│       ├── Background STT   ← Whisper on speech-like segments during TTS playback
+│       ├── Intent Classifier ← rule-based: matches interrupt phrases (configurable list)
+│       └── [PROJ-43 Hook]   ← optional speaker verification (disabled until PROJ-43)
 │
 ├── Session Registry (in-memory only)
 ├── JWT Validator (RS256 public key, same cert as alice-auth)
@@ -192,12 +220,20 @@ Browser → audio bytes → faster-whisper → transcript text → Browser
 
 **Mode 2 — Full Voice (`/ws/voice`):**
 ```
-Browser → audio bytes
-  → faster-whisper → text
-  → alice-chat-stream (SSE token stream)
-  → Sentence Accumulator (splits at . ! ?)
-  → wyoming-piper (per sentence, pipelined)
-  → audio chunks → Browser
+Browser → continuous audio stream
+  → [main path] VAD detects end of utterance
+      → faster-whisper → text
+      → alice-chat-stream (SSE token stream)
+      → Sentence Accumulator (splits at . ! ?)
+      → wyoming-piper (per sentence, pipelined)
+      → audio chunks → Browser
+  → [barge-in path, parallel during TTS playback]
+      → VAD pre-filter → speech-like segment?
+      → faster-whisper (background) → transcript
+      → Intent Classifier → interrupt phrase matched?
+      → [PROJ-43] Speaker match?
+      → yes: cancel main pipeline, transcript → new main path input
+      → no: discard, main pipeline continues
 ```
 
 **Mode 3 — Wyoming / HA Voice Device (port 10300):**
@@ -233,9 +269,13 @@ No new PostgreSQL tables required. The gateway forwards `session_id` to alice-ch
 | TTS | wyoming-piper via Wyoming client mode | Reuses existing Piper container; avoids duplication |
 | AI backend | alice-chat-stream SSE endpoint | Existing internal endpoint; session_id passed through for history |
 | Sentence streaming | Accumulate tokens, split at `.!?` newline | TTS starts before LLM finishes — reduces perceived latency |
-| Barge-in | Cancel asyncio tasks on new audio | Clean abort of STT→AI→TTS pipeline mid-flight |
+| Barge-in trigger | Post-Whisper intent classification, not raw audio | Raw audio alone cannot distinguish user intent from TV/radio/background noise |
+| Barge-in stage 1 | VAD pre-filter (WebRTC VAD or silero-vad) | Avoids Whisper GPU call for obvious silence/noise; fast, CPU-only |
+| Barge-in stage 2 | Background Whisper during TTS playback | Shared model instance; parallel asyncio task, low overhead when no speech detected |
+| Barge-in stage 3 | Rule-based intent classifier (MVP) | Configurable phrase list in YAML; no LLM call needed for MVP; extension path to Option C (rule pre-filter + LLM confirmation) if false negatives become a problem |
+| Barge-in stage 4 | PROJ-43 speaker verification hook | Interface defined now; disabled until PROJ-43 delivers speaker embeddings |
 | JWT auth | RS256 public key validation | WebApp endpoints require auth; Wyoming trusts Docker internal network only |
-| Config | YAML volume + env vars | Device mapping updatable without container rebuild |
+| Config | YAML volume + env vars | Device mapping and interrupt phrase list updatable without container rebuild |
 
 ### Ports & Networking
 
@@ -261,8 +301,17 @@ No new PostgreSQL tables required. The gateway forwards `session_id` to alice-ch
 
 This feature does NOT include:
 - WebApp UI changes (→ PROJ-41)
-- Speaker Recognition (→ PROJ-43)
+- Speaker Recognition enrollment and embedding (→ PROJ-43); the gateway only provides the hook interface
 - HA Voice pipeline configuration in Home Assistant (→ PROJ-42)
+
+### Extension Path: Barge-In Option C
+
+If the rule-based intent classifier (MVP) produces too many false negatives in real use, the upgrade path is **Option C (hybrid)**:
+1. Rule-based classifier runs first as before
+2. On a rule match, a secondary LLM call (lightweight Ollama model, e.g. qwen3:1.7b) confirms intent
+3. Only confirmed matches trigger the interrupt
+
+This adds ~300–600ms to the interrupt decision latency but eliminates borderline false positives from ambiguous phrases. No architectural changes required — only the Intent Classifier component is swapped out.
 
 ## QA Test Results
 _To be added by /qa_
