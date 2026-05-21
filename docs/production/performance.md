@@ -61,7 +61,3 @@ export const getStats = unstable_cache(
 - [ ] Loading states show skeleton/spinner
 - [ ] Fonts loaded with `next/font`
 - [ ] No unnecessary client-side JavaScript (`"use client"` only when needed)
-
-## Automated Monitoring
-- **Vercel Analytics** - Automatic on Pro plan, shows Core Web Vitals
-- **Vercel Speed Insights** - Real user performance data

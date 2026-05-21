@@ -1,3 +1,11 @@
+---
+paths:
+  - "src/components/**"
+  - "src/app/**/page.tsx"
+  - "src/app/**/layout.tsx"
+  - "src/hooks/**"
+---
+
 # Frontend Development Rules
 
 ## shadcn/ui First (MANDATORY)

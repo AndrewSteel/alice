@@ -1,7 +1,7 @@
 ---
 name: help
 description: Context-aware guide that tells you where you are in the workflow and what to do next. Use anytime you're unsure.
-argument-hint: [optional question]
+argument-hint: "optional question"
 user-invocable: true
 allowed-tools: Read, Glob, Grep, Bash
 model: sonnet
@@ -42,13 +42,13 @@ Based on the state analysis, determine what the user should do next:
 **If PRD is empty template:**
 
 > Your project hasn't been initialized yet.
-> Run `/requirements` with a description of what you want to build.
-> Example: `/requirements I want to build a task management app for small teams`
+> Run `/init` with a description of what you want to build.
+> Example: `/init I want to build a task management app for small teams`
 
 **If PRD exists but no features:**
 
 > Your PRD is set up but no features have been created yet.
-> Run `/requirements` to create your first feature specification.
+> Run `/write-spec` to create your first feature specification.
 
 **If features exist with status "Planned" (no Tech Design):**
 
@@ -58,9 +58,8 @@ Based on the state analysis, determine what the user should do next:
 **If features have Tech Design but no implementation:**
 
 > Feature PROJ-X has a tech design and is ready for implementation.
-> - If it's a UI feature: Run `/frontend` to build the UI for `features/PROJ-X-name.md`
-> - If it's an n8n workflow feature: Run `/backend` to build the workflow
-> - If it's both: Run `/frontend` first, then `/backend`
+> Run `/frontend` to build the UI for `features/PROJ-X-name.md`
+> (If backend is needed, run `/backend` after frontend is done)
 
 **If features are implemented but no QA:**
 
@@ -76,7 +75,7 @@ Based on the state analysis, determine what the user should do next:
 
 > All current features are deployed! You can:
 >
-> - Run `/requirements` to add a new feature
+> - Run `/write-spec` to add a new feature
 > - Check `docs/PRD.md` for planned features not yet specified
 
 ### Step 3: Answer User Questions
@@ -84,7 +83,7 @@ Based on the state analysis, determine what the user should do next:
 If the user asked a specific question (via arguments), answer it in the context of the current project state. Common questions:
 
 - "What skills are available?" → List all 6 skills with brief descriptions
-- "How do I add a new feature?" → Explain `/requirements` workflow
+- "How do I add a new feature?" → Explain `/write-spec` workflow (or `/init` if the project isn't set up yet)
 - "How do I customize this template?" → Point to CLAUDE.md, rules/, skills/
 - "What's the project structure?" → Explain the directory layout
 - "How do I deploy?" → Explain `/deploy` workflow and prerequisites

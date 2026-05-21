@@ -1,10 +1,17 @@
+---
+paths:
+  - "src/app/api/**"
+  - ".env*"
+  - "next.config.*"
+---
+
 # Security Rules
 
 ## Secrets Management
 - NEVER commit secrets, API keys, or credentials to git
-- Use `.env.local` for local development (already in .gitignore)
+- Use `.env` for local development (already in .gitignore)
 - Use `NEXT_PUBLIC_` prefix ONLY for values safe to expose in browser
-- Document all required env vars in `.env.local.example` with dummy values
+- Document all required env vars in `.env.example` with dummy values
 
 ## Input Validation
 - Validate ALL user input on the server side with Zod

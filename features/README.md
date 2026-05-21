@@ -53,7 +53,7 @@ Am Ende des Feature-Dokuments fügt QA die Test-Ergebnisse hinzu:
 ## QA Test Results
 
 **Tested:** 2026-01-12
-**App URL:** http://localhost:3000
+**App URL:** https://alice.happy-mining.de
 
 ### Acceptance Criteria Status
 - [x] AC-1: User kann Email + Passwort eingeben
@@ -76,7 +76,7 @@ Am Ende des Feature-Dokuments fügt QA die Test-Ergebnisse hinzu:
 
 **Status:** ✅ Deployed
 **Deployed:** 2026-01-13
-**Production URL:** https://your-app.vercel.app
+**Production URL:** https://alice.happy-mining.de
 **Git Tag:** v1.0.0-PROJ-1
 ```
 

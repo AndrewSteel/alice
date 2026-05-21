@@ -90,12 +90,9 @@ export const config = {
 
 ## Recommended Limits
 
-| Endpoint Type | Limit | Window |
-|--------------|-------|--------|
-| Login/Register | 5 requests | 1 minute |
-| Password Reset | 3 requests | 5 minutes |
-| General API | 30 requests | 10 seconds |
-| File Upload | 5 requests | 1 minute |
-
-## Alternative
-**Vercel Edge Config** - Simpler but less flexible. Built into Vercel, no external service needed.
+| Endpoint Type  | Limit       | Window     |
+| -------------- | ----------- | ---------- |
+| Login/Register | 5 requests  | 1 minute   |
+| Password Reset | 3 requests  | 5 minutes  |
+| General API    | 30 requests | 10 seconds |
+| File Upload    | 5 requests  | 1 minute   |

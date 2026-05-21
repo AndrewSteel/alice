@@ -1,13 +1,8 @@
 ## PRD Result Template
 
-```markdown
-# PRD: [Workflow Name]
+# Add n8n Workflow Desgin to Feature Spec
 
-**Status:** Draft
-**Created:** [Date]
-**Author:** [Name]
-
----
+Add a "Tech Design (n8n Workflow Architect) [Workflow Name]"
 
 ## 1. Goal & Context
 
@@ -24,12 +19,12 @@
 
 ## 2. Trigger & Schedule
 
-| Property | Value |
-|---|---|
-| Trigger Type | [Webhook / Schedule / Manual / Event] |
-| Schedule | [e.g. Every Monday 9:00 / Real-time / On demand] |
-| Timezone | [e.g. Europe/Berlin] |
-| Expected Volume | [e.g. 10-50 executions per day] |
+| Property        | Value                                            |
+| --------------- | ------------------------------------------------ |
+| Trigger Type    | [Webhook / Schedule / Manual / Event]            |
+| Schedule        | [e.g. Every Monday 9:00 / Real-time / On demand] |
+| Timezone        | [e.g. Europe/Berlin]                             |
+| Expected Volume | [e.g. 10-50 executions per day]                  |
 
 ---
 
@@ -59,11 +54,11 @@
 
 ## 4. Services & Credentials
 
-| Service | Purpose | Credential Type | Status |
-|---|---|---|---|
-| [e.g. PostgreSQL] | [Query data] | [postgres] | [Available / Missing] |
-| [e.g. Ollama] | [LLM processing] | [ollamaApi] | [Available / Missing] |
-| [e.g. MQTT] | [Event queue] | [mqtt] | [Available / Missing] |
+| Service           | Purpose          | Credential Type | Status                |
+| ----------------- | ---------------- | --------------- | --------------------- |
+| [e.g. PostgreSQL] | [Query data]     | [postgres]      | [Available / Missing] |
+| [e.g. Ollama]     | [LLM processing] | [ollamaApi]     | [Available / Missing] |
+| [e.g. MQTT]       | [Event queue]    | [mqtt]          | [Available / Missing] |
 
 ---
 
@@ -71,11 +66,11 @@
 
 ### Node Overview (recommended)
 
-| # | Node Name | Node Type | Function |
-|---|---|---|---|
-| 1 | [Name] | [n8n-nodes-base.xyz] | [What the node does] |
-| 2 | [Name] | [n8n-nodes-base.xyz] | [What the node does] |
-| ... | ... | ... | ... |
+| #   | Node Name | Node Type            | Function             |
+| --- | --------- | -------------------- | -------------------- |
+| 1   | [Name]    | [n8n-nodes-base.xyz] | [What the node does] |
+| 2   | [Name]    | [n8n-nodes-base.xyz] | [What the node does] |
+| ... | ...       | ...                  | ...                  |
 
 ### Data Flow Diagram
 
@@ -97,12 +92,12 @@
 
 ### Error Handling
 
-| Error Type | Response |
-|---|---|
-| API unreachable | [e.g. Retry 3x, then notify] |
-| Empty data | [e.g. Send info notification, end workflow] |
-| Rate limit reached | [e.g. Wait and retry] |
-| Invalid input | [e.g. Validate, return error message] |
+| Error Type         | Response                                    |
+| ------------------ | ------------------------------------------- |
+| API unreachable    | [e.g. Retry 3x, then notify]                |
+| Empty data         | [e.g. Send info notification, end workflow] |
+| Rate limit reached | [e.g. Wait and retry]                       |
+| Invalid input      | [e.g. Validate, return error message]       |
 
 ### Known Edge Cases
 - [Edge Case 1: Description + desired behavior]

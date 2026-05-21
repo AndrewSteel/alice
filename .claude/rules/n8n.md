@@ -1,3 +1,8 @@
+---
+paths:
+  - "workflows/**"
+---
+
 ## n8n Development Rules
 
 ### Core Behavior

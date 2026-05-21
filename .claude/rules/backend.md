@@ -1,14 +1,21 @@
+---
+paths:
+  - "frontend/src/app/api/**"
+  - "docker/compose/**"
+  - "scripts/**"
+---
+
 # Backend Development Rules
 
 ## Docker Container
 
 - Use 'docker/compose/automations/{dockername}/compose.yml' for development
 - Use 'docker/compose/automations/{dockername}/Dockerfile' for custom container setup
-- Use 'docker/compose/automations/{dockername}/.env' for container-specific environment variables
+- Use 'docker/compose/automations/{dockername}/.env.example' for container-specific environment variables
 - All files belonging to the container are located in the same directory as the Dockerfile
 - Expand 'STACKS' in 'docker/compose/scripts/Makefile' to add new containers
 - Use 'docker/compose/scripts/Makefile' for common commands (build, up, down, logs)
-- Use ./sync-compose.sh' to sync compose files to project root
+- Use 'scripts/sync-compose.sh' to sync compose files to project root
 
 ## Database (postgresql)
 

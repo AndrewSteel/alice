@@ -16,9 +16,11 @@
 - [ ] Workflow JSON saved to `workflows/`
 - [ ] No hardcoded secrets — all credentials via n8n credential store
 - [ ] User has reviewed and approved
+- [ ] Frontend connected to real API endpoints
 - [ ] User notified: "Deploy n8n-workflow `<name>`"
 
 ## Verification (run before marking complete)
+- [ ] `npm run build` passes without errors
 - [ ] Workflow validated via n8n-mcp `validate_workflow`
 - [ ] All acceptance criteria from feature spec addressed
 - [ ] Triggers and endpoints return correct status codes (test with curl)
@@ -29,5 +31,6 @@
 - [ ] Frequently filtered PostgreSQL columns have indexes
 - [ ] No N+1 queries — use PostgreSQL joins or `splitInBatches` node
 - [ ] All list queries use LIMIT
+- [ ] Zod validation on all write endpoints
 - [ ] Retry logic on external API calls (optional for MVP)
 - [ ] Rate limiting configured on public-facing webhooks (optional for MVP)

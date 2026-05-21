@@ -1,7 +1,7 @@
 ---
 name: n8n-architecture
 description: Design PM-friendly architecture for n8n automation workflows. Use when planning n8n workflows, creating automation requirements, starting a new n8n project, or preparing workflow specifications before building.
-argument-hint: [feature-spec-path]
+argument-hint: "feature-spec-path"
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 model: sonnet
@@ -91,7 +91,7 @@ Ask targeted questions across these dimensions. Use the AskUserQuestion tool wit
 
 After all questions are answered:
 
-- Add a "Tech Design (n8n Architect)" section to `/features/PROJ-X.md` based on the template [template.md](template.md)
+- Add a "Tech Design (n8n Architect)" section to `features/PROJ-X.md` based on the template [template.md](template.md)
 
 #### Git Commit
 

@@ -44,6 +44,13 @@ Add this section to the END of the feature spec `/features/PROJ-X.md`:
 
 - [ ] BUG: [Security issue description]
 
+**Docker features:**
+- [x] Authentication: JWT verification required (missing/invalid token returns 401)
+- [x] Authorization: Users cannot access other users' data
+- [x] Input validation: malformed payloads handled gracefully
+- [x] No secrets visible in execution logs
+- [x] Rate limiting: Excessive requests handled
+
 ### Bugs Found
 
 #### BUG-1: [Bug Title]
