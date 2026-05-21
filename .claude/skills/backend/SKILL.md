@@ -68,7 +68,7 @@ Use `AskUserQuestion` for:
 
 ### 5. Create API Routes
 
-- Create route handlers in `/src/app/api/`
+- Create route handlers in `frontend/src/app/api/`
 - Implement CRUD operations
 - Add Zod input validation on all POST/PUT endpoints
 - Add proper error handling with meaningful messages
@@ -82,7 +82,7 @@ Use `AskUserQuestion` for:
 
 ### 7. Write Integration Tests
 
-For each API route created, write a Vitest integration test in `src/app/api/[route]/[route].test.ts`:
+For each API route created, write a Vitest integration test in `frontend/src/app/api/[route]/[route].test.ts`:
 
 - Test the happy path (valid input → expected response)
 - Test validation errors (invalid input → 400 with error message)

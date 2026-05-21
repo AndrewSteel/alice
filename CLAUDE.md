@@ -75,7 +75,7 @@ Docs are in German; code comments and commit messages should be in English.
 
 ## Development Commands
 
-### Frontend (React/Vite)
+### Frontend (React/Next.js)
 
 ```bash
 cd frontend && npm ci          # Install dependencies
@@ -142,16 +142,16 @@ Permission check functions: `alice.check_ha_permission()`, `alice.check_dms_perm
 
 ### Key Environment Variables
 
-| Variable            | Used by           | Purpose                                      |
-| ------------------- | ----------------- | -------------------------------------------- |
-| `HA_URL`            | n8n, alice-ha-sync | Home Assistant base URL                     |
-| `HA_TOKEN`          | n8n, alice-ha-sync | Long-lived HA access token                  |
-| `OLLAMA_URL`        | alice-chat-stream | Ollama inference endpoint                    |
-| `WEAVIATE_URL`      | n8n, alice-ha-sync | Weaviate HTTP endpoint                      |
-| `POSTGRES_CONNECTION` | n8n             | PostgreSQL connection string                 |
-| `REDIS_URL`         | n8n               | Redis connection URL                         |
-| `MQTT_URL`          | n8n, extractors   | MQTT broker URL                              |
-| `JWT_PUBLIC_KEY_PATH` | alice-chat-stream | RS256 public key for JWT verification      |
+| Variable              | Used by            | Purpose                               |
+| --------------------- | ------------------ | ------------------------------------- |
+| `HA_URL`              | n8n, alice-ha-sync | Home Assistant base URL               |
+| `HA_TOKEN`            | n8n, alice-ha-sync | Long-lived HA access token            |
+| `OLLAMA_URL`          | alice-chat-stream  | Ollama inference endpoint             |
+| `WEAVIATE_URL`        | n8n, alice-ha-sync | Weaviate HTTP endpoint                |
+| `POSTGRES_CONNECTION` | n8n                | PostgreSQL connection string          |
+| `REDIS_URL`           | n8n                | Redis connection URL                  |
+| `MQTT_URL`            | n8n, extractors    | MQTT broker URL                       |
+| `JWT_PUBLIC_KEY_PATH` | alice-chat-stream  | RS256 public key for JWT verification |
 
 Full variable list: see `.env.n8n.example` and each container's `.env` file.
 

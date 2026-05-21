@@ -4,10 +4,13 @@
 
 ## Status Legend
 
-- **Planned** - Requirements written, ready for development
-- **In Progress** - Currently being built
-- **In Review** - QA testing in progress
-- **Deployed** - Live in production
+- **Roadmap** - Feature identified, no spec file yet (after `/init`)
+- **Planned** - Spec written, ready for architecture (after `/write-spec`)
+- **Architected** - Tech design done, ready for implementation (after `/architecture`)
+- **In Progress** - Currently being built (after `/frontend` or `/backend` starts)
+- **In Review** - QA testing in progress (after `/qa` starts)
+- **Approved** - QA passed, no Critical/High bugs (after `/qa` passes)
+- **Deployed** - Live in production (after `/deploy`)
 
 ## Features
 

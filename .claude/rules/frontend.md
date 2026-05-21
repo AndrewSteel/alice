@@ -1,9 +1,9 @@
 ---
 paths:
-  - "src/components/**"
-  - "src/app/**/page.tsx"
-  - "src/app/**/layout.tsx"
-  - "src/hooks/**"
+  - "frontend/src/components/**"
+  - "frontend/src/app/**/page.tsx"
+  - "frontend/src/app/**/layout.tsx"
+  - "frontend/src/hooks/**"
 ---
 
 # Frontend Development Rules

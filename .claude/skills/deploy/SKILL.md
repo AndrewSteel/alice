@@ -110,7 +110,7 @@ add_header Strict-Transport-Security "max-age=63072000; includeSubDomains";
 docker exec postgres psql -U user -d alice -c "SELECT count(*) FROM alice.users;"
 ```
 
-Checl although:
+Check also:
 
 **Error Tracking (5 min):** See [error-tracking.md](../../../docs/production/error-tracking.md)
 **Security Headers (copy-paste):** See [security-headers.md](../../../docs/production/security-headers.md)
@@ -143,9 +143,9 @@ Checl although:
 
 ### Environment variables not available
 
-- Verify vars are set in Vercel Dashboard (Settings → Environment Variables)
-- Client-side vars need `NEXT_PUBLIC_` prefix
-- Redeploy after adding new env vars (they don't apply retroactively)
+- Set via Docker Compose env file (e.g. `docker/compose/<category>/<service>.yml`) and recreate the container
+- Client-side vars need `NEXT_PUBLIC_` prefix (they are statically bundled at build time — rebuild after changing them)
+- Re-run `./scripts/deploy-frontend.sh` after changing any `NEXT_PUBLIC_*` vars
 
 ### Environment variables missing in n8n
 

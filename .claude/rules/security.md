@@ -1,8 +1,8 @@
 ---
 paths:
-  - "src/app/api/**"
+  - "frontend/src/app/api/**"
   - ".env*"
-  - "next.config.*"
+  - "frontend/next.config.*"
 ---
 
 # Security Rules
