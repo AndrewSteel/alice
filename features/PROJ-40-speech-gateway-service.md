@@ -1,6 +1,6 @@
 # PROJ-40: Speech Gateway Service
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-05-21
 **Last Updated:** 2026-05-21
 
@@ -150,7 +150,119 @@
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Container Overview
+
+New Python container **`alice-speech-gateway`** that:
+- **Replaces** the existing `wyoming-whisper` container (inherits port 10300)
+- **Keeps** `wyoming-piper` running — the gateway calls it as a client
+- Adds **two new WebSocket endpoints** on port 10301 for the WebApp
+
+### Internal Structure
+
+```
+alice-speech-gateway (Python, ports 10300 + 10301)
+│
+├── Wyoming Server (port 10300)           ← replaces wyoming-whisper
+│   └── HA Voice Device sessions → VoicePipeline
+│
+├── WebSocket Server (port 10301)         ← new, for WebApp
+│   ├── /ws/stt   → STT-only session
+│   └── /ws/voice → VoicePipeline session
+│
+├── VoicePipeline (one per active session)
+│   ├── STT Engine          ← faster-whisper large-v3, shared GPU model
+│   ├── Chat Client         ← calls alice-chat-stream SSE endpoint
+│   ├── Sentence Accumulator ← splits token stream at . ! ? newline
+│   ├── TTS Client          ← calls wyoming-piper via Wyoming protocol
+│   └── Barge-In Controller ← cancels in-flight tasks on interrupt
+│
+├── Session Registry (in-memory only)
+├── JWT Validator (RS256 public key, same cert as alice-auth)
+├── Device Mapper (reads device-mapping.yaml from Docker volume)
+└── Config Loader (env vars for timeouts, language, GPU ID)
+```
+
+### Data Flow
+
+**Mode 1 — STT only (`/ws/stt`):**
+```
+Browser → audio bytes → faster-whisper → transcript text → Browser
+```
+
+**Mode 2 — Full Voice (`/ws/voice`):**
+```
+Browser → audio bytes
+  → faster-whisper → text
+  → alice-chat-stream (SSE token stream)
+  → Sentence Accumulator (splits at . ! ?)
+  → wyoming-piper (per sentence, pipelined)
+  → audio chunks → Browser
+```
+
+**Mode 3 — Wyoming / HA Voice Device (port 10300):**
+```
+HA Voice Device → Wyoming audio
+  → device-mapping.yaml → user_id
+  → faster-whisper → text
+  → alice-chat-stream (SSE token stream)
+  → Sentence Accumulator
+  → wyoming-piper (per sentence, pipelined)
+  → audio chunks → HA Voice Device
+```
+
+### Data Model
+
+| What | Where stored | Notes |
+|---|---|---|
+| Active voice sessions | In-memory only | Each WebSocket connection = one session object |
+| Device→User mapping | YAML file in Docker volume | Read at startup; no database needed |
+| Session history / messages | Owned by alice-chat-stream | Gateway is stateless across restarts |
+| JWT public key | Env var path | Same public key as alice-auth service |
+
+No new PostgreSQL tables required. The gateway forwards `session_id` to alice-chat-stream, which owns conversation history.
+
+### Tech Decisions
+
+| Decision | Choice | Why |
+|---|---|---|
+| Language | Python (asyncio) | faster-whisper and wyoming are Python-native; async required for concurrent sessions |
+| WebSocket framework | FastAPI + uvicorn | Clean WebSocket support; consistent with alice-chat-stream stack |
+| STT | faster-whisper large-v3, CUDA | Same model as current wyoming-whisper; GPU-accelerated |
+| GPU sharing | Single model instance loaded at startup | Avoids reloading VRAM per request; shared across concurrent sessions |
+| TTS | wyoming-piper via Wyoming client mode | Reuses existing Piper container; avoids duplication |
+| AI backend | alice-chat-stream SSE endpoint | Existing internal endpoint; session_id passed through for history |
+| Sentence streaming | Accumulate tokens, split at `.!?` newline | TTS starts before LLM finishes — reduces perceived latency |
+| Barge-in | Cancel asyncio tasks on new audio | Clean abort of STT→AI→TTS pipeline mid-flight |
+| JWT auth | RS256 public key validation | WebApp endpoints require auth; Wyoming trusts Docker internal network only |
+| Config | YAML volume + env vars | Device mapping updatable without container rebuild |
+
+### Ports & Networking
+
+| Port | Protocol | Consumer |
+|---|---|---|
+| 10300 | Wyoming (TCP) | HA Voice Devices (replaces wyoming-whisper) |
+| 10301 | WebSocket (HTTP upgrade) | WebApp via nginx proxy |
+
+**nginx change:** Add proxy rule `/api/speech/` → `alice-speech-gateway:10301` (WebSocket upgrade, buffering off, `proxy_read_timeout 300s`).
+
+### Dependencies (Python packages)
+
+| Package | Purpose |
+|---|---|
+| `faster-whisper` | GPU STT inference |
+| `wyoming` | Wyoming protocol server + client |
+| `fastapi` + `uvicorn` | WebSocket server |
+| `httpx` | Async SSE client for alice-chat-stream |
+| `pyjwt` + `cryptography` | RS256 JWT validation |
+| `pyyaml` | Device→User mapping config |
+
+### Scope Boundary
+
+This feature does NOT include:
+- WebApp UI changes (→ PROJ-41)
+- Speaker Recognition (→ PROJ-43)
+- HA Voice pipeline configuration in Home Assistant (→ PROJ-42)
 
 ## QA Test Results
 _To be added by /qa_
