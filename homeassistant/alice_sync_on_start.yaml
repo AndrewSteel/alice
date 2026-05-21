@@ -1,0 +1,30 @@
+# alice_sync_on_start.yaml
+# Triggers a full HA→Alice sync 30 seconds after Home Assistant starts.
+# This ensures the intent registry is rebuilt after HA updates/restarts.
+#
+# Required: MQTT broker integration enabled in HA (broker: mqtt-alice)
+# Topic: alice/ha/sync
+# Consumer: n8n workflow alice-ha-intent-sync
+
+alias: Sync on HA Start
+description: ""
+triggers:
+  - trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 30
+      milliseconds: 0
+  - action: mqtt.publish
+    metadata: {}
+    data:
+      qos: "1"
+      retain: false
+      topic: alice/ha/sync
+      payload: >-
+        {"event": "ha_start", "sync_type": "full", "timestamp": "{{
+        now().isoformat() }}"}
+mode: single
