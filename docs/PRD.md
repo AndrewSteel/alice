@@ -1,80 +1,69 @@
-# Product Requirements Document
+# Product Requirements Document — Phase 2
+
+> Phase 1 (PROJ-1–PROJ-39) ist abgeschlossen.
+> Phase-1-Roadmap → `docs/PRD.Phase1.md`
+> Entwicklungsstand Phase 1 → `docs/summaries/phase1-summary.md`
 
 ## Vision
 
-Alice ist ein lokaler, KI-first und Sprache-first Personal Assistant und Smart Home Controller. Das System vereint Haussteuerung, Dokumentenmanagement, Finanzen und persönliche Assistenz unter einer einzigen intelligenten Schnittstelle – ohne dass der Nutzer zwischen verschiedenen Systemen unterscheiden muss. Alle KI-Inferenz läuft lokal, der Zugang nur über VPN.
+Phase 2 transformiert Alice von einem text-basierten in einen vollständigen **Sprache-First-Assistenten**. Ein zentraler Speech-Gateway-Service verbindet HA-Voice-Geräte und WebApp mit derselben KI-Pipeline. Sprechererkennung ermöglicht automatische Nutzeridentifikation per Stimme und schafft die Grundlage für rollenbasierte Berechtigungen ohne manuelle Authentifizierung.
 
 ## Target Users
 
 **Primär: Andreas** (Admin)
-- Technikaffiner Hausbesitzer mit Interesse an KI, Smart Home, Garten und Finanzen
-- Nutzt das System täglich für Haussteuerung, Dokumentensuche und Informationen
-- Bevorzugt deutschen, technisch detaillierten Dialog
+- Möchte Alice aus verschiedenen Räumen per Sprache nutzen — über HA-Voice-Geräte (Wakeword) und die WebApp (Mikrofon-Button)
+- Sprechererkennung soll ihn automatisch identifizieren, ohne Login
+- Display-Routing soll es ermöglichen, Ergebnisse gezielt auf Wallpanel, TV oder PC zu senden
 
 **Sekundär: Partner und Gäste**
-- Abgestufte Berechtigungen (User/Guest)
-- Einfachere Sprache, weniger Systemzugriff
+- Abgestufte Berechtigungen, erkannt per Stimme (Phase 2.2+)
+- Einfache Sprach-Interaktion ohne Admin-Zugriff
 
-**Schmerz:** Zu viele Systeme (HA, NAS, Finanzen, Dokumente) erfordern manuelle Navigation. Sprachsteuerung über HA ist unflexibel. Kein systemübergreifendes Gedächtnis.
+**Schmerz Phase 2:** Alice ist nur per Texteingabe am Browser nutzbar. Keine Sprachsteuerung über HA-Voice-Geräte mit zentraler KI. Kein Hands-free-Betrieb im Haushalt.
 
-## Core Features (Roadmap)
+## Core Features (Roadmap Phase 2)
 
-| Priority | Feature                                                              | Phase | Status   |
-| -------- | -------------------------------------------------------------------- | ----- | -------- |
-| P0 (MVP) | Infrastruktur: DB-Schema & Weaviate HAIntent Collection              | 1.1   | Deployed |
-| P0 (MVP) | React Chat Frontend (Text-basiert)                                   | 1.1   | Deployed |
-| P0 (MVP) | n8n Chat-Handler Grundgerüst mit Memory                              | 1.1   | Deployed |
-| P0 (MVP) | FastAPI Container + Python Helper (hassil)                           | 1.2   | Deployed |
-| P0 (MVP) | HA-First Chat-Handler mit Intent-Routing                             | 1.2   | Deployed |
-| P0 (MVP) | HA Auto-Sync via MQTT                                                | 1.2   | Deployed |
-| P0 (MVP) | Hassil Native Library Integration (Expansion Engine Upgrade)         | 1.2   | Deployed |
-| P0 (MVP) | Hassil expansion_rules Compatibility Fix                             | 1.2   | Deployed |
-| P0 (MVP) | HA Sync Python Worker (Ersatz n8n alice-ha-intent-sync)              | 1.2   | Deployed |
-| P1       | JWT Auth / Login Screen                                              | 1.5   | Deployed |
-| P1       | DMS NAS-Ordner-Verwaltung (PROJ-15)                                  | 1.4   | Deployed |
-| P1       | DMS Scanner & NAS-Infrastruktur (PROJ-16)                            | 1.4   | Deployed |
-| P1       | DMS Scanner Multi-Queue-Routing (PROJ-17)                            | 1.4   | Deployed |
-| P1       | DMS Text-Extractor-Container (PROJ-18)                               | 1.4   | Deployed |
-| P1       | DMS Processor Workflow (PROJ-19)                                     | 1.4   | Deployed |
-| P1       | DMS Document Search Tool (PROJ-20)                                   | 1.4   | Deployed |
-| P1       | DMS Lifecycle Management (PROJ-21/22)                                | 1.4   | Deployed |
-| P1       | DMS Security Hardening (PROJ-23/24/25)                               | 1.4   | Deployed |
-| P1       | Admin Nutzerverwaltung (PROJ-26)                                     | 1.5   | Deployed |
-| P1       | Memory-Transfer PostgreSQL → Weaviate                                | 1.5   | Planned  |
-| P1       | Streaming Verbosity — Thinking + angereicherte Tool-Events (PROJ-37) | 1.6   | Deployed |
-| P2       | Speech Gateway (Whisper STT + Piper TTS)                             | 2     | Planned  |
-| P2       | Speaker-ID / Sprechererkennung                                       | 2     | Planned  |
-| P3       | Multi-User-Handling & Display-Routing                                | 3     | Planned  |
-| P3       | WebAuthn / Passkeys                                                  | 3     | Planned  |
+| Priority | Feature                                          | Phase | Status  |
+| -------- | ------------------------------------------------ | ----- | ------- |
+| P0       | Speech Gateway Service (PROJ-40)                 | 2.1   | Roadmap |
+| P0       | WebApp Voice Interface (PROJ-41)                 | 2.1   | Roadmap |
+| P1       | Home Assistant Voice Integration (PROJ-42)       | 2.2   | Roadmap |
+| P1       | Speaker Recognition / Speaker-ID (PROJ-43)       | 2.2   | Roadmap |
+| P1       | DMS BankTransaction Lifecycle Cleanup (PROJ-44)  | 2.1   | Roadmap |
+| P2       | Display Registry & Output Router (PROJ-45)       | 2.3   | Roadmap |
+| P2       | Mail IMAP Integration (PROJ-46)                  | 2.3   | Roadmap |
 
 ## Success Metrics
 
-| Metrik                            | Zielwert                    |
-| --------------------------------- | --------------------------- |
-| Einfacher HA-Befehl Latenz        | < 200ms End-to-End          |
-| Multi-Intent Latenz (2-3 Befehle) | < 400ms                     |
-| LLM-Antwort (Chat)                | < 3s                        |
-| Intent-Erkennung Accuracy         | > 90% bei Standard-Befehlen |
-| Auto-Sync nach Entity-Änderung    | < 60s                       |
-| System-Uptime                     | > 99% (lokal, nur über VPN) |
+| Metrik                                        | Zielwert                           |
+| --------------------------------------------- | ---------------------------------- |
+| Sprach-Latenz WebApp (STT + LLM + TTS)        | < 3s                               |
+| HA-Voice End-to-End (Wakeword → TTS-Antwort)  | < 4s                               |
+| Sprechererkennung Accuracy                    | > 95% bei eintrainierten Sprechern |
+| DMS BankTransaction: verwaiste Objekte        | 0 nach Parent-Löschung             |
+| System-Uptime                                 | > 99% (lokal, nur über VPN)        |
 
 ## Constraints
 
 - **Lokal-First**: Keine Cloud-Abhängigkeiten für Kernfunktionen
-- **Hardware**: Ryzen 9 + RTX 3090 (LLM) + TITAN X (Embeddings/Weaviate)
+- **Hardware**: Ryzen 9 + RTX 3090 (LLM + Whisper) + TITAN X (Embeddings + Speaker-ID)
 - **Zugang**: Nur über VPN erreichbar (kein öffentliches Internet)
 - **Sprache**: Primär Deutsch; Docs auf Deutsch, Code/Commits auf Englisch
-- **Team**: Solo-Projekt (Andreas), Hobbyzeit (3-4h/Tag)
-- **Stack**: n8n + Ollama (qwen3:14b) + Weaviate + PostgreSQL + React/Next.js
+- **Team**: Solo-Projekt (Andreas), Hobbyzeit (3–4h/Tag)
+- **Stack**: Python-Services + n8n + React/Next.js + Whisper + Piper + Wyoming-Protocol
+- **Phase 1 Basis**: PROJ-1–39 deployed — JWT-Auth, DMS-Pipeline, HA-Sync, Streaming Chat (SSE), BankTransaction-Indexierung
+- **Verschoben auf Phase 3**: Memory Transfer PostgreSQL → Weaviate, WebAuthn/Passkeys, Multi-User Display-Routing (erweitert)
 
-## Non-Goals
+## Non-Goals Phase 2
 
 - Keine Cloud-LLM-Pflicht (optional für spezifische Use-Cases)
-- Keine öffentliche API / kein Multi-Tenant-Betrieb
+- Kein Echtzeit-Transkriptions-Streaming (chunk-basierte Verarbeitung reicht)
+- Kein Memory Transfer (→ Phase 3)
+- Kein WebAuthn (→ Phase 3, Datenstruktur in Phase 1 vorbereitet)
+- Keine Finance-Ingestion-Pipeline (durch DMS + PROJ-29 bereits abgedeckt)
 - Keine Mobile App (PWA reicht)
-- Kein Echtzeit-Video/Bild-Verarbeitung im DMS (Phase 1)
-- Keine Spracherkennung vor Phase 2
+- Keine öffentliche API / kein Multi-Tenant-Betrieb
 
 ---
 
-Use `/requirements` to create detailed feature specifications for each item in the roadmap above.
+Use `/write-spec` to create detailed feature specifications for each item in the roadmap above.

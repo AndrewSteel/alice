@@ -2,6 +2,10 @@
 
 Dieser Ordner enthält detaillierte Feature Specs vom Requirements Engineer.
 
+## Path-Structure
+`features/**` aktueller Entwicklungs-Pfad
+`features/phase-X/**` abgeschlossene Features der Phase-X
+
 ## Naming Convention
 `PROJ-X-feature-name.md`
 
@@ -96,7 +100,7 @@ Feature-Status wird direkt im Feature-Dokument getrackt:
 ```markdown
 # PROJ-1: Feature Name
 
-**Status:** 🔵 Planned | 🟡 In Progress | ✅ Deployed
+**Status:** 🔵 Planned | 🟡 In Progress | ✅ Deployed | ❌ Deleted
 **Created:** 2026-01-12
 **Last Updated:** 2026-01-12
 ```
@@ -105,6 +109,7 @@ Feature-Status wird direkt im Feature-Dokument getrackt:
 - 🔵 Planned – Requirements sind geschrieben, ready for development
 - 🟡 In Progress – Wird gerade gebaut
 - ✅ Deployed – Live in Production
+- ❌ Deleted - Feature wurde entfernt
 
 **Git als Single Source of Truth:**
 - Alle Implementierungs-Details sind in Git Commits
