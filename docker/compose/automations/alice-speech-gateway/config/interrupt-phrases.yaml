@@ -1,0 +1,25 @@
+# Barge-in interrupt phrases (PROJ-40 Mode 2 + 3, barge-in stage 3).
+#
+# During TTS playback the gateway transcribes speech-like audio in the
+# background. Only if the transcript contains one of these phrases is the
+# running pipeline interrupted. Everything else (TV, radio, side talk) is
+# silently discarded.
+#
+# Matching is case-insensitive and ignores surrounding punctuation.
+# A phrase matches if it appears as a whole-word substring of the transcript.
+#
+# Deploy to the Docker volume:
+#   /srv/warm/alice/speech-gateway/config/interrupt-phrases.yaml
+
+phrases:
+  - "stop"
+  - "stopp"
+  - "halt"
+  - "warte mal"
+  - "warte"
+  - "moment"
+  - "ich habe eine frage"
+  - "kurze nachfrage"
+  - "da widerspreche ich"
+  - "das stimmt nicht"
+  - "entschuldigung"

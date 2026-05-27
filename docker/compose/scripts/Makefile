@@ -15,6 +15,7 @@ STACKS ?= \
   automations/alice-ha-sync \
   automations/alice-auth \
   automations/alice-chat-stream \
+  automations/alice-speech-gateway \
   automations/mqtt \
   automations/weaviate \
   automations/dms-extractor-pdf \

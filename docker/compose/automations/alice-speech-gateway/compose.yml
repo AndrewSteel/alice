@@ -1,0 +1,63 @@
+services:
+  alice-speech-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-speech-gateway
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    init: true
+    env_file:
+      - .env
+    environment:
+      - HF_HOME=/data/hf
+      - TRANSFORMERS_CACHE=/data/hf
+      - XDG_CACHE_HOME=/data/cache
+      - CT2_VERBOSE=-1
+    ports:
+      # 10300 = Wyoming (HA Voice Devices) — replaces wyoming-whisper
+      - "10300:10300"
+      # 10301 = WebSocket (WebApp) — proxied by nginx under /api/speech/
+      - "10301:10301"
+    volumes:
+      # JWT public key — same cert as alice-auth / alice-chat-stream
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+      # JWT private key — ONLY for minting Wyoming service tokens (Mode 3).
+      # Remove this mount to disable the Wyoming endpoint entirely.
+      - /srv/warm/alice/keys/jwt_private.pem:/run/secrets/jwt_private.pem:ro
+      # faster-whisper model cache — reuse the existing whisper model volume
+      - /srv/hot/whisper-models:/data
+      # Device->User mapping + interrupt phrases — editable without rebuild
+      - /srv/compose/automations/alice-speech-gateway/config:/config:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
+              capabilities: ["gpu"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python3 -c "import urllib.request; urllib.request.urlopen(''http://localhost:10301/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      # frontend = same network as wyoming-piper and HA Voice Devices reach
+      frontend:
+        aliases: [alice-speech-gateway]
+      # automation = reach alice-chat-stream
+      automation:
+        aliases: [alice-speech-gateway]
+
+networks:
+  frontend:
+    external: true
+    name: frontend
+  automation:
+    external: true
+    name: automation

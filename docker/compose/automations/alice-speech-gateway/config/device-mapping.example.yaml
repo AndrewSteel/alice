@@ -1,0 +1,16 @@
+# Device -> User mapping for Wyoming / HA Voice Devices (PROJ-40 Mode 3).
+#
+# The Wyoming protocol does not carry a device identifier. The client IP
+# of the TCP connection is used instead — each ESPHome satellite has a
+# fixed IP in the local network.
+#
+# Deploy to the Docker volume:
+#   /srv/compose/automations/alice-speech-gateway/config/device-mapping.yaml
+#
+# user_id must match an existing alice.users.id (UUID).
+
+devices:
+  # Küche HA Voice Satellite
+  "192.168.1.X": "UUID1"
+  # Büro
+  "192.168.1.Y": "UUID2"
