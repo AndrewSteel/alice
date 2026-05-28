@@ -2,7 +2,7 @@
 
 ## Status: Planned
 **Created:** 2026-05-28
-**Last Updated:** 2026-05-28
+**Last Updated:** 2026-05-28 (Barge-In ergänzt)
 
 ## Dependencies
 - Requires: PROJ-40 (Speech Gateway Service) — WebSocket endpoints `/ws/stt` (Mode 1) and `/ws/voice` (Mode 2) on `/api/speech/`
@@ -21,6 +21,8 @@
 - Als Nutzer möchte ich eine laufende Sprachsession jederzeit mit einem Stop-Button beenden können, damit ich die Kontrolle über das Gespräch behalte.
 
 - Als Nutzer möchte ich nach einer Alice-Antwort direkt weiterreden können ohne erneut einen Button zu drücken, damit das Gespräch natürlich fließt.
+
+- Als Nutzer möchte ich Alice während ihrer Antwort durch Sprechen unterbrechen können, damit ich eine falsche Gesprächsrichtung korrigieren oder eine Teilantwort konkretisieren kann, bevor die vollständige Antwort ausgegeben wurde.
 
 - Als Nutzer möchte ich eine verständliche Fehlermeldung sehen wenn der Mikrofonzugriff verweigert wurde, damit ich weiß was zu tun ist.
 
@@ -47,6 +49,9 @@
   - `tts_generating` / Audio läuft → "Alice spricht…"
   - Warte auf nächste Eingabe (nach TTS) → "Höre zu…"
 - [ ] TTS-Audio-Chunks (binäre WebSocket-Frames) werden über die Web Audio API in Echtzeit abgespielt — kein vollständiges Buffern vor dem Abspielen
+- [ ] Während TTS-Audio abgespielt wird, läuft die Mikrofonaufnahme weiter und Audio-Chunks werden kontinuierlich an den Gateway gesendet (Barge-In-Input)
+- [ ] Empfängt der Browser ein neues Status-Event vom Gateway während TTS läuft (z.B. `stt_complete` als Signal dass ein Interrupt erkannt wurde), wird die laufende Audio-Wiedergabe sofort gestoppt und die Wiedergabe-Queue geleert
+- [ ] Nach einem Barge-In zeigt das Overlay den neuen Zustand ("Alice denkt…") — die Session bleibt erhalten, kein Neustart nötig
 - [ ] Nach vollständiger TTS-Antwort bleibt die Session offen und wartet auf neue Spracheingabe (continued conversation)
 - [ ] Das Overlay enthält einen Stop-Button, der die Session beendet und das Overlay schließt
 - [ ] Bei `session_ended`-Event vom Gateway wird das Overlay automatisch geschlossen
@@ -69,7 +74,8 @@
 - **Leere Aufnahme (Mode 1)**: Whisper liefert leeren Text → kein Text ins Eingabefeld einfügen; optional Toast "Nichts verstanden, bitte nochmals versuchen"
 - **WebSocket-Verbindungsfehler**: Verbindung zu `/api/speech/` schlägt fehl → Toast "Sprachverbindung fehlgeschlagen", Aufnahme wird gestoppt, Buttons wieder aktiviert
 - **Session-Timeout (Mode 2)**: Gateway sendet `session_ended` nach Silence-Timeout → Overlay schließt sich automatisch, keine Fehlermeldung nötig
-- **Barge-In aus Browser-Sicht (Mode 2)**: Während TTS-Audio läuft nimmt der Browser weiterhin Mikrofon-Audio auf und sendet es an den Gateway — das Overlay zeigt weiterhin "Alice spricht…" bis der Gateway antwortet; kein besonderer UI-Zustand für Barge-In nötig
+- **Barge-In erkannt (Mode 2)**: Gateway sendet ein neues Status-Event während TTS läuft → Browser stoppt sofort die Wiedergabe, leert die Audio-Queue, zeigt neuen Zustand. Bereits an den Lautsprecher ausgegebene Samples können nicht zurückgeholt werden — das ist akzeptabel.
+- **Barge-In nicht erkannt (Mode 2)**: Browser sendet Audio (z.B. Hintergrundgeräusche), Gateway verwirft es intern — TTS läuft ungestört weiter, Browser merkt nichts davon
 - **Tab-Wechsel / Seite verlassen während aktiver Session**: WebSocket wird geschlossen, laufende Aufnahme gestoppt, Web-Audio-Kontext freigegeben
 - **Gleichzeitiges Abspielen und Aufnehmen (Mode 2)**: Echo-Unterdrückung via `echoCancellation: true` in `getUserMedia`-Constraints
 - **JWT abgelaufen**: Gateway schließt WebSocket mit Code 4401 → Toast "Sitzung abgelaufen, bitte neu einloggen"
