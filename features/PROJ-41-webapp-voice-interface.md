@@ -94,7 +94,96 @@
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Component Structure
+
+```text
+InputArea (extended — existing component)
++-- Textarea (existing)
++-- MicButton (NEW) — Mode 1 toggle, pulsing ring when recording
++-- VoiceButton (NEW) — Mode 2 trigger; disabled while Mode 1 active
++-- SendButton / StopButton (existing, disabled during Mode 1 recording)
+
+VoiceOverlay (NEW — shadcn Dialog over full chat UI)
++-- StatusLabel — "Höre zu…" / "Alice denkt…" / "Alice spricht…"
++-- AnimatedVisualizer — CSS pulsing ring for live state feedback
++-- StopButton — ends session, closes overlay
+
+useVoiceMode1 (NEW hook)
+  — MediaRecorder lifecycle, WS /ws/stt, transcript → InputArea callback
+
+useVoiceMode2 (NEW hook)
+  — MediaRecorder, WS /ws/voice, binary chunk streaming,
+    status event parsing, Web Audio API playback queue, barge-in flush
+
+useAudioPermission (NEW hook — shared by both modes)
+  — getUserMedia, permission state, error toast on denial
+```
+
+### Data Flow
+
+**Mode 1:**
+
+```text
+MicButton click → getUserMedia → MediaRecorder starts
+→ MicButton click again → stop → single blob sent over WebSocket
+→ Gateway returns JSON { text: "..." } → injected into Textarea
+→ User edits and sends manually
+```
+
+**Mode 2:**
+
+```text
+VoiceButton click → getUserMedia → WS /ws/voice opens
+→ MediaRecorder fires ondataavailable (~250ms) → each chunk sent as binary WS frame
+→ Gateway sends JSON status events: stt_complete, ai_processing, tts_generating, session_ended
+→ Gateway sends binary TTS frames → AudioContext queue plays back-to-back
+→ Barge-in: new status event → AudioContext queue flushed, playback stopped immediately
+→ session_ended event or Stop click → WebSocket closed, overlay dismissed
+```
+
+### Audio Handling
+
+- **Recording**: `MediaRecorder` with `echoCancellation: true`, `noiseSuppression: true`. Mode 1: single blob on stop. Mode 2: chunks streamed continuously as binary WS frames.
+- **Playback (Mode 2)**: `AudioContext.decodeAudioData` per incoming binary frame → sequential playback queue. On barge-in, queue cleared and active `AudioBufferSourceNode` stopped.
+- **Cleanup**: `MediaRecorder.stop()`, `WebSocket.close()`, `AudioContext.close()` called on overlay close and tab unload.
+
+### State Model (hook-local, no DB)
+
+```text
+Mode 1: isRecording: boolean, transcript callback
+Mode 2: status: 'idle'|'listening'|'processing'|'speaking'|'ended',
+        audioQueue: AudioBuffer[], wsConnection: WebSocket | null
+```
+
+### Tech Decisions
+
+| Decision | Choice | Why |
+| --- | --- | --- |
+| Overlay | shadcn `Dialog` (already installed) | No new package; accessible; works on mobile |
+| Audio playback | Web Audio API `AudioContext` | Required for streaming binary chunks + instant barge-in interrupt |
+| Recording format | MediaRecorder default (webm/opus) | PROJ-40 gateway already handles Opus; no transcoding needed |
+| Hook split | Two separate hooks | Modes share almost no logic; combined hook adds complexity with no benefit |
+| JWT auth | `?token=<jwt>` query param | Browser WebSocket API does not support custom headers |
+| Icons | lucide-react `Mic`, `AudioLines` | Already installed; consistent with existing InputArea icons |
+
+### Files
+
+| Action | File |
+| --- | --- |
+| Modify | `frontend/src/components/Chat/InputArea.tsx` |
+| Create | `frontend/src/components/Chat/VoiceOverlay.tsx` |
+| Create | `frontend/src/hooks/useVoiceMode1.ts` |
+| Create | `frontend/src/hooks/useVoiceMode2.ts` |
+| Create | `frontend/src/hooks/useAudioPermission.ts` |
+
+### Dependencies
+
+No new packages. All required capabilities are already available:
+
+- `shadcn/ui Dialog` — already installed
+- `lucide-react` — already installed
+- Web Audio API + MediaRecorder API — native browser APIs
 
 ## QA Test Results
 _To be added by /qa_
