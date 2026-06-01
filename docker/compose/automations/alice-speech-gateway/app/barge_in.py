@@ -17,6 +17,7 @@ import logging
 import re
 
 from . import config
+from .audio_decode import pcm_to_wav
 from .stt import STTEngine
 
 logger = logging.getLogger("alice-speech-gateway.barge_in")
@@ -93,7 +94,8 @@ class BargeInController:
         Returns the interrupt transcript on a match, else None.
 
         `webm` is the same audio in a Whisper-decodable container if the
-        client sends one; otherwise `pcm` is transcribed directly.
+        caller has one; if it is None, the PCM is wrapped in a minimal WAV
+        container so Whisper's ffmpeg-based auto-detection can decode it.
         `speaker_ok` is the PROJ-43 hook — defaults True (disabled) until
         speaker verification is integrated.
         """
@@ -102,7 +104,7 @@ class BargeInController:
             return None
 
         # Stage 2 — STT on the speech-like segment.
-        audio_for_stt = webm if webm is not None else pcm
+        audio_for_stt = webm if webm is not None else pcm_to_wav(pcm, _VAD_SAMPLE_RATE)
         try:
             transcript = await self._stt.transcribe(audio_for_stt)
         except Exception as exc:  # noqa: BLE001 — STT failure: no interrupt

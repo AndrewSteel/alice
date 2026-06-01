@@ -39,7 +39,7 @@ AI_TIMEOUT_SECONDS = float(_get("AI_TIMEOUT_SECONDS", "15"))
 PIPER_URI = _get("PIPER_URI", "tcp://wyoming-piper:10200")
 
 # --- Wyoming server ---
-WYOMING_PORT = int(_get("WYOMING_PORT", "10300"))
+WYOMING_PORT = int(_get("WYOMING_PORT", "10302"))
 
 # --- Conversation behaviour ---
 SILENCE_TIMEOUT_SECONDS = float(_get("SILENCE_TIMEOUT_SECONDS", "30"))

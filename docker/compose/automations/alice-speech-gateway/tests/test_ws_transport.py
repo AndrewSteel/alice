@@ -109,9 +109,38 @@ class FakeBargeIn:
         return None
 
 
+_PCM_BYTES_PER_SEC = 16000 * 2  # 16 kHz mono 16-bit
+
+
 def _audio(seconds: float) -> bytes:
     """Bytes representing `seconds` of 16 kHz mono 16-bit PCM."""
-    return b"\x00" * int(ws_transport._PCM_BYTES_PER_SEC * seconds)
+    return b"\x00" * int(_PCM_BYTES_PER_SEC * seconds)
+
+
+class FakeDecoder:
+    """
+    Stand-in for `WebmPcmDecoder` in tests — bypasses ffmpeg.
+
+    The receiver feeds it webm chunks; we just echo them back as if they
+    were already PCM so the barge-in path sees enough bytes to evaluate.
+    """
+
+    def __init__(self):
+        self._buf = bytearray()
+
+    async def feed(self, chunk):
+        self._buf.extend(chunk)
+
+    def take_pcm(self):
+        data = bytes(self._buf)
+        self._buf.clear()
+        return data
+
+    def discard_pcm(self):
+        self._buf.clear()
+
+    async def close(self):
+        pass
 
 
 async def test_normal_turn_then_conversation_end(monkeypatch):
@@ -124,7 +153,7 @@ async def test_normal_turn_then_conversation_end(monkeypatch):
         {"text": json.dumps({"type": "end_of_utterance"})},
     ])
 
-    await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
 
     assert len(pipeline.audio_turns) == 1
     assert pipeline.text_turns == []
@@ -153,7 +182,7 @@ async def test_barge_in_interrupts_running_turn(monkeypatch):
         {"bytes": _audio(1.0)},
     ])
 
-    await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
 
     assert pipeline.interrupted is True
     assert barge_in.calls >= 1
@@ -177,7 +206,7 @@ async def test_non_interrupt_audio_is_discarded(monkeypatch):
         {"bytes": _audio(1.0)},  # background noise during the turn
     ])
 
-    await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
 
     assert pipeline.interrupted is False
     assert pipeline.text_turns == []
@@ -191,7 +220,7 @@ async def test_silence_timeout_ends_session(monkeypatch):
     barge_in = FakeBargeIn([])
     ws = FakeWebSocket([])  # client sends nothing
 
-    await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
 
     assert pipeline.audio_turns == []
     assert ws.closed == (1000, "session ended")
@@ -203,7 +232,7 @@ async def test_stop_frame_ends_session(monkeypatch):
     barge_in = FakeBargeIn([])
     ws = FakeWebSocket([{"text": json.dumps({"type": "stop"})}])
 
-    await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
 
     assert ws.closed == (1000, "session ended")
 
@@ -214,7 +243,7 @@ async def test_client_disconnect_ends_loop(monkeypatch):
     barge_in = FakeBargeIn([])
     ws = FakeWebSocket([{"type": "websocket.disconnect"}])
 
-    await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
 
     # _CLOSED path returns without sending a session-ended status.
     assert ws.closed is None
@@ -241,4 +270,4 @@ async def test_ttserror_aborts_session_cleanly(monkeypatch):
     # _voice_loop lets TTSError propagate; ws_voice catches it. Mirror that
     # contract here: the loop raises, the handler-level except handles it.
     with pytest.raises(TTSError):
-        await ws_transport._voice_loop(ws, pipeline, barge_in, {})
+        await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
