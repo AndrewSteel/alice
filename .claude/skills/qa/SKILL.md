@@ -2,8 +2,8 @@
 name: qa
 description: Test features against acceptance criteria, find bugs, and perform security audit. Use after implementation is done.
 argument-hint: "feature-spec-path"
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 user-invocable: true
-context: fork
 agent: QA Engineer
 model: opus
 ---

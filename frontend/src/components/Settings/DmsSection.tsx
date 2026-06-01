@@ -11,7 +11,11 @@ import { FoldersTable } from "./FoldersTable";
 import { AddFolderDialog } from "./AddFolderDialog";
 import { EditFolderDialog } from "./EditFolderDialog";
 import { DeleteFolderDialog } from "./DeleteFolderDialog";
-import type { DmsFolder, CreateFolderInput, UpdateFolderInput } from "@/services/dms";
+import type {
+  DmsFolder,
+  CreateFolderInput,
+  UpdateFolderInput,
+} from "@/services/dms";
 
 export function DmsSection() {
   const {
@@ -39,7 +43,9 @@ export function DmsSection() {
       await addFolder(data);
       setAddOpen(false);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Erstellen.");
+      setActionError(
+        err instanceof Error ? err.message : "Fehler beim Erstellen.",
+      );
       throw err; // Let dialog know it failed
     }
   }
@@ -50,7 +56,9 @@ export function DmsSection() {
       await editFolder(id, data);
       setEditTarget(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Aktualisieren.");
+      setActionError(
+        err instanceof Error ? err.message : "Fehler beim Aktualisieren.",
+      );
       throw err;
     }
   }
@@ -61,7 +69,9 @@ export function DmsSection() {
       await removeFolder(id);
       setDeleteTarget(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Loeschen.");
+      setActionError(
+        err instanceof Error ? err.message : "Fehler beim Loeschen.",
+      );
     }
   }
 
@@ -70,7 +80,9 @@ export function DmsSection() {
     try {
       await toggleFolder(folder.id, !folder.enabled);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Umschalten.");
+      setActionError(
+        err instanceof Error ? err.message : "Fehler beim Umschalten.",
+      );
     }
   }
 
@@ -80,7 +92,10 @@ export function DmsSection() {
     } catch (err) {
       toast({
         title: "Fehler",
-        description: err instanceof Error ? err.message : "Reihenfolge konnte nicht gespeichert werden.",
+        description:
+          err instanceof Error
+            ? err.message
+            : "Reihenfolge konnte nicht gespeichert werden.",
         variant: "destructive",
       });
     }
@@ -137,12 +152,15 @@ export function DmsSection() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-100">DMS Ordner</h2>
         <Button
-          onClick={() => { setActionError(null); setAddOpen(true); }}
+          onClick={() => {
+            setActionError(null);
+            setAddOpen(true);
+          }}
           size="sm"
           className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
         >
           <Plus className="h-4 w-4" />
-          Ordner hinzufuegen
+          Ordner hinzufügen
         </Button>
       </div>
 
@@ -151,7 +169,7 @@ export function DmsSection() {
         <div className="rounded-lg border border-gray-700 bg-gray-800 p-8 text-center">
           <p className="text-gray-400">Noch keine Ordner konfiguriert.</p>
           <p className="text-sm text-gray-500 mt-1">
-            Fuege einen NAS-Ordner hinzu, um das DMS zu starten.
+            Füge einen NAS-Ordner hinzu, um das DMS zu starten.
           </p>
         </div>
       ) : (
@@ -176,7 +194,9 @@ export function DmsSection() {
         <EditFolderDialog
           folder={editTarget}
           open={!!editTarget}
-          onOpenChange={(open) => { if (!open) setEditTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setEditTarget(null);
+          }}
           onSubmit={handleEdit}
         />
       )}
@@ -185,7 +205,9 @@ export function DmsSection() {
         <DeleteFolderDialog
           folder={deleteTarget}
           open={!!deleteTarget}
-          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
           onConfirm={handleDelete}
         />
       )}

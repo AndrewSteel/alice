@@ -3,7 +3,6 @@ name: backend
 description: Build n8n workflows and database schemas for Alice. Use after architecture is designed.
 argument-hint: "feature-spec-path"
 user-invocable: true
-context: fork
 agent: Backend Developer
 model: opus
 ---

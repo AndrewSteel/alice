@@ -23,6 +23,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from . import auth, config
+from .audio_decode import WebmPcmDecoder
 from .barge_in import BargeInController
 from .pipeline import STATUS_SESSION_ENDED, VoicePipeline
 from .stt import STTError, get_engine
@@ -32,8 +33,11 @@ logger = logging.getLogger("alice-speech-gateway.ws")
 
 router = APIRouter()
 
-# Approx bytes/sec for 16 kHz mono 16-bit PCM — used for the min-length check.
+# 16 kHz / mono / s16le → 32 000 bytes per second of audio. The barge-in
+# VAD needs at least a few hundred milliseconds to compute a meaningful
+# voiced-frame ratio; 0.5 s gives ~16 VAD frames at 30 ms each.
 _PCM_BYTES_PER_SEC = 16000 * 2
+_BARGE_IN_PCM_MIN_BYTES = _PCM_BYTES_PER_SEC // 2
 
 
 async def _authenticate(ws: WebSocket) -> dict | None:
@@ -65,11 +69,6 @@ async def ws_stt(ws: WebSocket) -> None:
             audio = message.get("bytes")
             if audio is None:
                 # Ignore stray text frames on the STT endpoint.
-                continue
-            if len(audio) < _PCM_BYTES_PER_SEC * config.MIN_AUDIO_SECONDS:
-                await ws.send_json(
-                    {"type": "error", "message": config.SPEECH_ERRORS["audio_too_short"]}
-                )
                 continue
             try:
                 transcript = await get_engine().transcribe(audio, config.SPEECH_LANGUAGE)
@@ -111,11 +110,17 @@ async def ws_voice(ws: WebSocket) -> None:
         send_audio=send_audio,
     )
     barge_in = BargeInController(get_engine())
+    decoder = WebmPcmDecoder()
+    try:
+        await decoder.start()
+    except FileNotFoundError:
+        logger.error("ffmpeg not found — barge-in disabled for this session", extra=log)
+        decoder = None  # type: ignore[assignment]
 
     await ws.send_json({"type": "session", "session_id": session_id})
 
     try:
-        await _voice_loop(ws, pipeline, barge_in, log)
+        await _voice_loop(ws, pipeline, barge_in, log, decoder=decoder)
     except WebSocketDisconnect:
         logger.info("Voice client disconnected mid-stream", extra=log)
     except TTSError as exc:
@@ -128,6 +133,8 @@ async def ws_voice(ws: WebSocket) -> None:
         except RuntimeError:
             pass  # socket already closed
     finally:
+        if decoder is not None:
+            await decoder.close()
         logger.info("Voice session ended", extra=log)
 
 
@@ -141,6 +148,7 @@ async def _voice_loop(
     pipeline: VoicePipeline,
     barge_in: BargeInController,
     log: dict,
+    decoder: WebmPcmDecoder | None = None,
 ) -> None:
     """
     Continued-conversation loop with live barge-in.
@@ -148,16 +156,21 @@ async def _voice_loop(
     A single receiver task continuously reads frames from the socket. When
     no turn is running, audio frames accumulate into an utterance that is
     flushed on an `end_of_utterance` control frame. While a turn IS running,
-    incoming audio is routed to the barge-in path instead: it is buffered,
-    and on each chunk evaluated by the 3-stage `BargeInController`. A match
-    interrupts the running pipeline and the interrupt transcript is fed
-    straight back in as the next turn's input (same session_id).
+    incoming audio is routed to the barge-in path instead: chunks are fed
+    to a persistent ffmpeg decoder and the resulting PCM is evaluated by
+    the 3-stage `BargeInController`. A match interrupts the running
+    pipeline and the interrupt transcript is fed straight back in as the
+    next turn's input (same session_id).
+
+    `decoder` is the per-session webm/opus → PCM stream decoder. None
+    disables the barge-in path (e.g. when ffmpeg is unavailable in the
+    container, or in tests that inject their own decoder via `state`).
 
     The session ends on silence timeout, an explicit `stop`, a client
     disconnect, or a `conversation_end` event from alice-chat-stream.
     """
     # Shared state between the receiver task and the turn driver.
-    state = _VoiceState()
+    state = _VoiceState(decoder=decoder)
 
     receiver = asyncio.create_task(_audio_receiver(ws, barge_in, state, log))
     try:
@@ -171,10 +184,6 @@ async def _voice_loop(
                 return
 
             utterance: bytes = outcome  # type: ignore[assignment]
-            if len(utterance) < _PCM_BYTES_PER_SEC * config.MIN_AUDIO_SECONDS:
-                await pipeline._speak(config.SPEECH_ERRORS["audio_too_short"])
-                continue
-
             result = await _run_turn_with_barge_in(
                 pipeline, state, utterance, log
             )
@@ -251,9 +260,14 @@ async def _audio_receiver(
 
         if message.get("bytes") is not None:
             audio = message["bytes"]
+            # Always feed the streaming decoder so it builds a continuous
+            # PCM view of the conversation (MediaRecorder chunks after
+            # the first lack EBML headers and cannot be decoded alone).
+            if state.decoder is not None:
+                await state.decoder.feed(audio)
             if state.turn_running():
-                # Barge-in path: evaluate audio captured during TTS playback.
-                await _evaluate_barge_in(barge_in, state, audio, log)
+                # Barge-in path: pull decoded PCM and evaluate.
+                await _evaluate_barge_in(barge_in, state, log)
             else:
                 state.utterance.extend(audio)
             continue
@@ -274,31 +288,34 @@ async def _audio_receiver(
 async def _evaluate_barge_in(
     barge_in: BargeInController,
     state: "_VoiceState",
-    audio: bytes,
     log: dict,
 ) -> None:
     """
-    Buffer barge-in audio and run it through the 3-stage controller.
+    Pull decoded PCM from the per-session decoder and run it through the
+    3-stage barge-in controller.
 
-    The buffer is evaluated once it holds at least `MIN_AUDIO_SECONDS` of
-    audio so VAD and Whisper have a meaningful segment to work on. On an
-    interrupt match the running pipeline is cancelled and the transcript
-    handed to the turn driver.
+    The PCM is accumulated in `state.barge_pcm_buffer` until at least
+    ~0.5 s is available so the VAD can compute a meaningful voiced-frame
+    ratio. On an interrupt match the running pipeline is cancelled and
+    the transcript handed to the turn driver.
     """
     if state.interrupt_pending():
         return  # an interrupt is already being processed — ignore further audio
+    if state.decoder is None:
+        return  # ffmpeg unavailable — barge-in disabled for this session
 
-    state.barge_buffer.extend(audio)
-    if len(state.barge_buffer) < _PCM_BYTES_PER_SEC * config.MIN_AUDIO_SECONDS:
+    state.barge_pcm_buffer.extend(state.decoder.take_pcm())
+    if len(state.barge_pcm_buffer) < _BARGE_IN_PCM_MIN_BYTES:
         return
 
-    segment = bytes(state.barge_buffer)
-    state.barge_buffer.clear()
+    pcm_segment = bytes(state.barge_pcm_buffer)
+    state.barge_pcm_buffer.clear()
 
-    # `evaluate` expects 16 kHz PCM for the VAD stage and a Whisper-decodable
-    # container for STT; the WebApp client streams PCM, so the same bytes
-    # serve both. (PROJ-41 owns the client-side audio format contract.)
-    transcript = await barge_in.evaluate(pcm=segment, webm=segment)
+    # Pass `webm=None` so the controller wraps the PCM in a WAV container
+    # for Whisper's ffmpeg-based auto-detection (raw webm chunks captured
+    # mid-stream don't have the EBML init segment and aren't decodable
+    # standalone).
+    transcript = await barge_in.evaluate(pcm=pcm_segment, webm=None)
     if transcript is None:
         return  # silence / noise / no interrupt intent — pipeline continues
 
@@ -310,14 +327,16 @@ class _VoiceState:
     """
     Shared state between the audio receiver task and the turn driver.
 
-    Holds the in-progress utterance buffer, the barge-in audio buffer, the
-    currently running pipeline (if any), and a queue used to hand completed
-    utterances / session-ending sentinels to the turn driver.
+    Holds the in-progress utterance buffer, the barge-in PCM accumulator,
+    the per-session webm→PCM decoder, the currently running pipeline (if
+    any), and a queue used to hand completed utterances / session-ending
+    sentinels to the turn driver.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, decoder: WebmPcmDecoder | None = None) -> None:
         self.utterance = bytearray()
-        self.barge_buffer = bytearray()
+        self.barge_pcm_buffer = bytearray()
+        self.decoder = decoder
         self._events: asyncio.Queue = asyncio.Queue()
         self._pipeline: VoicePipeline | None = None
         self._interrupt_transcript: str | None = None
@@ -325,12 +344,18 @@ class _VoiceState:
     # --- turn lifecycle ---
     def begin_turn(self, pipeline: VoicePipeline) -> None:
         self._pipeline = pipeline
-        self.barge_buffer.clear()
+        self.barge_pcm_buffer.clear()
+        # Discard PCM produced during the (now-finished) user utterance
+        # — it isn't barge-in audio.
+        if self.decoder is not None:
+            self.decoder.discard_pcm()
 
     def end_turn(self) -> None:
         self._pipeline = None
         self._interrupt_transcript = None
-        self.barge_buffer.clear()
+        self.barge_pcm_buffer.clear()
+        if self.decoder is not None:
+            self.decoder.discard_pcm()
 
     def turn_running(self) -> bool:
         return self._pipeline is not None

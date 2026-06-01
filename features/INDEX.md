@@ -16,7 +16,9 @@
 | ID      | Phase | Feature                                                                                                                         | Status  | Spec | Created |
 | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------- | ------- | ---- | ------- |
 | PROJ-40 | 2.1   | Speech Gateway Service — Python-Container, Wyoming (HA Voice) + HTTP/WS (WebApp), Whisper STT, Piper TTS; Mode 3 deferred → PROJ-42 | Approved | [Spec](PROJ-40-speech-gateway-service.md) | 2026-05-21 |
-| PROJ-41 | 2.1   | WebApp Voice Interface — Mikrofon-Button, Audio→Gateway, TTS-Playback im Browser                                               | Architected | [Spec](PROJ-41-webapp-voice-interface.md) | 2026-05-21 |
+| PROJ-41 | 2.1   | WebApp Voice Interface — Mikrofon-Button, Audio→Gateway, TTS-Playback im Browser                                               | Deployed | [Spec](PROJ-41-webapp-voice-interface.md) | 2026-05-21 |
+<!-- 2026-06-01 live re-test: BUG-LIVE-1 fixed (setuptools<81 pin verified, webrtcvad imports cleanly). Mode 1 & Mode 2 happy path both PASS live. Open follow-ups: BUG-LIVE-2 (uvicorn WS protocol logger still emits JWT; --no-access-log only covers HTTP) and BUG-LIVE-3 (end-of-utterance → first TTS = 10.8 s vs 3 s spec budget, alice-chat-stream first-token latency). Both MEDIUM — Approved for /deploy. -->
+
 | PROJ-42 | 2.2   | Home Assistant Voice Integration — Wyoming STT/TTS, Wakeword→KI→TTS auf HA-Gerät                                               | Roadmap | —    | 2026-05-21 |
 | PROJ-43 | 2.2   | Speaker Recognition (Speaker-ID) — Voice-Embedding, Enrollment-Flow, Speaker→User/Rolle in Postgres                            | Roadmap | —    | 2026-05-21 |
 | PROJ-44 | 2.1   | DMS BankTransaction Lifecycle Cleanup — BUG-13-Fix: BankTransaction-Kinder bei Parent-BankStatement-Löschung mitlöschen        | Roadmap | —    | 2026-05-21 |

@@ -16,8 +16,12 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/venv/bin:$PATH"
+# setuptools<81: starting with 81.0 the legacy `pkg_resources` module is no
+# longer importable by default. webrtcvad 2.0.10 (unmaintained since 2017)
+# still does `import pkg_resources` at module load, which would otherwise
+# crash every BargeInController construction and take down /ws/voice.
 RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir -U pip setuptools wheel
+    /opt/venv/bin/pip install --no-cache-dir -U pip 'setuptools<81' wheel
 
 WORKDIR /app
 
@@ -29,4 +33,8 @@ COPY app/ ./app/
 # 10300 = Wyoming (HA Voice Devices), 10301 = WebSocket (WebApp via nginx)
 EXPOSE 10300 10301
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "10301"]
+# --no-access-log: uvicorn's default access log writes the full request URI
+# (including `?token=<JWT>` on WS handshakes) to stdout. The gateway emits
+# its own structured JSON logs for session start/end/auth; suppressing the
+# default access log keeps JWTs out of `docker logs`.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "10301", "--no-access-log"]

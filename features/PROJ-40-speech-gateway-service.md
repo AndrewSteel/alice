@@ -62,8 +62,8 @@
 - [ ] Authentifizierung via JWT
 
 ### Modus 3 — Wyoming-Endpunkt (HA Voice Device)
-- [ ] Der Gateway exponiert einen Wyoming-kompatiblen Endpunkt (Port 10300)
-      und ersetzt damit den wyoming-whisper-Container vollständig
+- [ ] Der Gateway exponiert einen Wyoming-kompatiblen Endpunkt (Port 10302)
+      und läuft parallel zum wyoming-whisper-Container (Port 10300)
 - [ ] HA Voice Devices können nach Wakeword-Erkennung Audio an den Gateway
       senden; der Gateway führt dieselbe Full-Voice-Pipeline wie Modus 2 aus
 - [ ] Jede Device-ID wird über eine Konfigurationsdatei (YAML/JSON,
@@ -162,7 +162,7 @@
 - **Concurrency**: Mehrere gleichzeitige Sessions; graceful degradation
   bei Ressourcenengpass
 - **GPU**: TITAN X — gleiche Zuweisung wie bisheriger wyoming-whisper
-- **Ports**: 10300 (Wyoming), 10301 (WebSocket, WebApp)
+- **Ports**: 10302 (Wyoming), 10301 (WebSocket, WebApp)
 - **Sprache**: Deutsch (Standard); konfigurierbar per Umgebungsvariable
 - **Container**: Ersetzt wyoming-whisper vollständig
 - **Konfiguration**: Device→User-Mapping als YAML/JSON in Docker-Volume;
@@ -178,7 +178,8 @@
 ### Container Overview
 
 New Python container **`alice-speech-gateway`** that:
-- **Replaces** the existing `wyoming-whisper` container (inherits port 10300)
+- **Runs alongside** the existing `wyoming-whisper` container (which stays on port 10300)
+- Uses **port 10302** for its own Wyoming endpoint (avoids conflict with wyoming-whisper)
 - **Keeps** `wyoming-piper` running — the gateway calls it as a client
 - Adds **two new WebSocket endpoints** on port 10301 for the WebApp
 
@@ -281,7 +282,7 @@ No new PostgreSQL tables required. The gateway forwards `session_id` to alice-ch
 
 | Port | Protocol | Consumer |
 |---|---|---|
-| 10300 | Wyoming (TCP) | HA Voice Devices (replaces wyoming-whisper) |
+| 10302 | Wyoming (TCP) | HA Voice Devices (parallel to wyoming-whisper on 10300) |
 | 10301 | WebSocket (HTTP upgrade) | WebApp via nginx proxy |
 
 **nginx change:** Add proxy rule `/api/speech/` → `alice-speech-gateway:10301` (WebSocket upgrade, buffering off, `proxy_read_timeout 300s`).

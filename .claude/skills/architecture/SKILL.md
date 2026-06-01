@@ -98,6 +98,7 @@ List only package names with brief purpose.
 #### E) Workflow Architecture (for n8n features)
 
 If the feature is primarily an n8n workflow, describe:
+
 - **Trigger:** What starts the workflow (Webhook / Schedule / MQTT)
 - **Nodes:** High-level list of processing steps (no implementation details)
 - **Data flow:** What comes in → what happens → what goes out
@@ -132,13 +133,16 @@ Add a "Tech Design (Solution Architect)" section to `/features/PROJ-X.md`
 After approval, tell the user based on feature type:
 
 **UI feature (with or without backend):**
+
 > "Design is ready! Next step: Run `/frontend` to build the UI components for this feature."
 > If this feature also needs backend work, run `/backend` after frontend is done.
 
 **n8n workflow feature (no UI):**
+
 > "Design is ready! Next step: Run `/backend` to build the n8n workflow for this feature."
 
 **n8n workflow with complex requirements:**
+
 > "Design is ready! For a detailed workflow spec, run `/n8n-architecture` first, then `/backend` to build."
 
 ## Git Commit

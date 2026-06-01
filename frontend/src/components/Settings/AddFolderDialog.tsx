@@ -30,7 +30,11 @@ interface AddFolderDialogProps {
 
 const AUTO_VALUE = "__auto__";
 
-export function AddFolderDialog({ open, onOpenChange, onSubmit }: AddFolderDialogProps) {
+export function AddFolderDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+}: AddFolderDialogProps) {
   const [path, setPath] = useState("");
   const [suggestedType, setSuggestedType] = useState<string>(AUTO_VALUE);
   const [description, setDescription] = useState("");
@@ -82,9 +86,9 @@ export function AddFolderDialog({ open, onOpenChange, onSubmit }: AddFolderDialo
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Ordner hinzufuegen</DialogTitle>
+          <DialogTitle>Ordner hinzufügen</DialogTitle>
           <DialogDescription className="text-gray-400">
-            Fuege einen NAS-Pfad zur DMS-Ueberwachung hinzu.
+            Füge einen NAS-Pfad zur DMS-Überwachung hinzu.
           </DialogDescription>
         </DialogHeader>
 
@@ -116,11 +120,18 @@ export function AddFolderDialog({ open, onOpenChange, onSubmit }: AddFolderDialo
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-gray-800 border-gray-700">
-                <SelectItem value={AUTO_VALUE} className="text-gray-300 focus:bg-gray-700 focus:text-gray-100">
+                <SelectItem
+                  value={AUTO_VALUE}
+                  className="text-gray-300 focus:bg-gray-700 focus:text-gray-100"
+                >
                   Automatisch (LLM)
                 </SelectItem>
                 {SUGGESTED_TYPES.map((t) => (
-                  <SelectItem key={t} value={t} className="text-gray-300 focus:bg-gray-700 focus:text-gray-100">
+                  <SelectItem
+                    key={t}
+                    value={t}
+                    className="text-gray-300 focus:bg-gray-700 focus:text-gray-100"
+                  >
                     {t}
                   </SelectItem>
                 ))}
@@ -141,9 +152,7 @@ export function AddFolderDialog({ open, onOpenChange, onSubmit }: AddFolderDialo
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-red-400">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-400">{error}</p>}
 
           <DialogFooter>
             <Button
@@ -160,7 +169,7 @@ export function AddFolderDialog({ open, onOpenChange, onSubmit }: AddFolderDialo
               disabled={submitting}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
-              {submitting ? "Wird erstellt..." : "Hinzufuegen"}
+              {submitting ? "Wird erstellt..." : "Hinzufügen"}
             </Button>
           </DialogFooter>
         </form>
