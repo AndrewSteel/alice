@@ -84,7 +84,116 @@
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Context: What PROJ-40 Already Built
+
+The core Wyoming infrastructure is **fully implemented** in `alice-speech-gateway`. PROJ-42 does not rebuild it — it completes the last missing piece (ESPHome device config) and refines the device-mapping schema.
+
+Already running (PROJ-40, status: Approved):
+- Wyoming TCP server on port 10302 — accepts direct device connections
+- Device identification by **source IP** (not a protocol field — the Wyoming protocol carries no device ID; this was discovered during PROJ-40 live testing)
+- Continued conversation loop (open session after each TTS reply, 30-second silence timeout)
+- `conversation_end` signal handling — AI signals session end after HA write actions (e.g. lights switched), session stays open after read-only queries
+- Full pipeline: faster-whisper STT → alice-chat-stream → Piper TTS → audio back to device
+- Spoken German error messages for all failure modes (unknown device, STT error, AI timeout, audio too short)
+
+### What PROJ-42 Delivers
+
+PROJ-42 has **three components** — no new containers, no database changes, no n8n workflows.
+
+```
+PROJ-42 Delivery
+│
+├── 1. ESPHome Device Configuration (NEW FILE)
+│   └── devices/ha-voice-pe/espHome.yaml
+│       Dual wakeword on the HA Voice PE hardware:
+│         "Hey Jarvis" → direct TCP Wyoming to Gateway port 10302 (bypasses HA)
+│         "Okay Nabu"  → HA Assist (existing, unchanged)
+│       Firmware update procedure documented inline
+│
+├── 2. device-mapping.yaml Format Extension (CHANGE)
+│   ├── device-mapping.yaml — new format with name + room per entry
+│   ├── device-mapping.example.yaml — updated to show new format
+│   └── config.py — parser updated to load name + room alongside user_id
+│
+└── 3. Gateway — Logging Enhancement (MINOR CHANGE)
+    └── wyoming_transport.py — log messages use device name instead of raw IP
+        (no logic changes — purely observability improvement)
+```
+
+### Data Flow
+
+```
+HA Voice PE
+  │
+  │ "Hey Jarvis" detected (on-device wakeword)
+  │
+  ↓  direct TCP Wyoming (port 10302) — HA is NOT in this path
+alice-speech-gateway
+  │  look up source IP in device-mapping.yaml → user_id + name + room
+  │  faster-whisper STT
+  │  alice-chat-stream (AI pipeline, conversation history)
+  │  Piper TTS (sentence-level streaming)
+  │  audio back to device
+  │  loop: wait for next utterance OR end session
+  │    → conversation_end signal (after HA write action) → session ends
+  │    → 30 s silence → session ends
+  │    → in either case: device returns to wakeword listening mode
+  ↓
+HA Voice PE (wakeword mode)
+
+HA Voice PE
+  │
+  │ "Okay Nabu" detected
+  │
+  ↓  existing HA Assist pipeline — UNCHANGED
+Home Assistant Assist
+```
+
+### Device-Mapping Data Model (extended)
+
+Each device entry will have four fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `ip` | string | Source IP of TCP connection — primary lookup key |
+| `user_id` | UUID | Maps to `alice.users.id` — determines whose session context is used |
+| `name` | string | Human-readable device name (used in logs, future UI) |
+| `room` | string | Room label (ready for PROJ-43 speaker recognition context) |
+
+Stored in: `device-mapping.yaml` (Docker volume, mounted read-only into the gateway container). Loaded at startup. A gateway restart is required to pick up changes.
+
+No new PostgreSQL tables. No Weaviate changes.
+
+### Key Architectural Decision: Dual Wakeword
+
+The HA Voice PE hardware supports configuring **multiple wakewords with independent pipeline targets**. This is the design that makes PROJ-42 possible without any trade-off:
+
+- "Hey Jarvis" → ESPHome opens a direct TCP connection to the Gateway on port 10302. HA Assist is bypassed for this wakeword entirely.
+- "Okay Nabu" → HA's built-in voice assistant pipeline, unchanged.
+- Both wakewords are active in parallel on the same device. They are independent — no conflicts.
+- The ESPHome integration in HA **remains connected** for entity visibility (entities, LED, volume control, events). Only the voice pipeline for "Hey Jarvis" is rerouted.
+
+### Operational Requirement: DHCP Reservation
+
+Device identity is based on source TCP IP. The HA Voice PE must have a **fixed IP address** via DHCP reservation in the router. If the IP changes, the device receives a spoken error ("Gerät nicht konfiguriert") until `device-mapping.yaml` is updated. This is an ops requirement, not a code change.
+
+### What Does NOT Change
+
+- All gateway Python logic (STT, AI pipeline, TTS, barge-in, continued conversation) — PROJ-40
+- HA Assist pipeline and "Okay Nabu" path — untouched
+- alice-chat-stream and `conversation_end` event semantics — already implemented
+- nginx, PostgreSQL, n8n — no changes needed
+- The wyoming-whisper container (port 10300) stays running for HA
+
+### Dependencies Confirmed
+
+| Dependency | Status |
+|---|---|
+| alice-speech-gateway Wyoming endpoint (port 10302) | Built in PROJ-40 |
+| `conversation_end` event from alice-chat-stream after HA write actions | PROJ-40 dependency, implemented |
+| ESPHome direct Wyoming satellite support | ESPHome firmware feature, confirmed supported |
+| DHCP reservation for device IP | Ops requirement, outside codebase |
 
 ## QA Test Results
 _To be added by /qa_
