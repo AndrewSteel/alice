@@ -1,0 +1,157 @@
+# =============================================================================
+# Alice — Custom ESPHome config for Home Assistant Voice PE (PROJ-42)
+# =============================================================================
+#
+# WHAT THIS DOES
+# --------------
+# Dual wakeword on a single HA Voice PE device, each routed to a different
+# voice backend:
+#
+#   "Hey Jarvis"  -> direct TCP Wyoming connection to the Alice speech gateway
+#                    (ki.lan:10302). Home Assistant is NOT in this path — the
+#                    firmware streams mic audio straight to Alice and plays the
+#                    TTS audio Alice streams back. Continued-conversation,
+#                    silence timeout and conversation_end are handled by the
+#                    gateway (PROJ-40).
+#
+#   "Okay Nabu"   -> the stock HA Assist pipeline over the ESPHome native API,
+#                    completely unchanged.
+#
+# The device stays a normal ESPHome device in Home Assistant the whole time:
+# native API stays connected, so entities, LED ring, volume, mute switch and
+# button events keep working. Only the "Hey Jarvis" voice path is rerouted.
+#
+# WHY A CUSTOM COMPONENT IS NEEDED
+# --------------------------------
+# Stock ESPHome `voice_assistant` only speaks the HA native API — it cannot
+# open a raw socket to an arbitrary host. The "Hey Jarvis -> Alice" path needs
+# a small external component that implements a Wyoming TCP *client* (AudioStart
+# / AudioChunk / AudioStop framing) against the gateway. It lives in
+# `components/wyoming_satellite/` next to this file and is pulled in via
+# `external_components` below.
+#
+# -----------------------------------------------------------------------------
+# FIRMWARE-UPDATE PROCEDURE (read before touching the device)
+# -----------------------------------------------------------------------------
+# This YAML extends Nabu Casa's official HA Voice PE firmware as a remote
+# `package`. A Voice PE OTA firmware update from Home Assistant will REPLACE
+# the firmware on the device and undo this custom config. To restore it:
+#
+#   1. Note the official firmware version you want to track. Pin it in the
+#      `packages:` ref below (replace `@main` with the release tag, e.g.
+#      `@2025.x.y`) so a future upstream change can't silently break the build.
+#   2. In the ESPHome dashboard (or CLI) compile + flash THIS file:
+#        esphome run devices/ha-voice-pe/espHome.yaml
+#   3. Confirm both wakewords:
+#        - "Okay Nabu"  -> HA Assist answers as before.
+#        - "Hey Jarvis" -> Alice answers (check the gateway logs show a
+#          "Wyoming session start" for this device's IP).
+#   4. If the gateway endpoint or the device IP changed, update:
+#        - substitutions: alice_gateway_host / alice_gateway_port (here), and
+#        - device-mapping.yaml in alice-speech-gateway/config (source IP).
+#
+# After any HA Voice PE hardware/firmware revision, re-pull the upstream
+# package (step 1) and re-test — the override keys below assume the stock
+# `micro_wake_word` + `voice_assistant` component names.
+# =============================================================================
+
+substitutions:
+  name: "ha-voice-pe-buero"
+  friendly_name: "Büro HA Voice PE"
+  # Alice speech gateway Wyoming endpoint (PROJ-40).
+  # Prefer the gateway's fixed IP over a hostname — the device resolves this
+  # via lwip getaddrinfo and ".lan"/".local" names may not resolve on-device.
+  alice_gateway_host: "192.168.178.88" # <-- set to the gateway/ki.lan IP
+  alice_gateway_port: "10302"
+  # IDs of the microphone + speaker declared by the official HA Voice PE package.
+  # VERIFY against the pinned package before flashing:
+  #   esphome config devices/ha-voice-pe/espHome.yaml | grep -E 'id:.*(mic|speaker|media)'
+  # If the package names differ, update these two values (no C++ change needed).
+  mic_id: "i2s_mics"
+  # Use the raw I2S speaker (48 kHz hardware rate). The gateway now sends 48 kHz
+  # directly, so no resampling wrapper is needed. announcement_resampling_speaker
+  # goes through speaker_mixer which has a ~6 s startup delay, causing most audio
+  # to be dropped (ring buffer overflow) before playback begins.
+  speaker_id: "i2s_audio_speaker"
+
+# Official HA Voice PE firmware as the base. Pin to a release tag instead of
+# @main before flashing (see the firmware-update procedure above).
+packages:
+  nabu_casa.voice_pe: github://esphome/home-assistant-voice-pe/home-assistant-voice.yaml@26.4.0
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+# Keep the device adoptable / connected to HA so all non-voice entities,
+# the LED ring and button events stay available.
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+logger:
+  level: DEBUG
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # PROJ-42: device identity at the gateway is the source IP. Give this device
+  # a DHCP reservation in the router; if the IP changes, Alice replies
+  # "Dieses Gerät ist nicht bei Alice registriert" until device-mapping.yaml
+  # is updated.
+  use_address: ${name}.local
+
+# Wyoming TCP client to the Alice gateway (see "WHY A CUSTOM COMPONENT" above).
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [wyoming_satellite]
+
+wyoming_satellite:
+  id: alice_satellite
+  host: ${alice_gateway_host}
+  port: ${alice_gateway_port}
+  microphone: ${mic_id} # reuse the mic defined by the official package
+  speaker: ${speaker_id} # reuse the speaker defined by the official package
+  # On-device VAD / continued-conversation tuning (tune on hardware):
+  silence_threshold: 700  # room noise typically < 300 RMS, speech > 700 RMS
+  silence_ms: 900
+  listen_timeout_ms: 6000 # total utterance window; keep short to minimise STT latency
+
+# -----------------------------------------------------------------------------
+# Dual wakeword.
+#
+# The @26.4.0 package declares micro_wake_word (id: mww) with on_wake_word_detected.
+# ESPHome MERGES automation triggers — it does NOT replace them. So we only add
+# the hey_jarvis intercept here; the package handler keeps running for all wake words.
+#
+# Flow when hey_jarvis fires:
+#   1. Package handler runs first → voice_assistant.start (HA Assist)
+#   2. Our handler runs immediately after → voice_assistant.stop, then
+#      wyoming_satellite.start (Alice gateway)
+#
+# Flow for all other wake words (okay_nabu, hey_mycroft, stop):
+#   1. Package handler runs → full timer/media/wake-sound/voice_assistant logic
+#   2. Our handler: condition fails → does nothing
+#
+# The mute-switch check mirrors the package guard so we don't bypass it.
+# -----------------------------------------------------------------------------
+micro_wake_word:
+  on_wake_word_detected:
+    - if:
+        condition:
+          and:
+            - lambda: 'return wake_word == "Hey Jarvis";'
+            - switch.is_off: master_mute_switch
+        then:
+          # Stop any active alice session first (safe no-op when already idle).
+          # This lets "Hey Jarvis" break a stuck self-conversation loop without
+          # a re-flash — the user just repeats the wake word.
+          - wyoming_satellite.stop: alice_satellite
+          # Undo what the package handler just started, then hand off to Alice.
+          - voice_assistant.stop:
+          - wyoming_satellite.start: alice_satellite

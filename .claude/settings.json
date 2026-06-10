@@ -20,7 +20,7 @@
       "Bash(cat:*)",
       "Bash(python3 -c \":*)",
       "mcp__postgres__query",
-      "mcp__n8n-mcp__n8n_:*",
+      "mcp__n8n-mcp__n8n_*",
       "Bash(npx tsc --noEmit)",
       "Bash(pip3 show *)"
     ]

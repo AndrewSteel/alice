@@ -27,6 +27,11 @@ from app.wyoming_transport import GatewayWyomingHandler
 _RATE = 16000
 _WIDTH = 2
 _CHANNELS = 1
+_CLIENT_IP = "192.0.2.10"
+
+
+def _device(user_id: str = "uuid-1") -> config.Device:
+    return config.Device(user_id=user_id, name="Test Device", room="Test Room")
 
 
 def _pcm(seconds: float) -> bytes:
@@ -49,9 +54,18 @@ class FakePipeline:
     def __init__(self, results):
         self._results = list(results)
         self.turns: list[bytes] = []
+        self.tokens: list[str] = []
+        self.speak_on_empty_calls: list[bool] = []
 
-    async def run_turn(self, audio: bytes, audio_format: str = "pcm") -> PipelineResult:
+    def set_jwt(self, jwt_token: str) -> None:
+        self.tokens.append(jwt_token)
+
+    async def run_turn(self, audio: bytes, audio_format: str = "pcm",
+                       pcm_rate: int = 16000, pcm_width: int = 2,
+                       pcm_channels: int = 1,
+                       speak_on_empty: bool = True) -> PipelineResult:
         self.turns.append(audio)
+        self.speak_on_empty_calls.append(speak_on_empty)
         await asyncio.sleep(0)  # yield to let other tasks run
         return self._results.pop(0) if self._results else PipelineResult()
 
@@ -62,11 +76,12 @@ class _TestableHandler(GatewayWyomingHandler):
     reader/writer) and captures every write_event call.
     """
 
-    def __init__(self, device_mapping: dict[str, int], device_id: str = "test-device"):
+    def __init__(self, device_mapping: dict[str, config.Device], client_ip: str = _CLIENT_IP):
         # Directly initialise our own attributes only.
         self._device_mapping = device_mapping
         self._info = None
-        self._device_id = device_id
+        # Production identifies the device by the TCP source IP.
+        self._client_ip = client_ip
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._loop_task = None
         self.written_events: list = []
@@ -91,7 +106,7 @@ def _written_types(handler: _TestableHandler) -> list[str]:
 # ---------------------------------------------------------------------------
 
 async def test_collect_audio_returns_pcm(monkeypatch):
-    """_collect_audio returns the accumulated PCM for a complete block."""
+    """_collect_audio returns (pcm_bytes, rate, width, channels) from AudioStart."""
     monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 1.0)
     handler = _TestableHandler({})
 
@@ -103,7 +118,12 @@ async def test_collect_audio_returns_pcm(monkeypatch):
     handler._event_queue.put_nowait(_audio_stop())
 
     result = await handler._collect_audio()
-    assert result == pcm
+    assert result is not None
+    audio, rate, width, channels = result
+    assert audio == pcm
+    assert rate == _RATE
+    assert width == _WIDTH
+    assert channels == _CHANNELS
 
 
 async def test_collect_audio_timeout(monkeypatch):
@@ -131,7 +151,7 @@ async def test_continued_conversation_two_turns(monkeypatch):
     monkeypatch.setattr("app.wyoming_transport._service_token_for", lambda uid: "tok")
     monkeypatch.setattr("app.wyoming_transport.get_engine", lambda: None)
 
-    handler = _TestableHandler({"test-device": 1})
+    handler = _TestableHandler({_CLIENT_IP: _device()})
 
     # Feed both utterances before awaiting the task (they queue up).
     await _feed_block(handler, 1.0)
@@ -147,6 +167,46 @@ async def test_continued_conversation_two_turns(monkeypatch):
     assert types.count("audio-stop") == 2
 
 
+async def test_service_token_reminted_each_turn(monkeypatch):
+    """
+    BUG-2 regression: the service token is re-minted at the start of every
+    turn, so a long continued conversation never reuses a token that has
+    outlived SERVICE_JWT_TTL_SECONDS.
+    """
+    monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 1.0)
+    fake = FakePipeline([PipelineResult(), PipelineResult(conversation_ended=True)])
+
+    minted: list[str] = []
+
+    def fake_mint(user_id: str) -> str:
+        token = f"tok-{len(minted) + 1}"
+        minted.append(token)
+        return token
+
+    captured_construct: dict = {}
+
+    def fake_pipeline(**kw):
+        captured_construct["jwt_token"] = kw["jwt_token"]
+        return fake
+
+    monkeypatch.setattr("app.wyoming_transport.VoicePipeline", fake_pipeline)
+    monkeypatch.setattr("app.wyoming_transport._service_token_for", fake_mint)
+    monkeypatch.setattr("app.wyoming_transport.get_engine", lambda: None)
+
+    handler = _TestableHandler({_CLIENT_IP: _device()})
+    await _feed_block(handler, 1.0)
+    await _feed_block(handler, 1.0)
+
+    assert handler._loop_task is not None
+    await handler._loop_task
+
+    # Two turns → the token is minted twice with distinct values.
+    assert minted == ["tok-1", "tok-2"]
+    # Turn 1's token is passed at construction; turn 2 refreshes via set_jwt.
+    assert captured_construct["jwt_token"] == "tok-1"
+    assert fake.tokens == ["tok-2"]
+
+
 async def test_conversation_ended_signal_stops_after_one_turn(monkeypatch):
     """A conversation_end result ends the session without waiting for more audio."""
     monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 1.0)
@@ -155,7 +215,7 @@ async def test_conversation_ended_signal_stops_after_one_turn(monkeypatch):
     monkeypatch.setattr("app.wyoming_transport._service_token_for", lambda uid: "tok")
     monkeypatch.setattr("app.wyoming_transport.get_engine", lambda: None)
 
-    handler = _TestableHandler({"test-device": 1})
+    handler = _TestableHandler({_CLIENT_IP: _device()})
     await _feed_block(handler, 1.0)
 
     assert handler._loop_task is not None
@@ -172,7 +232,7 @@ async def test_silence_timeout_between_turns_ends_session(monkeypatch):
     monkeypatch.setattr("app.wyoming_transport._service_token_for", lambda uid: "tok")
     monkeypatch.setattr("app.wyoming_transport.get_engine", lambda: None)
 
-    handler = _TestableHandler({"test-device": 1})
+    handler = _TestableHandler({_CLIENT_IP: _device()})
     await _feed_block(handler, 1.0)
 
     assert handler._loop_task is not None
@@ -194,10 +254,48 @@ async def test_unknown_device_gets_spoken_error(monkeypatch):
 
     monkeypatch.setattr(_TestableHandler, "_speak_error", fake_speak_error)
 
-    handler = _TestableHandler(device_mapping={}, device_id="unknown-device")
+    handler = _TestableHandler(device_mapping={})
     await _feed_block(handler, 1.0)
 
     assert handler._loop_task is not None
     await handler._loop_task
 
     assert spoken == [config.SPEECH_ERRORS["unknown_device"]]
+
+
+async def test_no_speech_result_ends_session(monkeypatch):
+    """A no_speech result (VAD removed all audio) ends the session after one turn."""
+    monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 1.0)
+    fake = FakePipeline([PipelineResult(no_speech=True)])
+    monkeypatch.setattr("app.wyoming_transport.VoicePipeline", lambda **kw: fake)
+    monkeypatch.setattr("app.wyoming_transport._service_token_for", lambda uid: "tok")
+    monkeypatch.setattr("app.wyoming_transport.get_engine", lambda: None)
+
+    handler = _TestableHandler({_CLIENT_IP: _device()})
+    await _feed_block(handler, 1.0)
+
+    assert handler._loop_task is not None
+    await handler._loop_task
+
+    assert len(fake.turns) == 1  # session ends; does NOT loop back for a second turn
+
+
+async def test_speak_on_empty_only_on_first_turn(monkeypatch):
+    """
+    speak_on_empty=True on turn 1 (error feedback after accidental wake word),
+    speak_on_empty=False on turn 2+ (continued-conversation silence ends quietly).
+    """
+    monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 1.0)
+    fake = FakePipeline([PipelineResult(), PipelineResult(no_speech=True)])
+    monkeypatch.setattr("app.wyoming_transport.VoicePipeline", lambda **kw: fake)
+    monkeypatch.setattr("app.wyoming_transport._service_token_for", lambda uid: "tok")
+    monkeypatch.setattr("app.wyoming_transport.get_engine", lambda: None)
+
+    handler = _TestableHandler({_CLIENT_IP: _device()})
+    await _feed_block(handler, 1.0)
+    await _feed_block(handler, 1.0)
+
+    assert handler._loop_task is not None
+    await handler._loop_task
+
+    assert fake.speak_on_empty_calls == [True, False]

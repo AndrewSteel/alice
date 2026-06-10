@@ -11,9 +11,9 @@ conversation_end signal from alice-chat-stream, a silence timeout, a Piper
 outage, or a device disconnect.
 
 Auth: no JWT. The Wyoming port is only reachable inside the Docker network.
-The device id from the Wyoming `Info`/`RunPipeline` metadata is mapped to
-an alice user_id via device-mapping.yaml; unknown devices get a spoken
-error and no AI call.
+The source IP of the TCP connection is mapped to an alice user_id (plus
+name/room) via device-mapping.yaml; unknown IPs get a spoken error and no
+AI call.
 """
 from __future__ import annotations
 
@@ -32,16 +32,23 @@ from .stt import get_engine
 
 logger = logging.getLogger("alice-speech-gateway.wyoming")
 
-# Standard Wyoming audio: 16 kHz mono 16-bit PCM.
-_SAMPLE_RATE = 16000
+# Audio delivered to the HA Voice PE device: 48 kHz mono 16-bit PCM.
+# 48 kHz matches the I2S hardware rate so the device uses i2s_audio_speaker
+# directly — no resampling chain with its ~6 s startup delay.
+_SAMPLE_RATE = 48000
 _SAMPLE_WIDTH = 2
 _CHANNELS = 1
+# Max audio payload per Wyoming AudioChunk event sent to the device.
+# ESP32 rx_buffer_ is 16 KB; a single event (header ~190 B + payload) must fit.
+_MAX_DEVICE_CHUNK = 4096
+# Bytes per second at the target audio rate — used for send pacing.
+_BYTES_PER_SEC = _SAMPLE_RATE * _SAMPLE_WIDTH * _CHANNELS  # 96 000 B/s at 48 kHz
 
 
 class GatewayWyomingHandler(AsyncEventHandler):
     """One handler instance per HA Voice Device connection."""
 
-    def __init__(self, *args, device_mapping: dict[str, str], wyoming_info: Info, **kwargs):
+    def __init__(self, *args, device_mapping: dict[str, config.Device], wyoming_info: Info, **kwargs):
         super().__init__(*args, **kwargs)
         self._device_mapping = device_mapping
         self._info = wyoming_info
@@ -53,6 +60,12 @@ class GatewayWyomingHandler(AsyncEventHandler):
         self._loop_task: asyncio.Task | None = None
 
     async def handle_event(self, event: Event) -> bool:
+        # Session already ended — returning False signals the Wyoming server to
+        # close this connection. This handles any late events that arrive after
+        # _conversation_loop already closed the writer and exited.
+        if self._loop_task is not None and self._loop_task.done():
+            return False
+
         if not AudioChunk.is_type(event.type):
             logger.debug(
                 "Wyoming event: type=%r data=%r client_ip=%s",
@@ -75,19 +88,22 @@ class GatewayWyomingHandler(AsyncEventHandler):
     async def _conversation_loop(self) -> None:
         """Run a continued-conversation loop for this HA device connection."""
         session_id = str(uuid.uuid4())
+        device = self._device_mapping.get(self._client_ip)
+        device_label = device.name if device else self._client_ip
         pipeline: VoicePipeline | None = None
+        turn_count = 0
 
         while True:
-            audio = await self._collect_audio()
-            if audio is None:
+            collected = await self._collect_audio()
+            if collected is None:
                 logger.info(
                     "Wyoming silence timeout — session ending",
-                    extra={"session_id": session_id, "device_id": self._device_id},
+                    extra={"session_id": session_id, "device": device_label},
                 )
                 break
+            audio, pcm_rate, pcm_width, pcm_channels = collected
 
-            user_id = self._device_mapping.get(self._client_ip)
-            if user_id is None:
+            if device is None:
                 logger.warning("Unknown Wyoming client IP: %r", self._client_ip)
                 await self._speak_error(config.SPEECH_ERRORS["unknown_device"])
                 continue
@@ -95,31 +111,47 @@ class GatewayWyomingHandler(AsyncEventHandler):
             if pipeline is None:
                 pipeline = VoicePipeline(
                     session_id=session_id,
-                    user_id=user_id,
-                    jwt_token=_service_token_for(user_id),
+                    user_id=device.user_id,
+                    jwt_token=_service_token_for(device.user_id),
                     stt=get_engine(),
                     send_status=self._noop_status,
                     send_audio=self._send_audio,
                 )
                 logger.info(
                     "Wyoming session start",
-                    extra={"session_id": session_id, "user_id": user_id,
-                           "mode": "wyoming", "client_ip": self._client_ip},
+                    extra={"session_id": session_id, "user_id": device.user_id,
+                           "mode": "wyoming", "device": device.name, "room": device.room,
+                           "client_ip": self._client_ip},
                 )
+            else:
+                # BUG-2: re-mint the service token at the start of every turn.
+                # A continued conversation can stay open far longer than the
+                # token TTL (SERVICE_JWT_TTL_SECONDS, default 120 s); reusing the
+                # session-start token would send an expired token on later turns
+                # → 401 → spoken error mid-conversation. A single turn always
+                # completes well within the TTL, so a fresh token per turn is safe.
+                pipeline.set_jwt(_service_token_for(device.user_id))
 
-            if len(audio) < _SAMPLE_RATE * _SAMPLE_WIDTH * config.MIN_AUDIO_SECONDS:
+            if len(audio) < pcm_rate * pcm_width * config.MIN_AUDIO_SECONDS:
                 await self._speak_error(config.SPEECH_ERRORS["audio_too_short"])
                 continue
 
-            log = {"session_id": session_id, "user_id": user_id,
-                   "mode": "wyoming", "client_ip": self._client_ip}
+            turn_count += 1
+            log = {"session_id": session_id, "user_id": device.user_id,
+                   "mode": "wyoming", "device": device.name, "room": device.room}
             logger.info("Wyoming turn start", extra=log)
 
             await self.write_event(
                 AudioStart(rate=_SAMPLE_RATE, width=_SAMPLE_WIDTH, channels=_CHANNELS).event()
             )
             try:
-                result = await pipeline.run_turn(audio, audio_format="pcm")
+                result = await pipeline.run_turn(
+                    audio, audio_format="pcm",
+                    pcm_rate=pcm_rate, pcm_width=pcm_width, pcm_channels=pcm_channels,
+                    # Speak "Ich habe nichts verstanden" only on the first turn (no speech
+                    # after wake word). Continued-conversation silence ends quietly.
+                    speak_on_empty=(turn_count == 1),
+                )
             except tts.TTSError:
                 logger.error("Wyoming Piper unavailable — ending session", extra=log)
                 break
@@ -128,23 +160,39 @@ class GatewayWyomingHandler(AsyncEventHandler):
 
             logger.info("Wyoming turn done", extra=log)
 
+            if result.no_speech:
+                # Whisper VAD removed all audio — genuine silence in the room.
+                # End the session rather than looping: the user can trigger a
+                # new session with the wake word when ready.
+                logger.info("Wyoming session ended — no speech detected", extra=log)
+                break
+
             if result.conversation_ended:
                 logger.info("Wyoming conversation ended by AI signal", extra=log)
                 break
 
         logger.info(
             "Wyoming session end",
-            extra={"session_id": session_id, "client_ip": self._client_ip},
+            extra={"session_id": session_id, "device": device_label, "client_ip": self._client_ip},
         )
+        # Close the TCP connection so the device transitions out of AWAIT_RESPONSE
+        # back to IDLE (wake-word listening). Without this, the device polls
+        # read_socket_() forever and can never receive a new wake-word session.
+        try:
+            self.writer.close()
+            await self.writer.wait_closed()
+        except Exception:
+            pass
 
-    async def _collect_audio(self) -> bytes | None:
+    async def _collect_audio(self) -> tuple[bytes, int, int, int] | None:
         """Wait for one AudioStart/AudioChunk*/AudioStop block.
 
-        Returns collected PCM bytes, or None if the silence timeout fires
-        before an AudioStart arrives.
+        Returns (pcm_bytes, rate, width, channels) as declared in the AudioStart
+        event, or None if the silence timeout fires before an AudioStart arrives.
         """
         audio = bytearray()
         collecting = False
+        rate, width, channels = _SAMPLE_RATE, _SAMPLE_WIDTH, _CHANNELS
         while True:
             try:
                 event = await asyncio.wait_for(
@@ -155,19 +203,29 @@ class GatewayWyomingHandler(AsyncEventHandler):
                 return None
 
             if AudioStart.is_type(event.type):
+                evt = AudioStart.from_event(event)
+                rate, width, channels = evt.rate, evt.width, evt.channels
                 audio.clear()
                 collecting = True
             elif AudioChunk.is_type(event.type) and collecting:
                 audio.extend(AudioChunk.from_event(event).audio)
             elif AudioStop.is_type(event.type) and collecting:
-                return bytes(audio)
+                return bytes(audio), rate, width, channels
 
     async def _send_audio(self, chunk: bytes) -> None:
-        await self.write_event(
-            AudioChunk(
-                rate=_SAMPLE_RATE, width=_SAMPLE_WIDTH, channels=_CHANNELS, audio=chunk
-            ).event()
-        )
+        # Split into ≤ 4 KB chunks (rx_buffer_ constraint) and pace delivery to
+        # match I2S playback speed. Without pacing the gateway sends at network
+        # speed (>10× real-time), overflows the device's 200 ms ring buffer, and
+        # all but the last ~200 ms of audio is silently dropped.
+        for offset in range(0, len(chunk), _MAX_DEVICE_CHUNK):
+            data = chunk[offset : offset + _MAX_DEVICE_CHUNK]
+            await self.write_event(
+                AudioChunk(
+                    rate=_SAMPLE_RATE, width=_SAMPLE_WIDTH, channels=_CHANNELS,
+                    audio=data,
+                ).event()
+            )
+            await asyncio.sleep(len(data) / _BYTES_PER_SEC)
 
     async def _speak_error(self, message: str) -> None:
         """Stream a spoken error to the device, framed as a Wyoming audio block."""
@@ -199,7 +257,7 @@ def _service_token_for(user_id: str) -> str:
     return mint_service_token(user_id)
 
 
-async def run_wyoming_server(device_mapping: dict[str, str], wyoming_info: Info) -> None:
+async def run_wyoming_server(device_mapping: dict[str, config.Device], wyoming_info: Info) -> None:
     """Start the Wyoming TCP server. Runs for the app lifetime."""
     uri = f"tcp://0.0.0.0:{config.WYOMING_PORT}"
     server = AsyncServer.from_uri(uri)

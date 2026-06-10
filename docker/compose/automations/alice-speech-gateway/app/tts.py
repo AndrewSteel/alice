@@ -12,6 +12,7 @@ without TTS (see spec: Fehlerbehandlung).
 """
 from __future__ import annotations
 
+import audioop  # deprecated in Py3.11, still present in 3.12 — remove if upgrading to 3.13
 import logging
 from typing import AsyncIterator
 
@@ -22,6 +23,12 @@ from wyoming.tts import Synthesize
 from . import config
 
 logger = logging.getLogger("alice-speech-gateway.tts")
+
+# Gateway delivers 48 kHz 16-bit mono to the HA Voice PE device.
+# 48 kHz matches the I2S hardware rate, so the device can use i2s_audio_speaker
+# directly without the announcement_resampling_speaker → speaker_mixer chain,
+# which has a ~6 s startup delay that causes most audio to be dropped.
+_TARGET_RATE = 48000
 
 
 class TTSError(Exception):
@@ -39,6 +46,8 @@ async def synthesize(text: str) -> AsyncIterator[bytes]:
         return
 
     try:
+        resample_state = None
+        logged_format = False
         async with AsyncClient.from_uri(config.PIPER_URI) as client:
             await client.write_event(Synthesize(text=text).event())
             while True:
@@ -47,7 +56,19 @@ async def synthesize(text: str) -> AsyncIterator[bytes]:
                     break
                 if AudioChunk.is_type(event.type):
                     chunk = AudioChunk.from_event(event)
-                    yield chunk.audio
+                    if not logged_format:
+                        logger.debug(
+                            "Piper audio format: rate=%d width=%d channels=%d",
+                            chunk.rate, chunk.width, chunk.channels,
+                        )
+                        logged_format = True
+                    audio = chunk.audio
+                    if chunk.rate != _TARGET_RATE:
+                        audio, resample_state = audioop.ratecv(
+                            audio, chunk.width, chunk.channels,
+                            chunk.rate, _TARGET_RATE, resample_state,
+                        )
+                    yield audio
                 elif AudioStop.is_type(event.type):
                     break
     except (ConnectionError, OSError) as exc:

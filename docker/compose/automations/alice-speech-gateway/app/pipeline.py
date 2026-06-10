@@ -16,7 +16,9 @@ serves both the WebSocket transport and the Wyoming transport.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import wave as _wave
 from typing import Awaitable, Callable
 
 from . import config, tts
@@ -25,6 +27,17 @@ from .sentence_accumulator import SentenceAccumulator
 from .stt import STTEngine, STTError
 
 logger = logging.getLogger("alice-speech-gateway.pipeline")
+
+
+def _pcm_to_wav(pcm: bytes, *, rate: int = 16000, channels: int = 1, sampwidth: int = 2) -> bytes:
+    """Wrap raw PCM bytes in a WAV container so ffmpeg/Whisper can detect the format."""
+    buf = io.BytesIO()
+    with _wave.open(buf, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sampwidth)
+        wf.setframerate(rate)
+        wf.writeframes(pcm)
+    return buf.getvalue()
 
 SendStatus = Callable[[str], Awaitable[None]]
 SendAudio = Callable[[bytes], Awaitable[None]]
@@ -39,11 +52,20 @@ STATUS_SESSION_ENDED = "session_ended"
 class PipelineResult:
     """Outcome of one utterance turn."""
 
-    __slots__ = ("conversation_ended", "interrupted")
+    __slots__ = ("conversation_ended", "interrupted", "no_speech")
 
-    def __init__(self, conversation_ended: bool = False, interrupted: bool = False) -> None:
+    def __init__(
+        self,
+        conversation_ended: bool = False,
+        interrupted: bool = False,
+        no_speech: bool = False,
+    ) -> None:
         self.conversation_ended = conversation_ended
         self.interrupted = interrupted
+        # True when Whisper VAD removed all audio — genuine silence, not a
+        # transcription ambiguity. The Wyoming handler uses this to end the
+        # session rather than looping back into continued-conversation.
+        self.no_speech = no_speech
 
 
 class VoicePipeline:
@@ -67,6 +89,16 @@ class VoicePipeline:
         self._interrupt = asyncio.Event()
         self._log = {"session_id": session_id, "user_id": user_id}
 
+    def set_jwt(self, jwt_token: str) -> None:
+        """
+        Replace the service token used for alice-chat-stream.
+
+        The Wyoming path re-mints a short-lived service token per turn so a
+        long continued conversation never sends an expired token (PROJ-42
+        BUG-2). The WebApp WS path keeps its client-supplied token unchanged.
+        """
+        self._jwt = jwt_token
+
     def interrupt(self) -> None:
         """Signal barge-in: stops the LLM stream and discards pending TTS."""
         self._interrupt.set()
@@ -74,13 +106,25 @@ class VoicePipeline:
     def clear_interrupt(self) -> None:
         self._interrupt.clear()
 
-    async def run_turn(self, audio: bytes, audio_format: str = "webm") -> PipelineResult:
+    async def run_turn(
+        self,
+        audio: bytes,
+        audio_format: str = "webm",
+        pcm_rate: int = 16000,
+        pcm_width: int = 2,
+        pcm_channels: int = 1,
+        speak_on_empty: bool = True,
+    ) -> PipelineResult:
         """
         Run one full turn: transcribe `audio`, get the AI reply, speak it.
 
         Returns a PipelineResult. STT/AI/TTS errors produce a spoken German
         error message (except a Piper outage, which raises tts.TTSError).
         """
+        # Raw PCM has no container header; ffmpeg/Whisper requires one to detect the format.
+        if audio_format == "pcm":
+            audio = _pcm_to_wav(audio, rate=pcm_rate, channels=pcm_channels, sampwidth=pcm_width)
+
         # --- STT ---
         try:
             transcript = await self._stt.transcribe(audio, config.SPEECH_LANGUAGE)
@@ -89,8 +133,9 @@ class VoicePipeline:
             return PipelineResult()
 
         if not transcript.strip():
-            await self._speak(config.SPEECH_ERRORS["stt_empty"])
-            return PipelineResult()
+            if speak_on_empty:
+                await self._speak(config.SPEECH_ERRORS["stt_empty"])
+            return PipelineResult(no_speech=True)
 
         await self._send_status(STATUS_STT_COMPLETE)
         logger.info("STT transcript: %r", transcript, extra=self._log)
@@ -205,6 +250,7 @@ class VoicePipeline:
                     # Drain remaining sentences without synthesising them.
                     continue
                 await self._send_status(STATUS_TTS_GENERATING)
+                logger.info("TTS sentence: %r", sentence, extra=self._log)
                 async for chunk in tts.synthesize(sentence):
                     if self._interrupt.is_set():
                         break
