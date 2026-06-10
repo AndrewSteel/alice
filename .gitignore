@@ -41,6 +41,9 @@ docker/compose/automations/dms-extractor-pdf/.env
 docker/compose/automations/dms-extractor-office/.env
 docker/compose/automations/dms-extractor-txt/.env
 
+# esphome Konfigurationen (können sensible Informationen enthalten)
+devices/ha-voice-pe/secrets.yaml
+
 # Home Assistant configuration
 config/*
 !config/configuration.yaml

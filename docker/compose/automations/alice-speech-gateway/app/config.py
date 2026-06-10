@@ -10,10 +10,20 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 
 import yaml
 
 logger = logging.getLogger("alice-speech-gateway.config")
+
+
+@dataclass(frozen=True)
+class Device:
+    """A configured HA Voice device, keyed by its source IP in device-mapping.yaml."""
+
+    user_id: str
+    name: str
+    room: str
 
 
 def _get(name: str, default: str) -> str:
@@ -27,7 +37,11 @@ JWT_ALGORITHM = "RS256"
 # --- STT ---
 WHISPER_MODEL = _get("WHISPER_MODEL", "large-v3")
 WHISPER_DEVICE = _get("WHISPER_DEVICE", "cuda")
-WHISPER_COMPUTE_TYPE = _get("WHISPER_COMPUTE_TYPE", "int8")
+# "default" lets CTranslate2 auto-select the best compute type for the GPU.
+# On TITAN X (Maxwell): "float16" and "int8_float16" both fail (architecture
+# does not support mixed-precision). Use "default" (~7 GB, best accuracy) or
+# "int8" (~2 GB, lower accuracy). Set via WHISPER_COMPUTE_TYPE in .env.
+WHISPER_COMPUTE_TYPE = _get("WHISPER_COMPUTE_TYPE", "default")
 WHISPER_MODEL_DIR = _get("WHISPER_MODEL_DIR", "/data")
 SPEECH_LANGUAGE = _get("SPEECH_LANGUAGE", "de")
 
@@ -63,9 +77,12 @@ SPEECH_ERRORS = {
 }
 
 
-def load_device_mapping(path: str = DEVICE_MAPPING_PATH) -> dict[str, str]:
+def load_device_mapping(path: str = DEVICE_MAPPING_PATH) -> dict[str, Device]:
     """
-    Load the Wyoming device-id -> user_id mapping.
+    Load the source-IP -> Device mapping for Wyoming / HA Voice devices.
+
+    Each entry maps a fixed device IP to a user_id plus a human-readable
+    name and room (used for logging and, later, PROJ-43 speaker context).
 
     Returns an empty mapping (not an error) if the file is missing — every
     device then resolves as 'unknown' and receives a spoken error.
@@ -81,13 +98,19 @@ def load_device_mapping(path: str = DEVICE_MAPPING_PATH) -> dict[str, str]:
         return {}
 
     raw = data.get("devices", {})
-    mapping: dict[str, str] = {}
-    for device_id, user_id in raw.items():
-        if not user_id or not str(user_id).strip():
-            logger.error("Skipping invalid device mapping entry: %r -> %r", device_id, user_id)
+    mapping: dict[str, Device] = {}
+    for ip, entry in raw.items():
+        if not isinstance(entry, dict):
+            logger.error("Skipping device mapping entry (expected fields, got %r): %r", entry, ip)
             continue
-        mapping[str(device_id)] = str(user_id)
-    logger.info("Loaded %d device->user mappings", len(mapping))
+        user_id = entry.get("user_id")
+        if not user_id or not str(user_id).strip():
+            logger.error("Skipping device mapping entry without user_id: %r", ip)
+            continue
+        name = str(entry.get("name") or ip).strip()
+        room = str(entry.get("room") or "").strip()
+        mapping[str(ip)] = Device(user_id=str(user_id).strip(), name=name, room=room)
+    logger.info("Loaded %d device mappings", len(mapping))
     return mapping
 
 

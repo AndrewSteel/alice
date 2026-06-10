@@ -1,16 +1,28 @@
-# Device -> User mapping for Wyoming / HA Voice Devices (PROJ-40 Mode 3).
+# Source IP -> Device mapping for Wyoming / HA Voice devices (PROJ-40 / PROJ-42).
 #
 # The Wyoming protocol does not carry a device identifier. The client IP
-# of the TCP connection is used instead — each ESPHome satellite has a
-# fixed IP in the local network.
+# of the TCP connection is used instead — each ESPHome satellite must have
+# a fixed IP (DHCP reservation in the router). If the IP changes, the
+# device gets the spoken error "Dieses Gerät ist nicht bei Alice registriert".
+#
+# Adding a device is config-only — no code change. Add one block here and a
+# matching ESPHome YAML under devices/<device-name>/espHome.yaml, then
+# restart the gateway (changes are read at startup).
 #
 # Deploy to the Docker volume:
 #   /srv/compose/automations/alice-speech-gateway/config/device-mapping.yaml
 #
-# user_id must match an existing alice.users.id (UUID).
+# Fields per entry:
+#   user_id  (required)  must match an existing alice.users.id (UUID)
+#   name     (optional)  human-readable device name (used in logs / future UI)
+#   room     (optional)  room label (reserved for PROJ-43 speaker context)
 
 devices:
-  # Küche HA Voice Satellite
-  "192.168.1.X": "UUID1"
-  # Büro
-  "192.168.1.Y": "UUID2"
+  "192.168.1.X":
+    user_id: "00000000-0000-0000-0000-000000000001"
+    name: "Küche HA Voice PE"
+    room: "Küche"
+  "192.168.1.Y":
+    user_id: "00000000-0000-0000-0000-000000000002"
+    name: "Büro HA Voice PE"
+    room: "Büro"

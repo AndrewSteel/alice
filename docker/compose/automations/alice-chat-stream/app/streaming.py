@@ -352,6 +352,11 @@ async def stream_chat(
             "tool_calls": tool_call_log,
             "usage": usage,
         }
+        # Signal conversation end for HA commands. The Wyoming voice path uses
+        # this to close the session immediately after the TTS confirmation plays,
+        # rather than waiting 6 s for the silence-detection turn.
+        if any(tc.get("tool") == "home_assistant" for tc in tool_call_log):
+            yield (_sse({"type": "conversation_end"}), {})
         yield (_sse({"type": "done", "usage": usage}), side)
         yield (b"data: [DONE]\n\n", {})
 
