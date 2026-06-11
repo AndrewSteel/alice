@@ -12,7 +12,6 @@ without TTS (see spec: Fehlerbehandlung).
 """
 from __future__ import annotations
 
-import audioop  # deprecated in Py3.11, still present in 3.12 — remove if upgrading to 3.13
 import logging
 from typing import AsyncIterator
 
@@ -24,23 +23,22 @@ from . import config
 
 logger = logging.getLogger("alice-speech-gateway.tts")
 
-# Gateway delivers 48 kHz 16-bit mono to the HA Voice PE device.
-# 48 kHz matches the I2S hardware rate, so the device can use i2s_audio_speaker
-# directly without the announcement_resampling_speaker → speaker_mixer chain,
-# which has a ~6 s startup delay that causes most audio to be dropped.
-_TARGET_RATE = 48000
-
 
 class TTSError(Exception):
     """Raised when wyoming-piper is unreachable or fails to synthesise."""
 
 
-async def synthesize(text: str) -> AsyncIterator[bytes]:
+async def synthesize(text: str, target_rate: int | None = None) -> AsyncIterator[bytes]:
     """
     Synthesise one sentence and yield raw PCM audio chunks as they arrive.
 
     Chunks are yielded incrementally so the caller can stream them straight
     to the client without waiting for the full sentence.
+
+    target_rate: if set, resample Piper's native output to this rate before
+    yielding. Pass 48000 for the Wyoming/HA Voice PE path (I2S hardware rate).
+    Leave None (default) for the WebApp path, which receives native Piper output
+    and plays it back at the correct rate client-side.
     """
     if not text or not text.strip():
         return
@@ -63,10 +61,11 @@ async def synthesize(text: str) -> AsyncIterator[bytes]:
                         )
                         logged_format = True
                     audio = chunk.audio
-                    if chunk.rate != _TARGET_RATE:
+                    if target_rate is not None and chunk.rate != target_rate:
+                        import audioop  # noqa: PLC0415 — only imported when resampling is needed
                         audio, resample_state = audioop.ratecv(
                             audio, chunk.width, chunk.channels,
-                            chunk.rate, _TARGET_RATE, resample_state,
+                            chunk.rate, target_rate, resample_state,
                         )
                     yield audio
                 elif AudioStop.is_type(event.type):

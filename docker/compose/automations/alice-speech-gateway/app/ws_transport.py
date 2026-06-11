@@ -187,10 +187,11 @@ async def _voice_loop(
             result = await _run_turn_with_barge_in(
                 pipeline, state, utterance, log
             )
-            if result.conversation_ended and not state.interrupt_pending():
-                await _end_session(ws, log, "conversation ended")
-                return
-            # Otherwise keep the session open for the next utterance.
+            # conversation_ended is intentionally ignored here: the WebApp voice
+            # session stays open after HA commands so the user can continue
+            # talking. The Wyoming path (wyoming_transport.py) ends its session
+            # on conversation_ended — behaviour differs by design.
+            # Keep the session open for the next utterance.
     finally:
         receiver.cancel()
         try:

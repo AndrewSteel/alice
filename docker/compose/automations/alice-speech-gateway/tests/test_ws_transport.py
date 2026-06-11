@@ -144,7 +144,10 @@ class FakeDecoder:
 
 
 async def test_normal_turn_then_conversation_end(monkeypatch):
-    """A plain utterance runs one turn; conversation_end closes the session."""
+    """
+    conversation_ended is ignored in the WebApp voice path — the session stays
+    open after HA commands and ends only via silence timeout.
+    """
     monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 0.5)
     pipeline = FakePipeline([PipelineResult(conversation_ended=True)])
     barge_in = FakeBargeIn([])
@@ -157,7 +160,7 @@ async def test_normal_turn_then_conversation_end(monkeypatch):
 
     assert len(pipeline.audio_turns) == 1
     assert pipeline.text_turns == []
-    assert ws.closed == (1000, "conversation ended")
+    assert ws.closed == (1000, "session ended")
 
 
 async def test_barge_in_interrupts_running_turn(monkeypatch):
@@ -188,7 +191,7 @@ async def test_barge_in_interrupts_running_turn(monkeypatch):
     assert barge_in.calls >= 1
     # The interrupt transcript was fed back in as a new turn.
     assert pipeline.text_turns == ["Stopp"]
-    assert ws.closed == (1000, "conversation ended")
+    assert ws.closed == (1000, "session ended")
 
 
 async def test_non_interrupt_audio_is_discarded(monkeypatch):
@@ -210,7 +213,7 @@ async def test_non_interrupt_audio_is_discarded(monkeypatch):
 
     assert pipeline.interrupted is False
     assert pipeline.text_turns == []
-    assert ws.closed == (1000, "conversation ended")
+    assert ws.closed == (1000, "session ended")
 
 
 async def test_silence_timeout_ends_session(monkeypatch):
