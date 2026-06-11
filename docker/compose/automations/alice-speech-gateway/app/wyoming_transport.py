@@ -116,6 +116,7 @@ class GatewayWyomingHandler(AsyncEventHandler):
                     stt=get_engine(),
                     send_status=self._noop_status,
                     send_audio=self._send_audio,
+                    tts_target_rate=_SAMPLE_RATE,
                 )
                 logger.info(
                     "Wyoming session start",
@@ -233,7 +234,7 @@ class GatewayWyomingHandler(AsyncEventHandler):
             AudioStart(rate=_SAMPLE_RATE, width=_SAMPLE_WIDTH, channels=_CHANNELS).event()
         )
         try:
-            async for chunk in tts.synthesize(message):
+            async for chunk in tts.synthesize(message, target_rate=_SAMPLE_RATE):
                 await self._send_audio(chunk)
         except tts.TTSError:
             logger.error("Cannot speak Wyoming error — Piper unavailable")

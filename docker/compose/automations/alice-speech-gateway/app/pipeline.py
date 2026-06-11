@@ -79,6 +79,7 @@ class VoicePipeline:
         stt: STTEngine,
         send_status: SendStatus,
         send_audio: SendAudio,
+        tts_target_rate: int | None = None,
     ) -> None:
         self.session_id = session_id
         self.user_id = user_id
@@ -86,6 +87,9 @@ class VoicePipeline:
         self._stt = stt
         self._send_status = send_status
         self._send_audio = send_audio
+        # None → native Piper output (WebApp path, 22 050 Hz).
+        # 48 000 → resample for the Wyoming/HA Voice PE I2S speaker.
+        self._tts_target_rate = tts_target_rate
         self._interrupt = asyncio.Event()
         self._log = {"session_id": session_id, "user_id": user_id}
 
@@ -251,7 +255,7 @@ class VoicePipeline:
                     continue
                 await self._send_status(STATUS_TTS_GENERATING)
                 logger.info("TTS sentence: %r", sentence, extra=self._log)
-                async for chunk in tts.synthesize(sentence):
+                async for chunk in tts.synthesize(sentence, target_rate=self._tts_target_rate):
                     if self._interrupt.is_set():
                         break
                     await audio_queue.put(chunk)
@@ -284,5 +288,5 @@ class VoicePipeline:
 
     async def _speak(self, message: str) -> None:
         """Speak a single short message (error / prompt). Re-raises TTSError."""
-        async for chunk in tts.synthesize(message):
+        async for chunk in tts.synthesize(message, target_rate=self._tts_target_rate):
             await self._send_audio(chunk)
