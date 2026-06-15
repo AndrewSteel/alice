@@ -4,7 +4,7 @@
 #
 # A minimal Wyoming protocol TCP *client* for ESPHome. It lets a "Hey Jarvis"
 # wake-word event stream microphone audio straight to the Alice speech gateway
-# (ki.lan:10302) and play back the TTS audio the gateway streams back — without
+# (ki.lan:10300) and play back the TTS audio the gateway streams back — without
 # Home Assistant in the path.
 #
 # Stock ESPHome `voice_assistant` can only speak the HA native API; it cannot

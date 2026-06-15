@@ -104,7 +104,7 @@ class WyomingSatellite : public Component {
   void finish_session_();
 
   std::string host_;
-  uint16_t port_{10302};
+  uint16_t port_{10300};
   microphone::Microphone *mic_{nullptr};
   speaker::Speaker *speaker_{nullptr};
   uint16_t silence_threshold_{700};

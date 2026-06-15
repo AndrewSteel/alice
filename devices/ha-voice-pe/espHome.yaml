@@ -8,7 +8,7 @@
 # voice backend:
 #
 #   "Hey Jarvis"  -> direct TCP Wyoming connection to the Alice speech gateway
-#                    (ki.lan:10302). Home Assistant is NOT in this path — the
+#                    (ki.lan:10300). Home Assistant is NOT in this path — the
 #                    firmware streams mic audio straight to Alice and plays the
 #                    TTS audio Alice streams back. Continued-conversation,
 #                    silence timeout and conversation_end are handled by the
@@ -62,7 +62,7 @@ substitutions:
   # Prefer the gateway's fixed IP over a hostname — the device resolves this
   # via lwip getaddrinfo and ".lan"/".local" names may not resolve on-device.
   alice_gateway_host: "192.168.178.88" # <-- set to the gateway/ki.lan IP
-  alice_gateway_port: "10302"
+  alice_gateway_port: "10300"           # standard Wyoming port (wyoming-whisper removed)
   # IDs of the microphone + speaker declared by the official HA Voice PE package.
   # VERIFY against the pinned package before flashing:
   #   esphome config devices/ha-voice-pe/espHome.yaml | grep -E 'id:.*(mic|speaker|media)'

@@ -1,9 +1,9 @@
 """
-Wyoming transport — HA Voice Device endpoint on port 10300 (Mode 3).
+Wyoming transport — HA Voice Device endpoint on port 10300.
 
-Replaces the wyoming-whisper container. HA Voice Devices connect after
-wakeword detection and stream audio; the gateway runs the same full-voice
-pipeline as Mode 2 and streams TTS audio back over the Wyoming protocol.
+Handles direct Wyoming connections from ESPHome devices after wakeword
+detection. The gateway runs the full-voice pipeline (faster-whisper STT →
+alice-chat-stream → Piper TTS) and streams audio back over Wyoming protocol.
 
 Continued conversation: after each TTS response the session stays open and
 waits for the next AudioStart/AudioStop cycle. The session ends on a

@@ -57,7 +57,7 @@ In `espHome.yaml` `substitutions:`
 
 - `alice_gateway_host` → the **gateway's fixed IP** (the `ki.lan` host). Use an
   IP, not a hostname — the device may not resolve `.lan`/`.local` names.
-- `alice_gateway_port` → `10302` (unchanged).
+- `alice_gateway_port` → `10300` (standard Wyoming port; wyoming-whisper container was removed).
 - `mic_id` / `speaker_id` → must match the IDs the pinned package declares.
   Confirm them:
   ```bash

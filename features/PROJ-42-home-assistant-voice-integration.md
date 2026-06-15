@@ -750,5 +750,65 @@ ssh stan@ki.lan 'docker start ollama-3090'                               # DMS q
 - "Parent I2S bus not free" at TTS start: 1-second retry, resolves itself. Occurs only
   if mic and speaker transitions overlap. Rare after session cleanup fixes (BUG-9/10).
 
+## QA Re-Test (2026-06-15)
+
+**Tester:** QA Engineer (red-team) · **Build:** branch `feature/PROJ-41-webapp-voice-interface` (contains PROJ-42 commit `c41d830` + hardware-bring-up fixes)
+**Automated suite:** `alice-speech-gateway/.venv/bin/pytest -q` → **67 passed** (was 50/53 in prior rounds — net new regression tests).
+
+### Scope
+Re-test verifies that the BUG-1…BUG-15 fixes documented in the 2026-06-10 hardware bring-up are present in the current working tree and that the suite is green. Live hardware (HA Voice PE) and the GPU/STT/chat-stream stack were **not** re-exercised in this environment; ACs that were hardware-verified on 2026-06-10 are carried forward as PASS.
+
+### Fix Verification (code-level)
+| Bug | Sev | Claimed fix | Verified in code |
+|---|---|---|---|
+| BUG-1 | High | `wyoming_satellite` component authored/compiled/flashed | **PASS** — `devices/ha-voice-pe/components/wyoming_satellite/` present |
+| BUG-2 | Med | Service token re-minted per turn | **PASS** — `set_jwt()` per turn; `test_service_token_reminted_each_turn` |
+| BUG-7 | High | Speaker rate 48 kHz | **PASS** — `_SAMPLE_RATE=48000`, `_BYTES_PER_SEC=96000` (`wyoming_transport.py:38,45`) |
+| BUG-8 | High | Mic declares 16 kHz | **PASS** — `MIC_SAMPLE_RATE` used in `audio_format_json()` (firmware) |
+| BUG-9 | High | Writer closed after loop | **PASS** — `writer.close()/wait_closed()` (`wyoming_transport.py:183-184`) |
+| BUG-10 | High | Mic restarted in `finish_session_` | **PASS** — `mic_->start()` (`wyoming_satellite.cpp:465`) |
+| BUG-11 | Med | Break on empty transcript | **PASS** — `PipelineResult(no_speech=True)` (`pipeline.py:157`) |
+| BUG-12 | Med | `conversation_end` after HA tool | **PASS** — gated on `tc.tool=="home_assistant"` (`streaming.py:363-364`) |
+| BUG-13 | Med | `WHISPER_COMPUTE_TYPE=default` | **PASS** — `config.py:44` |
+| BUG-14 | Med | On-device VAD silence cut | **PASS** — `is_silent_`/`speech_seen_`/`silence_ms_` (`wyoming_satellite.cpp:69-71,164-166`) |
+| BUG-15 | Low | Suppress "nichts verstanden" turn 2+ | **PASS** — `speak_on_empty=(turn_count==1)` (`wyoming_transport.py:154`) |
+
+**All Critical/High and all Medium gateway bugs are resolved and present in code.**
+
+### Still Open (carried forward)
+| Bug | Sev | Status |
+|---|---|---|
+| Port binding `10300:10300` on `0.0.0.0` | **Medium (security)** | **OPEN** — `compose.yml` binds all host interfaces. If the host has any non-VPN/LAN interface, the no-auth Wyoming endpoint is LAN-reachable. Accepted for VPN-only deployment; harden with host firewall if exposure changes. |
+| BUG-3 | Low | **WONTFIX (accepted)** — `audio_too_short` speaks "Die Aufnahme war zu kurz…" not the AC text; judged functionally clearer on 2026-06-10. |
+| BUG-4 | Low | **OPEN** — unknown IP: `_speak_error` + `continue` (`wyoming_transport.py:108-109`); connection ends via timeout, not active close. |
+| BUG-5 | Low (doc) | **FIXED** — `wyoming_transport.py` docstring rewritten (2026-06-15): now correctly states port 10300 and the actual role of the transport. |
+
+### Regression
+Full gateway suite green (67 passed). No regressions in WebApp WS path, config loaders, or continued-conversation loop.
+
+### Production-Ready Decision: **READY**
+No Critical or High bugs remain. BUG-4 (Low) and BUG-3 (accepted) are non-blocking. BUG-5 fixed. Port binding (Medium) accepted for VPN-only deployment.
+
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-15
+
+### Port migration 10302 → 10300 (2026-06-15)
+
+The Wyoming endpoint was moved from port 10302 to port 10300 — reclaiming the standard Wyoming port after the `wyoming-whisper` container was removed in PROJ-40.
+
+**Files changed:**
+- `compose.yml` — port mapping updated
+- `app/config.py` + `.env.example` — `WYOMING_PORT` default updated
+- `app/main.py` + `app/wyoming_transport.py` — docstrings corrected (closes BUG-5)
+- `devices/ha-voice-pe/espHome.yaml` — `alice_gateway_port` substitution updated
+- `devices/ha-voice-pe/components/wyoming_satellite/wyoming_satellite.h` — default port updated
+- Component READMEs and comments updated
+
+**Deployed via:**
+1. `./scripts/sync-compose.sh` — synced compose + `.env.example` to server
+2. Server `.env` updated: `WYOMING_PORT=10302` → `10300`
+3. `docker compose up -d` on server (container recreated; `restart` does not re-read `env_file`)
+4. ESPHome firmware reflashed: `esphome run devices/ha-voice-pe/espHome.yaml --device 192.168.178.146`
+
+**Verified:** `docker exec alice-speech-gateway cat /proc/net/tcp` shows port 10300 bound. Device connects successfully.
