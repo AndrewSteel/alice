@@ -50,6 +50,15 @@ STATUS_TTS_GENERATING = "tts_generating"
 STATUS_SESSION_ENDED = "session_ended"
 
 
+class _ThinkingMessage(str):
+    """Waiting message spoken while LLM is still reasoning (PROJ-48).
+
+    Subclasses str so it passes through the TTS pipeline unchanged, but lets
+    _synth_stage re-emit ai_processing after speaking it — signalling to the
+    UI that Alice is still thinking despite having played audio.
+    """
+
+
 class PipelineResult:
     """Outcome of one utterance turn."""
 
@@ -193,7 +202,7 @@ class VoicePipeline:
                 elif event.kind == "thinking_start":
                     if not self._interrupt.is_set():
                         waiting_msg = config.SPEECH_THINKING.get(event.text, config.SPEECH_THINKING["du"])
-                        await sentence_queue.put(waiting_msg)
+                        await sentence_queue.put(_ThinkingMessage(waiting_msg))
                 elif event.kind == "conversation_end":
                     conversation_ended = True
                 elif event.kind == "done":
@@ -263,6 +272,7 @@ class VoicePipeline:
                 if self._interrupt.is_set():
                     # Drain remaining sentences without synthesising them.
                     continue
+                is_thinking_msg = isinstance(sentence, _ThinkingMessage)
                 await self._send_status(STATUS_TTS_GENERATING)
                 logger.info("TTS sentence: %r", sentence, extra=self._log)
                 # BUG-5: announce Piper's actual sample rate on the first chunk
@@ -280,6 +290,10 @@ class VoicePipeline:
                         break
                     await audio_queue.put(chunk)
                     synthesised_any = True
+                # After speaking the waiting message, signal that the LLM is
+                # still reasoning so the UI returns to "Alice denkt…".
+                if is_thinking_msg and not self._interrupt.is_set():
+                    await self._send_status(STATUS_AI_PROCESSING)
         finally:
             await audio_queue.put(None)
 
