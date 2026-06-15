@@ -43,6 +43,7 @@ docker/compose/automations/dms-extractor-txt/.env
 
 # esphome Konfigurationen (können sensible Informationen enthalten)
 devices/ha-voice-pe/secrets.yaml
+devices/ha-voice-pe/.esphome/
 
 # Home Assistant configuration
 config/*
@@ -71,6 +72,7 @@ docker/compose/automations/mqtt/config/passwordfile
 
 # Build-Artefakte (nginx html)
 docker/compose/infra/nginx/html/finance_upload/
+docker/compose/infra/nginx/html/
 
 # Lokale Konfigurationen
 config.local.json
