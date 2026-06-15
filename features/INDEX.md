@@ -22,7 +22,7 @@
 | PROJ-44 | 2.1   | DMS BankTransaction Lifecycle Cleanup — BUG-13-Fix: BankTransaction-Kinder bei Parent-BankStatement-Löschung mitlöschen             | Roadmap  | —                                         | 2026-05-21 |
 | PROJ-45 | 2.3   | Display Registry & Output Router — Config-Tabelle (Wallpanel/TV/PC), n8n-Router nach display_target                                 | Roadmap  | —                                         | 2026-05-21 |
 | PROJ-46 | 2.3   | Mail IMAP Integration — n8n IMAP-Connector, Metadaten in Weaviate, Mail-Query-Tools per Sprache/Text                                | Roadmap  | —                                         | 2026-05-21 |
-| PROJ-47 | 2.1   | JWT WebSocket Log Leak Fix — BUG-LIVE-2: uvicorn WebSocket protocol logger schreibt `?token=<JWT>` in Container-Logs                | Planned  | [Spec](PROJ-47-jwt-websocket-log-leak-fix.md) | 2026-06-02 |
+| PROJ-47 | 2.1   | JWT WebSocket Log Leak Fix — BUG-LIVE-2: uvicorn WebSocket protocol logger schreibt `?token=<JWT>` in Container-Logs                | Approved  | [Spec](PROJ-47-jwt-websocket-log-leak-fix.md) | 2026-06-02 |
 | PROJ-48 | 2.1   | TTS First-Token Latency Reduction — BUG-LIVE-3: Zeit bis erstes TTS-Audio ~10.8 s statt < 3 s; alice-chat-stream first-sentence streaming | Planned  | [Spec](PROJ-48-tts-first-token-latency.md) | 2026-06-02 |
 
 <!-- Add features above this line -->
