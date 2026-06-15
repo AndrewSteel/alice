@@ -117,6 +117,7 @@ wyoming_satellite:
   port: ${alice_gateway_port}
   microphone: ${mic_id} # reuse the mic defined by the official package
   speaker: ${speaker_id} # reuse the speaker defined by the official package
+  light: voice_assistant_leds  # LED ring state machine (PROJ-49)
   # On-device VAD / continued-conversation tuning (tune on hardware):
   silence_threshold: 700  # room noise typically < 300 RMS, speech > 700 RMS
   silence_ms: 900
@@ -148,9 +149,10 @@ micro_wake_word:
             - lambda: 'return wake_word == "Hey Jarvis";'
             - switch.is_off: master_mute_switch
         then:
-          # Stop any active alice session first (safe no-op when already idle).
-          # This lets "Hey Jarvis" break a stuck self-conversation loop without
-          # a re-flash — the user just repeats the wake word.
+          # Stop any active Alice session. finish_session_() only stops the speaker
+          # if TTS was playing (see wyoming_satellite.cpp) — this avoids corrupting
+          # the I2S bus state used by the announcement pipeline, which would cause
+          # the package's wake sound to play at the wrong rate on subsequent triggers.
           - wyoming_satellite.stop: alice_satellite
           # Undo what the package handler just started, then hand off to Alice.
           - voice_assistant.stop:

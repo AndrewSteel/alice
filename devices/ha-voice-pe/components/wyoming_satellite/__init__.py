@@ -17,8 +17,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import microphone, speaker
-from esphome.const import CONF_ID, CONF_MICROPHONE, CONF_SPEAKER
+from esphome.components import light, microphone, speaker
+from esphome.const import CONF_ID, CONF_LIGHT, CONF_MICROPHONE, CONF_SPEAKER
 
 CODEOWNERS = ["@alice"]
 # `socket` gives us the TCP client; `network` ensures wifi/IP is up first.
@@ -45,6 +45,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_PORT): cv.port,
         cv.Required(CONF_MICROPHONE): cv.use_id(microphone.Microphone),
         cv.Required(CONF_SPEAKER): cv.use_id(speaker.Speaker),
+        cv.Optional(CONF_LIGHT): cv.use_id(light.LightState),
         # RMS amplitude (0-32767) below which a 16 kHz frame counts as silence.
         cv.Optional(CONF_SILENCE_THRESHOLD, default=700): cv.int_range(min=0, max=32767),
         # Continuous silence that ends one utterance (sends Wyoming AudioStop).
@@ -67,6 +68,9 @@ async def to_code(config):
     cg.add(var.set_microphone(mic))
     spk = await cg.get_variable(config[CONF_SPEAKER])
     cg.add(var.set_speaker(spk))
+    if CONF_LIGHT in config:
+        lgt = await cg.get_variable(config[CONF_LIGHT])
+        cg.add(var.set_light(lgt))
 
     cg.add(var.set_silence_threshold(config[CONF_SILENCE_THRESHOLD]))
     cg.add(var.set_silence_ms(config[CONF_SILENCE_MS]))

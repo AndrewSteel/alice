@@ -1,6 +1,6 @@
 # PROJ-49: ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-06-15
 **Last Updated:** 2026-06-15
 
@@ -474,3 +474,91 @@ Anforderung: LED soll während LLM-Denkzeit blinken, nicht drehen. Erfordert:
 - Betroffene Dateien: `wyoming_transport.py`, `pipeline.py`, `wyoming_satellite.cpp/.h`
 
 → Tracked als **PROJ-50** in INDEX.md.
+
+---
+
+## QA Test Results v5 — Bug 2 Root-Cause-Final
+
+**Status:** In Review
+**Tested:** 2026-06-15 (Hardware-Flash + Nutzer-Rückmeldung)
+
+### v4 Hardware-Test Ergebnis
+
+- Bug 2 (falscher Ton-Pitch): ❌ OFFEN — v4-Fix (bedingter mic stop/start) traf wieder die falsche Stelle
+
+### Root-Cause-Revision v5 (final korrekt)
+
+Die Mic- und Speaker-Buses sind **getrennte I2S-Hardware-Buses** (`i2s_input` vs. `i2s_output`). Mic-Operationen können den Speaker-Bus physisch nicht beeinflussen. Alle bisherigen Hypothesen (v2–v4) über I2S-Bus-Korrumpierung durch Mic-Stop/Start waren falsch.
+
+**Tatsächliche Ursache**: `handle_inbound_event_()` rief `set_audio_stream_info(16-bit, mono, 48 kHz)` auf dem `i2s_audio_speaker`. Dieser Aufruf konfiguriert den I2S-DMA-Treiber des Speakers dauerhaft auf `I2S_CHANNEL_FMT_ONLY_LEFT` (Mono). Dieser Zustand bleibt nach `stop()` erhalten. Beim nächsten Wake Sound nutzt `mixing_speaker` denselben `i2s_audio_speaker` — und findet ihn im Mono-Modus statt im erwarteten Stereo-Modus → Wrong pitch.
+
+**v5-Fix**: `set_audio_stream_info()`-Call entfernt; stattdessen direkte Konvertierung 16-bit mono → 32-bit stereo in `audio-chunk`.
+
+### Geänderte Dateien (v5)
+
+| Datei | Änderung |
+|---|---|
+| `components/wyoming_satellite/wyoming_satellite.cpp` | `audio-start`: `set_audio_stream_info()` entfernt; `audio-chunk`: 16-bit mono → 32-bit stereo Konvertierung |
+
+### v5 Hardware-Test Ergebnis
+
+- Bug 2 (falscher Ton-Pitch): ✅ **BEHOBEN** — Nutzer bestätigt: "Ja, das klappt."
+- **Neue Regression**: TTS-Antworten spielen zu langsam / unverständlich ab
+
+### Regression-Analyse v5
+
+Root Cause der TTS-Verlangsamung: `i2s_audio_speaker` erbt bei fehlendem `set_audio_stream_info()`-Aufruf den Zustand vom `mixing_speaker` — dieser ist **16-bit stereo** (Resampler-Output). Unsere 32-bit-Stereo-Daten (8 Bytes/Frame) werden als 16-bit-stereo-Frames (4 Bytes/Frame) interpretiert → doppelt so viele Frames pro Zeiteinheit → DMA konsumiert Daten halb so schnell → Wiedergabe in halber Geschwindigkeit.
+
+---
+
+## QA Test Results v6 — TTS-Regression behoben
+
+**Status:** Approved
+**Tested:** 2026-06-15 (Hardware-Flash + Nutzer-Bestätigung)
+**Method:** Zielgerichteter Fix der v5-Regression + `esphome compile` + Hardware-Test
+
+### Root Cause (v6 — endgültige Diagnose)
+
+Das Problem war nie die Bytes-per-Second-Rate, sondern das **I2S Channel-Format**:
+
+- `mixing_speaker` konfiguriert `i2s_audio_speaker` für **16-bit Stereo** (`I2S_CHANNEL_FMT_RIGHT_LEFT`)
+- Unser ursprünglicher `set_audio_stream_info(16, 1 /*mono*/)` schaltete auf `I2S_CHANNEL_FMT_ONLY_LEFT`
+- Nach unserem `stop()` blieb der Kanal auf Mono → Mixer spielte Wake Sound mit falschem Pegel/Routing
+- In v5: kein `set_audio_stream_info()` → Zustand erbt 16-bit Stereo vom Mixer; unsere 32-bit-Daten (8 Bytes) werden als 2 × 16-bit-Stereo-Frames interpretiert → halbe Geschwindigkeit
+
+**v6-Fix**: `set_audio_stream_info(16, 2, 48000)` — **16-bit Stereo**, identisch zum Mixer-Format:
+- TTS-Session: DMA-Rate und Datenrate stimmen überein → korrekte Geschwindigkeit
+- Nach `stop()`: `audio_stream_info` bleibt auf 16-bit Stereo → Mixer findet korrekte Konfiguration vor → Wake Sound klingt identisch
+
+### Geänderte Dateien (v6)
+
+| Datei | Änderung |
+|---|---|
+| `components/wyoming_satellite/wyoming_satellite.cpp` | `audio-start`: `set_audio_stream_info(16, 2, 48000)` (Stereo statt Mono); `audio-chunk`: 16-bit mono → 16-bit stereo (L=R duplicate, 4 Bytes/Sample statt 8) |
+
+### Compiler-Verifikation v6
+
+```
+esphome compile devices/ha-voice-pe/espHome.yaml
+→ SUCCESS (20s)
+→ RAM: 19.5 % / Flash: 35.1 % — unverändert
+```
+
+### v6 Acceptance Criteria — Gesamtergebnis
+
+| # | Kriterium | Ergebnis |
+|---|---|---|
+| WS-1 | Wake Sound identisch bei jeder Aktivierung | ✅ PASS |
+| WS-2 | Root Cause identifiziert | ✅ PASS |
+| LED-1–6 | LED-Zustandsmaschine vollständig | ✅ PASS |
+| WB-1–4 | "Warte bitte…" Interstitial | ✅ PASS |
+| EC-1–5 | Edge Cases | ✅ PASS |
+| TTS | TTS-Antworten verständlich + korrekte Geschwindigkeit | ✅ PASS |
+
+**Nutzer-Bestätigung:** "Passt alles."
+
+### Produktionsbereitschaft v6
+
+**READY** — Alle Bugs behoben, keine offenen Critical/High Issues.
+
+Nächster Schritt: `/deploy`
