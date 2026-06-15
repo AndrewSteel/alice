@@ -1,8 +1,8 @@
 # PROJ-48: TTS First-Token Latency Reduction
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-06-02
-**Last Updated:** 2026-06-02
+**Last Updated:** 2026-06-15
 
 ## Background
 
@@ -62,7 +62,69 @@ The bottleneck is entirely in `alice-chat-stream`: qwen3:14b on the local 3090 t
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Root Cause
+
+The existing gateway pipeline is already architecturally correct for sentence-level TTS streaming: `pipeline.py` has a 3-stage concurrent pipeline (LLM token stream → `SentenceAccumulator` → Piper TTS → audio send). Tokens are yielded one-by-one from Ollama via SSE and the `SentenceAccumulator` dispatches each complete sentence to TTS immediately. There is no buffering problem.
+
+The actual bottleneck is **`OLLAMA_THINK=true` (the default in `alice-chat-stream`)**. qwen3:14b is a reasoning model. With `think: true`, it generates internal reasoning tokens (the `thinking` field) before producing any visible `content`. The gateway's `chat_client.py` explicitly ignores `thinking` events — so the pipeline receives no content tokens for ~9.6 s while the model reasons, then gets the full response in a burst.
+
+The fix: **disable thinking mode for voice sessions only.** Text-only chat sessions (WebApp, n8n) continue using thinking mode unchanged.
+
+### Component Structure
+
+No new components. Changes are confined to two existing services:
+
+```
+alice-chat-stream (Python service)
++-- ChatRequest model       ← add optional voice_mode flag
++-- streaming.py            ← pass think=False to Ollama when voice_mode=True
+
+alice-speech-gateway (Python service)
++-- chat_client.py          ← set voice_mode=True in request payload
+    (pipeline.py, sentence_accumulator.py unchanged — already correct)
+```
+
+### Data Flow (after fix)
+
+```
+[Voice turn]
+Browser/ESPHome → Gateway STT → alice-chat-stream (voice_mode=True)
+  → Ollama (think=False) → content tokens stream immediately
+  → SentenceAccumulator → Piper TTS → audio stream → client
+
+[Text turn — unchanged]
+Browser → alice-chat-stream (voice_mode absent/False)
+  → Ollama (think=True) → thinking tokens + content tokens
+  → SSE to browser
+```
+
+### What Changes (3 files, all surgical)
+
+| File | Change |
+|---|---|
+| `alice-chat-stream/app/main.py` | Add `voice_mode: bool = False` to `ChatRequest` model; pass it to `stream_chat()` |
+| `alice-chat-stream/app/streaming.py` | Add `think: bool = True` parameter to `stream_chat()`; use it in the Ollama payload |
+| `alice-speech-gateway/app/chat_client.py` | Add `"voice_mode": True` to the request payload in `stream_reply()` |
+
+### Expected Latency After Fix
+
+| Phase | Before | After |
+|---|---|---|
+| STT | ~0.6 s | ~0.6 s (unchanged) |
+| LLM first sentence | ~9.6 s | ~1.5–2.0 s (no reasoning phase) |
+| TTS first chunk | ~0.47 s | ~0.5 s (unchanged) |
+| **Total** | **~10.8 s** | **~2.6–3.1 s** |
+
+### No Changes Needed
+
+- `pipeline.py` — 3-stage pipeline already starts TTS on the first complete sentence
+- `sentence_accumulator.py` — already splits on `.!?\n` correctly
+- `tts.py`, `ws_transport.py`, `wyoming_transport.py` — unchanged
+- No database schema changes
+- No n8n workflow changes
+- No frontend changes
+- No new dependencies
 
 ## QA Test Results
 _To be added by /qa_
