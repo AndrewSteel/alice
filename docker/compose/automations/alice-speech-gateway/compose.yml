@@ -15,8 +15,8 @@ services:
       - XDG_CACHE_HOME=/data/cache
       - CT2_VERBOSE=-1
     ports:
-      # 10302 = Wyoming (HA Voice Devices) — parallel to wyoming-whisper on 10300
-      - "10302:10302"
+      # 10300 = Wyoming (HA Voice Devices) — reclaimed from removed wyoming-whisper container
+      - "10300:10300"
       # 10301 = WebSocket (WebApp) — proxied by nginx under /api/speech/
       - "10301:10301"
     volumes:

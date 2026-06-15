@@ -2,7 +2,7 @@
 alice-speech-gateway — speech I/O service for the Alice assistant (PROJ-40).
 
 Hosts three transports:
-  - Wyoming TCP server on port 10302  — HA Voice Devices (parallel to wyoming-whisper on 10300)
+  - Wyoming TCP server on port 10300  — HA Voice Devices (port reclaimed from removed wyoming-whisper)
   - WebSocket /ws/stt  on port 10301  — WebApp transcription-only
   - WebSocket /ws/voice on port 10301 — WebApp full voice conversation
 

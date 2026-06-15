@@ -14,7 +14,7 @@ device-level `README.md` for the build/flash procedure.
 wyoming_satellite:
   id: alice_satellite
   host: "192.168.1.10"     # gateway IP (prefer an IP; lwip resolves names too)
-  port: 10302
+  port: 10300
   microphone: va_mic       # id of a `microphone:` component (from the package)
   speaker: va_speaker      # id of a `speaker:` component (from the package)
   silence_threshold: 700   # RMS amplitude (0-32767) below which a frame = silence
