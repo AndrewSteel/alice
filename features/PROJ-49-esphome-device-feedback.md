@@ -1,6 +1,6 @@
 # PROJ-49: ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-15
 **Last Updated:** 2026-06-15
 

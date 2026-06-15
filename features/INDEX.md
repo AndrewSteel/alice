@@ -25,7 +25,7 @@
 | PROJ-47 | 2.1   | JWT WebSocket Log Leak Fix — BUG-LIVE-2: uvicorn WebSocket protocol logger schreibt `?token=<JWT>` in Container-Logs                | Deployed  | [Spec](PROJ-47-jwt-websocket-log-leak-fix.md) | 2026-06-02 |
 | PROJ-48 | 2.1   | TTS First-Token Latency Reduction — BUG-LIVE-3: Zeit bis erstes TTS-Audio ~10.8 s statt < 3 s; alice-chat-stream first-sentence streaming | Deployed  | [Spec](PROJ-48-tts-first-token-latency.md) | 2026-06-02 |
 
-| PROJ-49 | 2.2   | ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound; Clockwise/Blink/Counter-clockwise per State; Wake Sound Konsistenz | Approved  | [Spec](PROJ-49-esphome-device-feedback.md) | 2026-06-15 |
+| PROJ-49 | 2.2   | ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound; Clockwise/Blink/Counter-clockwise per State; Wake Sound Konsistenz | Deployed  | [Spec](PROJ-49-esphome-device-feedback.md) | 2026-06-15 |
 
 | PROJ-50 | 2.2   | ESPHome Wyoming Frame Split — LED zeigt "Thinking" während LLM-Wartezeit; Gateway sendet separaten AudioStart/AudioStop für "Warte bitte…" + neuer Device-Zustand LLM_WAITING | Roadmap  | —                                         | 2026-06-15 |
 
