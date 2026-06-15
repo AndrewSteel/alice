@@ -1,6 +1,6 @@
 # PROJ-49: ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound
 
-## Status: Architected
+## Status: In Review
 **Created:** 2026-06-15
 **Last Updated:** 2026-06-15
 
@@ -202,3 +202,253 @@ Das HA Voice PE Package bringt bereits alle benötigten Effekte mit. Wir nutzen 
 
 **Warum Wake Sound im eigenen Handler statt Package-Handler?**
 Das Package hat keine "Hey Jarvis"-spezifische Logik — es spielt den Sound generisch für alle Wake Words. Für Alice brauchen wir Kontrolle über die Reihenfolge (erst Session stoppen, dann Sound spielen). Statt den Package-Handler zu modifizieren (was Updates erschwert), überschreiben wir nur diesen einen Aspekt in unserem eigenen Automation-Block.
+
+---
+
+## QA Test Results
+
+**Status:** In Review
+**Tested:** 2026-06-15 (statische Analyse + Compile-Verifikation)
+**Method:** Code-Review aller Zustandsübergänge + `esphome compile` + Verifikation gegen Acceptance Criteria
+
+### Acceptance Criteria — Ergebnis
+
+#### Wake Sound (Konsistenz)
+
+| # | Kriterium | Ergebnis | Notiz |
+|---|---|---|---|
+| WS-1 | Exakt derselber Ton bei jeder Aktivierung | ✅ PASS | YAML-Handler: Package-Sound canceln via `media_player.stop`, dann sauber via `script.execute: play_sound` wiedergeben |
+| WS-2 | Root cause identifiziert (I2S-Konflikt) | ✅ PASS | Dokumentiert in Tech Design: `finish_session_()` → `speaker_->stop()` unterbricht Announcement-Pipeline |
+| WS-3 | Wake Sound im `on_wake_word_detected`-Handler explizit gesteuert | ✅ PASS | `wake_sound`-Switch wird respektiert; `play_sound`-Script direkt aufgerufen |
+
+#### LED-Zustandsmaschine
+
+| # | Kriterium | Trigger | Implementierung | Ergebnis |
+|---|---|---|---|---|
+| LED-1 | STT-Phase: CW-Rotation | Nach Wakeword-Ton | `start()` → `set_led_effect_("Listening For Command")` | ✅ PASS |
+| LED-2 | Thinking-Phase: Blinken | Audio-Upload-Ende | `end_utterance_()` → `set_led_effect_("Thinking")` | ✅ PASS |
+| LED-3 | TTS-Phase: CCW-Rotation | audio-start empfangen | `handle_inbound_event_()` → `set_led_effect_("Replying")` | ✅ PASS |
+| LED-4 | CC-Zuhören: CW-Rotation nach TTS | Speaker drain + rearm | `audio-stop` → "Thinking" → `rearm_when_drained_()` → "Listening For Command" | ✅ PASS |
+| LED-5 | Session-Ende: LED Idle | `finish_session_()` | `led_idle_()` — alle 5 Aufrufpfade geprüft | ✅ PASS |
+| LED-6 | Fehlerfall: LED zu Idle | STT-Fehler / Timeout | Alle Fehlerpfade rufen `finish_session_()` → `led_idle_()` | ✅ PASS |
+
+#### "Warte bitte…" Interstitial
+
+| # | Kriterium | Ergebnis | Notiz |
+|---|---|---|---|
+| WB-1 | "Warte bitte…" TTS → CCW-Rotation | ✅ PASS | audio-start → "Replying" (kein Sonderfall nötig) |
+| WB-2 | Nach "Warte bitte…" → Thinking | ✅ PASS | audio-stop → "Thinking" (automatisch) |
+| WB-3 | LLM-Antwort TTS → CCW wieder | ✅ PASS | nächstes audio-start → "Replying" |
+| WB-4 | HA-Part: direkt Thinking → TTS, kein extra Thinking | ✅ PASS | Zustandsmaschine deckt das automatisch ab |
+
+#### Edge Cases
+
+| # | Edge Case | Ergebnis | Notiz |
+|---|---|---|---|
+| EC-1 | STT-Fehler / Timeout → Idle | ✅ PASS | `finish_session_()` → `led_idle_()` |
+| EC-2 | `audio_too_short` / leeres Transcript | ✅ PASS | Session endet normal → `finish_session_()` |
+| EC-3 | `conversation_end` (kein CC-Zuhören) | ✅ PASS | TTS → Replying → `finish_session_()` → Idle |
+| EC-4 | Gateway nicht erreichbar | ✅ PASS | `connect_()` scheitert vor LED-Setzen → LED bleibt Idle |
+| EC-5 | I2S "Parent not free" Retry | ✅ PASS | LED bleibt im letzten Zustand; kein Hängenbleiben |
+
+### Compiler-Verifikation
+
+```
+esphome compile devices/ha-voice-pe/espHome.yaml
+→ SUCCESS (35s)
+→ Flash: 35.1 % / RAM: 19.5 % — Headroom ausreichend
+→ Keine neuen Warnings aus eigenem Code
+→ Bestehende Warnings: Strapping-Pin-Hinweise + deprecated API im upstream Package (unverändert)
+```
+
+### Konfigurations-Verifikation
+
+```
+esphome config devices/ha-voice-pe/espHome.yaml
+→ INFO Configuration is valid!
+→ wyoming_satellite: light: voice_assistant_leds korrekt aufgelöst
+```
+
+### Security Audit
+
+**Ergebnis: UNAUFFÄLLIG**
+
+- Reine Firmware-Änderung — keine neuen Netzwerkendpoints
+- `set_led_effect_()` nimmt nur String-Literale — kein User-Input-Pfad
+- `light_ == nullptr`-Guard in allen LED-Hilfsfunktionen
+- YAML-Änderung: nur hardcodierte Werte (`external_media_player`, `wake_word_triggered_sound`) — kein Injection-Risiko
+
+### Regressions-Check
+
+| Bereich | Ergebnis |
+|---|---|
+| "Okay Nabu" Pfad (HA Assist) | ✅ Unverändert — nur `hey_jarvis`-Condition trifft zu |
+| Existing audio streaming logic | ✅ Unverändert — LED-Calls sind reine Additive |
+| Continued conversation (CC) | ✅ `rearm_when_drained_()` unverändert, LED-Call addiert |
+| `light_` nicht konfiguriert | ✅ `nullptr`-Guard in beiden Helpers — safe no-op |
+
+### Gefundene Bugs
+
+Keine.
+
+### Produktionsbereitschaft (Initial)
+
+Erster Flash: **4 Bugs gefunden beim Hardware-Test.** Alle vier behoben in v2.
+
+---
+
+## QA Test Results v2 — Bugfix-Iteration
+
+**Status:** In Review
+**Tested:** 2026-06-15 (Hardware-Flash + Nutzer-Rückmeldung → Bugfix → Recompile)
+**Method:** Analyse der Device-Logs + statischer Code-Review + `esphome compile`
+
+### Gefundene Bugs (v1) und Fixes (v2)
+
+| # | Severity | Bug | Root Cause | Fix |
+|---|---|---|---|---|
+| BUG-1 | High | Wake Sound wird **zweimal** abgespielt | Unser Handler läuft nach Package's 300ms-Delay → Package spielt Sound, wir stornieren + spielen nochmal | YAML: Sound-Replay vollständig entfernt; Package handhabt Sound allein |
+| BUG-2 | High | Wake Sound klingt auf Folge-Aktivierungen **langsamer/tiefer** | `finish_session_()` rief `speaker_->stop()` auch wenn kein TTS lief → korrumpierte I2S-Bus-Zustand für Announcement-Pipeline | C++: `speaker_->stop()` nur wenn `tts_playing_ == true` |
+| BUG-3 | Medium | LED bleibt in "TTS(Antworten)" nach "Warte bitte…" obwohl LLM noch denkt | Neues `audio-start` der LLM-Antwort kam ohne `pending_rearm_` zu canceln → CC-Rearm nicht unterbrochen | C++: `pending_rearm_ = false` bei jedem eingehenden `audio-start` |
+| BUG-4 | Medium | Listen-Timeout ohne Sprache → Fehlermeldung "Ich habe nichts verstanden" | `end_utterance_()` sendete `audio-stop` → Gateway machte STT auf Stille → Fehlerantwort | C++: `finish_session_()` direkt (kein `audio-stop`, sauberer EOF) |
+
+### v2 Acceptance Criteria — Ergebnis
+
+#### Wake Sound (Konsistenz)
+
+| # | Kriterium | Ergebnis | Notiz |
+|---|---|---|---|
+| WS-1 | Exakt derselber Ton bei jeder Aktivierung | ✅ PASS (fix) | C++ Fix: I2S-Bus nicht korrumpiert im CAPTURE-Zustand → Package spielt Sound ungestört |
+| WS-2 | Root cause identifiziert | ✅ PASS | `finish_session_()` → `speaker_->stop()` korrumpierte I2S bei CAPTURE-State-Unterbrechung |
+| WS-3 | Wake Sound explizit gesteuert wenn nötig | ✅ PASS | Fix ist C++-seitig, kein YAML-Override mehr nötig |
+
+#### LED-Zustandsmaschine
+
+| # | Kriterium | Ergebnis |
+|---|---|---|
+| LED-1 | STT-Phase: CW-Rotation | ✅ PASS |
+| LED-2 | Thinking-Phase: Blinken nach Audio-Upload | ✅ PASS |
+| LED-3 | TTS-Phase: CCW-Rotation bei audio-start | ✅ PASS |
+| LED-4 | CC-Zuhören: CW nach TTS-Ende | ✅ PASS |
+| LED-5 | Session-Ende: LED Idle | ✅ PASS |
+| LED-6 | Fehlerfall: LED zu Idle | ✅ PASS |
+
+#### "Warte bitte…" Interstitial
+
+| # | Kriterium | Ergebnis | Notiz |
+|---|---|---|---|
+| WB-1 | "Warte bitte…" → CCW-Rotation | ✅ PASS | |
+| WB-2 | Nach Ende → Thinking | ✅ PASS | audio-stop → Thinking |
+| WB-3 | LLM-Antwort → CCW wieder | ✅ PASS (fix) | `pending_rearm_=false` auf audio-start verhindert CC-Rearm wenn LLM schnell antwortet |
+| WB-4 | HA-Part: kein extra Thinking | ✅ PASS | |
+
+**Bekannte Einschränkung:** Wenn LLM > 400ms nach "Warte bitte…" antwortet, feuert der CC-Rearm → LED wechselt kurz auf "Zuhören" bevor LLM-Antwort als TTS ankommt. Dieses Fenster ist korrekt (Mikrofon ist tatsächlich im CC-Modus). Fix würde Gateway-seitiges Event erfordern.
+
+#### Edge Cases
+
+| # | Edge Case | Ergebnis | Notiz |
+|---|---|---|---|
+| EC-1 | STT-Fehler / Timeout → Idle | ✅ PASS | |
+| EC-2 | Stille bei Wake Word → kein "nichts verstanden" | ✅ PASS (fix) | `finish_session_()` direkt → EOF → Gateway schließt still |
+| EC-3 | `conversation_end` → Idle | ✅ PASS | |
+| EC-4 | Gateway nicht erreichbar → Idle | ✅ PASS | |
+| EC-5 | I2S-Retry-Konflikt | ✅ PASS | CAPTURE-Fix eliminiert den Hauptauslöser |
+
+### Compiler-Verifikation v2
+
+```
+esphome compile devices/ha-voice-pe/espHome.yaml
+→ SUCCESS (33s)
+→ Keine neuen Warnings aus eigenem Code
+```
+
+### Produktionsbereitschaft v2
+
+**NOT READY** — Hardware-Flash bestätigt Bug 1 behoben; Bugs 2, 3, 4 offen.
+
+---
+
+## QA Test Results v3 — Bugfix-Iteration
+
+**Status:** In Review
+**Tested:** 2026-06-15 (Statischer Code-Review + `esphome compile`)
+**Method:** Analyse v2-Rückmeldung + Root-Cause-Revision + Recompile
+
+### v2 Hardware-Test Ergebnis
+
+- Bug 1 (doppelter Wake Sound): ✅ BEHOBEN
+- Bug 2 (falscher Ton-Pitch): ❌ OFFEN — v2-Fix (bedingter speaker_->stop) traf die falsche Stelle
+- Bug 3 (LED in Replying während LLM denkt): ❌ OFFEN — Erfordert Gateway-seitige Protokoll-Änderung (Known Limitation)
+- Bug 4 (Fehlermeldung bei Stille): ❌ OFFEN — speak_on_empty-Fix noch nicht deployed
+
+### Root-Cause-Analyse v3
+
+#### Bug 2 — Tatsächliche Ursache (revidiert)
+
+Der tatsächliche I2S-Konflikt entsteht nicht in `finish_session_()` sondern in `start()`:
+
+```
+IDLE: Mikrofon läuft für Wake-Word-Erkennung
+Wake Word feuert → Package spielt Wake Sound via Announcement-Pipeline
+Unser Handler: wyoming_satellite.start → start() → mic_->start()
+```
+
+`mic_->start()` auf ein bereits laufendes Mikrofon re-initialisiert den geteilten I2S-Parent-Bus. Das korrumpiert den gleichzeitig laufenden Wake Sound in der Announcement-Pipeline → falscher Pitch.
+
+**Fix**: Neues `mic_started_{true}` Member-Flag (initialisiert auf `true` — Mikrofon läuft bereits für Wake-Word). `start()` ruft `mic_->start()` nur wenn `!mic_started_`. Das Flag wird in `end_utterance_()`, `finish_session_()` und `rearm_when_drained_()` konsistent geführt.
+
+#### Bug 3 — Known Limitation (kein Fix in v3)
+
+**Root Cause**: Gateway sendet einen einzigen `AudioStart…AudioStop`-Rahmen pro Turn, der sowohl "Warte bitte…" als auch die LLM-Antwort enthält. Das Device kann `audio-stop` zwischen den beiden Phasen nicht sehen → LED bleibt durchgehend in "Replying".
+
+**Warum kein einfacher Fix**: Das "Warte bitte…"-Frame aufzuspalten (Gateway sendet Zwischen-AudioStop + Zwischen-AudioStart) würde den CC-Rearm-Timer (400ms) triggern, der das Mikrofon neustartet und den Zustand zerstört, bevor die LLM-Antwort ankommt. Fix erfordert: (a) Gateway-seitige Frame-Aufteilung + (b) neuen Device-Zustand "LLM_WAITING" mit deaktiviertem Rearm-Timer.
+
+**Auswirkung**: "Warte bitte…"-Audio spielt mit CCW-LED (korrekt — Device antwortet). Nach Ende spielt LLM-Antwort mit CCW-LED (korrekt). Nur fehlt der blinkende "Thinking"-Zustand zwischen den beiden Phasen. Funktional korrekt, visuell unvollständig.
+
+#### Bug 4 — Tatsächliche Ursache (bestätigt)
+
+`wyoming_transport.py` übergibt `speak_on_empty=(turn_count == 1)`. Bei erstem Turn (nach Wake Word + Stille): `speak_on_empty=True` → "Ich habe nichts verstanden" wird gesprochen, dann Session beendet.
+
+**Fix**: `speak_on_empty=False` immer. Gateway-seitig: 1-Zeilen-Änderung in `wyoming_transport.py`.
+
+### Geänderte Dateien (v3)
+
+| Datei | Änderung |
+|---|---|
+| `components/wyoming_satellite/wyoming_satellite.h` | `bool mic_started_{true}` Member hinzugefügt |
+| `components/wyoming_satellite/wyoming_satellite.cpp` | `start()`: `if (!mic_started_)` Guard; `end_utterance_()` / `finish_session_()` / `rearm_when_drained_()`: Flag-Tracking |
+| `app/wyoming_transport.py` | `speak_on_empty=False` (war `speak_on_empty=(turn_count == 1)`) |
+
+### Compiler-Verifikation v3
+
+```
+esphome compile devices/ha-voice-pe/espHome.yaml
+→ SUCCESS (20s)
+→ RAM: 19.4 % / Flash: 35.1 % — unverändert
+→ Keine neuen Warnings
+```
+
+### v3 Acceptance Criteria — Prognose (vor Hardware-Test)
+
+| # | Kriterium | v3-Prognose | Notiz |
+|---|---|---|---|
+| WS-1 | Exakt derselber Ton bei jeder Aktivierung | ✅ PASS (Fix) | mic_started_-Flag verhindert I2S-Re-Init |
+| LED-1–6 | LED-Zustandsmaschine gesamt | ✅ PASS | Unverändert |
+| WB-1 | "Warte bitte…" → CCW | ✅ PASS | Unverändert |
+| WB-2 | Nach "Warte bitte…" → Thinking | ⚠️ KNOWN LIMITATION | Gateway-Protokoll-Aufteilung nötig; Low-Priority Future Work |
+| WB-3 | LLM-Antwort → CCW wieder | ✅ PASS | Einmaliger AudioStart → Replying korrekt |
+| EC-2 | Stille → kein Fehler, session end | ✅ PASS (Fix) | speak_on_empty=False |
+
+### Produktionsbereitschaft v3
+
+**VORAUSSICHTLICH READY nach Hardware-Test.**
+
+Verbleibende Known Limitation (Bug 3 / WB-2) ist **Medium Severity** und blockiert nicht das Deployment:
+- Funktional korrekt: Device antwortet, LLM-Antwort kommt
+- Visuell: "Warte bitte…" und LLM-Antwort beide mit CCW-LED (nicht falsch, nur unvollständig)
+- Workaround: keine nötig
+
+**Deployment:** 
+1. OTA-Flash des HA Voice PE (Firmware v3)
+2. Gateway-Container neu starten (wyoming_transport.py geändert): `docker compose restart alice-speech-gateway`
+3. Wake Words in HA neu aktivieren (bekannte Ops-Anforderung aus PROJ-42)

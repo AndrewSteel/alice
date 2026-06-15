@@ -24,6 +24,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/components/audio/audio.h"
+#include "esphome/components/light/light_state.h"
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/socket/socket.h"
@@ -61,6 +62,7 @@ class WyomingSatellite : public Component {
   void set_port(uint16_t port) { this->port_ = port; }
   void set_microphone(microphone::Microphone *mic) { this->mic_ = mic; }
   void set_speaker(speaker::Speaker *spk) { this->speaker_ = spk; }
+  void set_light(light::LightState *light) { this->light_ = light; }
   void set_silence_threshold(uint16_t v) { this->silence_threshold_ = v; }
   void set_silence_ms(uint32_t v) { this->silence_ms_ = v; }
   void set_listen_timeout_ms(uint32_t v) { this->listen_timeout_ms_ = v; }
@@ -102,6 +104,8 @@ class WyomingSatellite : public Component {
 
   void set_state_(State state);
   void finish_session_();
+  void set_led_effect_(const char *effect);
+  void led_idle_();
 
   std::string host_;
   uint16_t port_{10300};
@@ -111,6 +115,7 @@ class WyomingSatellite : public Component {
   uint32_t silence_ms_{900};
   uint32_t listen_timeout_ms_{8000};
 
+  light::LightState *light_{nullptr};
   std::unique_ptr<socket::Socket> socket_;
   State state_{State::IDLE};
 
@@ -126,6 +131,10 @@ class WyomingSatellite : public Component {
   bool tts_playing_{false};           // an inbound AudioStart was seen
   bool pending_rearm_{false};         // TTS done; waiting for speaker to drain
   uint32_t tts_stop_ms_{0};           // millis() when audio-stop was received
+  // True when the mic is running (started by us or by the wake-word component at boot).
+  // Used to skip redundant mic_->start() calls that would re-initialize the shared
+  // I2S parent bus and corrupt concurrent speaker output (Bug 2 fix).
+  bool mic_started_{true};
 };
 
 template<typename... Ts> class StartAction : public Action<Ts...>, public Parented<WyomingSatellite> {
