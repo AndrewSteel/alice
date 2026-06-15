@@ -1,14 +1,15 @@
 """
 WebSocket transport — WebApp endpoints on port 10301.
 
-  /ws/stt    Mode 1 — push-to-talk transcription only (no AI, no TTS).
+  /ws/stt    Mode 1 — streaming transcription only (no AI, no TTS): rolling
+             interim transcripts while recording, one final transcript on
+             end_of_utterance.
   /ws/voice  Mode 2 — full voice conversation with sentence-streamed TTS,
              barge-in, and continued conversation.
 
 Wire protocol (both endpoints):
   - JSON text frames carry control messages: {"type": "..."} .
-  - Binary frames carry audio bytes (a complete clip for /ws/stt; streamed
-    audio for /ws/voice).
+  - Binary frames carry streamed audio bytes (250 ms chunks).
 
 Auth: JWT via `Authorization: Bearer` header or `?token=` query parameter,
 validated on the handshake before any audio is processed.
@@ -25,7 +26,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from . import auth, config
 from .audio_decode import WebmPcmDecoder
 from .barge_in import BargeInController
-from .pipeline import STATUS_SESSION_ENDED, VoicePipeline
+from .pipeline import STATUS_LISTENING, STATUS_SESSION_ENDED, VoicePipeline
 from .stt import STTError, get_engine
 from .tts import TTSError
 
@@ -39,6 +40,16 @@ router = APIRouter()
 _PCM_BYTES_PER_SEC = 16000 * 2
 _BARGE_IN_PCM_MIN_BYTES = _PCM_BYTES_PER_SEC // 2
 
+# Control words that should abort a turn without starting a new LLM query.
+# Matches the fallback list in config.load_interrupt_phrases() — update both
+# if interrupt-phrases.yaml changes significantly.
+_STOP_WORDS = frozenset(["stop", "stopp", "halt", "warte", "moment"])
+
+
+def _is_stop_only(transcript: str) -> bool:
+    """True when the barge-in transcript is only a control word with no actionable content."""
+    return transcript.strip().rstrip(".!?,").lower() in _STOP_WORDS
+
 
 async def _authenticate(ws: WebSocket) -> dict | None:
     """Verify the JWT from the handshake. Closes the socket and returns None on failure."""
@@ -51,35 +62,108 @@ async def _authenticate(ws: WebSocket) -> dict | None:
         return None
 
 
+# Mode 1 streaming STT: re-transcribe the accumulated buffer at most this
+# often while recording, so the client gets rolling interim results without
+# a Whisper run per 250 ms chunk. In production the chunks arrive in real
+# time, so this wall-clock interval tracks ~2 s of accumulated audio.
+_STT_INTERIM_INTERVAL_S = 2.0
+
+
+async def _stt_transcribe(audio: bytes) -> str | None:
+    """Transcribe the accumulated WebM buffer; return None on STT failure.
+
+    The buffer always starts at the first MediaRecorder chunk, which carries
+    the EBML/Init header, so the partial stream stays decodable on every call.
+    That is why Mode 1 re-transcribes the whole growing buffer instead of the
+    latest chunk alone (continuation chunks lack the header). Mode-1 clips are
+    short (< 30 s), so re-running Whisper on the buffer is cheap enough.
+    """
+    try:
+        return await get_engine().transcribe(audio, config.SPEECH_LANGUAGE)
+    except STTError:
+        return None
+
+
 @router.websocket("/ws/stt")
 async def ws_stt(ws: WebSocket) -> None:
-    """Mode 1 — transcription only. Client sends one complete audio clip."""
+    """Mode 1 — streaming transcription only (no AI, no TTS).
+
+    The client streams 250 ms WebM chunks as binary frames and signals the
+    end of speech with a `{"type":"end_of_utterance"}` control frame. The
+    gateway emits rolling `{"type":"interim"}` updates while recording and a
+    single authoritative `{"type":"final"}` before closing the socket.
+    """
     await ws.accept()
     payload = await _authenticate(ws)
     if payload is None:
         return
-    user_id = payload["user_id"]
-    log = {"user_id": user_id, "mode": "stt"}
+    log = {"user_id": payload["user_id"], "mode": "stt"}
+    try:
+        await _stt_loop(ws, log)
+    except WebSocketDisconnect:
+        logger.info("STT client disconnected", extra=log)
+
+
+async def _stt_loop(ws: WebSocket, log: dict) -> None:
+    """Accumulate streamed audio, emit interim transcripts, finalise on stop."""
+    loop = asyncio.get_running_loop()
+    buffer = bytearray()
+    interim_task: asyncio.Task | None = None
+    # Anchor the throttle to "now" so the first interim fires after ~2 s of
+    # audio rather than on the very first 250 ms chunk.
+    last_interim_at = loop.time()
+
+    async def run_interim(snapshot: bytes) -> None:
+        text = await _stt_transcribe(snapshot)
+        # Skip empty/failed interim — an empty interim would blank the client
+        # textarea mid-dictation. The final transcript is authoritative.
+        if text:
+            await ws.send_json({"type": "interim", "text": text})
 
     try:
         while True:
             message = await ws.receive()
             if message.get("type") == "websocket.disconnect":
-                break
+                return
+
             audio = message.get("bytes")
-            if audio is None:
-                # Ignore stray text frames on the STT endpoint.
+            if audio is not None:
+                buffer.extend(audio)
+                now = loop.time()
+                # One interim in flight at a time, throttled to the interval.
+                if (
+                    (interim_task is None or interim_task.done())
+                    and now - last_interim_at >= _STT_INTERIM_INTERVAL_S
+                ):
+                    last_interim_at = now
+                    interim_task = asyncio.create_task(run_interim(bytes(buffer)))
+                continue
+
+            text = message.get("text")
+            if text is None:
                 continue
             try:
-                transcript = await get_engine().transcribe(audio, config.SPEECH_LANGUAGE)
-            except STTError:
+                control = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if control.get("type") != "end_of_utterance":
+                continue
+
+            # Final transcript is authoritative — drop any in-flight interim.
+            if interim_task is not None and not interim_task.done():
+                interim_task.cancel()
+            final = await _stt_transcribe(bytes(buffer))
+            if final is None:
                 await ws.send_json(
                     {"type": "error", "message": config.SPEECH_ERRORS["stt_failed"]}
                 )
-                continue
-            await ws.send_json({"type": "transcript", "text": transcript})
-    except WebSocketDisconnect:
-        logger.info("STT client disconnected", extra=log)
+            else:
+                await ws.send_json({"type": "final", "text": final})
+            await ws.close(code=1000)
+            return
+    finally:
+        if interim_task is not None and not interim_task.done():
+            interim_task.cancel()
 
 
 @router.websocket("/ws/voice")
@@ -101,6 +185,9 @@ async def ws_voice(ws: WebSocket) -> None:
     async def send_audio(chunk: bytes) -> None:
         await ws.send_bytes(chunk)
 
+    async def send_audio_format(rate: int) -> None:
+        await ws.send_json({"type": "audio_format", "rate": rate})
+
     pipeline = VoicePipeline(
         session_id=session_id,
         user_id=user_id,
@@ -108,6 +195,7 @@ async def ws_voice(ws: WebSocket) -> None:
         stt=get_engine(),
         send_status=send_status,
         send_audio=send_audio,
+        send_audio_format=send_audio_format,
     )
     barge_in = BargeInController(get_engine())
     decoder = WebmPcmDecoder()
@@ -183,15 +271,18 @@ async def _voice_loop(
                 await _end_session(ws, log, "session ended")
                 return
 
-            utterance: bytes = outcome  # type: ignore[assignment]
+            audio_format, utterance = outcome  # type: ignore[misc]
             result = await _run_turn_with_barge_in(
-                pipeline, state, utterance, log
+                pipeline, state, utterance, log, audio_format=audio_format
             )
             # conversation_ended is intentionally ignored here: the WebApp voice
             # session stays open after HA commands so the user can continue
             # talking. The Wyoming path (wyoming_transport.py) ends its session
             # on conversation_ended — behaviour differs by design.
-            # Keep the session open for the next utterance.
+            #
+            # Signal the client to transition back to listening. Without this
+            # the client stays in "speaking" and its silence detector never fires.
+            await ws.send_json({"type": "status", "status": STATUS_LISTENING})
     finally:
         receiver.cancel()
         try:
@@ -205,6 +296,7 @@ async def _run_turn_with_barge_in(
     state: "_VoiceState",
     utterance: bytes,
     log: dict,
+    audio_format: str = "webm",
 ):
     """
     Run one pipeline turn while the receiver feeds barge-in audio.
@@ -215,12 +307,17 @@ async def _run_turn_with_barge_in(
     """
     state.begin_turn(pipeline)
     try:
-        result = await pipeline.run_turn(utterance, audio_format="webm")
+        result = await pipeline.run_turn(utterance, audio_format=audio_format)
         # An interrupt may have fired during the turn; chain interrupt turns
         # until one finishes cleanly. The session_id is preserved throughout.
         while result.interrupted:
             transcript = state.take_interrupt_transcript()
             if transcript is None:
+                break
+            if _is_stop_only(transcript):
+                # Pure control word — user wants to abort, not start a new query.
+                # Feeding "stop"/"warte" to the LLM causes unintended HA commands.
+                logger.info("Barge-in stop-only: aborting turn without LLM query", extra=log)
                 break
             logger.info("Feeding barge-in transcript as new turn", extra=log)
             result = await pipeline.run_text_turn(transcript)
@@ -271,6 +368,13 @@ async def _audio_receiver(
                 await _evaluate_barge_in(barge_in, state, log)
             else:
                 state.utterance.extend(audio)
+                # Pull decoded PCM for the utterance STT path. Using the
+                # decoder's output avoids the WebM init-header problem:
+                # continuation chunks (2nd+ utterances) lack the EBML header
+                # and fail standalone decoding. The decoder has full stream
+                # context and produces valid PCM for every utterance.
+                if state.decoder is not None:
+                    state.pcm_utterance.extend(state.decoder.take_pcm())
             continue
 
         if message.get("text") is not None:
@@ -280,6 +384,7 @@ async def _audio_receiver(
                 continue
             ctype = control.get("type")
             if ctype == "stop":
+                state.stop_turn()  # abort any running pipeline immediately
                 state.signal(_SESSION_END)
                 return
             if ctype == "end_of_utterance" and not state.turn_running():
@@ -335,7 +440,8 @@ class _VoiceState:
     """
 
     def __init__(self, decoder: WebmPcmDecoder | None = None) -> None:
-        self.utterance = bytearray()
+        self.utterance = bytearray()            # WebM bytes (fallback when decoder absent)
+        self.pcm_utterance = bytearray()        # decoded PCM from the per-session decoder
         self.barge_pcm_buffer = bytearray()
         self.decoder = decoder
         self._events: asyncio.Queue = asyncio.Queue()
@@ -362,6 +468,11 @@ class _VoiceState:
         return self._pipeline is not None
 
     # --- barge-in ---
+    def stop_turn(self) -> None:
+        """Interrupt the running pipeline so a stop request takes effect immediately."""
+        if self._pipeline is not None:
+            self._pipeline.interrupt()
+
     def trigger_interrupt(self, transcript: str) -> None:
         """Cancel the running pipeline and stash the interrupt transcript."""
         self._interrupt_transcript = transcript
@@ -378,8 +489,24 @@ class _VoiceState:
 
     # --- utterance / event handoff ---
     def flush_utterance(self) -> None:
-        self._events.put_nowait(bytes(self.utterance))
-        self.utterance = bytearray()
+        # Drain any final PCM that ffmpeg has decoded but not yet emitted.
+        if self.decoder is not None:
+            self.pcm_utterance.extend(self.decoder.take_pcm())
+
+        if self.pcm_utterance:
+            # Happy path: PCM available from the per-session decoder.
+            # Continuation WebM chunks (2nd+ utterances) lack the EBML init
+            # header and fail standalone decoding — PCM sidesteps this.
+            audio = bytes(self.pcm_utterance)
+            self.pcm_utterance = bytearray()
+            self.utterance = bytearray()
+            self._events.put_nowait(("pcm", audio))
+        else:
+            # Fallback: ffmpeg unavailable or produced no output yet.
+            # Only the first utterance (full WebM with header) is safe here.
+            audio = bytes(self.utterance)
+            self.utterance = bytearray()
+            self._events.put_nowait(("webm", audio))
 
     def signal(self, sentinel: object) -> None:
         self._events.put_nowait(sentinel)

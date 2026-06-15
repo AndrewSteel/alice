@@ -32,24 +32,25 @@ export function InputArea({
 
   const voice2 = useVoiceMode2();
 
-  const handleTranscript = useCallback((text: string) => {
-    setValue((prev) => {
-      const next = prev.trim().length === 0 ? text : `${prev.trim()} ${text}`;
-      // Re-grow the textarea on the next paint.
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.style.height = "auto";
-        el.style.height =
-          Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX) + "px";
-        el.focus();
-      });
-      return next;
+  // Mode 1 streams interim transcripts: each update replaces the dictated
+  // text (rolling replacement). The hook composes base + transcript, so this
+  // is a straight replacement, not an append.
+  const handleVoiceText = useCallback((text: string) => {
+    setValue(text);
+    // Re-grow the textarea on the next paint.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX) + "px";
+      el.focus();
     });
   }, []);
 
   const voice1 = useVoiceMode1({
-    onTranscript: handleTranscript,
+    onTranscript: handleVoiceText,
+    // Snapshotted when recording starts so a new dictation is appended.
+    getBaseText: () => value,
     // Mode 2 has priority — disable Mode 1 while overlay is active.
     disabled: voice2.isActive,
   });
@@ -98,13 +99,15 @@ export function InputArea({
 
   const handleInput = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      // A manual edit blocks further interim/final injection from Mode 1.
+      voice1.notifyUserEdit();
       setValue(e.target.value);
       const el = e.target;
       el.style.height = "auto";
       el.style.height =
         Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX) + "px";
     },
-    [],
+    [voice1.notifyUserEdit],
   );
 
   // --- Voice button derived states ---

@@ -1,15 +1,23 @@
 "use client";
 
 /**
- * useVoiceMode1 — toggle-based push-to-talk that streams a single
- * MediaRecorder blob to `/api/speech/ws/stt` and pushes the returned
- * transcript into the caller via `onTranscript`. No auto-send.
+ * useVoiceMode1 — Extended Mode 1 (PROJ-41): streaming push-to-talk with
+ * live transcription.
  *
- * Protocol (from PROJ-40 ws_transport.py):
- *  - Client opens WS with `?token=<jwt>`.
- *  - Client sends ONE binary frame containing the whole webm/opus clip.
- *  - Server responds with `{"type":"transcript","text":"..."}` or
- *    `{"type":"error","message":"..."}` and the client closes.
+ * The WebSocket opens on button press; MediaRecorder chunks (250 ms) are
+ * streamed as binary frames to `/api/speech/ws/stt`. A client-side
+ * AnalyserNode watches the mic and, after ~900 ms of silence following
+ * detected speech, sends `{type:"end_of_utterance"}` to flush the gateway.
+ *
+ * Wire protocol (Tech Design — Mode 1 Extended):
+ *  - Client → Gateway: WS open (?token=<jwt>), then binary 250 ms chunks.
+ *  - Gateway → Client: {"type":"interim","text":"..."}  rolling updates.
+ *  - Client → Gateway: {"type":"end_of_utterance"}  on silence / manual stop.
+ *  - Gateway → Client: {"type":"final","text":"..."}  then closes the socket.
+ *
+ * The transcript is pushed into the caller via `onTranscript` (no auto-send).
+ * Interim/final updates are blocked once the user manually edits the textarea
+ * (`notifyUserEdit`) so we never overwrite their changes.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,13 +29,30 @@ import { useAudioPermission } from "./useAudioPermission";
 
 const WS_URL_BASE = "/api/speech/ws/stt";
 
+// Stream ~every 250 ms so the gateway can build interim transcripts.
+const RECORD_TIMESLICE_MS = 250;
+// Client-side silence detection: -40 dBFS ≈ 0.010 linear RMS.
+// Two thresholds:
+//   SILENCE_HANG_AFTER_SPEECH_MS — after speech was heard, 900 ms trailing
+//     silence triggers auto-stop (original responsive behaviour).
+//   SILENCE_HANG_NO_SPEECH_MS   — if no speech is ever detected (mic gain
+//     too low to cross the threshold), auto-stop fires 1 500 ms after the
+//     button was pressed, so the button can never get permanently stuck.
+const SILENCE_THRESHOLD = 0.01;
+const SILENCE_HANG_AFTER_SPEECH_MS = 900;
+const SILENCE_HANG_NO_SPEECH_MS = 1500;
+const SILENCE_CHECK_INTERVAL_MS = 50;
+
 function buildWsUrl(token: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${WS_URL_BASE}?token=${encodeURIComponent(token)}`;
 }
 
 interface UseVoiceMode1Options {
+  /** Replace the textarea content with the (composed) transcript. */
   onTranscript: (text: string) => void;
+  /** Current textarea text — snapshotted when recording starts. */
+  getBaseText: () => string;
   /** Mode 2 has priority — when true, this hook is fully inert. */
   disabled?: boolean;
 }
@@ -36,10 +61,13 @@ interface UseVoiceMode1Result {
   isRecording: boolean;
   permissionDenied: boolean;
   toggle: () => void;
+  /** Call when the user types in the textarea — blocks interim/final injection. */
+  notifyUserEdit: () => void;
 }
 
 export function useVoiceMode1({
   onTranscript,
+  getBaseText,
   disabled = false,
 }: UseVoiceMode1Options): UseVoiceMode1Result {
   const { toast } = useToast();
@@ -47,16 +75,114 @@ export function useVoiceMode1({
 
   const [isRecording, setIsRecording] = useState(false);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const recordStartAtRef = useRef<number>(0);
+  // Latest option closures, mirrored into refs so the long-lived WS and
+  // silence-detector callbacks never read a stale textarea snapshot.
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
+  const getBaseTextRef = useRef(getBaseText);
+  getBaseTextRef.current = getBaseText;
 
-  // Must match MIN_AUDIO_SECONDS in the gateway config.
-  const MIN_RECORDING_MS = 500;
+  // Session resources
+  const wsRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  // BUG-7: blocks a second toggle() tap while the WS is still opening.
+  const connectingRef = useRef<boolean>(false);
+
+  // Silence detection
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const silenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const lastVoiceAtRef = useRef<number>(0);
+  const speechDetectedRef = useRef<boolean>(false);
+
+  // Transcript composition + edit mutex
+  const baseTextRef = useRef<string>("");
+  const userHasEditedRef = useRef<boolean>(false);
+  const endRequestedRef = useRef<boolean>(false);
+
+  // Lets the silence detector call the finalizer without a cyclic dep.
+  const finalizeRef = useRef<() => void>(() => {});
+
+  const composeText = useCallback((text: string) => {
+    const base = baseTextRef.current.trim();
+    return base.length > 0 ? `${base} ${text}` : text;
+  }, []);
+
+  // ----- silence detector -----
+
+  const stopSilenceDetector = useCallback(() => {
+    if (silenceIntervalRef.current) {
+      clearInterval(silenceIntervalRef.current);
+      silenceIntervalRef.current = null;
+    }
+    if (analyserSourceRef.current) {
+      try {
+        analyserSourceRef.current.disconnect();
+      } catch {
+        /* ignore */
+      }
+      analyserSourceRef.current = null;
+    }
+    analyserRef.current = null;
+  }, []);
+
+  const startSilenceDetector = useCallback((stream: MediaStream) => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    const source = ctx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    analyserRef.current = analyser;
+    analyserSourceRef.current = source;
+
+    // Connect the analyser into the graph at gain 0 so browsers that only
+    // process nodes wired to the destination still deliver audio data. The
+    // mic is never audible through the speakers.
+    const silentGain = ctx.createGain();
+    silentGain.gain.value = 0;
+    analyser.connect(silentGain);
+    silentGain.connect(ctx.destination);
+
+    const buf = new Float32Array(analyser.fftSize);
+    speechDetectedRef.current = false;
+    lastVoiceAtRef.current = performance.now();
+
+    silenceIntervalRef.current = setInterval(() => {
+      const analyserNode = analyserRef.current;
+      if (!analyserNode) return;
+      analyserNode.getFloatTimeDomainData(buf);
+      let sumSq = 0;
+      for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
+      const rms = Math.sqrt(sumSq / buf.length);
+
+      const now = performance.now();
+      if (rms > SILENCE_THRESHOLD) {
+        lastVoiceAtRef.current = now;
+        speechDetectedRef.current = true;
+      }
+
+      // Auto-stop: use the shorter post-speech hang when speech has been
+      // heard, otherwise fall back to the longer no-speech hang so the
+      // button can't get permanently stuck on low-gain devices.
+      const hang = speechDetectedRef.current
+        ? SILENCE_HANG_AFTER_SPEECH_MS
+        : SILENCE_HANG_NO_SPEECH_MS;
+      if (now - lastVoiceAtRef.current > hang) {
+        finalizeRef.current();
+      }
+    }, SILENCE_CHECK_INTERVAL_MS);
+  }, []);
+
+  // ----- teardown -----
 
   const cleanup = useCallback(() => {
+    stopSilenceDetector();
+
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       try {
         recorderRef.current.stop();
@@ -80,12 +206,75 @@ export function useVoiceMode1({
       wsRef.current = null;
     }
 
-    chunksRef.current = [];
+    if (audioCtxRef.current) {
+      const ctx = audioCtxRef.current;
+      audioCtxRef.current = null;
+      ctx.close().catch(() => {});
+    }
+
+    baseTextRef.current = "";
+    userHasEditedRef.current = false;
+    endRequestedRef.current = false;
+    speechDetectedRef.current = false;
+    connectingRef.current = false;
     setIsRecording(false);
-  }, []);
+  }, [stopSilenceDetector]);
 
   // Release resources if the component unmounts mid-recording.
   useEffect(() => cleanup, [cleanup]);
+
+  /**
+   * End the current utterance: stop the recorder first so MediaRecorder can
+   * emit its final `ondataavailable` chunk, then send `end_of_utterance` in
+   * the `onstop` callback. This ensures the gateway never finalises before
+   * the last audio chunk arrives (BUG-8). Used by both the silence detector
+   * and a manual second click. Idempotent via `endRequestedRef`.
+   */
+  const finalizeUtterance = useCallback(() => {
+    if (endRequestedRef.current) return;
+    endRequestedRef.current = true;
+
+    stopSilenceDetector();
+
+    const ws = wsRef.current;
+    const recorder = recorderRef.current;
+    recorderRef.current = null; // prevent cleanup() from stopping it again
+
+    const sendEouAndCleanupAudio = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "end_of_utterance" }));
+        } catch {
+          /* ignore */
+        }
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        const ctx = audioCtxRef.current;
+        audioCtxRef.current = null;
+        ctx.close().catch(() => {});
+      }
+    };
+
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = sendEouAndCleanupAudio;
+      try {
+        recorder.stop();
+      } catch {
+        // recorder threw despite state check — onstop won't fire; flush now
+        sendEouAndCleanupAudio();
+      }
+    } else {
+      sendEouAndCleanupAudio();
+    }
+  }, [stopSilenceDetector]);
+
+  finalizeRef.current = finalizeUtterance;
+
+  // ----- session start -----
 
   const startRecording = useCallback(async () => {
     const token = getToken();
@@ -98,16 +287,40 @@ export function useVoiceMode1({
       return;
     }
 
+    connectingRef.current = true;
+
     const stream = await requestStream();
-    if (!stream) return;
+    if (!stream) {
+      connectingRef.current = false;
+      return;
+    }
     streamRef.current = stream;
 
-    let recorder: MediaRecorder;
+    // Reset per-session state and snapshot whatever is already in the
+    // textarea so a new dictation is appended, not lost.
+    baseTextRef.current = getBaseTextRef.current();
+    userHasEditedRef.current = false;
+    endRequestedRef.current = false;
+    speechDetectedRef.current = false;
+
+    let ws: WebSocket;
     try {
-      recorder = new MediaRecorder(stream);
+      ws = new WebSocket(buildWsUrl(token));
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn("MediaRecorder unsupported", err);
+      console.warn("WS construct failed", err);
+      toast({ title: "Sprachverbindung fehlgeschlagen", variant: "destructive" });
+      cleanup();
+      return;
+    }
+    wsRef.current = ws;
+    ws.binaryType = "arraybuffer";
+
+    try {
+      audioCtxRef.current = new AudioContext();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("AudioContext failed", err);
       toast({
         title: "Aufnahme nicht unterstützt",
         description: "Dieser Browser kann keine Sprachaufnahmen erzeugen.",
@@ -116,143 +329,112 @@ export function useVoiceMode1({
       cleanup();
       return;
     }
-    recorderRef.current = recorder;
-    chunksRef.current = [];
 
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-    };
+    ws.onopen = () => {
+      connectingRef.current = false; // BUG-7: unlock toggle now that WS is ready
+      audioCtxRef.current?.resume();
 
-    recorder.onstop = async () => {
-      const blob = new Blob(chunksRef.current, {
-        type: recorder.mimeType || "audio/webm",
-      });
-      chunksRef.current = [];
-
-      // Stop the mic immediately — we still hold the WebSocket until the
-      // transcript arrives.
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      recorderRef.current = null;
-
-      if (blob.size === 0) {
-        cleanup();
-        return;
-      }
-
-      const durationMs = performance.now() - recordStartAtRef.current;
-      if (durationMs < MIN_RECORDING_MS) {
-        toast({ title: "Aufnahme zu kurz — bitte nochmals versuchen" });
-        cleanup();
-        return;
-      }
-
-      let ws: WebSocket;
+      let recorder: MediaRecorder;
       try {
-        ws = new WebSocket(buildWsUrl(token));
+        recorder = new MediaRecorder(stream);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn("WS construct failed", err);
+        console.warn("MediaRecorder unsupported", err);
         toast({
-          title: "Sprachverbindung fehlgeschlagen",
+          title: "Aufnahme nicht unterstützt",
+          description: "Dieser Browser kann keine Sprachaufnahmen erzeugen.",
           variant: "destructive",
         });
         cleanup();
         return;
       }
-      wsRef.current = ws;
-      ws.binaryType = "arraybuffer";
+      recorderRef.current = recorder;
 
-      ws.onopen = async () => {
+      recorder.ondataavailable = async (e) => {
+        if (!e.data || e.data.size === 0) return;
+        const sock = wsRef.current;
+        if (!sock || sock.readyState !== WebSocket.OPEN) return;
         try {
-          const buf = await blob.arrayBuffer();
-          ws.send(buf);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn("WS send failed", err);
-          cleanup();
-        }
-      };
-
-      ws.onmessage = (event) => {
-        if (typeof event.data !== "string") return;
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "transcript") {
-            const text: string = (msg.text ?? "").trim();
-            if (text.length > 0) {
-              onTranscript(text);
-            } else {
-              toast({ title: "Nichts verstanden, bitte nochmals versuchen" });
-            }
-          } else if (msg.type === "error") {
-            toast({
-              title: "Spracherkennung fehlgeschlagen",
-              description: msg.message,
-              variant: "destructive",
-            });
-          }
+          const sbuf = await e.data.arrayBuffer();
+          sock.send(sbuf);
         } catch {
-          /* ignore non-JSON */
+          /* ignore — socket already torn down */
         }
-        // One transcript per session — close out.
-        cleanup();
       };
 
-      ws.onerror = () => {
-        toast({
-          title: "Sprachverbindung fehlgeschlagen",
-          variant: "destructive",
-        });
+      try {
+        recorder.start(RECORD_TIMESLICE_MS);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("MediaRecorder.start failed", err);
         cleanup();
-      };
+        return;
+      }
 
-      ws.onclose = (event) => {
-        if (event.code === 4401) {
-          toast({
-            title: "Sitzung abgelaufen, bitte neu einloggen",
-            variant: "destructive",
-          });
-        }
-        // onmessage already cleaned up on success; this guards aborts.
-        if (wsRef.current === ws) cleanup();
-      };
+      startSilenceDetector(stream);
+      setIsRecording(true);
     };
 
-    try {
-      recordStartAtRef.current = performance.now();
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("MediaRecorder.start failed", err);
-      cleanup();
-    }
-  }, [cleanup, onTranscript, requestStream, toast]);
-
-  const stopRecording = useCallback(() => {
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
+    ws.onmessage = (event) => {
+      if (typeof event.data !== "string") return;
       try {
-        recorder.stop();
+        const msg = JSON.parse(event.data);
+        if (msg.type === "interim") {
+          if (userHasEditedRef.current) return;
+          const text: string = (msg.text ?? "").trim();
+          if (text.length > 0) onTranscriptRef.current(composeText(text));
+        } else if (msg.type === "final") {
+          const text: string = (msg.text ?? "").trim();
+          if (userHasEditedRef.current) {
+            toast({ title: "Aufnahme abgeschlossen" });
+          } else if (text.length > 0) {
+            onTranscriptRef.current(composeText(text));
+          } else {
+            toast({ title: "Nichts verstanden, bitte nochmals versuchen" });
+          }
+          cleanup();
+        } else if (msg.type === "error") {
+          toast({
+            title: "Spracherkennung fehlgeschlagen",
+            description: msg.message,
+            variant: "destructive",
+          });
+          cleanup();
+        }
       } catch {
-        cleanup();
+        /* ignore malformed JSON */
       }
-    } else {
+    };
+
+    ws.onerror = () => {
+      toast({ title: "Sprachverbindung fehlgeschlagen", variant: "destructive" });
       cleanup();
-    }
-  }, [cleanup]);
+    };
+
+    ws.onclose = (event) => {
+      if (event.code === 4401) {
+        toast({
+          title: "Sitzung abgelaufen, bitte neu einloggen",
+          variant: "destructive",
+        });
+      }
+      // `cleanup` nulls wsRef after a successful final; this guards aborts.
+      if (wsRef.current === ws) cleanup();
+    };
+  }, [cleanup, composeText, requestStream, startSilenceDetector, toast]);
 
   const toggle = useCallback(() => {
-    if (disabled || permissionDenied) return;
+    if (disabled || permissionDenied || connectingRef.current) return;
     if (isRecording) {
-      stopRecording();
+      finalizeUtterance();
     } else {
       void startRecording();
     }
-  }, [disabled, isRecording, permissionDenied, startRecording, stopRecording]);
+  }, [disabled, finalizeUtterance, isRecording, permissionDenied, startRecording]);
 
-  return { isRecording, permissionDenied, toggle };
+  const notifyUserEdit = useCallback(() => {
+    userHasEditedRef.current = true;
+  }, []);
+
+  return { isRecording, permissionDenied, toggle, notifyUserEdit };
 }

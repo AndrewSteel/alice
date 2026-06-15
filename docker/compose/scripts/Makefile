@@ -24,9 +24,12 @@ STACKS ?= \
   automations/dms-extractor-office \
   ai/ollama \
   ai/openwebui \
-  ai/whisper \
   ai/piper \
   ai/jupyter
+
+#  ai/whisper \
+#    Das Original-Whisper wurde herausgenommen und durch whisper in alice-speech-gateway ersetzt, da es dort besser integriert ist 
+#	 (MQTT-Trigger, Audio-Input/Output, etc.). Das Original-Whisper-Image wird nicht mehr gepflegt und hat Probleme mit neueren CUDA-Versionen.
 
 # Optional: s=<stack-pfad>, svc=<servicename>, prune=yes
 # Beispiele:

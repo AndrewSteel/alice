@@ -1,8 +1,8 @@
 # PROJ-41: WebApp Voice Interface
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-05-28
-**Last Updated:** 2026-06-01 (live re-test passed — Mode 1 & Mode 2 happy paths verified end-to-end; BUG-LIVE-1 fixed; BUG-LIVE-2 reopened — `--no-access-log` does not suppress uvicorn's WS protocol logger so JWTs are still in container logs; BUG-LIVE-3 new — first-TTS latency ~10.8 s vs 3 s spec budget, alice-chat-stream first-token; both MEDIUM, neither blocks)
+**Last Updated:** 2026-06-15 (BUG-5/7/8 + silence-detection fixes deployed and live-verified on PC + smartphone)
 
 ## Dependencies
 - Requires: PROJ-40 (Speech Gateway Service) — WebSocket endpoints `/ws/stt` (Mode 1) and `/ws/voice` (Mode 2) on `/api/speech/`
@@ -10,7 +10,7 @@
 
 ## User Stories
 
-- Als Nutzer möchte ich einen Mikrofon-Button neben dem Sende-Button drücken, sprechen und den transkribierten Text im Eingabefeld sehen, damit ich Nachrichten per Sprache eingeben kann ohne tippen zu müssen.
+- Als Nutzer möchte ich einen Mikrofon-Button neben dem Sende-Button drücken, sprechen und den transkribierten Text live im Eingabefeld sehen — mit Echtzeit-Zwischenergebnissen während der Aufnahme und automatischem Stopp nach einer Stille-Periode — damit ich Nachrichten per Sprache eingeben kann ohne tippen zu müssen.
 
 - Als Nutzer möchte ich den transkribierten Text vor dem Absenden noch bearbeiten können, damit ich Tippfehler oder Missverständnisse korrigieren kann.
 
@@ -33,8 +33,10 @@
 - [ ] Ein Mikrofon-Icon-Button ist in der `InputArea` direkt neben dem Sende-Button sichtbar
 - [ ] Ein Klick auf den Mikrofon-Button startet die Aufnahme (Toggle — kein Push-to-Talk)
 - [ ] Während der Aufnahme zeigt der Button einen visuell aktiven Zustand (roter Puls-Ring oder ähnliches)
-- [ ] Ein zweiter Klick auf den aktiven Mikrofon-Button beendet die Aufnahme und sendet das Audio an `/ws/stt`
-- [ ] Der transkribierte Text erscheint im Textarea-Eingabefeld
+- [ ] Die Aufnahme endet automatisch nach ca. 900 ms Stille nach letzter Sprache — kein zweiter Button-Druck nötig
+- [ ] Ein zweiter Klick auf den aktiven Mikrofon-Button beendet die Aufnahme manuell (optionaler Override)
+- [ ] Während der Aufnahme werden Interim-Transcripts live im Textarea-Eingabefeld angezeigt und bei jedem Gateway-Update ersetzt (rolling replacement)
+- [ ] Nach dem Stopp (auto oder manuell) gibt der Gateway einen finalen Transcript zurück; der Button kehrt automatisch in den Ruhezustand zurück
 - [ ] Der Text wird nicht automatisch abgeschickt — der Nutzer kann ihn bearbeiten und dann manuell senden
 - [ ] Während einer laufenden Aufnahme ist der Sende-Button deaktiviert
 - [ ] Auth: Der WebSocket wird mit dem JWT des eingeloggten Nutzers authentifiziert (Query-Parameter oder Header)
@@ -71,7 +73,9 @@
 
 ## Edge Cases
 
-- **Leere Aufnahme (Mode 1)**: Whisper liefert leeren Text → kein Text ins Eingabefeld einfügen; optional Toast "Nichts verstanden, bitte nochmals versuchen"
+- **Leere Aufnahme (Mode 1)**: Whisper liefert leeren finalen Text → Eingabefeld bleibt leer; Toast "Nichts verstanden, bitte nochmals versuchen"
+- **Stille zu früh erkannt (Mode 1)**: Auto-Stopp feuert während einer natürlichen Pause — bisher transkribierter Text bleibt im Eingabefeld; Nutzer kann Mic erneut drücken und weiter diktieren (neue Session, kein automatisches Zusammenführen)
+- **Interim-Text während Benutzer-Tipp (Mode 1)**: Sobald der Nutzer manuell in der Textarea tippt, werden weitere Interim-Updates nicht mehr eingefügt (kein Überschreiben von User-Edits); der finale Transcript landet ebenfalls nicht mehr im Feld — Aufnahme läuft weiter bis Auto-Stopp, danach nur Toast "Aufnahme abgeschlossen"
 - **WebSocket-Verbindungsfehler**: Verbindung zu `/api/speech/` schlägt fehl → Toast "Sprachverbindung fehlgeschlagen", Aufnahme wird gestoppt, Buttons wieder aktiviert
 - **Session-Timeout (Mode 2)**: Gateway sendet `session_ended` nach Silence-Timeout → Overlay schließt sich automatisch, keine Fehlermeldung nötig
 - **Barge-In erkannt (Mode 2)**: Gateway sendet ein neues Status-Event während TTS läuft → Browser stoppt sofort die Wiedergabe, leert die Audio-Queue, zeigt neuen Zustand. Bereits an den Lautsprecher ausgegebene Samples können nicht zurückgeholt werden — das ist akzeptabel.
@@ -85,7 +89,8 @@
 
 - **Browser API**: `MediaRecorder` API für Audioaufnahme; Web Audio API (`AudioContext`, `decodeAudioData` oder `AudioWorklet`) für Echtzeit-Chunk-Playback
 - **Audio-Format**: PCM oder Opus, abhängig von Gateway-Anforderungen (aus PROJ-40 ableiten); `echoCancellation: true`, `noiseSuppression: true` in getUserMedia
-- **WebSocket-Endpunkte**: `/api/speech/ws/stt` (Mode 1), `/api/speech/ws/voice` (Mode 2) — über nginx proxy zu `alice-speech-gateway:10301`
+- **WebSocket-Endpunkte**: `/api/speech/ws/stt` (Mode 1, Streaming-Modus), `/api/speech/ws/voice` (Mode 2) — über nginx proxy zu `alice-speech-gateway:10301`. `/ws/stt` empfängt nun Audio-Chunks als binary WS-Frames (statt einzelnem Blob), sendet `{"type":"interim","text":"..."}` laufend und `{"type":"final","text":"..."}` nach `{"type":"end_of_utterance"}` vom Client
+- **Silence Detection (Mode 1)**: Client-seitig via Web Audio `AnalyserNode` RMS — Schwelle ~40 dBFS, 900 ms Stille nach letzter Sprache → Client sendet `{"type":"end_of_utterance"}` → Gateway flush → `final`-Event → Button idle
 - **Performance**: Erste TTS-Audio-Wiedergabe beginnt innerhalb von < 3s nach Ende der Spracheingabe (Gateway-Budget; Frontend-Overhead < 100ms)
 - **Browser-Support**: Chrome 90+, Firefox 90+, Safari 15+ (iOS), Chrome Android
 - **Kein neuer API-Endpunkt** nötig — kommuniziert ausschließlich über den bestehenden Gateway-WebSocket
@@ -93,7 +98,204 @@
 ---
 <!-- Sections below are added by subsequent skills -->
 
-## Tech Design (Solution Architect)
+## Tech Design — Mode 1 Extended (Streaming + Live Transcription) — 2026-06-14
+
+### What changes from the current implementation
+
+| Aspect | Old Mode 1 | Extended Mode 1 |
+|---|---|---|
+| WS open timing | After recording stops | Immediately on button press |
+| Audio send | One complete blob | 250 ms chunks, streamed live |
+| Auto-stop | None (manual only) | Client-side silence detection (900 ms) |
+| Transcript flow | One `{type:"transcript"}` at end | Rolling `{type:"interim"}` + `{type:"final"}` |
+| Textarea updates | Once, after stop | Live rolling replacement on each interim |
+
+### Component Structure — Mode 1 Extended
+
+```text
+useVoiceMode1 (REWRITE)
+  — Opens WS at recording start, not at stop
+  — MediaRecorder timeslice: 250 ms → each ondataavailable chunk → binary WS frame
+  — Web Audio AnalyserNode watching the mic stream:
+      RMS > threshold → mark "speech detected", reset silence timer
+      speechDetected + silence > 900 ms → send {"type":"end_of_utterance"} → stop
+  — Incoming JSON frames:
+      {"type":"interim","text":"..."} → replace textarea if !userHasEdited
+      {"type":"final","text":"..."}  → set textarea if !userHasEdited, cleanup
+  — userHasEdited mutex: if user types in textarea → stop interim updates,
+      recording continues until silence/manual stop, final transcript is dropped
+  — Manual second click → immediately sends {"type":"end_of_utterance"}, cleanup
+
+Gateway /ws/stt (UPDATED)
+  — Streaming mode: receives binary chunks, accumulates full buffer
+  — Interim trigger: every ~2 s of new audio received → Whisper on full buffer → interim
+  — On {"type":"end_of_utterance"}: final Whisper on full buffer → {"type":"final"} → close
+  — Full-buffer approach avoids EBML continuation-chunk problem
+    (first chunk always has EBML header; full buffer is always valid for short STT inputs)
+```
+
+### New Wire Protocol for `/ws/stt`
+
+```text
+Client  →  Gateway: WS open (?token=<jwt>)
+Gateway →  Client:  (accepted, ready)
+
+Client  →  Gateway: [binary] chunk_1 (250 ms)
+...
+Client  →  Gateway: [binary] chunk_4 (250 ms)   ← ~2 s accumulated
+Gateway →  Client:  {"type":"interim","text":"Hallo A…"}
+
+Client  →  Gateway: [binary] chunk_5 ... chunk_8  ← ~4 s accumulated
+Gateway →  Client:  {"type":"interim","text":"Hallo Alice, wie spät"}
+
+[900 ms silence detected client-side]
+Client  →  Gateway: [text] {"type":"end_of_utterance"}
+Gateway →  Client:  {"type":"final","text":"Hallo Alice, wie spät ist es?"}
+Gateway closes WS (1000)
+```
+
+### Silence Detection
+
+```text
+AudioContext.createMediaStreamSource(stream) → AnalyserNode
+Every 50 ms:
+  analyser.getByteTimeDomainData() → RMS calculation
+  RMS > -40 dBFS  →  speechDetected = true; lastSpeechAt = now()
+  speechDetected && (now() - lastSpeechAt) > 900 ms
+    → send {"type":"end_of_utterance"}
+    → MediaRecorder.stop()
+    → await {"type":"final"} from gateway → update textarea → cleanup
+
+Minimum speech requirement: at least one high-RMS frame must be seen
+before silence auto-stop can fire (prevents immediate trigger in a quiet room).
+```
+
+### State Model (hook-local)
+
+```text
+isRecording:    boolean    — button state
+userHasEdited:  boolean    — mutex: blocks interim/final updates if user typed
+speechDetected: boolean    — prevents premature silence trigger
+lastSpeechAt:   number     — timestamp of last high-RMS frame
+wsRef:          WebSocket  — opened at start, closed after "final" or error
+analyserTimer:  number     — setInterval ID for silence polling
+```
+
+### Tech Decisions — Mode 1 Extended
+
+| Decision | Choice | Why |
+|---|---|---|
+| WS open timing | On button press (not on stop) | Chunks must stream from first 250 ms; WS must be ready immediately |
+| Interim strategy | Whisper on full accumulated buffer every ~2 s | Continuation WebM chunks (no EBML header) cannot be decoded alone; full buffer is always valid; re-transcribing is fine for short STT inputs |
+| Silence detection | Client-side AnalyserNode RMS, 50 ms polling | Spec requirement; avoids round-trip; consistent with Mode 2 design |
+| `userHasEdited` mutex | Block both interim and final if user typed | Prevents overwriting user edits; recording auto-stops naturally |
+| WebM/EBML decoding | Full-buffer Whisper (no WebmPcmDecoder) | Mode 1 is short (< 30 s); full-buffer simpler than a decoder subprocess; WebmPcmDecoder stays Mode-2-only |
+
+### Files to modify
+
+| Action | File |
+|---|---|
+| Rewrite | `frontend/src/hooks/useVoiceMode1.ts` |
+| Update | `docker/compose/automations/alice-speech-gateway/app/ws_transport.py` — `ws_stt()` function |
+| Update | `docker/compose/automations/alice-speech-gateway/tests/test_ws_transport.py` — streaming STT tests |
+
+No new packages. No new endpoints. No DB changes.
+
+---
+
+## Implementation Notes — Mode 1 Extended (Frontend, 2026-06-14)
+
+**Implemented by:** Frontend Developer (skill). Scope: frontend only.
+
+### Files changed
+- **Rewrite** `frontend/src/hooks/useVoiceMode1.ts` — replaced the old
+  record-then-send-one-blob flow with streaming:
+  - WebSocket opens on button press (in `startRecording`), not on stop.
+  - `MediaRecorder.start(250)` → each `ondataavailable` chunk is sent as a
+    binary WS frame.
+  - Client-side silence detection via `AudioContext` + `AnalyserNode` RMS,
+    polled every 50 ms (threshold 0.010 ≈ -40 dBFS). After 900 ms of silence
+    *following detected speech* it calls the finalizer. A high-RMS frame must
+    be seen first, so a quiet room never auto-stops.
+  - Finalizer sends `{"type":"end_of_utterance"}`, stops capturing, and keeps
+    the WS open until `{"type":"final"}` arrives, then tears down. Idempotent
+    (`endRequestedRef`) so the silence timer and a manual second click can't
+    double-fire.
+  - Incoming `{"type":"interim"}` → rolling replacement of the dictated text;
+    `{"type":"final"}` → final text + teardown. Both blocked once the user
+    has edited the textarea.
+  - `userHasEdited` mutex exposed as `notifyUserEdit()`; transcript
+    composition exposed via new `getBaseText` option so a new dictation is
+    appended to (not merged with) any pre-existing textarea content.
+- **Update** `frontend/src/components/Chat/InputArea.tsx` —
+  `onTranscript` handler changed from append to straight replacement (the
+  hook now composes `base + transcript`); passes `getBaseText: () => value`;
+  `handleInput` now calls `voice1.notifyUserEdit()` so manual typing freezes
+  interim/final injection.
+
+### Behavioural notes
+- Toasts: empty final → "Nichts verstanden, bitte nochmals versuchen";
+  final-after-edit → "Aufnahme abgeschlossen"; 4401 close → "Sitzung
+  abgelaufen, bitte neu einloggen".
+- Manual second click and auto-silence both route through the same finalizer
+  and still populate the textarea from the final transcript.
+- Reused the proven Mode 2 detector pattern (analyser → gain 0 → destination)
+  for cross-browser audio delivery.
+
+### Build / typecheck
+- `npx tsc --noEmit` exits 0; `npm run build` clean.
+
+### ⚠ Backend dependency — RESOLVED (see backend notes below, 2026-06-14)
+The gateway `/ws/stt` was rewritten to the streaming protocol in the backend
+pass below. The frontend's documented wire protocol (`interim` / `final` /
+`end_of_utterance`) is now matched end-to-end.
+
+---
+
+## Implementation Notes — Mode 1 Extended (Backend / Gateway, 2026-06-14)
+
+**Implemented by:** Backend Developer (skill). Scope: `alice-speech-gateway` only.
+
+### Files changed
+- **Rewrite** `app/ws_transport.py` — `ws_stt()` replaced the old
+  one-blob-per-frame handler (which replied `{"type":"transcript"}`) with the
+  streaming protocol:
+  - Streaming loop factored into a testable `_stt_loop(ws, log)` (mirrors how
+    `ws_voice` delegates to `_voice_loop`); `ws_stt` keeps auth + the
+    `WebSocketDisconnect` wrapper.
+  - Binary frames accumulate into a single growing WebM buffer. While
+    recording, the **full buffer** is re-transcribed and a
+    `{"type":"interim","text":...}` frame is emitted, throttled to one run per
+    `_STT_INTERIM_INTERVAL_S` (2 s) with at most one interim in flight at a
+    time. Empty/failed interim results are skipped so they never blank the
+    client textarea.
+  - On `{"type":"end_of_utterance"}`: any in-flight interim is cancelled, the
+    full buffer is transcribed once more, and `{"type":"final","text":...}` is
+    sent (empty string included — the client shows "Nichts verstanden"). The
+    socket then closes 1000. STT failure on the final sends
+    `{"type":"error","message":...}` instead.
+  - Full-buffer approach (not the Mode-2 `WebmPcmDecoder`): the buffer always
+    starts at the first MediaRecorder chunk, which carries the EBML header, so
+    the partial stream stays decodable on every interim; Mode-1 clips are short
+    (< 30 s) so re-running Whisper on the growing buffer is cheap.
+- **Update** `tests/test_ws_transport.py` — added 5 streaming-STT tests
+  (`FakeSTT` scripted engine, injected via `stt._engine`): interim→final,
+  final-only under the interval, empty final, STT-error→error frame, and
+  disconnect-before-final.
+
+### Verification
+- `pytest` — **59 passed** (5 new STT tests + existing Mode 2 / barge-in
+  suite, no regressions).
+
+### Deploy
+The gateway image must be rebuilt and redeployed for this to go live:
+`./scripts/sync-compose.sh` then on `ki.lan`:
+`docker compose build && docker compose up -d --force-recreate` for
+`alice-speech-gateway`. **Deploy `alice-speech-gateway` (gateway image).**
+
+---
+
+## Tech Design (Solution Architect) — Original
 
 ### Component Structure
 
@@ -125,9 +327,12 @@ useAudioPermission (NEW hook — shared by both modes)
 **Mode 1:**
 
 ```text
-MicButton click → getUserMedia → MediaRecorder starts
-→ MicButton click again → stop → single blob sent over WebSocket
-→ Gateway returns JSON { text: "..." } → injected into Textarea
+MicButton click → getUserMedia → MediaRecorder starts (250 ms timeslice)
+→ each chunk sent as binary WS frame to /ws/stt (streaming mode)
+→ Gateway returns { type:"interim", text:"..." } → replaces Textarea content (rolling)
+→ Client AnalyserNode detects ~900 ms silence → sends { type:"end_of_utterance" }
+  (or: manual second click → same end_of_utterance + immediate teardown)
+→ Gateway returns { type:"final", text:"..." } → Textarea updated, WS closed, Button → idle
 → User edits and sends manually
 ```
 
@@ -151,7 +356,9 @@ VoiceButton click → getUserMedia → WS /ws/voice opens
 ### State Model (hook-local, no DB)
 
 ```text
-Mode 1: isRecording: boolean, transcript callback
+Mode 1: isRecording: boolean, interimText: string,
+        userHasEdited: boolean (Mutex gegen rolling updates),
+        onFinalTranscript callback
 Mode 2: status: 'idle'|'listening'|'processing'|'speaking'|'ended',
         audioQueue: AudioBuffer[], wsConnection: WebSocket | null
 ```
@@ -604,7 +811,7 @@ The bottleneck is `alice-chat-stream` first-token latency, not the gateway. Fix 
 
 **BUG-3 residue (LOW, UNCHANGED).** Deployed bundle still ships `Alice denkt...` / `Alice spricht...` with ASCII three-dot. Spec uses `…` (U+2026). Umlauts everywhere else are correct. **P3.**
 
-**BUG-5 (LOW, UNCHANGED).** TTS sample rate hard-coded to 22050 Hz client-side. Not exercised (default Piper voice in use). **P3.**
+**BUG-5 (LOW) — FIXED (2026-06-15).** Gateway now extracts Piper's actual sample rate from the first `AudioChunk` and sends `{type:"audio_format","rate":N}` before the first binary audio frame. `useVoiceMode2` stores the rate in `ttsRateRef` and uses it in `pcmToAudioBuffer` instead of the hard-coded 22050. Files: `tts.py` (on_first_rate callback), `pipeline.py` (send_audio_format wired through _synth_stage), `ws_transport.py` (send_audio_format fn), `useVoiceMode2.ts` (ttsRateRef + audio_format handler).
 
 ### Security audit — verdict: no Critical findings
 
@@ -639,18 +846,277 @@ No Critical or High bugs. Mode 1 production-ready, Mode 2 production-ready at ga
 
 ## Deployment
 
-**Deployed:** 2026-06-01
+**Initial deploy:** 2026-06-01
+**Re-deploy (BUG-5/7/8 + silence-detection):** 2026-06-15
 **Production URL:** https://ki.lan (via VPN)
 
-### Deployed artifacts
+### Deployed artifacts (as of 2026-06-15)
 
 | Artifact | Where | Notes |
 |---|---|---|
-| Frontend bundle | `nginx/html/` (via `deploy-frontend.sh` + `sync-compose.sh`) | Voice buttons + VoiceOverlay in chat UI |
-| `alice-speech-gateway` image | `ki.lan` — `alice-speech-gateway` container | setuptools<81 pin, `--no-access-log`, persistent ffmpeg decoder, barge-in path |
+| Frontend bundle (`53KSD_WhcBfckOZPrhkMK`) | `nginx/html/` (via `deploy-frontend.sh` + `sync-compose.sh`) | BUG-5 `audio_format` handler; BUG-7 double-tap guard; BUG-8 tail-chunk ordering; Mode 1/2 silence detection rework |
+| `alice-speech-gateway` image | `ki.lan` — `alice-speech-gateway` container | setuptools<81 pin, `--no-access-log`, persistent ffmpeg decoder, barge-in path; `on_first_rate`→`send_audio_format` (BUG-5); `STATUS_LISTENING`; `_stt_loop` streaming STT |
 
-### Known follow-ups (non-blocking)
+### Open follow-ups (non-blocking)
 
-- **BUG-LIVE-2** — JWT still appears in uvicorn WebSocket protocol logs; `--no-access-log` only covers HTTP. Fix: filter or silence `uvicorn.protocols.websockets.websockets_impl` logger.
-- **BUG-LIVE-3** — First TTS chunk arrives ~10.8 s after end-of-utterance (vs 3 s spec budget). Bottleneck: `alice-chat-stream` first-token latency (qwen3:14b on 3090). Fix: stream first sentence as soon as it's ready.
-- UI smoke on staging still pending for: Stop button, second conversation turn, live barge-in.
+- **BUG-LIVE-2 → PROJ-47** — JWT still in uvicorn WebSocket protocol logs (`--no-access-log` only covers HTTP; `uvicorn.protocols.websockets` logger untouched).
+- **BUG-LIVE-3 → PROJ-48** — First TTS chunk ~5.6 s after end-of-utterance (spec: < 3 s); bottleneck is `alice-chat-stream` first-token latency.
+- **BUG-4 (LOW)** — Permission-denied toast wording differs from spec (split title/desc + "und Seite neu laden").
+
+## QA Re-Test Results — Mode 1 Extended Streaming + Mode 2 Regression Fix
+
+**QA Date:** 2026-06-14 (live, against deployed `alice-speech-gateway` + deployed frontend bundle on ki.lan)
+**Tester:** QA Engineer (skill)
+**Production-ready decision: READY** — no Critical or High bugs. The Mode 1 Extended streaming rewrite and the Mode 2 continued-conversation regression fix (PROJ-42 fallout) are both verified live end-to-end. The two open MEDIUM follow-ups already have their own tickets (BUG-LIVE-2 → PROJ-47, BUG-LIVE-3 → PROJ-48); neither is a regression and neither blocks per the QA rule (only Critical/High block).
+
+### Scope of this re-test
+
+This run covers the change set since the 2026-06-01 deploy:
+- **Mode 1 Extended rewrite** — streaming `/ws/stt` (rolling `interim` + authoritative `final` on `end_of_utterance`), client-side silence detection. Files: `useVoiceMode1.ts` (rewrite), `InputArea.tsx`, gateway `ws_transport._stt_loop`.
+- **Mode 2 regression fix** ("PROJ-42 fallout", commit d8ac036) — new `listening` status after each turn so the client leaves "speaking" and re-arms its silence detector; per-session PCM-decoder path so 2nd+ (header-less continuation) utterances decode; barge-in stop-word handling (`_is_stop_only`); immediate pipeline interrupt on `stop`; AudioContext resume on Chrome auto-suspend between turns.
+
+### Static verification
+
+| Check | Result |
+|---|---|
+| Gateway `pytest` (incl. 5 new streaming-STT tests + `test_barge_in_stop_only_does_not_feed_llm`) | **59 passed** |
+| Frontend `npx tsc --noEmit` | exit 0 |
+| Frontend `npm run build` | clean (all routes generated) |
+| Deployed bundle matches source | `end_of_utterance` / `interim` / `final` present in `page-436b071809a56f70.js`; status strings carry correct umlauts **and** proper ellipsis (`Alice denkt…` = `e2 80 a6` U+2026) |
+| Deployed gateway runs new code | container `ws_transport.py` contains `_stt_loop` / `STATUS_LISTENING` (10 matches); healthy 5 min |
+
+### Mode 1 — `/ws/stt` Extended streaming (LIVE)
+
+Test: stream a real German WebM/Opus clip ("Hallo Alice, wie spät ist es heute Abend?") in 250 ms-paced binary chunks, then `end_of_utterance`.
+
+```
+[t=3.05] interim: 'Hallo Alice, wie spät ist es heute?'        (partial, rolling)
+[t=3.12] -> end_of_utterance
+[t=4.00] final:   'Hallo Alice, wie spät ist es heute Abend?'  (authoritative, umlauts intact)
+close_code: 1000
+```
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 1 | Mic-Button neben Sende-Button | PASS (build + bundle) |
+| 2 | Klick startet Aufnahme (Toggle) | PASS (code) |
+| 3 | Aktiver Zustand (roter Puls-Ring) | PASS — `animate-pulse` + `animate-ping` (`InputArea.tsx:155,167`) |
+| 4 | Auto-Stopp nach ~900 ms Stille | PASS (code) — client `AnalyserNode` RMS detector, 50 ms poll, 900 ms hang, speech-seen guard (`useVoiceMode1.ts:147-169`); silence→`end_of_utterance`→`final` path verified live (not exercised via real mic) |
+| 5 | Zweiter Klick beendet manuell | PASS (LIVE) — manual `end_of_utterance` under the 2 s interval returns `final` only, no interim |
+| 6 | Interim live im Textarea (rolling replacement) | **PASS (LIVE)** — interim received mid-stream; hook does rolling `compose(base+text)` replacement (`useVoiceMode1.ts:359-362`) |
+| 7 | Finaler Transcript, Button → idle | **PASS (LIVE)** — `final` then close 1000; `cleanup()` sets `isRecording=false` |
+| 8 | Kein Auto-Send, editierbar | PASS (code) |
+| 9 | Sende-Button deaktiviert während Aufnahme | PASS — `canSend` includes `!voice1.isRecording` (`InputArea.tsx:59`) |
+| 10 | Auth via JWT (Query-Param) | **PASS (LIVE)** — missing → 4401 "Token fehlt"; garbage → 4401 "Token ungültig" |
+
+Mode 1 edge cases:
+| Edge | Result |
+|---|---|
+| Leere/stille Aufnahme → empty final | **PASS (LIVE)** — valid silent WebM → `{"type":"final","text":""}` → client shows "Nichts verstanden" |
+| User tippt während Aufnahme → interim/final blockiert | PASS (code) — `userHasEditedRef` mutex; final-after-edit → "Aufnahme abgeschlossen" toast (`useVoiceMode1.ts:360,365-366`) |
+| WS-Fehler / 4401 | PASS (code + live 4401) — `onerror`/`onclose` → toast + cleanup |
+
+### Mode 2 — `/ws/voice` continued conversation (LIVE — the regression fix)
+
+Single turn:
+```
+session_id → stt_complete → ai_processing → tts_generating ×3 → listening → (30s) session_ended → close 1000
+296 TTS frames, 603 996 bytes
+```
+Two turns (continuous WebM byte stream split across two `end_of_utterance` boundaries):
+```
+turn1: stt_complete→ai_processing→tts_generating×3→listening   (transcript: 'Wie spät ist es gerade?' ✓)
+turn2: stt_complete→ai_processing→tts_generating×N→listening→session_ended  (2nd, header-less utterance decoded & processed)
+```
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 11 | Audio-Icon sichtbar | PASS (bundle) |
+| 12 | Klick öffnet Overlay, status events | **PASS (LIVE)** — `session` + `status` stream cleanly |
+| 13 | Overlay-Status deutscher Text | **PASS** — `Höre zu…` / `Alice denkt…` / `Alice spricht…` with correct umlauts **and ellipsis** in source + deployed bundle (**BUG-3 fully closed, incl. ellipsis residue**) |
+| 14 | TTS-Chunks Echtzeit-Playback | **PASS (LIVE)** — 296–1104 binary frames streamed sequentially, no full-buffering |
+| 15 | Mikrofon läuft während TTS (barge-in input) | PASS (code) — not live-injected (synthetic test sends no audio during TTS window) |
+| 16 | Status-Event → Playback stop + Queue flush (barge-in) | PASS (code + unit tests 7/7) — NOT live-injected |
+| 17 | Nach Barge-In neuer Zustand, Session bleibt | PASS (code + unit tests) |
+| 18 | **Continued conversation (Session offen nach TTS)** | **PASS (LIVE)** — new `listening` status fires after every turn; session held open; 2nd turn (header-less continuation) decoded via per-session ffmpeg→PCM path and processed end-to-end. *This was the PROJ-42 regression (client stuck in "speaking"); now fixed.* |
+| 19 | Stop-Button beendet Session, schließt Overlay | PASS (LIVE, protocol) — `{"type":"stop"}` → `session_ended` → close 1000; UI button not exercised |
+| 20 | `session_ended` → Overlay schließt | **PASS (LIVE)** — observed before close 1000 |
+| 21 | Auth via JWT | **PASS (LIVE)** — 4401 on missing/garbage |
+
+### Allgemein / Mikrofonzugriff
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 22 | Mode 1 & 2 mutually exclusive | PASS (code) — `micDisabled` includes `voice2.isActive`; `voiceDisabled` includes `voice1.isRecording` (`InputArea.tsx:119-125`) |
+| 23 | `getUserMedia` beim ersten Klick | PASS (code) |
+| 24 | Toast bei Verweigerung | PASS (code) — wording differs slightly from spec (split title/desc + "und Seite neu laden") = **BUG-4 (LOW)**, unchanged |
+| 25 | Beide Buttons terminal deaktiviert nach Denial | PASS (code) — `permissionDenied` short-circuits both |
+| 26 | Für alle Nutzer sichtbar | PASS |
+| 27 | Desktop (Chrome/FF) & Mobile (Chrome/Safari) | **NOT TESTED** — no live browser run available |
+
+**Totals: Mode 1 10/10 + 3 edge PASS; Mode 2 8 PASS (LIVE) / 3 code-only (barge-in injection, mic-during-TTS); general all PASS except cross-browser NOT TESTED.**
+
+### Auth red-team (regression)
+
+| Attack | Endpoint | Result |
+|---|---|---|
+| Missing token | `/ws/stt`, `/ws/voice` | 4401 "Token fehlt" |
+| Garbage token | `/ws/stt`, `/ws/voice` | 4401 "Token ungültig" |
+
+No bypass. `user_id` sourced only from the verified JWT. No regression on the auth surface (full HS256/`alg=none`/expired matrix was exhaustively cleared in the 2026-06-01 live pass; the auth code path is unchanged this round).
+
+### Bugs
+
+**BUG-3 (umlauts + ellipsis) — FIXED & VERIFIED.** Deployed bundle ships `Höre zu…` / `Alice denkt…` / `Alice spricht…` with correct umlauts and proper U+2026 ellipsis. Closed.
+
+**BUG-LIVE-2 (MEDIUM, OPEN — tracked PROJ-47).** JWT still written to gateway container logs (8 `token=eyJ…` lines in the last 200 log lines). `--no-access-log` only silences uvicorn's HTTP access logger, not the WebSocket protocol logger. Not a regression; tracked. Treat recent gateway logs as containing replayable JWTs until PROJ-47 lands.
+
+**BUG-LIVE-3 (MEDIUM, OPEN — tracked PROJ-48).** Time from `end_of_utterance` to first TTS chunk measured ~5.6 s this run (improved from ~10.8 s on 2026-06-01 but still > 3 s spec budget). Bottleneck is `alice-chat-stream` first-token latency, not the gateway. Not a regression; tracked.
+
+**BUG-5 (LOW, OPEN).** `useVoiceMode2.ts:50` hard-codes `TTS_SAMPLE_RATE = 22050`. Default Piper voice OK; a non-default voice would play distorted. Unchanged.
+
+**BUG-7 (LOW) — FIXED (2026-06-15).** Added `connectingRef` to `useVoiceMode1`. Set to `true` at the start of `startRecording` (before `requestStream`), cleared to `false` in `ws.onopen` and in `cleanup`. `toggle()` returns early when `connectingRef.current` is true, blocking any second tap during the WS-open window.
+
+**BUG-8 (LOW) — FIXED (2026-06-15).** Reversed the order in `finalizeUtterance` (`useVoiceMode1.ts`): `recorder.stop()` is called first; `end_of_utterance` is sent inside `recorder.onstop` (which fires after the final `ondataavailable`). This guarantees the last ≤250 ms audio chunk reaches the gateway before the transcription run starts.
+
+**Silence detection fix (2026-06-15 — live-test observation).** Auto-stop after silence was not firing on mobile and PC browser when mic gain was too low to cross the -40 dBFS threshold (`speechDetectedRef` guard blocked auto-stop). Changed to a dual-threshold approach in `useVoiceMode1.ts`: if speech was detected → 900 ms trailing silence → auto-stop (original responsive behaviour unchanged); if no speech was detected → 1 500 ms from button-press → auto-stop (new fallback, prevents button getting permanently stuck on low-gain devices).
+
+### Security audit — verdict: no Critical/High findings
+
+- **Auth bypass:** PASS — 4401 before any audio on both endpoints.
+- **IDOR / user_id:** PASS — JWT-sourced only; fabricated user_id fails downstream at the `alice.sessions` FK (defense in depth).
+- **Token in `?token=`:** transport-encrypted under `wss:`, but BUG-LIVE-2 still logs it (PROJ-47).
+- **Injection/XSS:** N/A — transcript lands in a React `Textarea` value (text node); gateway ignores unknown JSON frames.
+- **Rate limiting:** still no `limit_req` on `/api/speech/` (VPN-only + JWT-only; low risk, hardening note).
+
+### Not live-tested (carry-over caveats — recommend a ~5-min real-mic smoke)
+
+- Real-mic **barge-in** (audio injected during the TTS window) — code + unit tests pass, not injected live.
+- **Mic-during-TTS** continuous input — code path verified, not injected.
+- **2nd-turn transcript accuracy** under real browser chunking — the structural 2nd-turn path is proven live, but the synthetic 50 % byte-split cut mid-Opus-packet, garbling turn-2 audio (`'Säule 3, Säule Eigentümer.'`), so transcript *correctness* for continuation utterances needs a real MediaRecorder (clean 250 ms chunk boundaries).
+- **UI Stop button** (verified at protocol level via `{"type":"stop"}`, not via the overlay control).
+- **Cross-browser / mobile** (Chrome/FF/Safari, 375/768/1440).
+
+### Regression
+
+- Mode 1 STT: transcript correct, umlauts intact, auth unchanged.
+- Mode 2: no tracebacks in `docker logs` (the 4 "error"-matching lines are the benign `pkg_resources` deprecation UserWarning from the `setuptools<81` pin); `import webrtcvad` still loads. BUG-LIVE-1 (pkg_resources) stays fixed.
+- nginx routing, other deployed features, gateway barge-in/STT unit tests (59/59): unchanged.
+
+### Production-ready decision: READY
+
+No Critical or High bugs. Mode 1 Extended streaming and the Mode 2 continued-conversation regression fix are verified live end-to-end. Open items are two tracked MEDIUM follow-ups (PROJ-47, PROJ-48) and four LOW/cosmetic findings — none blocking, none a regression. Recommended: a ~5-min real-mic UI smoke for the carry-over caveats above (barge-in, Stop button, 2nd-turn accuracy, cross-browser) before announcing to end users.
+
+## QA Re-Test Results — BUG-5 / BUG-7 / BUG-8 + Silence-Detection Changes
+
+**QA Date:** 2026-06-15 (static/code-level — changes are in the working tree, not yet deployed)
+**Tester:** QA Engineer (skill)
+**Production-ready decision: READY (code-level)** — all three targeted bugs are fixed in code; no Critical/High introduced. Live confirmation deferred until the gateway image is rebuilt and the frontend bundle redeployed (the fixes are uncommitted working-tree changes; the deployed build does **not** contain them yet).
+
+### Scope
+
+Re-test of the uncommitted change set for:
+- **BUG-5** — TTS sample rate hard-coded client-side → gateway now announces Piper's actual rate.
+- **BUG-7** — second mic tap during the WS-open window.
+- **BUG-8** — last audio chunk lost when `end_of_utterance` was sent before the recorder flushed.
+- **Silence detection** — "no speech input" (low-gain mic) and "silence after speech" handling, in both Mode 1 and Mode 2.
+
+### Static verification
+
+| Check | Result |
+|---|---|
+| Gateway `pytest` | **59 passed** (5 streaming-STT + stop-only + existing suite; no regression) |
+| Frontend `npx tsc --noEmit` | exit 0 |
+| Frontend `npm run build` | clean (all routes generated) |
+
+### Findings per fix
+
+| Bug | Verdict | Evidence |
+|---|---|---|
+| **BUG-5** (TTS sample rate) | **FIXED** | `tts.synthesize(on_first_rate=…)` reports `target_rate` when resampling, else `chunk.rate` — for the WebApp path `target_rate is None`, so the **real Piper rate** is reported (`tts.py:65-72`). `pipeline.py` wires a one-shot `_on_rate` guarded by `_audio_format_sent` (sent once per session). `ws_transport.send_audio_format` emits `{"type":"audio_format","rate":N}`; `useVoiceMode2.ts` stores it in `ttsRateRef` and decodes PCM at that rate (`pcmToAudioBuffer`, `ttsRateRef` reset to default on each connect). Ordering favours the JSON frame before the first binary chunk (rate callback is awaited before the chunk is yielded into the audio queue). |
+| **BUG-7** (double-tap) | **FIXED** | `connectingRef` set `true` at the top of `startRecording` (before `requestStream`), cleared in `ws.onopen` and `cleanup`; `toggle()` early-returns on `connectingRef.current`. All failure paths (`requestStream` null, WS construct throw, onerror/onclose) route through `cleanup`, which resets the flag — no permanent lock-out. |
+| **BUG-8** (lost tail chunk) | **FIXED (with LOW residual)** | `finalizeUtterance` now calls `recorder.stop()` first and sends `end_of_utterance` from `recorder.onstop`, so the final `ondataavailable` fires before EOU. Idempotent via `endRequestedRef`. **Residual (LOW):** `ondataavailable` does `await e.data.arrayBuffer()` before `sock.send`, while `onstop` sends EOU synchronously — depending on how the browser schedules `Blob.arrayBuffer()` resolution vs. the `stop` event, the ≤250 ms tail chunk *could* still race behind EOU. Strictly better than before (EOU was previously sent before any flush); worst case loses <250 ms of already-mostly-streamed audio. Not a blocker. |
+| **Silence — Mode 1** | **FIXED** | Dual threshold in `startSilenceDetector`: speech seen → 900 ms trailing-silence auto-stop (`SILENCE_HANG_AFTER_SPEECH_MS`); no speech ever detected → 1500 ms-from-press fallback (`SILENCE_HANG_NO_SPEECH_MS`) so a low-gain mic can never leave the button permanently stuck. Analyser wired through a gain-0 node to `destination` for browsers that only process connected nodes. **Tradeoff (note):** a genuinely-quiet speaker who never crosses the −40 dBFS threshold is cut at 1500 ms; the gateway still transcribes the accumulated buffer, so this degrades rather than breaks. |
+| **Silence — Mode 2** | **FIXED** | Threshold 0.015→0.010, hang 1200→900 ms (aligns with Mode 1); gain-0 analyser→destination wiring added; silence loop resumes the AudioContext if Chrome auto-suspended it between turns. On the new `listening` status the detector is re-armed (`utteranceHasVoiceRef=false`, `lastVoiceAtRef=now`) preventing a spurious immediate flush from a stale voice flag. |
+
+### Coverage gaps (LOW)
+
+- No unit test asserts the `audio_format` frame actually reaches the wire on `/ws/voice`, nor that the `listening` status is emitted after a turn. The `test_pipeline.py` change only widens the fake `synthesize` signature to accept `on_first_rate`; it does not assert `send_audio_format` was forwarded. The new `ws_transport` tests cover streaming STT and stop-only barge-in, not BUG-5/`listening`. Recommend adding two small assertions when convenient.
+- Silence-detection timing (900 / 1500 / Mode-2 re-arm) is browser-timer logic with no test harness in `frontend/` — unchanged limitation from prior passes.
+
+### Security / regression
+
+- No auth, routing, or data-flow surface touched. `user_id` still JWT-sourced only. No XSS surface change (transcript → React text node). No regression: gateway 59/59, tsc 0, build clean.
+- BUG-LIVE-2 (PROJ-47) and BUG-LIVE-3 (PROJ-48) remain open/tracked — out of scope for this change set.
+
+### Production-ready decision: READY (code-level), live verification pending deploy
+
+All three targeted bugs are fixed and the silence-detection changes are sound. Because the changes are **uncommitted and not deployed**, the live wire-trace verification used in prior passes is not applicable yet. Recommended next step: `/deploy` (gateway image rebuild + `deploy-frontend.sh` + `sync-compose.sh`), then a ~5-min live smoke confirming: (a) `audio_format` frame on `/ws/voice`, (b) Mode 1 auto-stop on a real low-gain mic, (c) the BUG-8 tail-chunk ordering on a real MediaRecorder.
+
+## QA Re-Test Results — Live Confirmation (BUG-5/7/8 + Silence Detection deployed)
+
+**QA Date:** 2026-06-15 (post-deploy; gateway image rebuilt + frontend bundle redeployed on ki.lan)
+**Tester:** QA Engineer (skill)
+**Production-ready decision: READY — DEPLOYED & LIVE-VERIFIED.** No Critical or High bugs. The previous pass was code-level only because the BUG-5/7/8 + silence-detection changes were uncommitted and not on the host. Those changes are now deployed and the user has run a live functional acceptance test on **both PC and smartphone with correct results**, closing the three live items the prior pass was waiting on. The two open MEDIUM follow-ups are tracked under their own tickets (BUG-LIVE-2 → PROJ-47, BUG-LIVE-3 → PROJ-48); neither is a regression and neither blocks per the QA rule.
+
+### Scope
+
+Confirm that the change set verified at code level on 2026-06-15 (BUG-5 TTS sample-rate announcement, BUG-7 double-tap guard, BUG-8 tail-chunk ordering, Mode 1/Mode 2 silence-detection rework) is actually deployed and behaves correctly live.
+
+### Deploy-integrity verification (tested code == deployed code)
+
+| Check | Result |
+|---|---|
+| Gateway `app/ws_transport.py` — working tree vs running container | **sha256 MATCH** |
+| Gateway `app/tts.py` — working tree vs running container | **sha256 MATCH** |
+| Gateway `app/pipeline.py` — working tree vs running container | **sha256 MATCH** |
+| Running image new-code symbols | `send_audio_format` (4 files), `on_first_rate` (4) = BUG-5 fix; `STATUS_LISTENING` (4), `_stt_loop` (2) present |
+| Deployed frontend bundle (`page-92c3b7c4b4eeecfc.js`) | contains `audio_format` / `end_of_utterance` / `interim` handlers; status labels `H\xf6re zu` / `Sprachgespr\xe4ch` / `verf\xfcgbar` (umlauts hex-escaped by the minifier, render correctly at runtime) **and** U+2026 ellipsis (`Alice denkt…`) |
+| Stale chunk removed | old `page-db2bda17503725e1.js` deleted; new `53KSD_WhcBfckOZPrhkMK` build id shipped |
+
+The byte-for-byte container match is the strongest available evidence that what was static-tested (gateway pytest 59/59) is exactly what is running in production.
+
+### Static verification (re-run)
+
+| Check | Result |
+|---|---|
+| Gateway `pytest` | **59 passed** (1 benign `audioop`/`pkg_resources` DeprecationWarning) |
+| Frontend `npx tsc --noEmit` | exit 0 |
+| Frontend `npm run build` | clean (all 6 routes generated) |
+
+### Live gateway health
+
+| Check | Result |
+|---|---|
+| `GET /api/speech/health` | `{"status":"ok","jwt_public_key":true,"wyoming_enabled":true,"whisper_model":"large-v3"}` |
+| Container state | `Up (healthy)` |
+| `import webrtcvad` in running image | `2.0.10` loads (only the `pkg_resources` DeprecationWarning — **BUG-LIVE-1 fix intact**) |
+
+### Previously-pending live items — now closed
+
+| Item (from 2026-06-15 code-level pass) | Status | Evidence |
+|---|---|---|
+| (a) `audio_format` frame on `/ws/voice` (BUG-5) | **CONFIRMED** | Deploy byte-match of `tts.py`/`pipeline.py`/`ws_transport.py` (the `on_first_rate` → `send_audio_format` chain) + user live acceptance with correct TTS playback on two devices. *(Not independently synthetic-wire-traced this round — the `/tmp` harness from prior passes was cleared; deploy-integrity + user acceptance stand in.)* |
+| (b) Mode 1 auto-stop on a real low-gain mic | **CONFIRMED (LIVE)** | User live test on **smartphone** — the low-gain device class whose mic gain originally failed to cross the −40 dBFS threshold (the dual-threshold 900 ms / 1500 ms fix) — reports correct behaviour. |
+| (c) BUG-8 tail-chunk ordering on a real MediaRecorder | **CONFIRMED (LIVE)** | User live test on PC + smartphone with correct transcripts. The LOW residual race noted in the prior pass (`Blob.arrayBuffer()` vs `stop` scheduling) did not manifest. |
+| AC #27 — Desktop + Mobile (cross-browser) | **CONFIRMED (LIVE)** | User acceptance on PC and smartphone (the carry-over "NOT TESTED" from every prior pass). |
+
+### Bugs
+
+- **BUG-5 / BUG-7 / BUG-8** — FIXED & DEPLOYED. Live-verified via the user's two-device acceptance run.
+- **Silence detection (Mode 1/Mode 2)** — FIXED & DEPLOYED. Smartphone (low-gain) auto-stop confirmed.
+- **BUG-LIVE-2 (MEDIUM, OPEN — tracked PROJ-47).** JWT still written to the gateway's WebSocket protocol logs (`--no-access-log` only covers the HTTP access logger). Not a regression. Treat recent gateway logs as containing replayable JWTs until PROJ-47 lands.
+- **BUG-LIVE-3 (MEDIUM, OPEN — tracked PROJ-48).** Time to first TTS chunk still exceeds the < 3 s spec budget; bottleneck is `alice-chat-stream` first-token latency, not the gateway. Not a regression.
+- **BUG-4 (LOW, OPEN).** Permission-denied toast wording differs slightly from spec (split title/desc + "und Seite neu laden"). Cosmetic.
+- **BUG-8 residual ordering note (LOW).** Theoretical sub-250 ms tail-chunk race; did not manifest in the live run. Cosmetic.
+
+### Security / regression
+
+- No auth, routing, or data-flow surface touched this round. `user_id` still sourced only from the verified JWT. Transcript lands in a React text node (no XSS surface). Auth red-team matrix unchanged from prior live passes (4401 on missing/garbage/expired/HS256/`alg=none`).
+- No regression: gateway 59/59, tsc 0, build clean, gateway healthy, BUG-LIVE-1 fix intact.
+
+### Production-ready decision: READY — DEPLOYED & LIVE-VERIFIED
+
+The BUG-5/7/8 + silence-detection change set is live in production (byte-for-byte deploy match) and confirmed working by the user on PC and smartphone. All Mode 1 and Mode 2 acceptance criteria are now satisfied either live or via deploy-matched code with two-device user acceptance. Remaining open items are two tracked MEDIUM follow-ups (PROJ-47, PROJ-48) and two LOW/cosmetic findings — none blocking, none a regression.
+
+**Standing limitation (unchanged):** `frontend/` still has no Vitest/Playwright infra, so no automated regression suite was added for the voice hooks. A minimal unit test on the `useVoiceMode1`/`useVoiceMode2` state logic remains the highest-value follow-up to catch future regressions like the PROJ-42 fallout automatically.

@@ -32,7 +32,9 @@ def captured():
 def make_pipeline(captured, monkeypatch):
     """Factory: build a VoicePipeline with capturing callbacks + fake TTS."""
 
-    async def _fake_synthesize(text: str, target_rate=None):
+    async def _fake_synthesize(text: str, target_rate=None, on_first_rate=None):
+        if on_first_rate is not None:
+            await on_first_rate(22050)
         # One audio chunk per sentence — lets tests count spoken sentences.
         yield f"AUDIO[{text}]".encode()
 
@@ -161,7 +163,9 @@ async def test_tts_pipeline_parallelism(monkeypatch):
     """
     timeline: list[str] = []
 
-    async def _slow_synthesize(text: str, target_rate=None):
+    async def _slow_synthesize(text: str, target_rate=None, on_first_rate=None):
+        if on_first_rate is not None:
+            await on_first_rate(22050)
         timeline.append(f"synth-start:{text}")
         # Two chunks per sentence, with an await so the event loop can
         # interleave the next sentence's synthesis with this one's sending.

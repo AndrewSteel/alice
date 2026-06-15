@@ -18,8 +18,9 @@ import json
 
 import pytest
 
-from app import config, ws_transport
+from app import config, stt, ws_transport
 from app.pipeline import PipelineResult
+from app.stt import STTError
 from app.tts import TTSError
 
 
@@ -166,8 +167,8 @@ async def test_normal_turn_then_conversation_end(monkeypatch):
 async def test_barge_in_interrupts_running_turn(monkeypatch):
     """
     BUG-1 regression: audio arriving while a turn runs is evaluated for
-    barge-in; a match interrupts the pipeline and the interrupt transcript
-    is fed back as a new (text) turn.
+    barge-in; a non-stop-word match interrupts the pipeline and the
+    interrupt transcript is fed back as a new (text) turn.
     """
     monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 0.5)
     # First (audio) turn returns interrupted=True because barge-in fired;
@@ -176,7 +177,8 @@ async def test_barge_in_interrupts_running_turn(monkeypatch):
         PipelineResult(interrupted=True),
         PipelineResult(conversation_ended=True),
     ])
-    barge_in = FakeBargeIn(["Stopp"])
+    # Use a non-stop-word transcript so it is fed back to the LLM.
+    barge_in = FakeBargeIn(["Wechsle das Thema"])
     ws = FakeWebSocket([
         {"bytes": _audio(1.0)},
         {"text": json.dumps({"type": "end_of_utterance"})},
@@ -190,7 +192,31 @@ async def test_barge_in_interrupts_running_turn(monkeypatch):
     assert pipeline.interrupted is True
     assert barge_in.calls >= 1
     # The interrupt transcript was fed back in as a new turn.
-    assert pipeline.text_turns == ["Stopp"]
+    assert pipeline.text_turns == ["Wechsle das Thema"]
+    assert ws.closed == (1000, "session ended")
+
+
+async def test_barge_in_stop_only_does_not_feed_llm(monkeypatch):
+    """
+    A pure stop-word barge-in ("stop", "warte" etc.) must abort the turn
+    without sending the control word to the LLM. Feeding "stop" to the
+    LLM caused unintended HA commands (e.g., deactivating devices).
+    """
+    monkeypatch.setattr(config, "SILENCE_TIMEOUT_SECONDS", 0.5)
+    pipeline = FakePipeline([PipelineResult(interrupted=True)])
+    barge_in = FakeBargeIn(["stop"])
+    ws = FakeWebSocket([
+        {"bytes": _audio(1.0)},
+        {"text": json.dumps({"type": "end_of_utterance"})},
+        {"sleep": 0.005},
+        {"bytes": _audio(1.0)},
+    ])
+
+    await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
+
+    assert pipeline.interrupted is True
+    # "stop" must NOT be fed to the LLM as a new turn.
+    assert pipeline.text_turns == []
     assert ws.closed == (1000, "session ended")
 
 
@@ -274,3 +300,106 @@ async def test_ttserror_aborts_session_cleanly(monkeypatch):
     # contract here: the loop raises, the handler-level except handles it.
     with pytest.raises(TTSError):
         await ws_transport._voice_loop(ws, pipeline, barge_in, {}, decoder=FakeDecoder())
+
+
+# --- Mode 1 streaming STT (/ws/stt) ---------------------------------------
+
+
+class FakeSTT:
+    """Scripted STT engine: returns the next transcript (or raises) per call."""
+
+    def __init__(self, transcripts):
+        self._transcripts = list(transcripts)
+        self.calls = 0
+
+    async def transcribe(self, audio, language=None):
+        self.calls += 1
+        if not self._transcripts:
+            return ""
+        item = self._transcripts.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+async def test_stt_streaming_interim_then_final(monkeypatch):
+    """
+    Streaming Mode 1: a rolling interim is emitted while recording, then a
+    single authoritative final on end_of_utterance, then the socket closes.
+    """
+    # Interval 0 → the first chunk triggers an interim transcription.
+    monkeypatch.setattr(ws_transport, "_STT_INTERIM_INTERVAL_S", 0.0)
+    monkeypatch.setattr(stt, "_engine", FakeSTT(["Hallo", "Hallo Alice"]))
+    ws = FakeWebSocket([
+        {"bytes": _audio(0.25)},
+        {"sleep": 0.01},  # let the interim task run
+        {"text": json.dumps({"type": "end_of_utterance"})},
+    ])
+
+    await ws_transport._stt_loop(ws, {})
+
+    assert ws.sent_json == [
+        {"type": "interim", "text": "Hallo"},
+        {"type": "final", "text": "Hallo Alice"},
+    ]
+    assert ws.closed == (1000, "")
+
+
+async def test_stt_streaming_final_only_when_under_interval(monkeypatch):
+    """Chunks within the interim interval produce no interim — only the final."""
+    # Default 2 s interval; chunks arrive instantly, so no interim fires.
+    monkeypatch.setattr(stt, "_engine", FakeSTT(["Hallo Alice"]))
+    ws = FakeWebSocket([
+        {"bytes": _audio(0.25)},
+        {"bytes": _audio(0.25)},
+        {"text": json.dumps({"type": "end_of_utterance"})},
+    ])
+
+    await ws_transport._stt_loop(ws, {})
+
+    assert ws.sent_json == [{"type": "final", "text": "Hallo Alice"}]
+    assert ws.closed == (1000, "")
+
+
+async def test_stt_streaming_empty_final(monkeypatch):
+    """An empty final is sent as-is (the client shows 'Nichts verstanden')."""
+    monkeypatch.setattr(stt, "_engine", FakeSTT([""]))
+    ws = FakeWebSocket([
+        {"bytes": _audio(0.25)},
+        {"text": json.dumps({"type": "end_of_utterance"})},
+    ])
+
+    await ws_transport._stt_loop(ws, {})
+
+    assert ws.sent_json == [{"type": "final", "text": ""}]
+    assert ws.closed == (1000, "")
+
+
+async def test_stt_streaming_final_failure_sends_error(monkeypatch):
+    """An STTError on the final transcription surfaces as an error frame."""
+    monkeypatch.setattr(stt, "_engine", FakeSTT([STTError("boom")]))
+    ws = FakeWebSocket([
+        {"bytes": _audio(0.25)},
+        {"text": json.dumps({"type": "end_of_utterance"})},
+    ])
+
+    await ws_transport._stt_loop(ws, {})
+
+    assert ws.sent_json == [
+        {"type": "error", "message": config.SPEECH_ERRORS["stt_failed"]}
+    ]
+    assert ws.closed == (1000, "")
+
+
+async def test_stt_streaming_disconnect_before_final(monkeypatch):
+    """A client disconnect mid-stream ends the loop without a final or close."""
+    monkeypatch.setattr(stt, "_engine", FakeSTT(["Hallo"]))
+    ws = FakeWebSocket([
+        {"bytes": _audio(0.25)},
+        {"type": "websocket.disconnect"},
+    ])
+
+    await ws_transport._stt_loop(ws, {})
+
+    assert ws.sent_json == []
+    assert ws.closed is None
