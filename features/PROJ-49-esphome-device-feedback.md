@@ -561,4 +561,25 @@ esphome compile devices/ha-voice-pe/espHome.yaml
 
 **READY** — Alle Bugs behoben, keine offenen Critical/High Issues.
 
-Nächster Schritt: `/deploy`
+---
+
+## Deployment
+
+**Deployed:** 2026-06-15 — Büro-Device (HA Voice PE), Firmware v6
+**Deployed:** 2026-06-16 — Küche-Device (HA Voice PE), Firmware v6
+
+Beide Devices funktionieren einwandfrei. LED-Zustandsmaschine und Wake Sound Konsistenz bestätigt.
+
+### Nachgelagerte Infrastruktur-Änderungen
+
+Im Rahmen der Küche-Inbetriebnahme wurde die Gerätekonfiguration umstrukturiert:
+
+| Änderung | Details |
+|---|---|
+| `espHome.yaml` → `espHome.example.yaml` | Anonymisierte Vorlage mit Setup-Anleitung im Repo |
+| `espHome-buero.yaml` / `espHome-kueche.yaml` | Device-spezifische Configs, gitignored |
+| `secrets.yaml` | Separater `api_encryption_key_<room>` pro Device |
+| `device-mapping.yaml` | Aus Git-Tracking entfernt (enthält echte IPs + UUIDs) |
+| `devices/ha-voice-pe/espHome-*.yaml` | Pattern in `.gitignore` für alle künftigen Devices |
+
+Neues Device einrichten: `espHome.example.yaml` kopieren, Substitutions + Secret-Key setzen, in `device-mapping.yaml` eintragen, flashen.
