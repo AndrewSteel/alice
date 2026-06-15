@@ -382,35 +382,31 @@ void WyomingSatellite::handle_inbound_event_(const std::string &type, const std:
     // Cancel any pending mic rearm — new TTS is arriving so the "Warte bitte…"
     // interstitial sequence doesn't erroneously switch to CC-listening state.
     this->pending_rearm_ = false;
-    // Do NOT call set_audio_stream_info() here. i2s_audio_speaker is co-owned by
-    // the package's mixing_speaker, which expects native 32-bit stereo 48 kHz.
-    // Calling set_audio_stream_info(16-bit, mono) reconfigures the I2S hardware
-    // driver; that state persists after stop() and causes the mixing_speaker to
-    // misinterpret its own 32-bit stereo writes on the next wake sound playback,
-    // producing the wrong pitch (Bug 2). Audio-chunk converts to 32-bit stereo.
+    // i2s_audio_speaker is co-owned by the package's mixing_speaker (which feeds
+    // it 16-bit stereo from the resampler chain). Using 16-bit stereo here keeps
+    // audio_stream_info consistent with what the mixer leaves behind after each
+    // use — preventing the I2S channel format from being left in mono mode
+    // (I2S_CHANNEL_FMT_ONLY_LEFT), which causes the next wake sound to play at
+    // the wrong pitch (Bug 2 root cause).
+    this->speaker_->set_audio_stream_info(
+        audio::AudioStreamInfo(SAMPLE_WIDTH * 8, 2, SAMPLE_RATE));
     this->speaker_->start();
     this->tts_playing_ = true;
     this->set_led_effect_("Replying");
   } else if (type == "audio-chunk") {
     if (!payload.empty()) {
-      // Gateway sends 16-bit mono 48 kHz PCM. Convert to 32-bit stereo to match
-      // i2s_audio_speaker's native format (as configured by the package YAML:
-      // bits_per_sample: 32bit, channel: stereo). This avoids calling
-      // set_audio_stream_info(), which would corrupt the shared I2S driver state.
+      // Gateway sends 16-bit mono 48 kHz PCM. Duplicate each sample to stereo so
+      // the data matches the 16-bit stereo audio_stream_info set above.
       const size_t samples = payload.size() / 2;
-      std::vector<uint8_t> s32stereo;
-      s32stereo.reserve(samples * 8);  // 2 bytes in → 8 bytes out per sample
+      std::vector<uint8_t> stereo;
+      stereo.reserve(samples * 4);  // 2 bytes in → 4 bytes out (L + R)
       for (size_t i = 0; i < samples; ++i) {
-        const int16_t s16 = static_cast<int16_t>(
-            payload[i * 2] | (static_cast<uint16_t>(payload[i * 2 + 1]) << 8));
-        // MSB-justify 16-bit sample into 32-bit word (hardware expects MSB-first).
-        const int32_t s32 = static_cast<int32_t>(s16) << 16;
-        const uint8_t *b = reinterpret_cast<const uint8_t *>(&s32);
-        // Duplicate to left and right channel.
-        s32stereo.insert(s32stereo.end(), b, b + 4);
-        s32stereo.insert(s32stereo.end(), b, b + 4);
+        stereo.push_back(payload[i * 2]);      // L low byte
+        stereo.push_back(payload[i * 2 + 1]);  // L high byte
+        stereo.push_back(payload[i * 2]);      // R low byte (duplicate)
+        stereo.push_back(payload[i * 2 + 1]);  // R high byte (duplicate)
       }
-      this->speaker_->play(s32stereo.data(), s32stereo.size());
+      this->speaker_->play(stereo.data(), stereo.size());
     }
   } else if (type == "audio-stop") {
     ESP_LOGD(TAG, "TTS done — will re-arm mic in 400 ms once speaker drains");
