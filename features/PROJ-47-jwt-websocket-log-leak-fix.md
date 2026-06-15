@@ -1,6 +1,6 @@
 # PROJ-47: JWT WebSocket Log Leak Fix
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-02
 **Last Updated:** 2026-06-15
 
@@ -104,4 +104,10 @@ alice-speech-gateway/
 
 ## Deployment
 
-_To be added by /deploy_
+**Deployed:** 2026-06-15
+**Tag:** `v2.1.2-PROJ-47`
+
+- Only changed file: `app/logging_config.py` in `alice-speech-gateway`
+- No Dockerfile change, no nginx change, no n8n workflow, no DB migration
+- Synced via `./scripts/sync-compose.sh` → rebuilt on ki.lan → container recreated
+- Production health verified: `{"status":"ok","jwt_public_key":true,"wyoming_enabled":true}`
