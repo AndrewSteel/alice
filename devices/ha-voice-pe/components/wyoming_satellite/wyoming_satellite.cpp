@@ -72,14 +72,15 @@ void WyomingSatellite::loop() {
         this->end_utterance_();
         break;
       }
-      // Fallback: end after listen_timeout_ms only when no speech was detected
-      // (accidental wakeword trigger). Once speech_seen_ is true, silence_ms_
-      // is the sole end condition — long utterances must not be cut off.
+      // Fallback: no speech detected → end session silently without triggering
+      // STT. Sending audio-stop would cause the gateway to transcribe silence
+      // and reply "Ich habe nichts verstanden" — bad UX for accidental triggers.
+      // We disconnect cleanly; the gateway sees an EOF and closes gracefully.
       if (this->capturing_utterance_ && !this->speech_seen_ &&
           (millis() - this->utterance_start_ms_) > this->listen_timeout_ms_) {
-        ESP_LOGD(TAG, "Listen timeout (%.0f s) — ending utterance",
+        ESP_LOGD(TAG, "Listen timeout (%.0f s) without speech — ending session silently",
                  this->listen_timeout_ms_ / 1000.0f);
-        this->end_utterance_();
+        this->finish_session_();
       }
       break;
 
@@ -117,9 +118,16 @@ void WyomingSatellite::start() {
   this->speech_seen_ = false;
   this->last_voice_ms_ = millis();
   this->capture_armed_ms_ = millis();
-  this->mic_->start();
+  // The mic is already running for wake-word detection; re-calling start()
+  // re-initializes the shared I2S parent bus and corrupts any concurrent
+  // speaker output (announcement pipeline wake sound). Only start it if we
+  // explicitly stopped it during a previous session (Bug 2 fix).
+  if (!this->mic_started_)
+    this->mic_->start();
+  this->mic_started_ = true;
   this->set_state_(State::CAPTURE);
   this->begin_utterance_();  // sends audio-start to gateway
+  this->set_led_effect_("Listening For Command");
 }
 
 void WyomingSatellite::stop() {
@@ -215,8 +223,10 @@ void WyomingSatellite::end_utterance_() {
   this->send_event_("audio-stop", nullptr, 0);
   this->capturing_utterance_ = false;
   this->mic_->stop();
+  this->mic_started_ = false;
   this->pending_rearm_ = false;
   this->set_state_(State::AWAIT_RESPONSE);
+  this->set_led_effect_("Thinking");
 }
 
 // ---------------------------------------------------------------------------
@@ -369,12 +379,16 @@ void WyomingSatellite::try_dispatch_() {
 void WyomingSatellite::handle_inbound_event_(const std::string &type, const std::vector<uint8_t> &payload) {
   if (type == "audio-start") {
     ESP_LOGD(TAG, "TTS playback start");
+    // Cancel any pending mic rearm — new TTS is arriving so the "Warte bitte…"
+    // interstitial sequence doesn't erroneously switch to CC-listening state.
+    this->pending_rearm_ = false;
     // Configure the speaker for the gateway's TTS audio format.
     // SAMPLE_RATE = 48 kHz (speaker hardware rate, distinct from MIC_SAMPLE_RATE).
     this->speaker_->set_audio_stream_info(
         audio::AudioStreamInfo(SAMPLE_WIDTH * 8, CHANNELS, SAMPLE_RATE));
     this->speaker_->start();
     this->tts_playing_ = true;
+    this->set_led_effect_("Replying");
   } else if (type == "audio-chunk") {
     if (!payload.empty())
       this->speaker_->play(payload.data(), payload.size());
@@ -383,6 +397,7 @@ void WyomingSatellite::handle_inbound_event_(const std::string &type, const std:
     this->tts_stop_ms_ = millis();
     this->tts_playing_ = false;
     this->pending_rearm_ = true;
+    this->set_led_effect_("Thinking");
     // Do NOT call rearm_when_drained_() here — the speaker ring buffer is still
     // playing. loop() polls it every tick; the actual rearm fires after the delay.
   }
@@ -406,8 +421,10 @@ void WyomingSatellite::rearm_when_drained_() {
   this->last_voice_ms_ = millis();
   this->capture_armed_ms_ = millis();
   this->mic_->start();
+  this->mic_started_ = true;
   this->set_state_(State::CAPTURE);
   this->begin_utterance_();
+  this->set_led_effect_("Listening For Command");
 }
 
 // ---------------------------------------------------------------------------
@@ -446,23 +463,47 @@ std::string WyomingSatellite::json_str_(const std::string &json, const std::stri
 
 void WyomingSatellite::set_state_(State state) { this->state_ = state; }
 
+void WyomingSatellite::set_led_effect_(const char *effect) {
+  if (this->light_ == nullptr) return;
+  auto call = this->light_->make_call();
+  call.set_state(true);
+  call.set_effect(effect);
+  call.perform();
+}
+
+void WyomingSatellite::led_idle_() {
+  if (this->light_ == nullptr) return;
+  auto call = this->light_->make_call();
+  call.set_state(false);
+  call.perform();
+}
+
 void WyomingSatellite::finish_session_() {
-  if (this->mic_ != nullptr)
+  if (this->mic_ != nullptr) {
     this->mic_->stop();
-  if (this->speaker_ != nullptr)
+    this->mic_started_ = false;
+  }
+  // Only stop the speaker if TTS was active. Calling speaker_->stop() while in
+  // CAPTURE (no TTS yet) corrupts the I2S bus state used by the announcement
+  // pipeline (speaker_mixer), causing the wake sound to play at the wrong rate
+  // on subsequent activations.
+  if (this->speaker_ != nullptr && this->tts_playing_)
     this->speaker_->stop();
   this->disconnect_();
   this->capturing_utterance_ = false;
   this->tts_playing_ = false;
   this->pending_rearm_ = false;
   this->set_state_(State::IDLE);
+  this->led_idle_();
   ESP_LOGD(TAG, "Session ended — wake-word listening");
   // Restart the mic so micro_wake_word receives audio data and can detect the
   // next wake word. During a session we stop the mic (end_utterance_) to free
   // the shared I2S bus for the speaker; the wake-word component never restarts
   // it on its own.
-  if (this->mic_ != nullptr)
+  if (this->mic_ != nullptr) {
     this->mic_->start();
+    this->mic_started_ = true;
+  }
 }
 
 }  // namespace wyoming_satellite

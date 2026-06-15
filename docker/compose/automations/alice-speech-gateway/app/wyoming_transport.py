@@ -149,9 +149,10 @@ class GatewayWyomingHandler(AsyncEventHandler):
                 result = await pipeline.run_turn(
                     audio, audio_format="pcm",
                     pcm_rate=pcm_rate, pcm_width=pcm_width, pcm_channels=pcm_channels,
-                    # Speak "Ich habe nichts verstanden" only on the first turn (no speech
-                    # after wake word). Continued-conversation silence ends quietly.
-                    speak_on_empty=(turn_count == 1),
+                    # Never speak an error on silence — wake-word accidental triggers
+                    # should end quietly. The device handles UX via LED and the next
+                    # wake-word cycle (user design decision, Bug 4 fix).
+                    speak_on_empty=False,
                 )
             except tts.TTSError:
                 logger.error("Wyoming Piper unavailable — ending session", extra=log)
