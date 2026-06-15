@@ -66,6 +66,12 @@ INTERRUPT_PHRASES_PATH = _get("INTERRUPT_PHRASES_PATH", "/config/interrupt-phras
 # --- Logging ---
 LOG_LEVEL = _get("LOG_LEVEL", "INFO").upper()
 
+# Spoken waiting messages — played immediately when qwen3 starts reasoning (PROJ-48).
+SPEECH_THINKING = {
+    "du": "Warte bitte, ich muss kurz überlegen.",
+    "sie": "Warten Sie bitte, ich muss kurz überlegen.",
+}
+
 # Spoken error messages (German) — surfaced to the user as TTS audio.
 SPEECH_ERRORS = {
     "stt_empty": "Ich habe nichts verstanden, bitte wiederhole das.",

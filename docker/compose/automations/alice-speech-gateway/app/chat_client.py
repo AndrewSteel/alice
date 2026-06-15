@@ -6,11 +6,12 @@ just forwards `session_id` + user transcript and yields back text tokens.
 
 SSE event shapes produced by alice-chat-stream (see streaming.py):
   data: {"type":"token","content":"..."}
-  data: {"type":"thinking","content":"..."}   — reasoning, NOT spoken
-  data: {"type":"tool_start"|"tool_end", ...}  — ignored for TTS
+  data: {"type":"thinking_start","anrede":"..."}  — first thinking token, triggers waiting message
+  data: {"type":"thinking","content":"..."}        — reasoning, NOT spoken
+  data: {"type":"tool_start"|"tool_end", ...}      — ignored for TTS
   data: {"type":"error","message":"..."}
   data: {"type":"done","usage":{...}}
-  data: {"type":"conversation_end"}            — ends continued conversation
+  data: {"type":"conversation_end"}                — ends continued conversation
   data: [DONE]
 """
 from __future__ import annotations
@@ -84,6 +85,8 @@ async def stream_reply(
                     etype = event.get("type")
                     if etype == "token":
                         yield ChatEvent("token", event.get("content", ""))
+                    elif etype == "thinking_start":
+                        yield ChatEvent("thinking_start", event.get("anrede", "du"))
                     elif etype == "conversation_end":
                         yield ChatEvent("conversation_end")
                     elif etype == "error":

@@ -155,6 +155,8 @@ async def stream_chat_endpoint(
         logger.error("Memory load failed: %s", exc, extra=log_extra)
         raise HTTPException(status_code=503, detail="Memory unavailable") from exc
 
+    anrede = (profile.get("preferences") or {}).get("anrede", "du")
+
     # Tier 2: long-term memory — best-effort, never blocks (errors return [])
     long_term = await memory.recall_long_term(user_id, user_message)
     system_prompt = memory.build_system_prompt(profile, long_term_memories=long_term)
@@ -198,6 +200,7 @@ async def stream_chat_endpoint(
                 history=history,
                 system_prompt=system_prompt,
                 user_id=user_id,
+                anrede=anrede,
             ):
                 # Detect client disconnect — stop iterating gracefully.
                 if await request.is_disconnected():

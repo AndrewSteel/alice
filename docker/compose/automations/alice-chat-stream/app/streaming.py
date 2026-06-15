@@ -169,6 +169,7 @@ async def stream_chat(
     history: list[dict],
     system_prompt: str,
     user_id: str,
+    anrede: str = "du",
 ) -> AsyncIterator[tuple[bytes, dict]]:
     """
     Yields (sse_bytes, side_effect_dict). side_effect_dict carries data the
@@ -184,6 +185,7 @@ async def stream_chat(
     tool_call_log: list[dict] = []
     usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
     rounds = 0
+    thinking_start_sent = False
 
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
         while rounds <= MAX_TOOL_ROUNDS:
@@ -229,6 +231,9 @@ async def stream_chat(
                         # in chat_tokens_total — they are flushed to the client and forgotten.
                         thinking = msg.get("thinking") or ""
                         if thinking:
+                            if not thinking_start_sent:
+                                thinking_start_sent = True
+                                yield (_sse({"type": "thinking_start", "anrede": anrede}), {})
                             yield (_sse({"type": "thinking", "content": thinking}), {})
 
                         content = msg.get("content") or ""

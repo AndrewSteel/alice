@@ -190,6 +190,10 @@ class VoicePipeline:
                 if event.kind == "token":
                     for sentence in accumulator.feed(event.text):
                         await sentence_queue.put(sentence)
+                elif event.kind == "thinking_start":
+                    if not self._interrupt.is_set():
+                        waiting_msg = config.SPEECH_THINKING.get(event.text, config.SPEECH_THINKING["du"])
+                        await sentence_queue.put(waiting_msg)
                 elif event.kind == "conversation_end":
                     conversation_ended = True
                 elif event.kind == "done":

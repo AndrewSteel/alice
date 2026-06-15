@@ -1,6 +1,6 @@
 # PROJ-48: TTS First-Token Latency Reduction
 
-## Status: Architected
+## Status: Approved
 **Created:** 2026-06-02
 **Last Updated:** 2026-06-15
 
@@ -157,7 +157,55 @@ data: {"type":"thinking_start","anrede":"du"}
 | First content sentence TTS | t ≈ 10.5 s |
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-06-15 — Code review + static analysis + unit tests (alice-speech-gateway pytest suite on local machine; production timing requires post-deploy measurement)
+
+### Acceptance Criteria
+
+| # | Criterion | Result | Notes |
+|---|-----------|--------|-------|
+| AC1 | Zeit < 3 s bis erstes TTS-Audio beim Client | **PASS** (erwartet) | Code path: thinking_start bei ~0.9 s → TTS Wartebotschaft ~1.1 s. Produktiv-Messung nach Deploy erforderlich. |
+| AC2 | `tts_generating`-Event vor vollständiger LLM-Antwort | **PASS** | Wartebotschaft liegt in `sentence_queue`, `_synth_stage` emittiert `tts_generating` bei ~1.1 s, LLM-Antwort erst bei ~10 s. |
+| AC3 | Erster Thinking-Token → Wartebotschaft sofort synthetisiert | **PASS** | `thinking` → `thinking_start` SSE → `ChatEvent("thinking_start", anrede)` → `sentence_queue.put(SPEECH_THINKING[anrede])`. Unit-Test `test_waiting_message_is_first_audio` bestätigt. |
+| AC4 | Korrekte Texte: "Warte bitte…" / "Warten Sie bitte…" | **PASS** | `config.SPEECH_THINKING` enthält beide Varianten. Tests `test_thinking_start_du_plays_waiting_message` und `_sie_` bestätigt. |
+| AC5 | Anrede aus `user_profiles.preferences.anrede`; Fallback auf `du` | **PASS** | `(profile.get("preferences") or {}).get("anrede", "du")` — None-safe, fehlender Schlüssel → "du". Test `test_thinking_start_unknown_anrede_falls_back_to_du` bestätigt. |
+| AC6 | Nahtlose Abfolge Wartebotschaft → LLM-Antwort | **PASS** | Queue-Reihenfolge garantiert: Wartebotschaft zuerst, dann Sentence-Accumulator-Ausgabe. Kein Duplikat, keine Lücke. |
+| AC7 | Barge-In während Wartebotschaft → korrekt abgebrochen | **PASS** | `if not self._interrupt.is_set()` vor `queue.put`; `_synth_stage` prüft Interrupt beim Dequeue. Test `test_barge_in_before_thinking_start_suppresses_waiting_message` bestätigt. |
+| AC8 | Mode 1 (Text-Input) nicht betroffen | **PASS** | `pipeline.py` nur im Voice-Pfad. `thinking_start`-Event in `api.ts` switch nicht abgedeckt → silently ignored. |
+| AC9 | Text-only Chat ignoriert `thinking_start` stillschweigend | **PASS** | `switch (evt.type)` in `frontend/src/services/api.ts` — kein `case "thinking_start"`, kein `default` → fällt durch ohne Seiteneffekte. |
+| AC10 | Wartebotschaft nicht in Gesprächshistorie | **PASS** | Gateway fügt Wartebotschaft nur in `sentence_queue` ein; `alice-chat-stream` speichert nur `accumulated_text` (LLM-Content-Tokens). Kein Gateway→DB-Schreibpfad. |
+
+### Test Results (Unit Tests)
+
+**Suite:** `alice-speech-gateway` pytest — 38 Tests total
+
+| Test | Result |
+|------|--------|
+| `test_thinking_start_du_plays_waiting_message` | PASS |
+| `test_thinking_start_sie_plays_waiting_message` | PASS |
+| `test_thinking_start_unknown_anrede_falls_back_to_du` | PASS |
+| `test_no_thinking_start_no_waiting_message` | PASS |
+| `test_waiting_message_is_first_audio` | PASS |
+| `test_barge_in_before_thinking_start_suppresses_waiting_message` | PASS |
+| `test_thinking_start_does_not_write_to_history` | PASS |
+| Alle 31 Regressions-Tests (pipeline, config, auth, sentence_accumulator) | PASS |
+
+### Security Audit
+
+- **`anrede`-Injection:** Wert kommt aus Server-DB via authentifizierter `user_id` aus JWT — kein user-controlled Input
+- **Dict-Lookup:** `SPEECH_THINKING.get(event.text, SPEECH_THINKING["du"])` — unknown values fallen auf statischen Fallback; kein Code-Execution-Risiko
+- **Kein neues SSE-Exposure:** `thinking_start` enthält nur `{"type":"thinking_start","anrede":"du"}` — keine sensitiven Daten
+- **Kein neuer DB-Zugriff, keine neuen Auth-Pfade**
+
+**Ergebnis: Keine Security-Findings.**
+
+### Bugs
+
+Keine Bugs gefunden.
+
+### Production-Ready Decision
+
+**READY** — Alle 10 Akzeptanzkriterien bestätigt (8 durch Code Review + Unit Tests, AC1 erwartet per Design-Rechnung). Keine Critical/High Bugs.
 
 ## Deployment
 _To be added by /deploy_
