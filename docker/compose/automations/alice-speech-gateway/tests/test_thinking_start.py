@@ -168,6 +168,30 @@ async def test_barge_in_before_thinking_start_suppresses_waiting_message(
     assert not any("überlegen".encode() in c for c in captured["audio"])
 
 
+async def test_status_flow_thinking_message_returns_to_ai_processing(make_pipeline, captured, monkeypatch):
+    """After the waiting message is spoken, status must revert to ai_processing."""
+    monkeypatch.setattr(
+        pipeline,
+        "stream_reply",
+        _fake_stream([
+            ChatEvent("thinking_start", "du"),
+            ChatEvent("token", "Antwort."),
+            ChatEvent("done"),
+        ]),
+    )
+    p = make_pipeline()
+    await p.run_turn(b"x" * 100)
+
+    # Expected order: ai_processing → tts_generating (waiting msg) → ai_processing → tts_generating (answer)
+    assert "ai_processing" in captured["status"]
+    assert "tts_generating" in captured["status"]
+    ai_idx = [i for i, s in enumerate(captured["status"]) if s == "ai_processing"]
+    tts_idx = [i for i, s in enumerate(captured["status"]) if s == "tts_generating"]
+    # ai_processing must appear both before AND after the first tts_generating
+    assert ai_idx[0] < tts_idx[0], "ai_processing must precede first tts_generating"
+    assert any(a > tts_idx[0] for a in ai_idx), "ai_processing must re-appear after waiting message"
+
+
 async def test_thinking_start_does_not_write_to_history(make_pipeline, captured, monkeypatch):
     """
     Waiting message must not appear as a repeated sentence in audio output
