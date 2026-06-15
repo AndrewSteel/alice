@@ -43,6 +43,7 @@ SendStatus = Callable[[str], Awaitable[None]]
 SendAudio = Callable[[bytes], Awaitable[None]]
 
 # Status events surfaced to the WebApp client (spec: Continued Conversation).
+STATUS_LISTENING = "listening"
 STATUS_STT_COMPLETE = "stt_complete"
 STATUS_AI_PROCESSING = "ai_processing"
 STATUS_TTS_GENERATING = "tts_generating"
@@ -80,6 +81,7 @@ class VoicePipeline:
         send_status: SendStatus,
         send_audio: SendAudio,
         tts_target_rate: int | None = None,
+        send_audio_format: Callable[[int], Awaitable[None]] | None = None,
     ) -> None:
         self.session_id = session_id
         self.user_id = user_id
@@ -90,6 +92,10 @@ class VoicePipeline:
         # None → native Piper output (WebApp path, 22 050 Hz).
         # 48 000 → resample for the Wyoming/HA Voice PE I2S speaker.
         self._tts_target_rate = tts_target_rate
+        # Optional: called once with Piper's actual sample rate so the client
+        # can decode PCM at the correct rate (BUG-5).
+        self._send_audio_format = send_audio_format
+        self._audio_format_sent = False
         self._interrupt = asyncio.Event()
         self._log = {"session_id": session_id, "user_id": user_id}
 
@@ -255,7 +261,17 @@ class VoicePipeline:
                     continue
                 await self._send_status(STATUS_TTS_GENERATING)
                 logger.info("TTS sentence: %r", sentence, extra=self._log)
-                async for chunk in tts.synthesize(sentence, target_rate=self._tts_target_rate):
+                # BUG-5: announce Piper's actual sample rate on the first chunk
+                # of the session so the client can decode PCM at the right rate.
+                on_rate = None
+                if not self._audio_format_sent and self._send_audio_format is not None:
+                    async def _on_rate(rate: int) -> None:
+                        self._audio_format_sent = True
+                        await self._send_audio_format(rate)  # type: ignore[misc]
+                    on_rate = _on_rate
+                async for chunk in tts.synthesize(
+                    sentence, target_rate=self._tts_target_rate, on_first_rate=on_rate
+                ):
                     if self._interrupt.is_set():
                         break
                     await audio_queue.put(chunk)

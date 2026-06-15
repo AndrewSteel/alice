@@ -9,6 +9,7 @@
  *    on the wire, so we hard-code it here).
  *  - JSON frames from server    → `{type:"session", session_id}` once on
  *    connect, then `{type:"status", status}` events. Status values:
+ *      listening        → turn complete, ready for next utterance
  *      stt_complete     → STT done, waiting for AI
  *      ai_processing    → LLM is generating
  *      tts_generating   → TTS audio is being streamed
@@ -52,9 +53,13 @@ const TTS_SAMPLE_RATE = 22050;
 const RECORD_TIMESLICE_MS = 250;
 // Local silence detector: we tell the gateway "end of utterance" after
 // this much continuous silence while in `listening`.
-const SILENCE_THRESHOLD = 0.015;
-const SILENCE_HANG_MS = 1200;
+const SILENCE_THRESHOLD = 0.010;
+const SILENCE_HANG_MS = 900;
 const SILENCE_CHECK_INTERVAL_MS = 100;
+// If no speech at all is detected for this long while in `listening`, end the
+// session. Covers: (1) CC button pressed but user doesn't speak, (2) after TTS
+// the user stays silent. Gateway timeout is 30 s — this gives a faster close.
+const NO_SPEECH_SESSION_END_MS = 5000;
 
 function buildWsUrl(token: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -95,6 +100,12 @@ export function useVoiceMode2(): UseVoiceMode2Result {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<AudioBufferSourceNode[]>([]);
   const nextStartTimeRef = useRef<number>(0);
+  // BUG-5: actual Piper sample rate sent by the gateway in the first
+  // audio_format frame; falls back to the hard-coded default until received.
+  const ttsRateRef = useRef<number>(TTS_SAMPLE_RATE);
+  // Kept current with the `stop` callback so the silence interval can call it
+  // without capturing a stale closure (stopRef itself is stable).
+  const stopRef = useRef<() => void>(() => {});
 
   // Silence detection
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -104,6 +115,10 @@ export function useVoiceMode2(): UseVoiceMode2Result {
   );
   const lastVoiceAtRef = useRef<number>(0);
   const utteranceHasVoiceRef = useRef<boolean>(false);
+  // True between sending end_of_utterance and receiving stt_complete/listening
+  // from the gateway — blocks the no-speech auto-close while the pipeline is
+  // processing the utterance the user just spoke.
+  const utteranceInFlightRef = useRef<boolean>(false);
 
   // ----- playback helpers -----
 
@@ -131,7 +146,7 @@ export function useVoiceMode2(): UseVoiceMode2Result {
       if (pcm.byteLength < 2) return null;
       const samples = pcm.byteLength / 2;
       const view = new DataView(pcm);
-      const buffer = ctx.createBuffer(1, samples, TTS_SAMPLE_RATE);
+      const buffer = ctx.createBuffer(1, samples, ttsRateRef.current);
       const channel = buffer.getChannelData(0);
       for (let i = 0; i < samples; i++) {
         const s = view.getInt16(i * 2, true);
@@ -162,6 +177,13 @@ export function useVoiceMode2(): UseVoiceMode2Result {
         const queue = playbackQueueRef.current;
         const idx = queue.indexOf(node);
         if (idx >= 0) queue.splice(idx, 1);
+        // When the last chunk finishes playing and the gateway has already
+        // signalled `listening`, reset the no-speech timer from NOW so the
+        // 5 s window starts after audio output ends, not when `listening`
+        // was received (which is before playback finishes).
+        if (queue.length === 0 && statusRef.current === "listening") {
+          lastVoiceAtRef.current = performance.now();
+        }
       };
     },
     [pcmToAudioBuffer],
@@ -195,12 +217,27 @@ export function useVoiceMode2(): UseVoiceMode2Result {
     analyserRef.current = analyser;
     analyserSourceRef.current = source;
 
+    // Connect analyser into the processing graph so browsers that only
+    // analyse nodes connected to the destination actually deliver audio.
+    // Gain = 0 means the mic is never heard through the speakers.
+    const silentGain = ctx.createGain();
+    silentGain.gain.value = 0;
+    analyser.connect(silentGain);
+    silentGain.connect(ctx.destination);
+
     const buf = new Float32Array(analyser.fftSize);
     utteranceHasVoiceRef.current = false;
+    utteranceInFlightRef.current = false;
     lastVoiceAtRef.current = performance.now();
 
     silenceIntervalRef.current = setInterval(() => {
-      if (!analyserRef.current) return;
+      const silenceCtx = audioCtxRef.current;
+      if (!analyserRef.current || !silenceCtx) return;
+      // Resume if Chrome auto-suspended the context between turns.
+      if (silenceCtx.state === "suspended") {
+        silenceCtx.resume();
+        return;
+      }
       analyserRef.current.getFloatTimeDomainData(buf);
       let sumSq = 0;
       for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
@@ -225,7 +262,27 @@ export function useVoiceMode2(): UseVoiceMode2Result {
           ws.send(JSON.stringify({ type: "end_of_utterance" }));
         }
         utteranceHasVoiceRef.current = false;
-        lastVoiceAtRef.current = now;
+        utteranceInFlightRef.current = true; // block no-speech close until gateway acks
+        // lastVoiceAtRef intentionally NOT reset here — the no-speech timer
+        // restarts only when the gateway sends `listening` (after TTS).
+        return;
+      }
+
+      // No speech at all for NO_SPEECH_SESSION_END_MS → end the session.
+      // Handles: (1) CC opened but user never speaks, (2) post-TTS silence.
+      // Guards:
+      //   utteranceInFlight — blocked while gateway processes the utterance
+      //   playbackQueue empty — blocked while browser is still playing audio
+      //     (gateway sends `listening` before playback finishes; lastVoiceAtRef
+      //     is reset in node.onended when the last chunk plays out)
+      if (
+        statusRef.current === "listening" &&
+        !utteranceHasVoiceRef.current &&
+        !utteranceInFlightRef.current &&
+        playbackQueueRef.current.length === 0 &&
+        now - lastVoiceAtRef.current > NO_SPEECH_SESSION_END_MS
+      ) {
+        stopRef.current();
       }
     }, SILENCE_CHECK_INTERVAL_MS);
   }, []);
@@ -291,6 +348,10 @@ export function useVoiceMode2(): UseVoiceMode2Result {
     updateStatus("idle");
   }, [teardown]);
 
+  // Keep stopRef pointing at the latest stop so the silence interval can call
+  // it without a stale closure. Runs on every render (safe — ref mutation).
+  stopRef.current = stop;
+
   const start = useCallback(async () => {
     if (isActive) return;
 
@@ -305,6 +366,7 @@ export function useVoiceMode2(): UseVoiceMode2Result {
     }
 
     updateStatus("connecting");
+    ttsRateRef.current = TTS_SAMPLE_RATE; // reset to default until gateway sends audio_format
 
     const stream = await requestStream();
     if (!stream) {
@@ -348,6 +410,10 @@ export function useVoiceMode2(): UseVoiceMode2Result {
     }
 
     ws.onopen = () => {
+      // Ensure AudioContext is running — Chrome may defer activation even
+      // when created from a user gesture if no audio has played yet.
+      audioCtxRef.current?.resume();
+
       // Start capturing as soon as the socket is up.
       let recorder: MediaRecorder;
       try {
@@ -396,7 +462,19 @@ export function useVoiceMode2(): UseVoiceMode2Result {
           const msg = JSON.parse(event.data);
           if (msg.type === "status") {
             switch (msg.status) {
+              case "listening":
+                // Server finished the turn (TTS done) — transition back to
+                // listening. Reset the silence detector so:
+                //   - the no-speech timer starts from TTS completion, not
+                //     from when the user last spoke
+                //   - a spurious immediate EOU can't fire from a stale flag
+                utteranceInFlightRef.current = false;
+                utteranceHasVoiceRef.current = false;
+                lastVoiceAtRef.current = performance.now(); // no-speech timer starts here
+                updateStatus("listening");
+                break;
               case "stt_complete":
+                utteranceInFlightRef.current = false; // gateway acked the utterance
                 // If we were speaking, this is a barge-in ack: flush
                 // playback immediately so the user hears the new answer
                 // cleanly.
@@ -413,6 +491,11 @@ export function useVoiceMode2(): UseVoiceMode2Result {
                 teardown();
                 updateStatus("idle");
                 break;
+            }
+          } else if (msg.type === "audio_format") {
+            // BUG-5: use the actual Piper sample rate instead of hard-coding 22050.
+            if (typeof msg.rate === "number" && msg.rate > 0) {
+              ttsRateRef.current = msg.rate;
             }
           } else if (msg.type === "session") {
             // session_id is logged on the server; nothing to render.

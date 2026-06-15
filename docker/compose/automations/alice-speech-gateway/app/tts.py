@@ -13,7 +13,7 @@ without TTS (see spec: Fehlerbehandlung).
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Awaitable, Callable
 
 from wyoming.audio import AudioChunk, AudioStop
 from wyoming.client import AsyncClient
@@ -28,7 +28,11 @@ class TTSError(Exception):
     """Raised when wyoming-piper is unreachable or fails to synthesise."""
 
 
-async def synthesize(text: str, target_rate: int | None = None) -> AsyncIterator[bytes]:
+async def synthesize(
+    text: str,
+    target_rate: int | None = None,
+    on_first_rate: Callable[[int], Awaitable[None]] | None = None,
+) -> AsyncIterator[bytes]:
     """
     Synthesise one sentence and yield raw PCM audio chunks as they arrive.
 
@@ -46,6 +50,7 @@ async def synthesize(text: str, target_rate: int | None = None) -> AsyncIterator
     try:
         resample_state = None
         logged_format = False
+        first_chunk = True
         async with AsyncClient.from_uri(config.PIPER_URI) as client:
             await client.write_event(Synthesize(text=text).event())
             while True:
@@ -60,6 +65,11 @@ async def synthesize(text: str, target_rate: int | None = None) -> AsyncIterator
                             chunk.rate, chunk.width, chunk.channels,
                         )
                         logged_format = True
+                    if first_chunk:
+                        first_chunk = False
+                        if on_first_rate is not None:
+                            rate_to_report = target_rate if target_rate is not None else chunk.rate
+                            await on_first_rate(rate_to_report)
                     audio = chunk.audio
                     if target_rate is not None and chunk.rate != target_rate:
                         import audioop  # noqa: PLC0415 — only imported when resampling is needed
