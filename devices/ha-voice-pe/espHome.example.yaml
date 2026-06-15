@@ -31,6 +31,19 @@
 # `external_components` below.
 #
 # -----------------------------------------------------------------------------
+# SETUP: HOW TO CREATE A DEVICE-SPECIFIC FILE
+# -----------------------------------------------------------------------------
+# 1. Copy this file to espHome-<room>.yaml (e.g. espHome-kueche.yaml).
+#    Device-specific files are gitignored — keep secrets out of the repo.
+# 2. Fill in the three substitutions below (name, friendly_name, alice_gateway_host).
+# 3. Add a matching secret to secrets.yaml:
+#      api_encryption_key_<room>: "<key from HA device settings>"
+#    and update the api.encryption.key reference in your copy accordingly.
+# 4. Add a DHCP reservation for the device in your router (fixed IP required).
+# 5. Add the device IP to device-mapping.yaml in the speech gateway config.
+# 6. Flash: esphome run espHome-<room>.yaml --device <device-ip>
+#
+# -----------------------------------------------------------------------------
 # FIRMWARE-UPDATE PROCEDURE (read before touching the device)
 # -----------------------------------------------------------------------------
 # This YAML extends Nabu Casa's official HA Voice PE firmware as a remote
@@ -41,7 +54,7 @@
 #      `packages:` ref below (replace `@main` with the release tag, e.g.
 #      `@2025.x.y`) so a future upstream change can't silently break the build.
 #   2. In the ESPHome dashboard (or CLI) compile + flash THIS file:
-#        esphome run devices/ha-voice-pe/espHome.yaml
+#        esphome run espHome-<room>.yaml --device <device-ip>
 #   3. Confirm both wakewords:
 #        - "Okay Nabu"  -> HA Assist answers as before.
 #        - "Hey Jarvis" -> Alice answers (check the gateway logs show a
@@ -56,16 +69,16 @@
 # =============================================================================
 
 substitutions:
-  name: "ha-voice-pe-buero"
-  friendly_name: "Büro HA Voice PE"
+  name: "ha-voice-pe-<room>"          # mDNS hostname + HA device name; must be unique per device
+  friendly_name: "<Raum> HA Voice PE" # display name in HA UI
   # Alice speech gateway Wyoming endpoint (PROJ-40).
   # Prefer the gateway's fixed IP over a hostname — the device resolves this
   # via lwip getaddrinfo and ".lan"/".local" names may not resolve on-device.
-  alice_gateway_host: "192.168.178.88" # <-- set to the gateway/ki.lan IP
-  alice_gateway_port: "10300"           # standard Wyoming port (wyoming-whisper removed)
+  alice_gateway_host: "<gateway-ip>"  # LAN IP of the server running alice-speech-gateway
+  alice_gateway_port: "10300"         # standard Wyoming port (wyoming-whisper removed)
   # IDs of the microphone + speaker declared by the official HA Voice PE package.
   # VERIFY against the pinned package before flashing:
-  #   esphome config devices/ha-voice-pe/espHome.yaml | grep -E 'id:.*(mic|speaker|media)'
+  #   esphome config espHome-<room>.yaml | grep -E 'id:.*(mic|speaker|media)'
   # If the package names differ, update these two values (no C++ change needed).
   mic_id: "i2s_mics"
   # Use the raw I2S speaker (48 kHz hardware rate). The gateway now sends 48 kHz
@@ -87,7 +100,7 @@ esphome:
 # the LED ring and button events stay available.
 api:
   encryption:
-    key: !secret api_encryption_key
+    key: !secret api_encryption_key_<room>  # rename per device, see secrets.yaml
 
 logger:
   level: DEBUG
