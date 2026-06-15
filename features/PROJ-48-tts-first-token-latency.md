@@ -1,6 +1,6 @@
 # PROJ-48: TTS First-Token Latency Reduction
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-02
 **Last Updated:** 2026-06-15
 
@@ -208,4 +208,9 @@ Keine Bugs gefunden.
 **READY** — Alle 10 Akzeptanzkriterien bestätigt (8 durch Code Review + Unit Tests, AC1 erwartet per Design-Rechnung). Keine Critical/High Bugs.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-15
+
+- Changed files: `alice-chat-stream/app/streaming.py`, `alice-chat-stream/app/main.py`, `alice-speech-gateway/app/config.py`, `alice-speech-gateway/app/chat_client.py`, `alice-speech-gateway/app/pipeline.py`
+- No Dockerfile change, no nginx change, no n8n workflow, no DB migration
+- UI status flow fix included: `_ThinkingMessage` re-emits `ai_processing` after waiting message
