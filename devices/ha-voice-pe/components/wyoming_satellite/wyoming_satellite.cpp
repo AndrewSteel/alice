@@ -479,7 +479,12 @@ void WyomingSatellite::led_idle_() {
 }
 
 void WyomingSatellite::finish_session_() {
-  if (this->mic_ != nullptr) {
+  // Only stop the mic if we know it is currently running. Unnecessary stop+start
+  // cycles re-initialize the shared I2S parent bus and change its clock, which
+  // corrupts the announcement pipeline's wake sound on the next activation (Bug 2).
+  // end_utterance_() already tracks when it stops the mic; if the mic is already
+  // stopped (or rearm already restarted it and we left it running), we leave it alone.
+  if (this->mic_ != nullptr && this->mic_started_) {
     this->mic_->stop();
     this->mic_started_ = false;
   }
@@ -496,11 +501,9 @@ void WyomingSatellite::finish_session_() {
   this->set_state_(State::IDLE);
   this->led_idle_();
   ESP_LOGD(TAG, "Session ended — wake-word listening");
-  // Restart the mic so micro_wake_word receives audio data and can detect the
-  // next wake word. During a session we stop the mic (end_utterance_) to free
-  // the shared I2S bus for the speaker; the wake-word component never restarts
-  // it on its own.
-  if (this->mic_ != nullptr) {
+  // Restart the mic only if it was stopped during the session. micro_wake_word
+  // never restarts it after we stop it in end_utterance_().
+  if (this->mic_ != nullptr && !this->mic_started_) {
     this->mic_->start();
     this->mic_started_ = true;
   }

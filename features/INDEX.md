@@ -27,6 +27,8 @@
 
 | PROJ-49 | 2.2   | ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound; Clockwise/Blink/Counter-clockwise per State; Wake Sound Konsistenz | In Review  | [Spec](PROJ-49-esphome-device-feedback.md) | 2026-06-15 |
 
+| PROJ-50 | 2.2   | ESPHome Wyoming Frame Split — LED zeigt "Thinking" während LLM-Wartezeit; Gateway sendet separaten AudioStart/AudioStop für "Warte bitte…" + neuer Device-Zustand LLM_WAITING | Roadmap  | —                                         | 2026-06-15 |
+
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-50
+## Next Available ID: PROJ-51

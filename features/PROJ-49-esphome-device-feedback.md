@@ -383,72 +383,94 @@ esphome compile devices/ha-voice-pe/espHome.yaml
 
 ### Root-Cause-Analyse v3
 
-#### Bug 2 — Tatsächliche Ursache (revidiert)
+#### Bug 2 — Tatsächliche Ursache (1. Revision: teilweise falsch)
 
-Der tatsächliche I2S-Konflikt entsteht nicht in `finish_session_()` sondern in `start()`:
+v3-Hypothese: `start()` → `mic_->start()` auf bereits laufendem Mikrofon re-initialisiert I2S.
+v3-Fix: `mic_started_`-Flag verhindert redundantes `mic_->start()` in `start()`.
+**v3 Hardware-Test: Bug 2 bleibt bestehen.** Ursache liegt woanders.
 
-```
-IDLE: Mikrofon läuft für Wake-Word-Erkennung
-Wake Word feuert → Package spielt Wake Sound via Announcement-Pipeline
-Unser Handler: wyoming_satellite.start → start() → mic_->start()
-```
+#### Bug 3 — Known Limitation (→ PROJ-50)
 
-`mic_->start()` auf ein bereits laufendes Mikrofon re-initialisiert den geteilten I2S-Parent-Bus. Das korrumpiert den gleichzeitig laufenden Wake Sound in der Announcement-Pipeline → falscher Pitch.
+**Root Cause**: Gateway sendet einen einzigen `AudioStart…AudioStop`-Rahmen pro Turn, der sowohl "Warte bitte…" als auch die LLM-Antwort enthält. Device kann `audio-stop` zwischen den Phasen nicht sehen.
 
-**Fix**: Neues `mic_started_{true}` Member-Flag (initialisiert auf `true` — Mikrofon läuft bereits für Wake-Word). `start()` ruft `mic_->start()` nur wenn `!mic_started_`. Das Flag wird in `end_utterance_()`, `finish_session_()` und `rearm_when_drained_()` konsistent geführt.
+**Fix erfordert**: (a) Gateway-seitige Frame-Aufteilung + (b) neuer Device-Zustand `LLM_WAITING` ohne CC-Rearm-Timer. Separates Feature → **PROJ-50**.
 
-#### Bug 3 — Known Limitation (kein Fix in v3)
+#### Bug 4 — Bestätigt behoben
 
-**Root Cause**: Gateway sendet einen einzigen `AudioStart…AudioStop`-Rahmen pro Turn, der sowohl "Warte bitte…" als auch die LLM-Antwort enthält. Das Device kann `audio-stop` zwischen den beiden Phasen nicht sehen → LED bleibt durchgehend in "Replying".
-
-**Warum kein einfacher Fix**: Das "Warte bitte…"-Frame aufzuspalten (Gateway sendet Zwischen-AudioStop + Zwischen-AudioStart) würde den CC-Rearm-Timer (400ms) triggern, der das Mikrofon neustartet und den Zustand zerstört, bevor die LLM-Antwort ankommt. Fix erfordert: (a) Gateway-seitige Frame-Aufteilung + (b) neuen Device-Zustand "LLM_WAITING" mit deaktiviertem Rearm-Timer.
-
-**Auswirkung**: "Warte bitte…"-Audio spielt mit CCW-LED (korrekt — Device antwortet). Nach Ende spielt LLM-Antwort mit CCW-LED (korrekt). Nur fehlt der blinkende "Thinking"-Zustand zwischen den beiden Phasen. Funktional korrekt, visuell unvollständig.
-
-#### Bug 4 — Tatsächliche Ursache (bestätigt)
-
-`wyoming_transport.py` übergibt `speak_on_empty=(turn_count == 1)`. Bei erstem Turn (nach Wake Word + Stille): `speak_on_empty=True` → "Ich habe nichts verstanden" wird gesprochen, dann Session beendet.
-
-**Fix**: `speak_on_empty=False` immer. Gateway-seitig: 1-Zeilen-Änderung in `wyoming_transport.py`.
+`speak_on_empty=False` in `wyoming_transport.py` → keine Fehlermeldung bei Stille. ✅ BEHOBEN.
 
 ### Geänderte Dateien (v3)
 
 | Datei | Änderung |
 |---|---|
-| `components/wyoming_satellite/wyoming_satellite.h` | `bool mic_started_{true}` Member hinzugefügt |
-| `components/wyoming_satellite/wyoming_satellite.cpp` | `start()`: `if (!mic_started_)` Guard; `end_utterance_()` / `finish_session_()` / `rearm_when_drained_()`: Flag-Tracking |
-| `app/wyoming_transport.py` | `speak_on_empty=False` (war `speak_on_empty=(turn_count == 1)`) |
+| `components/wyoming_satellite/wyoming_satellite.h` | `bool mic_started_{true}` Member |
+| `components/wyoming_satellite/wyoming_satellite.cpp` | `start()`: `if (!mic_started_)` Guard + Flag-Tracking in allen Mic-Operationen |
+| `app/wyoming_transport.py` | `speak_on_empty=False` |
 
-### Compiler-Verifikation v3
+### v3 Hardware-Test Ergebnis
 
-```
-esphome compile devices/ha-voice-pe/espHome.yaml
-→ SUCCESS (20s)
-→ RAM: 19.4 % / Flash: 35.1 % — unverändert
-→ Keine neuen Warnings
-```
-
-### v3 Acceptance Criteria — Prognose (vor Hardware-Test)
-
-| # | Kriterium | v3-Prognose | Notiz |
-|---|---|---|---|
-| WS-1 | Exakt derselber Ton bei jeder Aktivierung | ✅ PASS (Fix) | mic_started_-Flag verhindert I2S-Re-Init |
-| LED-1–6 | LED-Zustandsmaschine gesamt | ✅ PASS | Unverändert |
-| WB-1 | "Warte bitte…" → CCW | ✅ PASS | Unverändert |
-| WB-2 | Nach "Warte bitte…" → Thinking | ⚠️ KNOWN LIMITATION | Gateway-Protokoll-Aufteilung nötig; Low-Priority Future Work |
-| WB-3 | LLM-Antwort → CCW wieder | ✅ PASS | Einmaliger AudioStart → Replying korrekt |
-| EC-2 | Stille → kein Fehler, session end | ✅ PASS (Fix) | speak_on_empty=False |
+- Bug 2 (falscher Ton-Pitch): ❌ OFFEN
+- Bug 3 (LED Warte bitte): ✅ BEHOBEN (LED-Zustandsmaschine korrekt)
+- Bug 4 (Fehlermeldung bei Stille): ✅ BEHOBEN
 
 ### Produktionsbereitschaft v3
 
-**VORAUSSICHTLICH READY nach Hardware-Test.**
+**NOT READY** — Bug 2 offen.
 
-Verbleibende Known Limitation (Bug 3 / WB-2) ist **Medium Severity** und blockiert nicht das Deployment:
-- Funktional korrekt: Device antwortet, LLM-Antwort kommt
-- Visuell: "Warte bitte…" und LLM-Antwort beide mit CCW-LED (nicht falsch, nur unvollständig)
-- Workaround: keine nötig
+---
 
-**Deployment:** 
-1. OTA-Flash des HA Voice PE (Firmware v3)
-2. Gateway-Container neu starten (wyoming_transport.py geändert): `docker compose restart alice-speech-gateway`
-3. Wake Words in HA neu aktivieren (bekannte Ops-Anforderung aus PROJ-42)
+## QA Test Results v4 — Bug 2 Root-Cause-Revision
+
+**Status:** In Review
+**Tested:** 2026-06-15 (Statischer Code-Review + `esphome compile`)
+
+### Bug 2 — Root Cause (2. Revision, final)
+
+`start()` verhindert jetzt redundantes `mic_->start()`. Bug 2 bleibt → Ursache liegt in `finish_session_()`:
+
+`finish_session_()` ruft **immer** `mic_->stop()` + `mic_->start()` auf, unabhängig davon ob das Mikrofon läuft oder nicht. Diese unnötige Stop/Start-Schleife re-initialisiert den I2S-Parent-Bus und setzt seinen Clock-Zustand auf Mikrofon-Parameter. Das korrumpiert die Announcement-Pipeline des Packages beim nächsten Wake Sound.
+
+**Konkreter Ablauf (zweite Aktivierung)**:
+
+```
+1. Erste Session endet → finish_session_():
+     mic_->stop()   ← I2S-Parent verliert Speaker-Konfiguration
+     mic_->start()  ← I2S-Parent wird mit Mic-Parametern (16 kHz) neu initialisiert
+2. Device in IDLE, Mikrofon läuft
+3. Zweite "Hey Jarvis"-Aktivierung:
+     Package: Wake Sound via announcement_resampling_speaker
+     I2S-Parent ist jetzt auf 16 kHz (Mic-Rate) — Announcement erwartet andere Rate
+     → Wake Sound spielt zu langsam / zu tief
+```
+
+**Fix**: `finish_session_()` stop/start nur wenn wirklich nötig:
+- Stop nur wenn `mic_started_ == true` (Mic läuft gerade)
+- Start nur wenn `mic_started_ == false` nach dem Cleanup (Mic wurde während Session gestoppt)
+- Wenn Mic bereits läuft (z.B. nach CC-Rearm): kein Stop, kein Start → kein I2S-Re-Init
+
+### Geänderte Dateien (v4)
+
+| Datei | Änderung |
+|---|---|
+| `components/wyoming_satellite/wyoming_satellite.cpp` | `finish_session_()`: bedingter stop (nur wenn `mic_started_`) + bedingter start (nur wenn `!mic_started_`) |
+
+### Compiler-Verifikation v4
+
+```
+esphome compile devices/ha-voice-pe/espHome.yaml
+→ SUCCESS
+→ RAM: 19.4 % / Flash: 35.1 % — unverändert
+```
+
+### Künftige Anforderungen
+
+**PROJ-50: Wyoming Frame Split — LED "Thinking" während LLM-Wartezeit**
+
+Das Gateway sendet heute einen einzigen `AudioStart…AudioStop`-Rahmen der "Warte bitte…" und LLM-Antwort zusammenfasst. Das Device kann keine "Thinking"-Phase zwischen beiden zeigen.
+
+Anforderung: LED soll während LLM-Denkzeit blinken, nicht drehen. Erfordert:
+- Gateway: separater `AudioStop` nach "Warte bitte…", `AudioStart` vor LLM-Antwort
+- Device: neuer Zustand `LLM_WAITING` (kein 400ms CC-Rearm-Timer in diesem Zustand)
+- Betroffene Dateien: `wyoming_transport.py`, `pipeline.py`, `wyoming_satellite.cpp/.h`
+
+→ Tracked als **PROJ-50** in INDEX.md.
