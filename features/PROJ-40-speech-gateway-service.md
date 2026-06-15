@@ -1,8 +1,8 @@
 # PROJ-40: Speech Gateway Service
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-05-21
-**Last Updated:** 2026-05-21
+**Last Updated:** 2026-06-15
 
 ## Dependencies
 - Requires: PROJ-1 (User Authentication) — JWT-Validierung für WebApp-Clients
@@ -637,8 +637,8 @@ continued-conversation loop:
 
 ## Deployment
 
-**Date:** 2026-05-27
-**Status:** Partially deployed — WebApp endpoints (Mode 1 + 2) production-ready; Wyoming endpoint (Mode 3) deferred to PROJ-42.
+**Date:** 2026-05-27 (initial), fully deployed 2026-06-15
+**Status:** Deployed — alle Endpoints (Mode 1 + 2 WebApp, Mode 3 Wyoming) produktiv auf ki.lan.
 
 ### Live Runtime Findings (TITAN X host)
 
