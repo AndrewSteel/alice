@@ -44,6 +44,10 @@ docker/compose/automations/dms-extractor-txt/.env
 # esphome Konfigurationen (können sensible Informationen enthalten)
 devices/ha-voice-pe/secrets.yaml
 devices/ha-voice-pe/.esphome/
+devices/ha-voice-pe/espHome-*.yaml
+
+# Speech gateway device-mapping (enthält echte IPs und User-IDs)
+docker/compose/automations/alice-speech-gateway/config/device-mapping.yaml
 
 # Home Assistant configuration
 config/*
