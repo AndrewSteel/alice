@@ -52,6 +52,7 @@ async def stream_reply(
     user_id: str,
     transcript: str,
     jwt_token: str,
+    device_id: str | None = None,
 ) -> AsyncIterator[ChatEvent]:
     """
     POST the transcript to alice-chat-stream and yield ChatEvents.
@@ -62,7 +63,8 @@ async def stream_reply(
     """
     url = f"{config.CHAT_STREAM_URL}/stream/chat"
     headers = {"Authorization": f"Bearer {jwt_token}"}
-    payload = {"session_id": session_id, "content": transcript}
+    source = f"esphome:{device_id}" if device_id else "esphome"
+    payload = {"session_id": session_id, "content": transcript, "source": source}
     timeout = httpx.Timeout(config.AI_TIMEOUT_SECONDS, read=config.AI_TIMEOUT_SECONDS)
 
     try:

@@ -117,6 +117,7 @@ class GatewayWyomingHandler(AsyncEventHandler):
                     send_status=self._noop_status,
                     send_audio=self._send_audio,
                     tts_target_rate=_SAMPLE_RATE,
+                    device_id=device.room.replace(" ", "_") if device.room else device.name.replace(" ", "_"),
                 )
                 logger.info(
                     "Wyoming session start",

@@ -91,6 +91,7 @@ class VoicePipeline:
         send_audio: SendAudio,
         tts_target_rate: int | None = None,
         send_audio_format: Callable[[int], Awaitable[None]] | None = None,
+        device_id: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.user_id = user_id
@@ -107,6 +108,7 @@ class VoicePipeline:
         self._audio_format_sent = False
         self._interrupt = asyncio.Event()
         self._log = {"session_id": session_id, "user_id": user_id}
+        self._device_id = device_id
 
     def set_jwt(self, jwt_token: str) -> None:
         """
@@ -190,7 +192,8 @@ class VoicePipeline:
 
         try:
             async for event in stream_reply(
-                self.session_id, self.user_id, transcript, self._jwt
+                self.session_id, self.user_id, transcript, self._jwt,
+                device_id=self._device_id,
             ):
                 if self._interrupt.is_set():
                     logger.info("Turn interrupted by barge-in", extra=self._log)

@@ -23,6 +23,8 @@ logger = logging.getLogger("alice-chat-stream.memory")
 
 POSTGRES_DSN = os.environ.get("POSTGRES_DSN", "")
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate:8080").rstrip("/")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
 
 WORKING_MEMORY_LIMIT = 20
 LONG_TERM_MEMORY_LIMIT = 5
@@ -241,43 +243,72 @@ async def recall_long_term(
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
-async def ensure_session(session_id: str, user_id: str) -> None:
+async def ensure_session(session_id: str, user_id: str, source: str | None = None) -> None:
     """Idempotent insert into alice.sessions; bumps last_activity on hit."""
     await pool().execute(
         """
-        INSERT INTO alice.sessions (session_id, user_id, last_activity, message_count)
-        VALUES ($1::uuid, $2, NOW(), 0)
+        INSERT INTO alice.sessions (session_id, user_id, last_activity, message_count, session_type, expires_at, source)
+        VALUES ($1::uuid, $2, NOW(), 0, 'ha_only', NOW() + INTERVAL '30 days', $3)
         ON CONFLICT (session_id) DO UPDATE
             SET last_activity = NOW()
         """,
         session_id,
         user_id,
+        source,
     )
 
 
-async def insert_user_message(session_id: str, user_id: str, content: str) -> int:
+async def promote_to_llm(session_id: str) -> None:
+    """Promote a ha_only session to llm (remove expiry, makes it permanent)."""
+    await pool().execute(
+        """
+        UPDATE alice.sessions
+        SET session_type = 'llm', expires_at = NULL
+        WHERE session_id = $1::uuid AND session_type = 'ha_only'
+        """,
+        session_id,
+    )
+
+
+async def insert_user_message(session_id: str, user_id: str, content: str, msg_type: str = "user_text") -> int:
     row = await pool().fetchrow(
         """
-        INSERT INTO alice.messages (session_id, user_id, role, content)
-        VALUES ($1::uuid, $2, 'user', $3)
-        RETURNING id
+        WITH ins AS (
+            INSERT INTO alice.messages (session_id, user_id, role, content, msg_type)
+            VALUES ($1::uuid, $2, 'user', $3, $4)
+            RETURNING id
+        ),
+        upd AS (
+            UPDATE alice.sessions
+            SET message_count = message_count + 1, last_activity = NOW()
+            WHERE session_id = $1::uuid
+        )
+        SELECT id FROM ins
+        """,
+        session_id,
+        user_id,
+        content,
+        msg_type,
+    )
+    return row["id"]
+
+
+async def insert_llm_thinking(session_id: str, user_id: str, content: str) -> None:
+    """Save accumulated thinking tokens. role='system' keeps them out of LLM context window."""
+    if not content:
+        return
+    await pool().execute(
+        """
+        INSERT INTO alice.messages (session_id, user_id, role, content, msg_type)
+        VALUES ($1::uuid, $2, 'system', $3, 'llm_thinking')
         """,
         session_id,
         user_id,
         content,
     )
-    await pool().execute(
-        """
-        UPDATE alice.sessions
-        SET message_count = message_count + 1, last_activity = NOW()
-        WHERE session_id = $1::uuid
-        """,
-        session_id,
-    )
-    return row["id"]
 
 
-async def insert_assistant_message(
+async def insert_llm_response(
     session_id: str,
     user_id: str,
     content: str,
@@ -285,12 +316,24 @@ async def insert_assistant_message(
     tool_results: dict | None,
     token_count: int = 0,
 ) -> int:
+    """Insert LLM response and atomically promote session to llm type."""
     row = await pool().fetchrow(
         """
-        INSERT INTO alice.messages
-            (session_id, user_id, role, content, tool_calls, tool_results, token_count)
-        VALUES ($1::uuid, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6)
-        RETURNING id
+        WITH ins AS (
+            INSERT INTO alice.messages
+                (session_id, user_id, role, content, tool_calls, tool_results, token_count, msg_type)
+            VALUES ($1::uuid, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, 'llm_response')
+            RETURNING id
+        ),
+        upd AS (
+            UPDATE alice.sessions
+            SET message_count = message_count + 1,
+                last_activity = NOW(),
+                session_type = 'llm',
+                expires_at = NULL
+            WHERE session_id = $1::uuid
+        )
+        SELECT id FROM ins
         """,
         session_id,
         user_id,
@@ -299,15 +342,44 @@ async def insert_assistant_message(
         json.dumps(tool_results) if tool_results is not None else None,
         token_count,
     )
+    return row["id"]
+
+
+async def insert_ha_result(
+    session_id: str,
+    user_id: str,
+    content: str,
+    tool_results: dict | None = None,
+) -> None:
+    """Save HA fast-path result. Session stays ha_only."""
     await pool().execute(
         """
+        WITH ins AS (
+            INSERT INTO alice.messages (session_id, user_id, role, content, tool_results, msg_type)
+            VALUES ($1::uuid, $2, 'assistant', $3, $4::jsonb, 'ha_result')
+        )
         UPDATE alice.sessions
         SET message_count = message_count + 1, last_activity = NOW()
         WHERE session_id = $1::uuid
         """,
         session_id,
+        user_id,
+        content,
+        json.dumps(tool_results) if tool_results is not None else None,
     )
-    return row["id"]
+
+
+async def count_llm_responses(session_id: str) -> int:
+    """Count llm_response messages for session (used to detect first response)."""
+    row = await pool().fetchrow(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM alice.messages
+        WHERE session_id = $1::uuid AND msg_type = 'llm_response'
+        """,
+        session_id,
+    )
+    return int(row["cnt"])
 
 
 async def upsert_profile_fact(user_id: str, key: str, value: Any) -> None:
@@ -325,3 +397,41 @@ async def upsert_profile_fact(user_id: str, key: str, value: Any) -> None:
         key,
         json.dumps(value),
     )
+
+
+async def generate_title_async(session_id: str, user_message: str, llm_response: str) -> None:
+    """Background asyncio task: call Ollama to generate a short German title for the session."""
+    prompt = (
+        f"Erstelle einen sehr kurzen deutschen Titel (max. 60 Zeichen) für dieses Gespräch.\n"
+        f"Nutzer: {user_message[:300]}\n"
+        f"Assistent: {llm_response[:300]}\n"
+        f"Titel (nur der Titel, ohne Anführungszeichen):"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                },
+            )
+            data = resp.json()
+            title = (data.get("response") or "").strip()
+            if len(title) > 60:
+                title = title[:60].rstrip()
+            if title:
+                await pool().execute(
+                    """
+                    UPDATE alice.sessions
+                    SET title = $1
+                    WHERE session_id = $2::uuid AND title IS NULL
+                    """,
+                    title,
+                    session_id,
+                )
+                logger.info("Title generated for session %s: %s", session_id, title)
+    except Exception as exc:
+        logger.warning("Title generation failed for session %s: %s", session_id, exc)

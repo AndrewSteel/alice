@@ -492,10 +492,19 @@ CREATE TABLE IF NOT EXISTS alice.sessions (
     message_count INT DEFAULT 0,
     summary       TEXT,
     key_topics    TEXT[],
-    is_active     BOOLEAN DEFAULT TRUE
+    is_active     BOOLEAN DEFAULT TRUE,
+    -- PROJ-51: chat storage classification & retention (migration 014)
+    session_type  TEXT NOT NULL DEFAULT 'llm' CHECK (session_type IN ('llm', 'ha_only')),
+    expires_at    TIMESTAMPTZ,
+    source        TEXT CHECK (source IS NULL OR source IN ('webapp_cc', 'webapp_mic', 'esphome') OR source LIKE 'esphome:%')
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON alice.sessions(user_id, last_activity DESC);
+
+-- PROJ-51: cleanup index for expired ha_only sessions (migration 014)
+CREATE INDEX IF NOT EXISTS idx_sessions_cleanup
+    ON alice.sessions(session_type, expires_at)
+    WHERE session_type = 'ha_only' AND expires_at IS NOT NULL;
 
 ALTER TABLE alice.sessions ENABLE ROW LEVEL SECURITY;
 
@@ -517,11 +526,14 @@ CREATE TABLE IF NOT EXISTS alice.messages (
     token_count             INT,
     transferred_to_weaviate BOOLEAN DEFAULT FALSE,
     transferred_at          TIMESTAMPTZ,
-    weaviate_id             UUID
+    weaviate_id             UUID,
+    -- PROJ-51: display-type for session restore (migration 014)
+    msg_type                TEXT CHECK (msg_type IN ('user_text', 'user_stt', 'llm_thinking', 'llm_response', 'ha_result', 'tool_result'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session         ON alice.messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_user_recent     ON alice.messages(user_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_msg_type        ON alice.messages(session_id, msg_type);
 CREATE INDEX IF NOT EXISTS idx_messages_not_transferred ON alice.messages(user_id)
     WHERE transferred_to_weaviate = FALSE;
 

@@ -12,7 +12,7 @@ import { VoiceOverlay } from "./VoiceOverlay";
 const MAX_TEXTAREA_HEIGHT_PX = 168;
 
 interface InputAreaProps {
-  onSend: (text: string) => void;
+  onSend: (text: string, source?: string) => void;
   disabled: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
@@ -27,6 +27,7 @@ export function InputArea({
   const [value, setValue] = useState("");
   const [stopping, setStopping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const wasVoiceInputRef = useRef(false);
 
   // --- Voice modes ---
 
@@ -36,6 +37,7 @@ export function InputArea({
   // text (rolling replacement). The hook composes base + transcript, so this
   // is a straight replacement, not an append.
   const handleVoiceText = useCallback((text: string) => {
+    wasVoiceInputRef.current = true;
     setValue(text);
     // Re-grow the textarea on the next paint.
     requestAnimationFrame(() => {
@@ -78,7 +80,8 @@ export function InputArea({
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
-    onSend(value);
+    onSend(value, wasVoiceInputRef.current ? "webapp_mic" : "webapp_cc");
+    wasVoiceInputRef.current = false;
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -101,6 +104,7 @@ export function InputArea({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       // A manual edit blocks further interim/final injection from Mode 1.
       voice1.notifyUserEdit();
+      wasVoiceInputRef.current = false;
       setValue(e.target.value);
       const el = e.target;
       el.style.height = "auto";
