@@ -8,6 +8,7 @@ import { MeinProfilSection } from "./MeinProfilSection";
 import { AllgemeinSection } from "./AllgemeinSection";
 import { DmsSection } from "./DmsSection";
 import { NutzerVerwaltungSection } from "./NutzerVerwaltungSection";
+import { ChatarchivSection } from "./ChatarchivSection";
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -67,6 +68,14 @@ export function SettingsPage() {
                   <span className="hidden md:inline">Nutzerverwaltung</span>
                 </TabsTrigger>
               )}
+              {isAdmin && (
+                <TabsTrigger
+                  value="chatarchiv"
+                  className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                >
+                  Chatarchiv
+                </TabsTrigger>
+              )}
             </TabsList>
 
             {/* Tab Content */}
@@ -85,6 +94,11 @@ export function SettingsPage() {
               {isAdmin && (
                 <TabsContent value="nutzerverwaltung" className="mt-0">
                   <NutzerVerwaltungSection />
+                </TabsContent>
+              )}
+              {isAdmin && (
+                <TabsContent value="chatarchiv" className="mt-0">
+                  <ChatarchivSection />
                 </TabsContent>
               )}
             </div>

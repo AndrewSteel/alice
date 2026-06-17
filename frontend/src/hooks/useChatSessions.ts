@@ -81,7 +81,7 @@ export function useChatSessions() {
       .then((apiSessions) => {
         const mapped: SessionMeta[] = apiSessions.map((s) => ({
           id: s.session_id,
-          title: s.title || "Unbenannter Chat",
+          title: s.title || "Neuer Chat",
           updatedAt: new Date(s.last_activity || s.started_at),
           persisted: true,
         }));
@@ -176,12 +176,45 @@ export function useChatSessions() {
           setMessagesLoading(true);
           fetchSessionMessages(id)
             .then((apiMessages) => {
-              const mapped: Message[] = apiMessages.map((m) => ({
-                id: newId(),
-                role: m.role === "user" ? "user" : "assistant",
-                content: m.content,
-                createdAt: new Date(m.timestamp).getTime(),
-              }));
+              const mapped: Message[] = apiMessages.flatMap((m) => {
+                const msgType = m.msg_type;
+                let role: Message["role"];
+                let toolStatus: Message["toolStatus"] | undefined;
+
+                if (msgType) {
+                  switch (msgType) {
+                    case "user_text":
+                    case "user_stt":
+                      role = "user";
+                      break;
+                    case "llm_response":
+                      role = "assistant";
+                      break;
+                    case "llm_thinking":
+                      role = "thinking";
+                      break;
+                    case "ha_result":
+                    case "tool_result":
+                      role = "tool_call";
+                      toolStatus = "done";
+                      break;
+                    default:
+                      role = m.role === "user" ? "user" : "assistant";
+                  }
+                } else {
+                  // Legacy messages without msg_type
+                  role = m.role === "user" ? "user" : "assistant";
+                }
+
+                const msg: Message = {
+                  id: newId(),
+                  role,
+                  content: m.content,
+                  createdAt: new Date(m.timestamp).getTime(),
+                  ...(toolStatus ? { toolStatus } : {}),
+                };
+                return [msg];
+              });
               setMessagesBySession((prev) => ({ ...prev, [id]: mapped }));
             })
             .catch(() => {
@@ -304,7 +337,7 @@ export function useChatSessions() {
   // ---------- Streaming send (PROJ-30/31, redesigned in PROJ-35) ----------
 
   const streamingSend = useCallback(
-    (sessionId: string, text: string) => {
+    (sessionId: string, text: string, source?: string) => {
       const { trimmed } = beginUserTurn(sessionId, text);
 
       // Append an empty assistant placeholder; tokens will fill it in-place.
@@ -522,7 +555,7 @@ export function useChatSessions() {
         onToolEnd: handleToolEnd,
         onDone: finishStream,
         onError: handleError,
-      });
+      }, source);
 
       abortRef.current = handle.abort;
     },
@@ -601,12 +634,12 @@ export function useChatSessions() {
   );
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, source?: string) => {
       if (!activeSessionId || !text.trim()) return;
       if (isLoading || isStreaming) return;
 
       if (STREAM_API_URL) {
-        streamingSend(activeSessionId, text);
+        streamingSend(activeSessionId, text, source);
       } else {
         await legacySend(activeSessionId, text);
       }

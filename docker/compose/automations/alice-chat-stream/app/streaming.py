@@ -182,6 +182,7 @@ async def stream_chat(
     messages.append({"role": "user", "content": user_message})
 
     accumulated_text = ""
+    thinking_accumulator: list[str] = []
     tool_call_log: list[dict] = []
     usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
     rounds = 0
@@ -231,6 +232,7 @@ async def stream_chat(
                         # in chat_tokens_total — they are flushed to the client and forgotten.
                         thinking = msg.get("thinking") or ""
                         if thinking:
+                            thinking_accumulator.append(thinking)
                             if not thinking_start_sent:
                                 thinking_start_sent = True
                                 yield (_sse({"type": "thinking_start", "anrede": anrede}), {})
@@ -354,6 +356,7 @@ async def stream_chat(
         # End of while loop — emit the done event with side-effect payload
         side = {
             "final_text": accumulated_text,
+            "thinking_text": "".join(thinking_accumulator),
             "tool_calls": tool_call_log,
             "usage": usage,
         }

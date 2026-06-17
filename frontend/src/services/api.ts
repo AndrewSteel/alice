@@ -26,6 +26,7 @@ export interface MessageResponse {
   role: string;
   content: string;
   timestamp: string;
+  msg_type?: string;
 }
 
 // ---------- Helper ----------
@@ -178,6 +179,88 @@ export async function deleteSessionApi(sessionId: string): Promise<void> {
   }
 }
 
+// ---------- Admin API (PROJ-52) ----------
+
+export interface AdminSessionItem {
+  session_id: string;
+  username: string;
+  started_at: string;
+  last_activity: string;
+  session_type: string | null;
+  title: string | null;
+  source: string | null;
+  message_count: number;
+}
+
+export interface AdminMessageItem {
+  id: number;
+  role: string;
+  content: string;
+  msg_type: string | null;
+  timestamp: string;
+}
+
+export interface AdminSessionsResponse {
+  sessions: AdminSessionItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export async function fetchAdminSessions(
+  page: number = 1,
+  limit: number = 20
+): Promise<AdminSessionsResponse> {
+  if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
+  let res: Response;
+  try {
+    res = await fetch(
+      `${STREAM_API_URL}/admin/sessions?page=${page}&limit=${limit}`,
+      { method: "GET", headers: authHeaders() }
+    );
+  } catch {
+    throw new Error("Netzwerkfehler beim Laden des Archivs.");
+  }
+  handleAuthError(res);
+  if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
+  return res.json();
+}
+
+export async function fetchAdminSessionMessages(
+  sessionId: string
+): Promise<{ session: AdminSessionItem; messages: AdminMessageItem[] }> {
+  if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
+  let res: Response;
+  try {
+    res = await fetch(
+      `${STREAM_API_URL}/admin/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "GET", headers: authHeaders() }
+    );
+  } catch {
+    throw new Error("Netzwerkfehler beim Laden der Session.");
+  }
+  handleAuthError(res);
+  if (res.status === 404) throw new Error("404: Session nicht gefunden");
+  if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
+  return res.json();
+}
+
+export async function deleteAdminSession(sessionId: string): Promise<void> {
+  if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
+  let res: Response;
+  try {
+    res = await fetch(
+      `${STREAM_API_URL}/admin/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE", headers: authHeaders() }
+    );
+  } catch {
+    throw new Error("Netzwerkfehler beim Löschen.");
+  }
+  handleAuthError(res);
+  if (res.status === 404) throw new Error("404: Session nicht gefunden");
+  if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
+}
+
 export interface ChatCompletionResponse {
   id: string;
   object: string;
@@ -305,7 +388,8 @@ interface SseEvent {
 export function streamChat(
   sessionId: string,
   content: string,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  source?: string,
 ): StreamHandle {
   const token = getToken();
   if (!token) {
@@ -339,7 +423,7 @@ export function streamChat(
           Authorization: `Bearer ${token}`,
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ session_id: sessionId, content }),
+        body: JSON.stringify({ session_id: sessionId, content, ...(source ? { source } : {}) }),
         signal: controller.signal,
       });
     } catch (err) {

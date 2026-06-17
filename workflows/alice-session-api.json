@@ -34,7 +34,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('session_id', session_id::text, 'title', title, 'started_at', started_at::text, 'last_activity', last_activity::text) ORDER BY last_activity DESC), '[]'::json) AS sessions FROM alice.sessions WHERE user_id = '{{ $json.userId }}'::uuid",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('session_id', session_id::text, 'title', title, 'started_at', started_at::text, 'last_activity', last_activity::text) ORDER BY last_activity DESC), '[]'::json) AS sessions FROM alice.sessions WHERE user_id = '{{ $json.userId }}'::uuid AND (session_type = 'llm' OR session_type IS NULL)",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -152,7 +152,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('role', role, 'content', content, 'timestamp', timestamp::text) ORDER BY timestamp ASC), '[]'::json) AS messages FROM alice.messages WHERE session_id = '{{ $('JWT: Get Messages').first().json.sessionId }}'::uuid",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('role', role, 'content', content, 'timestamp', timestamp::text, 'msg_type', msg_type) ORDER BY timestamp ASC), '[]'::json) AS messages FROM alice.messages WHERE session_id = '{{ $('JWT: Get Messages').first().json.sessionId }}'::uuid",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",

@@ -9,7 +9,7 @@ interface ChatWindowProps {
   isLoading: boolean;
   messagesLoading?: boolean;
   isStreaming?: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, source?: string) => void;
   onStop?: () => void;
 }
 

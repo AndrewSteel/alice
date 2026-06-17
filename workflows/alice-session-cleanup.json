@@ -1,0 +1,56 @@
+{
+  "name": "alice-session-cleanup",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "id": "schedule-trigger",
+      "name": "Schedule: Daily 03:00"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH deleted AS (DELETE FROM alice.sessions WHERE session_type = 'ha_only' AND expires_at IS NOT NULL AND expires_at < NOW() RETURNING session_id) SELECT COUNT(*) AS deleted_count FROM deleted",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [288, 0],
+      "id": "pg-cleanup",
+      "name": "PG: Delete Expired Sessions",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: Daily 03:00": {
+      "main": [
+        [
+          {
+            "node": "PG: Delete Expired Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

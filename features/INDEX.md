@@ -28,7 +28,9 @@
 | PROJ-49 | 2.2   | ESPHome Device Feedback — LED-Zustandsmaschine + Wake Sound; Clockwise/Blink/Counter-clockwise per State; Wake Sound Konsistenz | Deployed  | [Spec](PROJ-49-esphome-device-feedback.md) | 2026-06-15 |
 
 | PROJ-50 | 2.2   | ESPHome Wyoming Frame Split — LED zeigt "Thinking" während LLM-Wartezeit; Gateway sendet separaten AudioStart/AudioStop für "Warte bitte…" + neuer Device-Zustand LLM_WAITING | Roadmap  | —                                         | 2026-06-15 |
+| PROJ-51 | 2.2   | Chat-Protokoll-Speicherung & Titelgenerierung — Erweitertes Nachrichtenmodell (STT/Thinking/HA), 30-Tage-Retention, Auto-Titel nach erstem LLM-Austausch, Sidebar-Titel-Fix | Deployed  | [Spec](PROJ-51-chat-storage-and-title-generation.md) | 2026-06-17 |
+| PROJ-52 | 2.2   | Admin-Chatarchiv — Neuer Settings-Tab: Liste aller Chats aller Nutzer (30 Tage), Detail-Ansicht mit allen Nachrichtentypen, Löschen-Funktion, Admin-only | Deployed  | [Spec](PROJ-52-admin-chat-archive.md) | 2026-06-17 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-51
+## Next Available ID: PROJ-53
