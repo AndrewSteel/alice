@@ -36,7 +36,9 @@
 - [ ] Erkannter Sprecher (Konfidenz ≥ Schwellenwert) → dieser Turn nutzt dessen `user_id` und Rolle
 - [ ] Unbekannter Sprecher oder Konfidenz < Schwellenwert → dieser Turn nutzt Guest-Rolle
 - [ ] Binäre Erkennung — keine Rückfrage bei unsicherer Erkennung, direkt Guest-Rolle
-- [ ] Erster Turn einer Session: Alice begrüßt den Sprecher als Auftakt der Antwort — "Hallo {display_name}, …" (bekannt) bzw. "Hallo Gast, was kann ich für dich tun?" (unbekannt); der bisherige Wake-Sound entfällt
+- [ ] Erster Turn einer Session: Alice begrüßt den Sprecher als Auftakt der Antwort; der bisherige Wake-Sound entfällt
+  - `ha_only`: Begrüßung + Ergebnis in einem TTS-Output — *"Hallo {display_name}, das Licht ist jetzt an."* / *"Hallo Gast, das Licht ist jetzt an."*
+  - `llm`: Begrüßung wird sofort nach Speaker-ID gesprochen (füllt LLM-Wartezeit) — *"Hallo {display_name}, einen Moment…"* / *"Hallo Gast, was kann ich für dich tun?"* — LLM-Antwort folgt nahtlos; ersetzt den "Warte bitte…"-Marker aus PROJ-50 für bekannte Sprecher
 - [ ] Folge-Turns in einer CC-Session: Sprecher wird pro Turn neu identifiziert; Rolle kann sich zwischen Turns ändern
 - [ ] Wechselt der Sprecher in einer CC-Session, gelten für den neuen Turn ausschließlich dessen Berechtigungen — keine Vererbung der Rolle aus dem vorigen Turn
 
