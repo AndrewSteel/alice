@@ -2,7 +2,7 @@
 
 ## Status: Planned
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-18 (per-utterance CC recognition added)
 
 ## Dependencies
 - Requires: PROJ-40 (Speech Gateway Service) — Speaker-ID-Hook im Gateway, Wyoming-Pipeline
@@ -27,14 +27,18 @@
 
 - Als Admin möchte ich Stimmprofile einsehen und löschen können.
 
+- Als Admin möchte ich, dass jeder Turn in einer laufenden CC-Session neu erkannt wird, damit ein Sprecher ohne Berechtigung keine privilegierten Befehle in meiner Session ausführen kann.
+
 ## Acceptance Criteria
 
 ### Sprechererkennung
-- [ ] Gateway identifiziert Sprecher aus dem Utterance-Audio bevor der LLM-Call erfolgt
-- [ ] Erkannter Sprecher (Konfidenz ≥ Schwellenwert) → Session nutzt dessen `user_id` und Rolle
-- [ ] Unbekannter Sprecher oder Konfidenz < Schwellenwert → Session nutzt Guest-Rolle
-- [ ] Wake-Sound wird ersetzt durch personalisierte Begrüßung: "Hallo {display_name}" (bekannt) bzw. "Hallo Gast, was kann ich für dich tun?" (unbekannt)
+- [ ] Gateway identifiziert Sprecher aus dem Utterance-Audio **jedes Turns** bevor der LLM-Call erfolgt
+- [ ] Erkannter Sprecher (Konfidenz ≥ Schwellenwert) → dieser Turn nutzt dessen `user_id` und Rolle
+- [ ] Unbekannter Sprecher oder Konfidenz < Schwellenwert → dieser Turn nutzt Guest-Rolle
 - [ ] Binäre Erkennung — keine Rückfrage bei unsicherer Erkennung, direkt Guest-Rolle
+- [ ] Erster Turn einer Session: Alice begrüßt den Sprecher als Auftakt der Antwort — "Hallo {display_name}, …" (bekannt) bzw. "Hallo Gast, was kann ich für dich tun?" (unbekannt); der bisherige Wake-Sound entfällt
+- [ ] Folge-Turns in einer CC-Session: Sprecher wird pro Turn neu identifiziert; Rolle kann sich zwischen Turns ändern
+- [ ] Wechselt der Sprecher in einer CC-Session, gelten für den neuen Turn ausschließlich dessen Berechtigungen — keine Vererbung der Rolle aus dem vorigen Turn
 
 ### Enrollment — ESPHome Voice-Pfad
 - [ ] "Hey Jarvis, lass uns einen neuen Nutzer aufnehmen" startet Enrollment mit Rolle `user` — nur wenn auslösender Sprecher als Admin erkannt
@@ -70,10 +74,12 @@
 - **Stimme verändert** (Krankheit, Stimmbruch): Erkennung schlägt fehl → Guest-Rolle; Neueinrollung via WebApp oder erneutes ESPHome-Enrollment.
 - **Erst-Deployment ohne eingerollte Nutzer**: Alle Sprecher werden als Gast erkannt bis Bootstrap abgeschlossen.
 - **Mehrere Sprecher gleichzeitig**: Dominanter Sprecher wird erkannt; bei unklarer Dominanz → Guest-Rolle.
+- **Sprecher-Wechsel in CC (Rechteeinschränkung)**: Admin startet CC; ein Gast oder unbekannter Sprecher übernimmt den nächsten Turn → Turn wird mit Guest-Rechten ausgeführt, auch wenn die Session ursprünglich von einem Admin gestartet wurde.
+- **Sprecher-Wechsel zu höherer Berechtigung in CC**: Unbekannter Sprecher startet Session (Guest-Rolle); Admin spricht im Folge-Turn → Admin-Rechte gelten ab genau diesem Turn.
 
 ## Technical Requirements
 
-- **Performance**: Speaker-ID läuft parallel zum STT-Beginn; Ziel: < 500 ms Mehrlatenz gegenüber aktuellem Wake-Sound
+- **Performance**: Speaker-ID läuft parallel zum STT-Beginn in jedem Turn; Ziel: < 500 ms Mehrlatenz pro Turn gegenüber reiner STT-Verarbeitung
 - **Hardware**: TITAN X (Embeddings/Speaker-ID, lokal — gemäß PRD-Constraints)
 - **Lokal-First**: Kein Cloud-Dienst für Speaker-ID; lokales Embedding-Modell
 - **Sprache**: Enrollment-Dialog auf Deutsch (Standard), Antworten nach eingestellter Nutzerpräferenz
