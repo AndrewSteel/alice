@@ -5,24 +5,23 @@
 # a fixed IP (DHCP reservation in the router). If the IP changes, the
 # device gets the spoken error "Dieses Gerät ist nicht bei Alice registriert".
 #
-# Adding a device is config-only — no code change. Add one block here and a
-# matching ESPHome YAML under devices/<device-name>/espHome.yaml, then
+# Adding a device is config-only — no code change. Add one block here, then
 # restart the gateway (changes are read at startup).
 #
 # Deploy to the Docker volume:
 #   /srv/compose/automations/alice-speech-gateway/config/device-mapping.yaml
 #
+# PROJ-43: user_id removed — user identity is determined per-turn by Speaker-ID
+# (SpeechBrain ECAPA-TDNN). name and room are kept for logging and room context.
+#
 # Fields per entry:
-#   user_id  (required)  must match an existing alice.users.id (UUID)
-#   name     (optional)  human-readable device name (used in logs / future UI)
-#   room     (optional)  room label (reserved for PROJ-43 speaker context)
+#   name  (optional)  human-readable device name (used in logs)
+#   room  (optional)  room label (passed to alice-chat-stream as device_id context)
 
 devices:
   "192.168.1.X":
-    user_id: "00000000-0000-0000-0000-000000000001"
     name: "Küche HA Voice PE"
     room: "Küche"
   "192.168.1.Y":
-    user_id: "00000000-0000-0000-0000-000000000002"
     name: "Büro HA Voice PE"
     room: "Büro"

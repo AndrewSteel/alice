@@ -19,7 +19,7 @@ import asyncio
 import io
 import logging
 import wave as _wave
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from . import config, tts
 from .chat_client import ChatError, ChatTimeout, stream_reply
@@ -62,13 +62,19 @@ class _ThinkingMessage(str):
 class PipelineResult:
     """Outcome of one utterance turn."""
 
-    __slots__ = ("conversation_ended", "interrupted", "no_speech")
+    __slots__ = (
+        "conversation_ended", "interrupted", "no_speech",
+        "speaker_user_id", "speaker_confidence", "speaker_display_name",
+    )
 
     def __init__(
         self,
         conversation_ended: bool = False,
         interrupted: bool = False,
         no_speech: bool = False,
+        speaker_user_id: Optional[str] = None,
+        speaker_confidence: float = 0.0,
+        speaker_display_name: Optional[str] = None,
     ) -> None:
         self.conversation_ended = conversation_ended
         self.interrupted = interrupted
@@ -76,6 +82,10 @@ class PipelineResult:
         # transcription ambiguity. The Wyoming handler uses this to end the
         # session rather than looping back into continued-conversation.
         self.no_speech = no_speech
+        # Speaker-ID result for this turn (PROJ-43). None → guest.
+        self.speaker_user_id = speaker_user_id
+        self.speaker_confidence = speaker_confidence
+        self.speaker_display_name = speaker_display_name
 
 
 class VoicePipeline:
@@ -92,6 +102,7 @@ class VoicePipeline:
         tts_target_rate: int | None = None,
         send_audio_format: Callable[[int], Awaitable[None]] | None = None,
         device_id: str | None = None,
+        jwt_factory: Optional[Callable[[str], str]] = None,
     ) -> None:
         self.session_id = session_id
         self.user_id = user_id
@@ -109,6 +120,9 @@ class VoicePipeline:
         self._interrupt = asyncio.Event()
         self._log = {"session_id": session_id, "user_id": user_id}
         self._device_id = device_id
+        # PROJ-43: called with speaker user_id to mint a per-turn service JWT.
+        # None → JWT is not updated per turn (WebApp path).
+        self._jwt_factory = jwt_factory
 
     def set_jwt(self, jwt_token: str) -> None:
         """
@@ -135,9 +149,15 @@ class VoicePipeline:
         pcm_width: int = 2,
         pcm_channels: int = 1,
         speak_on_empty: bool = True,
+        speaker_profiles: Optional[list] = None,
+        is_first_turn: bool = False,
     ) -> PipelineResult:
         """
         Run one full turn: transcribe `audio`, get the AI reply, speak it.
+
+        PROJ-43: when speaker_profiles is provided, Speaker-ID runs in parallel
+        with STT. The identified user's JWT replaces the session token for this
+        turn so alice-chat-stream uses the correct user context.
 
         Returns a PipelineResult. STT/AI/TTS errors produce a spoken German
         error message (except a Piper outage, which raises tts.TTSError).
@@ -146,38 +166,130 @@ class VoicePipeline:
         if audio_format == "pcm":
             audio = _pcm_to_wav(audio, rate=pcm_rate, channels=pcm_channels, sampwidth=pcm_width)
 
-        # --- STT ---
+        # --- STT + Speaker-ID in parallel (PROJ-43) ---
+        stt_task = asyncio.create_task(self._stt.transcribe(audio, config.SPEECH_LANGUAGE))
+
+        speaker_task: Optional[asyncio.Task] = None
+        if speaker_profiles is not None:
+            from . import speaker_id as _sid
+            if _sid.is_ready():
+                speaker_task = asyncio.create_task(
+                    _sid.identify_from_audio(audio, speaker_profiles, config.SPEAKER_THRESHOLD)
+                )
+
         try:
-            transcript = await self._stt.transcribe(audio, config.SPEECH_LANGUAGE)
+            transcript = await stt_task
         except STTError:
+            if speaker_task:
+                speaker_task.cancel()
             await self._speak(config.SPEECH_ERRORS["stt_failed"])
             return PipelineResult()
+
+        # Collect Speaker-ID result (2 s budget; fall back to guest on timeout)
+        spk_user_id: Optional[str] = None
+        spk_confidence: float = 0.0
+        spk_display_name: Optional[str] = None
+        if speaker_task is not None:
+            try:
+                spk_user_id, spk_confidence, spk_display_name = await asyncio.wait_for(
+                    speaker_task, timeout=2.0
+                )
+            except (asyncio.TimeoutError, Exception) as exc:
+                logger.warning("Speaker-ID result discarded: %s", exc)
+
+        # Update JWT and user_id for this turn if the speaker was identified
+        if spk_user_id and self._jwt_factory:
+            self._jwt = self._jwt_factory(spk_user_id)
+            self.user_id = spk_user_id
+            self._log = {"session_id": self.session_id, "user_id": self.user_id}
 
         if not transcript.strip():
             if speak_on_empty:
                 await self._speak(config.SPEECH_ERRORS["stt_empty"])
-            return PipelineResult(no_speech=True)
+            return PipelineResult(
+                no_speech=True,
+                speaker_user_id=spk_user_id,
+                speaker_confidence=spk_confidence,
+                speaker_display_name=spk_display_name,
+            )
 
         await self._send_status(STATUS_STT_COMPLETE)
-        logger.info("STT transcript: %r", transcript, extra=self._log)
+        logger.info(
+            "STT transcript: %r  speaker=%r (conf=%.2f)",
+            transcript, spk_user_id, spk_confidence,
+            extra=self._log,
+        )
 
-        return await self._run_ai_turn(transcript)
+        # Determine first-turn greeting (PROJ-43)
+        greeting: Optional[str] = None
+        if is_first_turn:
+            if spk_display_name:
+                greeting = f"Hallo {spk_display_name},"
+            else:
+                greeting = "Hallo Gast,"
 
-    async def run_text_turn(self, transcript: str) -> PipelineResult:
+        result = await self._run_ai_turn(transcript, greeting=greeting)
+        result.speaker_user_id = spk_user_id
+        result.speaker_confidence = spk_confidence
+        result.speaker_display_name = spk_display_name
+        return result
+
+    async def run_text_turn(
+        self,
+        transcript: str,
+        speaker_user_id: Optional[str] = None,
+        speaker_confidence: float = 0.0,
+        speaker_display_name: Optional[str] = None,
+        is_first_turn: bool = False,
+    ) -> PipelineResult:
         """
         Run a turn from an already-transcribed string.
 
-        Used to feed a barge-in interrupt transcript straight back into the
-        pipeline as new input without re-running STT.
-        """
-        return await self._run_ai_turn(transcript)
+        Used when the caller has already run STT (Wyoming handler) or when
+        feeding a barge-in interrupt transcript back without re-running STT.
 
-    async def _run_ai_turn(self, transcript: str) -> PipelineResult:
+        PROJ-43: if speaker_user_id is provided, the pipeline JWT is updated
+        before the alice-chat-stream call.
+        """
+        if speaker_user_id and self._jwt_factory:
+            self._jwt = self._jwt_factory(speaker_user_id)
+            self.user_id = speaker_user_id
+            self._log = {"session_id": self.session_id, "user_id": self.user_id}
+
+        greeting: Optional[str] = None
+        if is_first_turn:
+            if speaker_display_name:
+                greeting = f"Hallo {speaker_display_name},"
+            else:
+                greeting = "Hallo Gast,"
+
+        result = await self._run_ai_turn(transcript, greeting=greeting)
+        result.speaker_user_id = speaker_user_id
+        result.speaker_confidence = speaker_confidence
+        result.speaker_display_name = speaker_display_name
+        return result
+
+    async def _run_ai_turn(
+        self,
+        transcript: str,
+        greeting: Optional[str] = None,
+    ) -> PipelineResult:
+        """
+        Drive the LLM → TTS pipeline for one turn.
+
+        greeting (PROJ-43): "Hallo {name}," or "Hallo Gast," on the first turn
+        of a session. Injected differently per session type:
+          - llm  path: replaces the "Warte bitte" waiting message when
+                       thinking_start fires.
+          - ha_only path: prepended to the first sentence's text (no LLM
+                           reasoning, so thinking_start never fires).
+        """
         self.clear_interrupt()
         await self._send_status(STATUS_AI_PROCESSING)
 
         accumulator = SentenceAccumulator()
         conversation_ended = False
+        greeting_pending = greeting  # consumed on the first relevant event
 
         # Pipeline parallelism (spec criterion 4.4). Three concurrent stages:
         #   1. LLM token loop (here)  — splits tokens into sentences, queues them
@@ -200,12 +312,29 @@ class VoicePipeline:
                     break
 
                 if event.kind == "token":
+                    if greeting_pending:
+                        # ha_only path: inject greeting prefix into the accumulator
+                        # so the first sentence becomes "Hallo {name}, <HA result>."
+                        accumulator.feed(greeting_pending + " ")
+                        greeting_pending = None
                     for sentence in accumulator.feed(event.text):
                         await sentence_queue.put(sentence)
                 elif event.kind == "thinking_start":
                     if not self._interrupt.is_set():
-                        waiting_msg = config.SPEECH_THINKING.get(event.text, config.SPEECH_THINKING["du"])
-                        await sentence_queue.put(_ThinkingMessage(waiting_msg))
+                        if greeting_pending:
+                            # llm path: use greeting as the waiting message
+                            name = greeting_pending.rstrip(",").replace("Hallo ", "")
+                            if name == "Gast":
+                                msg = config.SPEECH_GREETING_THINKING["guest"]
+                            else:
+                                msg = config.SPEECH_GREETING_THINKING["known"].format(name=name)
+                            await sentence_queue.put(_ThinkingMessage(msg))
+                            greeting_pending = None
+                        else:
+                            waiting_msg = config.SPEECH_THINKING.get(
+                                event.text, config.SPEECH_THINKING["du"]
+                            )
+                            await sentence_queue.put(_ThinkingMessage(waiting_msg))
                 elif event.kind == "conversation_end":
                     conversation_ended = True
                 elif event.kind == "done":

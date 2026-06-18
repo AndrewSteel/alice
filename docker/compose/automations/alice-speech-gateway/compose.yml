@@ -53,6 +53,9 @@ services:
       # automation = reach alice-chat-stream
       automation:
         aliases: [alice-speech-gateway]
+      # backend = reach postgres for speaker profiles (PROJ-43)
+      backend:
+        aliases: [alice-speech-gateway]
 
 networks:
   frontend:
@@ -61,3 +64,6 @@ networks:
   automation:
     external: true
     name: automation
+  backend:
+    external: true
+    name: backend
