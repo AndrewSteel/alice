@@ -1,8 +1,8 @@
 # PROJ-43: Speaker Recognition (Speaker-ID)
 
-## Status: Architected
+## Status: In Review
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (Tech design added by /architecture)
+**Last Updated:** 2026-06-18 (QA completed by /qa — 3 High bugs found, not production-ready)
 
 ## Dependencies
 - Requires: PROJ-40 (Speech Gateway Service) — Speaker-ID-Hook im Gateway, Wyoming-Pipeline
@@ -248,7 +248,136 @@ Settings → "Stimmprofile" tab (admin only)
 | `frontend/src/components/Settings/SettingsPage.tsx` | MODIFIED |
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-06-18
+**Tester:** QA Engineer (AI)
+
+### Acceptance Criteria Status
+
+#### Sprechererkennung (Speaker Recognition)
+
+- [x] Gateway identifiziert Sprecher aus dem Utterance-Audio jedes Turns vor dem LLM-Call (`wyoming_transport.py:148-154`, `pipeline.py:170-199`)
+- [x] Erkannter Sprecher (Konfidenz ≥ Schwellenwert) → Turn nutzt dessen `user_id` und Rolle (`pipeline.py:201-204`, `jwt_factory` callback)
+- [x] Unbekannter Sprecher / Konfidenz < Schwellenwert → Guest-Rolle (`speaker_id.py:115-117`, binary — keine Rückfrage)
+- [x] Erster Turn `ha_only`: Begrüßung als Prefix der HA-Antwort — `pipeline.py:316-319`
+- [x] Erster Turn `llm`: Begrüßung sofort nach Speaker-ID als Thinking-Message (`pipeline.py:326-335`)
+- [x] Folge-Turns CC: Speaker-ID per Turn neu ausgeführt (Konversationsschleife in `wyoming_transport.py`)
+- [x] Sprecher-Wechsel in CC: Nur Berechtigungen des aktuellen Turns gelten (`VoicePipeline.user_id` wird via `jwt_factory` pro Turn ersetzt)
+
+#### Enrollment — ESPHome Voice-Pfad
+
+- [x] "lass uns einen neuen Nutzer aufnehmen" → Enrollment mit Rolle `user` (nur Admin) — `wyoming_transport.py:190-207`
+- [x] "lass uns einen neuen Gast aufnehmen" → Enrollment mit Rolle `guest` (nur Admin)
+- [x] Nicht-Admin-Trigger → `"Enrollment kann nur von einem Administrator gestartet werden."` (`config.py:103`)
+- [x] Alice führt durch: `display_name` (mit Bestätigung), `username` (mit Bestätigung), Anrede, Sprache — `enrollment.py` state machine
+- [x] Username-Kollision → Alice informiert und fragt nach Alternative (`enrollment.py:149-153`)
+- [x] Stimmproben aus Dialog-Turns erfasst (`enrollment.py:119-120`, `get_sample_audio()`)
+- [ ] **BUG-1 (HIGH):** Neuer `alice.users`-Eintrag wird angelegt — aber `anrede` und `sprache` werden still verworfen, nicht in `alice.user_profiles.preferences` geschrieben
+- [x] Eingerollter Nutzer sofort erkennbar — Profile in-place neu geladen (`wyoming_transport.py:335-339`)
+
+#### Enrollment — WebApp-Pfad
+
+- [ ] **BUG-3 (HIGH):** "Stimmregistrierung"-Button im Profil — **FEHLT** (kein Frontend implementiert)
+- [ ] **BUG-3 (HIGH):** Aufnahme von Stimmproben via Browser-Mikrofon — **FEHLT**
+- [ ] **BUG-3 (HIGH):** Admin-Toggle `allow_voice_enrollment` pro Nutzer in Nutzerverwaltung — **FEHLT**
+- [ ] **BUG-3 (HIGH):** Bootstrap — Backend-Endpoint `POST /enroll` existiert, aber **kein UI-Zugang**
+- [ ] **BUG-3 (HIGH):** Stimmproben erneuern — Backend unterstützt Überschreiben, aber **kein UI**
+
+#### Admin-Verwaltung
+
+- [ ] **BUG-3 (HIGH):** Stimmprofile einsehen und löschen in WebApp — **FEHLT** (`VoiceProfilesSection.tsx` nicht erstellt)
+- [ ] **BUG-3 (HIGH):** E-Mail + Passwort für ESPHome-Nutzer nachträglich vergeben — **FEHLT** (kein UI)
+
+#### device-mapping.yaml
+
+- [x] `user_id`-Feld entfernt — `config.py` `Device`-Dataclass und `device-mapping.example.yaml` aktualisiert
+- [x] `name` und `room` erhalten
+
+---
+
+### Edge Cases Status
+
+- [x] Bootstrap (Henne-Ei): Backend-Endpoint `POST /enroll` offen für Admin ohne Prior-Enrollment — kein Frontend-Zugang (→ BUG-3)
+- [x] Admin unter Schwellenwert → Enrollment-Trigger abgelehnt (wird als Guest erkannt, kein Admin-Recht)
+- [x] Username-Kollision → Alice fragt nach Alternative (enrollment.py state machine)
+- [x] Enrollment-Abbruch / leerer Transcript → kein User angelegt (DB-Schreibung nur bei `session.succeeded`)
+- [x] Erst-Deployment ohne eingerollte Nutzer → alle als Gast erkannt (`load_all_profiles()` liefert leere Liste)
+- [ ] **BUG-2 (HIGH):** Enrollment-Abbruch nach Success-TTS — Alice sagt "Einrollung abgeschlossen" bevor `create_enrolled_user()` aufgerufen wird; DB-Fehler nach TTS → Nutzer hört Erfolg, kein Nutzer wurde angelegt
+
+---
+
+### Security Audit Results
+
+- [x] JWT required on all `/enroll/*` endpoints — `_require_auth` Dependency
+- [x] `user_id` kommt ausschließlich aus JWT-Payload, nie aus Request-Body (`enroll_router.py:71`)
+- [x] Admin-only Endpoints (GET /profiles, DELETE, PATCH /allow) prüfen `role == "admin"` aus JWT
+- [x] SQL-Injection: alle DB-Queries parametrisiert (asyncpg `$1, $2` Syntax)
+- [x] Wyoming-Port nur im Docker-internen Netzwerk erreichbar — kein externer Angriff auf Enrollment
+- [x] Enrollment-Trigger verlangt erkannten Admin-Sprecher — unbekannte Sprecher können kein Enrollment starten
+- [x] Nginx: `/api/speech/enroll` separater Block mit expliziten Methoden (GET, POST, DELETE, PATCH, OPTIONS)
+
+---
+
+### Bugs Found
+
+#### BUG-1: `anrede` und `sprache` werden in ESPHome-Enrollment still verworfen
+- **Severity:** High
+- **Steps to Reproduce:**
+  1. Admin triggert ESPHome-Enrollment
+  2. Benutzer gibt `anrede=Sie` und `sprache=Englisch` an
+  3. Enrollment abgeschlossen
+  4. Erwartet: `alice.user_profiles.preferences` enthält `{"anrede": "sie", "sprache": "en"}`
+  5. Tatsächlich: `alice.user_profiles` Eintrag fehlt völlig; `alice.users` hat keine Felder für diese Werte
+- **Root Cause:** `speaker_db.create_enrolled_user()` nimmt `anrede`/`sprache` als Parameter an, ignoriert sie aber; schreibt nicht in `alice.user_profiles`
+- **File:** `docker/compose/automations/alice-speech-gateway/app/speaker_db.py:164-181`
+- **Priority:** Fix before deployment
+
+#### BUG-2: Vorzeitige Erfolgs-TTS vor tatsächlicher DB-Schreibung im ESPHome-Enrollment
+- **Severity:** High
+- **Steps to Reproduce:**
+  1. Admin triggert ESPHome-Enrollment, füllt alle Felder aus
+  2. Enrollment State Machine erreicht `ASKING_SPRACHE` → gibt sofort "Einrollung abgeschlossen" zurück → wird gesprochen
+  3. Danach schlägt `create_enrolled_user()` fehl (z.B. DB-Verbindungsproblem)
+  4. Erwartet: Alice spricht Erfolg erst nach erfolgreichem DB-Write
+  5. Tatsächlich: Erfolg bereits gesprochen; kein Nutzer angelegt; kein Fehler-Feedback
+- **Root Cause:** `enrollment.py:172-173` — success message returned in `process_turn()` state machine; DB write happens externally in `wyoming_transport.py:320-340` after TTS has already played
+- **Files:** `enrollment.py:162-173`, `wyoming_transport.py:307-342`
+- **Priority:** Fix before deployment
+
+#### BUG-3: Frontend-Implementierung komplett fehlend
+- **Severity:** High
+- **Steps to Reproduce:**
+  1. Nutzer öffnet WebApp → Settings → Mein Profil
+  2. Erwartet: "Stimmregistrierung"-Karte (wenn admin-enabled)
+  3. Tatsächlich: Kein Enrollment-UI vorhanden
+- **Root Cause:** Backend-Commit (edb2722) implementierte nur Gateway/DB-Schicht; Frontend-Dateien wurden nie erstellt
+- **Missing Files:**
+  - `frontend/src/components/Settings/VoiceEnrollmentDialog.tsx` (NEW — fehlt)
+  - `frontend/src/components/Settings/VoiceProfilesSection.tsx` (NEW — fehlt)
+  - `frontend/src/components/Settings/MeinProfilSection.tsx` (MODIFIED — nicht angepasst)
+  - `frontend/src/components/Settings/NutzerVerwaltungSection.tsx` (MODIFIED — nicht angepasst)
+  - `frontend/src/components/Settings/UserTable.tsx` (MODIFIED — nicht angepasst)
+  - `frontend/src/components/Settings/SettingsPage.tsx` (MODIFIED — nicht angepasst)
+- **Priority:** Fix before deployment
+
+#### BUG-4: Enrollment API akzeptiert weniger als 5 Stimmproben
+- **Severity:** Medium
+- **Steps to Reproduce:**
+  1. `POST /enroll` mit 1 WAV-Datei aufrufen
+  2. Erwartet: 400 Bad Request ("Mindestens 5 Audioaufnahmen erforderlich")
+  3. Tatsächlich: 200 OK — Enrollment mit nur 1 Sample gespeichert
+- **Root Cause:** `enroll_router.py:85` prüft `< 1` statt `< 5`
+- **Priority:** Fix before deployment
+
+---
+
+### Summary
+
+- **Acceptance Criteria:** 15/25 passed (10 failed)
+- **Bugs Found:** 4 total (0 Critical, 3 High, 1 Medium)
+- **Security:** Pass — JWT-Auth, user_id aus Token, parametrisierte Queries
+- **Production Ready:** NO
+- **Recommendation:** Fix BUG-1 (Datenverlust anrede/sprache), BUG-2 (Premature TTS), BUG-3 (Frontend), BUG-4 (Minimum Samples) — dann erneut `/qa` ausführen
 
 ## Deployment
 _To be added by /deploy_
