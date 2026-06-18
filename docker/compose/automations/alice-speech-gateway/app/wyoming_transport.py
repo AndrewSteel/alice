@@ -5,21 +5,31 @@ Handles direct Wyoming connections from ESPHome devices after wakeword
 detection. The gateway runs the full-voice pipeline (faster-whisper STT →
 alice-chat-stream → Piper TTS) and streams audio back over Wyoming protocol.
 
+PROJ-43 additions:
+  - Per-turn Speaker-ID: STT + Speaker-ID run in parallel on every turn.
+    The identified user's JWT is used for the alice-chat-stream call.
+  - First-turn greeting replaces the wake sound.
+  - Enrollment state machine: triggered by specific phrases spoken by an
+    identified admin; creates the new user in alice.users.
+  - device-mapping.yaml: user_id field removed (identity from Speaker-ID).
+
 Continued conversation: after each TTS response the session stays open and
 waits for the next AudioStart/AudioStop cycle. The session ends on a
 conversation_end signal from alice-chat-stream, a silence timeout, a Piper
 outage, or a device disconnect.
 
-Auth: no JWT. The Wyoming port is only reachable inside the Docker network.
-The source IP of the TCP connection is mapped to an alice user_id (plus
-name/room) via device-mapping.yaml; unknown IPs get a spoken error and no
-AI call.
+Auth: no JWT from the device. The Wyoming port is only reachable inside the
+Docker network. The source IP is mapped to device name/room via
+device-mapping.yaml; unknown IPs get a spoken error and no AI call.
 """
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import uuid
+import wave as _wave
+from typing import Optional
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.event import Event
@@ -28,21 +38,25 @@ from wyoming.server import AsyncEventHandler, AsyncServer
 
 from . import config, tts
 from .pipeline import VoicePipeline
-from .stt import get_engine
+from .stt import STTError, get_engine
 
 logger = logging.getLogger("alice-speech-gateway.wyoming")
 
-# Audio delivered to the HA Voice PE device: 48 kHz mono 16-bit PCM.
-# 48 kHz matches the I2S hardware rate so the device uses i2s_audio_speaker
-# directly — no resampling chain with its ~6 s startup delay.
 _SAMPLE_RATE = 48000
 _SAMPLE_WIDTH = 2
 _CHANNELS = 1
-# Max audio payload per Wyoming AudioChunk event sent to the device.
-# ESP32 rx_buffer_ is 16 KB; a single event (header ~190 B + payload) must fit.
 _MAX_DEVICE_CHUNK = 4096
-# Bytes per second at the target audio rate — used for send pacing.
 _BYTES_PER_SEC = _SAMPLE_RATE * _SAMPLE_WIDTH * _CHANNELS  # 96 000 B/s at 48 kHz
+
+
+def _pcm_to_wav(pcm: bytes, *, rate: int, channels: int, sampwidth: int) -> bytes:
+    buf = io.BytesIO()
+    with _wave.open(buf, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sampwidth)
+        wf.setframerate(rate)
+        wf.writeframes(pcm)
+    return buf.getvalue()
 
 
 class GatewayWyomingHandler(AsyncEventHandler):
@@ -52,26 +66,19 @@ class GatewayWyomingHandler(AsyncEventHandler):
         super().__init__(*args, **kwargs)
         self._device_mapping = device_mapping
         self._info = wyoming_info
-        # Stable identifier: client IP extracted from the TCP connection.
         peername = self.writer.get_extra_info("peername")
         self._client_ip: str = peername[0] if peername else ""
-        # Audio events are forwarded here so _conversation_loop can consume them.
         self._event_queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop_task: asyncio.Task | None = None
 
     async def handle_event(self, event: Event) -> bool:
-        # Session already ended — returning False signals the Wyoming server to
-        # close this connection. This handles any late events that arrive after
-        # _conversation_loop already closed the writer and exited.
         if self._loop_task is not None and self._loop_task.done():
             return False
 
         if not AudioChunk.is_type(event.type):
             logger.debug(
                 "Wyoming event: type=%r data=%r client_ip=%s",
-                event.type,
-                event.data,
-                self._client_ip,
+                event.type, event.data, self._client_ip,
             )
 
         if Describe.is_type(event.type):
@@ -87,11 +94,24 @@ class GatewayWyomingHandler(AsyncEventHandler):
 
     async def _conversation_loop(self) -> None:
         """Run a continued-conversation loop for this HA device connection."""
+        from . import enrollment as enroll_mod
+        from . import speaker_db
+        from . import speaker_id as sid_mod
+
         session_id = str(uuid.uuid4())
         device = self._device_mapping.get(self._client_ip)
         device_label = device.name if device else self._client_ip
-        pipeline: VoicePipeline | None = None
+        pipeline: Optional[VoicePipeline] = None
         turn_count = 0
+        active_enrollment: Optional[enroll_mod.EnrollmentSession] = None
+
+        # Load enrolled voice profiles once per session
+        speaker_profiles: list[dict] = []
+        if speaker_db.is_ready():
+            try:
+                speaker_profiles = await speaker_db.load_all_profiles()
+            except Exception as exc:
+                logger.warning("Could not load speaker profiles: %s", exc)
 
         while True:
             collected = await self._collect_audio()
@@ -101,59 +121,144 @@ class GatewayWyomingHandler(AsyncEventHandler):
                     extra={"session_id": session_id, "device": device_label},
                 )
                 break
-            audio, pcm_rate, pcm_width, pcm_channels = collected
+            audio_pcm, pcm_rate, pcm_width, pcm_channels = collected
 
             if device is None:
                 logger.warning("Unknown Wyoming client IP: %r", self._client_ip)
                 await self._speak_error(config.SPEECH_ERRORS["unknown_device"])
                 continue
 
+            if len(audio_pcm) < pcm_rate * pcm_width * config.MIN_AUDIO_SECONDS:
+                await self._speak_error(config.SPEECH_ERRORS["audio_too_short"])
+                continue
+
+            # Convert PCM → WAV once; reused for STT, Speaker-ID, and enrollment
+            wav = _pcm_to_wav(audio_pcm, rate=pcm_rate, channels=pcm_channels, sampwidth=pcm_width)
+
+            # --- Enrollment turn: feed audio to state machine ---
+            if active_enrollment is not None:
+                still_active = await self._run_enrollment_turn(
+                    active_enrollment, wav, speaker_profiles
+                )
+                if not still_active:
+                    active_enrollment = None
+                continue
+
+            # --- Run STT + Speaker-ID in parallel ---
+            stt_task = asyncio.create_task(get_engine().transcribe(wav, config.SPEECH_LANGUAGE))
+
+            speaker_task: Optional[asyncio.Task] = None
+            if sid_mod.is_ready() and speaker_profiles:
+                speaker_task = asyncio.create_task(
+                    sid_mod.identify_from_audio(wav, speaker_profiles, config.SPEAKER_THRESHOLD)
+                )
+
+            try:
+                transcript = await stt_task
+            except STTError:
+                if speaker_task:
+                    speaker_task.cancel()
+                await self._speak_error(config.SPEECH_ERRORS["stt_failed"])
+                continue
+
+            spk_user_id: Optional[str] = None
+            spk_confidence: float = 0.0
+            spk_display_name: Optional[str] = None
+            if speaker_task is not None:
+                try:
+                    spk_user_id, spk_confidence, spk_display_name = await asyncio.wait_for(
+                        speaker_task, timeout=2.0
+                    )
+                except (asyncio.TimeoutError, Exception) as exc:
+                    logger.warning("Speaker-ID result discarded: %s", exc)
+
+            if not transcript.strip():
+                # Genuine silence — end session quietly (PROJ-42 Bug 4 fix)
+                logger.info(
+                    "Wyoming session ended — no speech detected",
+                    extra={"session_id": session_id, "device": device_label},
+                )
+                break
+
+            logger.info(
+                "Wyoming STT: %r  speaker=%r conf=%.2f",
+                transcript, spk_user_id, spk_confidence,
+                extra={"session_id": session_id, "device": device.name},
+            )
+
+            # --- Enrollment trigger check (admin only, before AI call) ---
+            is_trigger, enroll_role = enroll_mod.is_enrollment_intent(transcript)
+            if is_trigger:
+                if spk_user_id:
+                    user_info = await speaker_db.get_user(spk_user_id)
+                    if user_info and user_info.get("role") == "admin":
+                        active_enrollment = enroll_mod.EnrollmentSession(
+                            role=enroll_role,
+                            username_checker=speaker_db.username_exists,
+                        )
+                        logger.info(
+                            "Enrollment triggered by admin %s (role=%s)",
+                            spk_user_id, enroll_role,
+                        )
+                        await self._speak_text(active_enrollment.first_prompt())
+                        continue
+                # Not admin or unrecognised → reject
+                await self._speak_error(config.SPEECH_ERRORS["enrollment_not_admin"])
+                continue
+
+            # --- Normal pipeline turn ---
+            turn_count += 1
+            is_first_turn = turn_count == 1
+
             if pipeline is None:
                 pipeline = VoicePipeline(
                     session_id=session_id,
-                    user_id=device.user_id,
-                    jwt_token=_service_token_for(device.user_id),
+                    user_id=spk_user_id or "guest",
+                    jwt_token=_token_for(spk_user_id),
                     stt=get_engine(),
                     send_status=self._noop_status,
                     send_audio=self._send_audio,
                     tts_target_rate=_SAMPLE_RATE,
-                    device_id=device.room.replace(" ", "_") if device.room else device.name.replace(" ", "_"),
+                    device_id=(
+                        device.room.replace(" ", "_") if device.room
+                        else device.name.replace(" ", "_")
+                    ),
+                    jwt_factory=_service_token_for,
                 )
                 logger.info(
                     "Wyoming session start",
-                    extra={"session_id": session_id, "user_id": device.user_id,
-                           "mode": "wyoming", "device": device.name, "room": device.room,
-                           "client_ip": self._client_ip},
+                    extra={
+                        "session_id": session_id,
+                        "user_id": spk_user_id or "guest",
+                        "mode": "wyoming",
+                        "device": device.name,
+                        "room": device.room,
+                        "client_ip": self._client_ip,
+                    },
                 )
-            else:
-                # BUG-2: re-mint the service token at the start of every turn.
-                # A continued conversation can stay open far longer than the
-                # token TTL (SERVICE_JWT_TTL_SECONDS, default 120 s); reusing the
-                # session-start token would send an expired token on later turns
-                # → 401 → spoken error mid-conversation. A single turn always
-                # completes well within the TTL, so a fresh token per turn is safe.
-                pipeline.set_jwt(_service_token_for(device.user_id))
 
-            if len(audio) < pcm_rate * pcm_width * config.MIN_AUDIO_SECONDS:
-                await self._speak_error(config.SPEECH_ERRORS["audio_too_short"])
-                continue
-
-            turn_count += 1
-            log = {"session_id": session_id, "user_id": device.user_id,
-                   "mode": "wyoming", "device": device.name, "room": device.room}
-            logger.info("Wyoming turn start", extra=log)
+            log = {
+                "session_id": session_id,
+                "mode": "wyoming",
+                "device": device.name,
+                "room": device.room,
+            }
+            logger.info(
+                "Wyoming turn start (turn=%d speaker=%r conf=%.2f)",
+                turn_count, spk_user_id, spk_confidence,
+                extra=log,
+            )
 
             await self.write_event(
                 AudioStart(rate=_SAMPLE_RATE, width=_SAMPLE_WIDTH, channels=_CHANNELS).event()
             )
             try:
-                result = await pipeline.run_turn(
-                    audio, audio_format="pcm",
-                    pcm_rate=pcm_rate, pcm_width=pcm_width, pcm_channels=pcm_channels,
-                    # Never speak an error on silence — wake-word accidental triggers
-                    # should end quietly. The device handles UX via LED and the next
-                    # wake-word cycle (user design decision, Bug 4 fix).
-                    speak_on_empty=False,
+                result = await pipeline.run_text_turn(
+                    transcript,
+                    speaker_user_id=spk_user_id,
+                    speaker_confidence=spk_confidence,
+                    speaker_display_name=spk_display_name,
+                    is_first_turn=is_first_turn,
                 )
             except tts.TTSError:
                 logger.error("Wyoming Piper unavailable — ending session", extra=log)
@@ -164,9 +269,6 @@ class GatewayWyomingHandler(AsyncEventHandler):
             logger.info("Wyoming turn done", extra=log)
 
             if result.no_speech:
-                # Whisper VAD removed all audio — genuine silence in the room.
-                # End the session rather than looping: the user can trigger a
-                # new session with the wake word when ready.
                 logger.info("Wyoming session ended — no speech detected", extra=log)
                 break
 
@@ -178,21 +280,71 @@ class GatewayWyomingHandler(AsyncEventHandler):
             "Wyoming session end",
             extra={"session_id": session_id, "device": device_label, "client_ip": self._client_ip},
         )
-        # Close the TCP connection so the device transitions out of AWAIT_RESPONSE
-        # back to IDLE (wake-word listening). Without this, the device polls
-        # read_socket_() forever and can never receive a new wake-word session.
         try:
             self.writer.close()
             await self.writer.wait_closed()
         except Exception:
             pass
 
-    async def _collect_audio(self) -> tuple[bytes, int, int, int] | None:
-        """Wait for one AudioStart/AudioChunk*/AudioStop block.
-
-        Returns (pcm_bytes, rate, width, channels) as declared in the AudioStart
-        event, or None if the silence timeout fires before an AudioStart arrives.
+    async def _run_enrollment_turn(
+        self,
+        session,
+        wav: bytes,
+        speaker_profiles: list[dict],
+    ) -> bool:
         """
+        Feed one turn to the enrollment state machine and speak the response.
+        Returns True if enrollment is still in progress, False when done.
+        """
+        from . import speaker_db
+        from . import speaker_id as sid_mod
+
+        try:
+            transcript = await get_engine().transcribe(wav, config.SPEECH_LANGUAGE)
+        except STTError:
+            transcript = ""
+
+        prompt = await session.process_turn(transcript, wav)
+        await self._speak_text(prompt)
+
+        if not session.is_done:
+            return True  # still going
+
+        if session.succeeded:
+            sample_audio_list = session.get_sample_audio()
+            embeddings: list[list[float]] = []
+            if sid_mod.is_ready():
+                for sample_wav in sample_audio_list:
+                    emb = await sid_mod.extract_embedding(sample_wav)
+                    if emb is not None:
+                        embeddings.append(emb.tolist())
+
+            if embeddings:
+                try:
+                    await speaker_db.create_enrolled_user(
+                        username=session.username,
+                        display_name=session.display_name,
+                        anrede=session.anrede,
+                        sprache=session.sprache,
+                        role=session.role,
+                        embeddings=embeddings,
+                    )
+                    logger.info(
+                        "Enrollment complete: %s (%d embeddings)", session.username, len(embeddings)
+                    )
+                    # Refresh profiles in-place so the new user is recognisable immediately
+                    speaker_profiles.clear()
+                    new_profiles = await speaker_db.load_all_profiles()
+                    speaker_profiles.extend(new_profiles)
+                except Exception as exc:
+                    logger.error("Failed to save enrolled user: %s", exc)
+            else:
+                logger.warning("Enrollment %s: no embeddings extracted", session.username)
+
+        return False  # done
+
+    async def _collect_audio(self) -> tuple[bytes, int, int, int] | None:
+        """Wait for one AudioStart/AudioChunk*/AudioStop block."""
         audio = bytearray()
         collecting = False
         rate, width, channels = _SAMPLE_RATE, _SAMPLE_WIDTH, _CHANNELS
@@ -216,10 +368,6 @@ class GatewayWyomingHandler(AsyncEventHandler):
                 return bytes(audio), rate, width, channels
 
     async def _send_audio(self, chunk: bytes) -> None:
-        # Split into ≤ 4 KB chunks (rx_buffer_ constraint) and pace delivery to
-        # match I2S playback speed. Without pacing the gateway sends at network
-        # speed (>10× real-time), overflows the device's 200 ms ring buffer, and
-        # all but the last ~200 ms of audio is silently dropped.
         for offset in range(0, len(chunk), _MAX_DEVICE_CHUNK):
             data = chunk[offset : offset + _MAX_DEVICE_CHUNK]
             await self.write_event(
@@ -230,8 +378,8 @@ class GatewayWyomingHandler(AsyncEventHandler):
             )
             await asyncio.sleep(len(data) / _BYTES_PER_SEC)
 
-    async def _speak_error(self, message: str) -> None:
-        """Stream a spoken error to the device, framed as a Wyoming audio block."""
+    async def _speak_text(self, message: str) -> None:
+        """Stream a spoken message to the device, framed as a Wyoming audio block."""
         await self.write_event(
             AudioStart(rate=_SAMPLE_RATE, width=_SAMPLE_WIDTH, channels=_CHANNELS).event()
         )
@@ -239,25 +387,26 @@ class GatewayWyomingHandler(AsyncEventHandler):
             async for chunk in tts.synthesize(message, target_rate=_SAMPLE_RATE):
                 await self._send_audio(chunk)
         except tts.TTSError:
-            logger.error("Cannot speak Wyoming error — Piper unavailable")
+            logger.error("Cannot speak — Piper unavailable")
         finally:
             await self.write_event(AudioStop().event())
+
+    async def _speak_error(self, message: str) -> None:
+        await self._speak_text(message)
 
     async def _noop_status(self, _status: str) -> None:
         return
 
 
 def _service_token_for(user_id: str) -> str:
-    """
-    Mint a short-lived RS256 JWT for the mapped user.
-
-    The Wyoming endpoint has no client-supplied token, but alice-chat-stream
-    still requires one. We sign a service token with the same key pair.
-    Wired lazily so the module imports without the private key present.
-    """
     from .service_token import mint_service_token
-
     return mint_service_token(user_id)
+
+
+def _token_for(user_id: Optional[str]) -> str:
+    """Mint a service token for the identified speaker, or a guest placeholder."""
+    from .service_token import mint_service_token
+    return mint_service_token(user_id or "00000000-0000-0000-0000-000000000000")
 
 
 async def run_wyoming_server(device_mapping: dict[str, config.Device], wyoming_info: Info) -> None:

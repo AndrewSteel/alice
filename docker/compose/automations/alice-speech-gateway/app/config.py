@@ -19,9 +19,11 @@ logger = logging.getLogger("alice-speech-gateway.config")
 
 @dataclass(frozen=True)
 class Device:
-    """A configured HA Voice device, keyed by its source IP in device-mapping.yaml."""
+    """A configured HA Voice device, keyed by its source IP in device-mapping.yaml.
 
-    user_id: str
+    user_id removed in PROJ-43 — identity is now determined per-turn by Speaker-ID.
+    """
+
     name: str
     room: str
 
@@ -66,10 +68,28 @@ INTERRUPT_PHRASES_PATH = _get("INTERRUPT_PHRASES_PATH", "/config/interrupt-phras
 # --- Logging ---
 LOG_LEVEL = _get("LOG_LEVEL", "INFO").upper()
 
+# --- Speaker Recognition (PROJ-43) ---
+# asyncpg DSN; empty → speaker recognition disabled (no DB connection).
+POSTGRES_DSN = _get("POSTGRES_DSN", "")
+# HuggingFace / SpeechBrain model cache directory.
+SPEAKER_MODEL_PATH = _get("SPEAKER_MODEL_PATH", "/data/speaker-model")
+# Cosine similarity threshold: scores below this → Guest role.
+SPEAKER_THRESHOLD = float(_get("SPEAKER_THRESHOLD", "0.75"))
+# CUDA device for Speaker-ID model ("cuda" or "cpu").
+SPEAKER_DEVICE = _get("SPEAKER_DEVICE", "cuda")
+
 # Spoken waiting messages — played immediately when qwen3 starts reasoning (PROJ-48).
+# On the first turn of a session the greeting replaces the waiting message (PROJ-43).
 SPEECH_THINKING = {
     "du": "Warte bitte, ich muss kurz überlegen.",
     "sie": "Warten Sie bitte, ich muss kurz überlegen.",
+}
+
+# First-turn greeting waiting messages (llm sessions, PROJ-43).
+# {name} is substituted with the speaker's display_name or "Gast".
+SPEECH_GREETING_THINKING = {
+    "known": "Hallo {name}, einen Moment…",   # U+2026 HORIZONTAL ELLIPSIS
+    "guest": "Hallo Gast, was kann ich für dich tun?",
 }
 
 # Spoken error messages (German) — surfaced to the user as TTS audio.
@@ -80,6 +100,24 @@ SPEECH_ERRORS = {
     "ai_timeout": "Alice antwortet gerade nicht, bitte versuche es erneut.",
     "ai_failed": "Bei der Verarbeitung ist ein Fehler aufgetreten.",
     "unknown_device": "Dieses Gerät ist nicht bei Alice registriert.",
+    "enrollment_not_admin": "Enrollment kann nur von einem Administrator gestartet werden.",
+}
+
+# Enrollment dialog prompts (PROJ-43).
+SPEECH_ENROLLMENT = {
+    "start_user":   "Ich starte die Einrollung eines neuen Nutzers. Wie lautet der Anzeigename?",
+    "start_guest":  "Ich starte die Einrollung eines neuen Gastes. Wie lautet der Anzeigename?",
+    "confirm_name": "Ich habe verstanden: {name}. Ist das korrekt? Ja oder Nein.",
+    "ask_username": "Gut. Wie lautet der Benutzername? Bitte nur Buchstaben und Zahlen.",
+    "confirm_username": "Ich habe verstanden: {username}. Ist das korrekt? Ja oder Nein.",
+    "username_taken": "Der Benutzername {username} ist bereits vergeben. Bitte nenne einen anderen.",
+    "retry_name":   "In Ordnung, bitte nenne den Anzeigenamen erneut.",
+    "retry_username": "In Ordnung, bitte nenne den Benutzernamen erneut.",
+    "ask_anrede":   "Welche Anrede bevorzugt die Person? Du oder Sie?",
+    "ask_sprache":  "Welche Sprache? Deutsch oder Englisch?",
+    "done_user":    "Einrollung abgeschlossen. {name} wurde als neuer Nutzer angelegt.",
+    "done_guest":   "Einrollung abgeschlossen. {name} wurde als neuer Gast angelegt.",
+    "aborted":      "Einrollung abgebrochen.",
 }
 
 
@@ -109,13 +147,9 @@ def load_device_mapping(path: str = DEVICE_MAPPING_PATH) -> dict[str, Device]:
         if not isinstance(entry, dict):
             logger.error("Skipping device mapping entry (expected fields, got %r): %r", entry, ip)
             continue
-        user_id = entry.get("user_id")
-        if not user_id or not str(user_id).strip():
-            logger.error("Skipping device mapping entry without user_id: %r", ip)
-            continue
         name = str(entry.get("name") or ip).strip()
         room = str(entry.get("room") or "").strip()
-        mapping[str(ip)] = Device(user_id=str(user_id).strip(), name=name, room=room)
+        mapping[str(ip)] = Device(name=name, room=room)
     logger.info("Loaded %d device mappings", len(mapping))
     return mapping
 

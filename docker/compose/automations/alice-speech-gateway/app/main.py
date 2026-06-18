@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from wyoming.info import AsrModel, AsrProgram, Attribution, Info
 
 from . import config, service_token
+from .enroll_router import router as enroll_router
 from .logging_config import setup_logging
 from .stt import WhisperEngine, get_engine, set_engine
 from .ws_transport import router as ws_router
@@ -71,6 +72,21 @@ async def lifespan(app: FastAPI):
         except Exception as exc:  # noqa: BLE001 — log, keep serving
             logger.error("STT warmup failed (will retry on first request): %s", exc)
 
+    # PROJ-43: initialise Speaker-ID model and DB pool
+    if config.POSTGRES_DSN:
+        from .speaker_db import init_pool
+        try:
+            await init_pool(config.POSTGRES_DSN)
+        except Exception as exc:
+            logger.error("Speaker DB pool failed (speaker recognition disabled): %s", exc)
+
+    if config.SPEAKER_MODEL_PATH:
+        from .speaker_id import load_model
+        try:
+            load_model(config.SPEAKER_MODEL_PATH, device=config.SPEAKER_DEVICE)
+        except Exception as exc:
+            logger.error("Speaker-ID model load failed (recognition disabled): %s", exc)
+
     # Start the Wyoming server only if a service token can be minted.
     if service_token.wyoming_enabled():
         device_mapping = config.load_device_mapping()
@@ -96,10 +112,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="alice-speech-gateway", version="1.0.0", lifespan=lifespan)
 app.include_router(ws_router)
+app.include_router(enroll_router)  # PROJ-43: POST/GET/DELETE /enroll/*
 
 
 @app.get("/health")
 async def health() -> dict:
+    from .speaker_db import is_ready as db_ready
+    from .speaker_id import is_ready as sid_ready
     jwt_ok = bool(config.JWT_PUBLIC_KEY_PATH)
     wyoming_ok = service_token.wyoming_enabled()
     status = "ok" if jwt_ok else "degraded"
@@ -108,4 +127,6 @@ async def health() -> dict:
         "jwt_public_key": jwt_ok,
         "wyoming_enabled": wyoming_ok,
         "whisper_model": config.WHISPER_MODEL,
+        "speaker_id_ready": sid_ready(),
+        "speaker_db_ready": db_ready(),
     }
