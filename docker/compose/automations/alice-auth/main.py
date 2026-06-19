@@ -670,7 +670,7 @@ async def get_profile(authorization: str | None = Header(default=None)):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT u.username, u.email,
+                SELECT u.username, u.email, u.allow_voice_enrollment,
                        COALESCE(p.facts, '{}'::jsonb)       AS facts,
                        COALESCE(p.preferences, '{}'::jsonb)  AS preferences
                 FROM alice.users u
@@ -687,6 +687,7 @@ async def get_profile(authorization: str | None = Header(default=None)):
         return {
             "username": row["username"],
             "email": row["email"],
+            "allow_voice_enrollment": bool(row["allow_voice_enrollment"]),
             "facts": row["facts"] or {},
             "preferences": row["preferences"] or {},
         }
@@ -971,7 +972,8 @@ async def admin_list_users(request: Request, authorization: str | None = Header(
             cur.execute(
                 """
                 SELECT id, username, display_name, email, role,
-                       is_active, must_change_password, created_at, last_login_at
+                       is_active, must_change_password, created_at, last_login_at,
+                       allow_voice_enrollment, speaker_enrollment_complete
                 FROM alice.users
                 ORDER BY created_at ASC
                 """
@@ -989,6 +991,8 @@ async def admin_list_users(request: Request, authorization: str | None = Header(
                 "must_change_password": r["must_change_password"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "last_login_at": r["last_login_at"].isoformat() if r["last_login_at"] else None,
+                "allow_voice_enrollment": bool(r["allow_voice_enrollment"]),
+                "speaker_enrollment_complete": bool(r["speaker_enrollment_complete"]),
             }
             for r in rows
         ]
@@ -1214,6 +1218,101 @@ async def admin_reset_otp(
     except Exception as exc:
         conn.rollback()
         logger.error("admin_reset_otp error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+@app.patch("/auth/admin/users/{user_id}/set-credentials", status_code=200)
+async def admin_set_credentials(
+    request: Request,
+    user_id: str,
+    body: UpdateEmailRequest,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Set email + OTP for an ESPHome-enrolled user who has no password yet.
+    Generates an OTP and sends it to the supplied address. Admin only.
+    """
+    _check_admin_rate_limit(request)
+    _require_admin(authorization)
+
+    if not _validate_email_format(body.email):
+        raise HTTPException(status_code=422, detail="Ungültiges E-Mail-Format")
+
+    domain = body.email.split("@", 1)[1]
+    has_mx, timed_out = _check_mx_record(domain)
+    if not has_mx and not timed_out:
+        raise HTTPException(status_code=422, detail="E-Mail-Domain akzeptiert keine E-Mails (kein MX-Record)")
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT username, display_name, email FROM alice.users WHERE id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Nutzer nicht gefunden")
+
+        if row["email"]:
+            raise HTTPException(status_code=409, detail="Nutzer hat bereits eine E-Mail-Adresse")
+
+        # Check global uniqueness before sending any email (OBS-1: avoids spurious
+        # OTP delivery when the address is already taken by a different user).
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM alice.users WHERE email = %s AND id != %s",
+                (body.email, user_id),
+            )
+            if cur.fetchone():
+                raise HTTPException(status_code=409, detail="E-Mail-Adresse ist bereits vergeben")
+
+        otp = _generate_otp()
+        otp_hash = _hash_password(otp)
+
+        try:
+            _send_otp_email(
+                email=body.email,
+                username=row["username"],
+                display_name=row["display_name"],
+                otp=otp,
+            )
+        except Exception as smtp_exc:
+            logger.error("SMTP error setting credentials for %s: %s", row["username"], smtp_exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"E-Mail-Versand fehlgeschlagen — Zugangsdaten wurden nicht gesetzt. SMTP prüfen. ({smtp_exc})",
+            )
+
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    """UPDATE alice.users
+                       SET email = %s, password_hash = %s, must_change_password = TRUE
+                       WHERE id = %s""",
+                    (body.email, otp_hash, user_id),
+                )
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback()
+                raise HTTPException(status_code=409, detail="E-Mail-Adresse ist bereits vergeben")
+        conn.commit()
+
+        logger.info("Credentials set for user_id=%s (%s) email=%s", user_id, row["username"], body.email)
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        conn.rollback()
+        logger.error("admin_set_credentials error: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()

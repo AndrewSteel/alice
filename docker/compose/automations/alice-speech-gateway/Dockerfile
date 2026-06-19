@@ -25,6 +25,15 @@ RUN python3 -m venv /opt/venv && \
 
 WORKDIR /app
 
+# Pin PyTorch to the last release that ships Maxwell (CC 5.2 / TITAN X) CUDA
+# kernels. PyTorch >= 2.4 dropped SM 5.x; cu121 wheels run on any CUDA 12.x
+# host. This must be installed BEFORE requirements.txt so pip does not upgrade
+# it when resolving SpeechBrain's transitive torch dependency.
+RUN pip install --no-cache-dir \
+    "torch==2.3.1+cu121" \
+    "torchaudio==2.3.1+cu121" \
+    --index-url https://download.pytorch.org/whl/cu121
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -8,6 +8,7 @@ import { MeinProfilSection } from "./MeinProfilSection";
 import { AllgemeinSection } from "./AllgemeinSection";
 import { DmsSection } from "./DmsSection";
 import { NutzerVerwaltungSection } from "./NutzerVerwaltungSection";
+import { VoiceProfilesSection } from "./VoiceProfilesSection";
 import { ChatarchivSection } from "./ChatarchivSection";
 
 export function SettingsPage() {
@@ -70,6 +71,14 @@ export function SettingsPage() {
               )}
               {isAdmin && (
                 <TabsTrigger
+                  value="stimmprofile"
+                  className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                >
+                  Stimmprofile
+                </TabsTrigger>
+              )}
+              {isAdmin && (
+                <TabsTrigger
                   value="chatarchiv"
                   className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
                 >
@@ -94,6 +103,11 @@ export function SettingsPage() {
               {isAdmin && (
                 <TabsContent value="nutzerverwaltung" className="mt-0">
                   <NutzerVerwaltungSection />
+                </TabsContent>
+              )}
+              {isAdmin && (
+                <TabsContent value="stimmprofile" className="mt-0">
+                  <VoiceProfilesSection />
                 </TabsContent>
               )}
               {isAdmin && (

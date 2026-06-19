@@ -1,19 +1,24 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { Mic, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { ProfilForm } from "./ProfilForm";
 import { EmailForm } from "./EmailForm";
 import { SettingsPasswordForm } from "./SettingsPasswordForm";
+import { VoiceEnrollmentDialog } from "./VoiceEnrollmentDialog";
 import type { ProfileUpdateInput, EmailUpdateInput, VoluntaryPasswordChangeInput } from "@/services/profileApi";
 
 export function MeinProfilSection() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const { profile, isLoading, error, reload, saveProfile, saveEmail, savePassword } =
     useProfile();
+  const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
 
   // --- Handlers ---
 
@@ -73,6 +78,10 @@ export function MeinProfilSection() {
     );
   }
 
+  // Admins may always self-enroll (bootstrap); other users only when an admin
+  // has enabled it for them.
+  const canEnrollVoice = user?.role === "admin" || profile.allow_voice_enrollment;
+
   // --- Main Content ---
   return (
     <div className="space-y-6">
@@ -86,6 +95,40 @@ export function MeinProfilSection() {
       <ProfilForm profile={profile} onSave={handleSaveProfile} />
       <EmailForm profile={profile} onSave={handleSaveEmail} />
       <SettingsPasswordForm onSave={handleSavePassword} />
+
+      {canEnrollVoice && (
+        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-900/40">
+              <Mic className="h-4 w-4 text-blue-300" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-medium text-gray-100">
+                Stimmregistrierung
+              </h3>
+              <p className="text-sm text-gray-400">
+                Nimm deine Stimme auf, damit Alice dich an Sprachgeraeten
+                automatisch erkennt. Du kannst die Aufnahme jederzeit erneuern.
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setVoiceDialogOpen(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white gap-2"
+          >
+            <Mic className="h-4 w-4" />
+            Stimme aufnehmen
+          </Button>
+        </div>
+      )}
+
+      <VoiceEnrollmentDialog
+        open={voiceDialogOpen}
+        onOpenChange={setVoiceDialogOpen}
+        onEnrolled={() =>
+          toast({ title: "Stimmregistrierung gespeichert" })
+        }
+      />
     </div>
   );
 }

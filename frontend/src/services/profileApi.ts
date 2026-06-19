@@ -7,6 +7,7 @@ const AUTH_BASE = "/api/auth";
 export interface ProfileData {
   username: string;
   email: string | null;
+  allow_voice_enrollment: boolean;
   facts: {
     name: string | null;
     rolle: string | null;

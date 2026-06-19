@@ -1,8 +1,8 @@
 # PROJ-43: Speaker Recognition (Speaker-ID)
 
-## Status: In Review
+## Status: Deployed
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (QA completed by /qa — 3 High bugs found, not production-ready)
+**Last Updated:** 2026-06-19 (Deployed to production. Voice enrollment verified end-to-end on ki.lan.)
 
 ## Dependencies
 - Requires: PROJ-40 (Speech Gateway Service) — Speaker-ID-Hook im Gateway, Wyoming-Pipeline
@@ -272,7 +272,7 @@ Settings → "Stimmprofile" tab (admin only)
 - [x] Alice führt durch: `display_name` (mit Bestätigung), `username` (mit Bestätigung), Anrede, Sprache — `enrollment.py` state machine
 - [x] Username-Kollision → Alice informiert und fragt nach Alternative (`enrollment.py:149-153`)
 - [x] Stimmproben aus Dialog-Turns erfasst (`enrollment.py:119-120`, `get_sample_audio()`)
-- [ ] **BUG-1 (HIGH):** Neuer `alice.users`-Eintrag wird angelegt — aber `anrede` und `sprache` werden still verworfen, nicht in `alice.user_profiles.preferences` geschrieben
+- [x] **BUG-1 (HIGH) — FIXED:** Neuer `alice.users`-Eintrag wird angelegt; `anrede`/`sprache` werden jetzt in `alice.user_profiles.preferences` geschrieben (`speaker_db.create_enrolled_user()` UPSERT, kanonische Werte `du`/`sie` + `deutsch`/`englisch`)
 - [x] Eingerollter Nutzer sofort erkennbar — Profile in-place neu geladen (`wyoming_transport.py:335-339`)
 
 #### Enrollment — WebApp-Pfad
@@ -302,7 +302,7 @@ Settings → "Stimmprofile" tab (admin only)
 - [x] Username-Kollision → Alice fragt nach Alternative (enrollment.py state machine)
 - [x] Enrollment-Abbruch / leerer Transcript → kein User angelegt (DB-Schreibung nur bei `session.succeeded`)
 - [x] Erst-Deployment ohne eingerollte Nutzer → alle als Gast erkannt (`load_all_profiles()` liefert leere Liste)
-- [ ] **BUG-2 (HIGH):** Enrollment-Abbruch nach Success-TTS — Alice sagt "Einrollung abgeschlossen" bevor `create_enrolled_user()` aufgerufen wird; DB-Fehler nach TTS → Nutzer hört Erfolg, kein Nutzer wurde angelegt
+- [x] **BUG-2 (HIGH) — FIXED:** Success-TTS wird zurückgehalten bis `create_enrolled_user()` erfolgreich war; bei DB-Fehler spricht Alice stattdessen `save_failed` (`wyoming_transport.py` `_run_enrollment_turn`)
 
 ---
 
@@ -379,5 +379,140 @@ Settings → "Stimmprofile" tab (admin only)
 - **Production Ready:** NO
 - **Recommendation:** Fix BUG-1 (Datenverlust anrede/sprache), BUG-2 (Premature TTS), BUG-3 (Frontend), BUG-4 (Minimum Samples) — dann erneut `/qa` ausführen
 
+## Frontend Implementation Notes
+
+**Implemented:** 2026-06-18 (by /frontend — resolves BUG-3)
+
+The WebApp enrollment + admin management UI (previously missing entirely) is now built. All new/changed files compile cleanly (`npm run build` passes type-check + lint).
+
+### New files
+- `frontend/src/services/voiceApi.ts` — gateway REST client: `enrollVoice()`, `getVoiceProfiles()`, `deleteVoiceProfile()`, `setVoiceEnrollmentAllowed()`. Targets `/api/speech/enroll*`. JWT sent as `Authorization: Bearer`; `user_id` never sent in body (gateway derives it from the token).
+- `frontend/src/hooks/useWavRecorder.ts` — captures mic audio via Web Audio API and encodes a **16 kHz mono 16-bit WAV** Blob client-side. MediaRecorder's WebM/Opus is avoided because the gateway's `torchaudio.load()` cannot reliably decode it; WAV matches the ECAPA-TDNN pipeline.
+- `frontend/src/hooks/useVoiceProfiles.ts` — admin list/delete state for enrolled profiles.
+- `frontend/src/components/Settings/VoiceEnrollmentDialog.tsx` — records 5 samples, progress bar + slot indicators, "Neu beginnen" reset, upload, success state.
+- `frontend/src/components/Settings/VoiceProfilesSection.tsx` — admin "Stimmprofile" tab: enrolled-users table (desktop + mobile), delete with AlertDialog confirm.
+
+### Modified files
+- `MeinProfilSection.tsx` — conditional "Stimmregistrierung" card. Shown when `user.role === "admin"` (bootstrap) **or** `profile.allow_voice_enrollment`.
+- `UserTable.tsx` — new "Stimme" column: per-user `Switch` toggling `allow_voice_enrollment`; admins show an "Immer" badge (always allowed); a green mic icon marks users whose voice is already enrolled.
+- `NutzerVerwaltungSection.tsx` — wires the toggle handler with success/error toasts.
+- `useAdminUsers.ts` — `toggleVoiceEnrollment()`.
+- `SettingsPage.tsx` — new admin "Stimmprofile" tab.
+- `services/adminApi.ts` / `services/profileApi.ts` — added `allow_voice_enrollment` (+ `speaker_enrollment_complete` on AdminUser) to the types.
+
+### Required backend addition (alice-auth)
+The `allow_voice_enrollment` flag lives in `alice.users` but the **alice-auth** service did not expose it. To make the profile card and admin toggle reflect real state, `docker/compose/automations/alice-auth/main.py` was extended:
+- `GET /auth/profile` now returns `allow_voice_enrollment`.
+- `GET /auth/admin/users` now returns `allow_voice_enrollment` and `speaker_enrollment_complete`.
+
+→ **alice-auth must be redeployed** alongside the frontend for the toggle/card state to load correctly.
+
+### Still open (backend — out of scope for /frontend)
+BUG-1 (anrede/sprache dropped), BUG-2 (premature success TTS), and BUG-4 (min-samples check `< 1` vs `< 5`) from the QA results remain and require a `/backend` pass before re-QA.
+
+## Backend Bug Fixes
+
+**Implemented:** 2026-06-18 (by /backend — resolves the three open backend bugs from QA)
+
+- **BUG-1 — `anrede`/`sprache` persisted.** `speaker_db.create_enrolled_user()` now writes an `alice.user_profiles` row inside the same transaction as the `alice.users` insert, storing `preferences = {"anrede", "sprache"}`. Uses `ON CONFLICT (user_id) DO UPDATE` merging via `||` so an existing profile is not clobbered. To stay consistent with the alice-auth `PATCH /auth/profile` format, the enrollment state machine now stores canonical values: `anrede` ∈ {`du`,`sie`} and `sprache` ∈ {`deutsch`,`englisch`} (previously `de`/`en`). Files: `speaker_db.py`, `enrollment.py`.
+- **BUG-2 — success TTS deferred until DB write confirms.** `_run_enrollment_turn()` in `wyoming_transport.py` no longer speaks the prompt up-front on the terminal turn. For questions/retries/abort it speaks immediately as before; on the final (succeeded) turn it extracts embeddings, calls `create_enrolled_user()`, and only then speaks the success prompt — or the new `SPEECH_ENROLLMENT["save_failed"]` message if the write fails. Files: `wyoming_transport.py`, `config.py`.
+- **BUG-4 — minimum sample count enforced.** `POST /enroll` now rejects fewer than 5 files with `400 "Mindestens 5 Audioaufnahmen erforderlich"` (was `< 1`). File: `enroll_router.py`.
+
+No DB migration needed — `alice.user_profiles` already exists; the gateway pool has write access. No n8n workflow changes. The gateway container (`alice-speech-gateway`) must be rebuilt/redeployed for these changes to take effect.
+
+---
+
+## QA Re-Test Results (Retest)
+
+**Tested:** 2026-06-18 (retest after BUG-1/2/3/4 fixes)
+**Tester:** QA Engineer (AI)
+**Scope:** Verify the four prior bugs are resolved; re-evaluate all acceptance criteria.
+
+### Prior Bugs — Verification
+
+| Bug | Severity | Status | Evidence |
+|---|---|---|---|
+| BUG-1 — `anrede`/`sprache` dropped | High | **FIXED** | `speaker_db.create_enrolled_user()` writes `alice.user_profiles` row in the same transaction (`ON CONFLICT … DO UPDATE` merge via `\|\|`); canonical values `du`/`sie` + `deutsch`/`englisch` set in `enrollment.py:162-170`. |
+| BUG-2 — premature success TTS | High | **FIXED** | `wyoming_transport.py:_run_enrollment_turn` (313-350) holds the terminal prompt; speaks success only after `create_enrolled_user()` succeeds, else `SPEECH_ENROLLMENT["save_failed"]` (`config.py:120`). |
+| BUG-3 — frontend missing | High | **FIXED** | All 5 new files present; `MeinProfilSection`/`UserTable`/`NutzerVerwaltungSection`/`SettingsPage`/`useAdminUsers`/`adminApi`/`profileApi` wired. `npm run build` passes type-check + lint clean. nginx `^~ /api/speech/enroll` block routes POST/GET/DELETE/PATCH → gateway:10301; `enroll_router` mounted + DB pool init in `main.py:115,76-79`. alice-auth exposes `allow_voice_enrollment` (+`speaker_enrollment_complete`). |
+| BUG-4 — min samples `< 1` | Medium | **FIXED** | `enroll_router.py:85` now rejects `len(files) < 5` with 400. |
+
+### New Bug
+
+#### BUG-5: Admin cannot assign E-Mail + Passwort to an ESPHome-enrolled user (WebApp access) — **FIXED**
+- **Fixed:** 2026-06-18
+- **Backend:** New `PATCH /auth/admin/users/{user_id}/set-credentials` endpoint in `alice-auth/main.py`. Sets email + hashed OTP, sends OTP email, rolls back on SMTP failure. Rejects if user already has email (409) or email format invalid (422).
+- **Frontend:** New `SetCredentialsDialog.tsx` + `setCredentials()` in `adminApi.ts` + `setUserCredentials()` in `useAdminUsers.ts`. `UserTable.tsx` now shows "Zugang einrichten" (active) instead of disabled "OTP zurücksetzen" for users without an email address.
+
+### Acceptance Criteria — Updated Status
+
+#### Sprechererkennung — 7/7 PASS (unchanged from first QA)
+#### Enrollment — ESPHome Voice-Pfad — 8/8 PASS (BUG-1, BUG-2 now fixed)
+#### Enrollment — WebApp-Pfad — 5/5 PASS (BUG-3 fixed: card, recorder, admin toggle, bootstrap, re-enroll all present and build clean)
+#### Admin-Verwaltung — 2/2 PASS
+- [x] Stimmprofile einsehen und löschen — `VoiceProfilesSection.tsx` + `GET/DELETE /enroll`
+- [x] E-Mail + Passwort nachträglich vergeben — `SetCredentialsDialog.tsx` + `PATCH /auth/admin/users/{id}/set-credentials`
+#### device-mapping.yaml — 2/2 PASS (unchanged)
+
+### Security Audit — PASS (re-confirmed)
+JWT enforced on all `/enroll/*`; `user_id` from token only; admin-only guards on profiles/delete/allow; parametrised asyncpg queries; nginx enroll block scoped to explicit methods + CORS.
+
+### Summary
+
+- **Acceptance Criteria:** 25/25 passed
+- **Bugs:** All resolved (BUG-1/2/3/4/5). 0 Critical, 0 High, 0 Medium open.
+- **Security:** Pass
+- **Production Ready:** YES — all ACs met, no open bugs.
+- **Deploy reminder:** rebuild `alice-speech-gateway` (backend fixes) + redeploy `alice-auth` (new profile fields + set-credentials endpoint); frontend via `deploy-frontend.sh` + `sync-compose.sh`.
+
+---
+
+## QA Re-Test Results (Independent Re-Verification)
+
+**Tested:** 2026-06-18 (independent re-test of the current working tree, incl. uncommitted BUG-5 + alice-auth/frontend changes)
+**Tester:** QA Engineer (AI)
+**Method:** Code-level verification of every AC against the actual source + frontend production build. The live voice pipeline (Wyoming/ECAPA-TDNN/Whisper/Piper) could **not** be exercised end-to-end locally — it requires CUDA, the SpeechBrain model, Postgres and physical ESPHome devices, all of which run on `ki.lan`. Speaker-recognition ACs are therefore verified by code inspection, not runtime.
+
+### Prior Bugs — Re-Verified
+
+| Bug | Sev | Status | Evidence (current tree) |
+|---|---|---|---|
+| BUG-1 — anrede/sprache dropped | High | **FIXED** | `speaker_db.create_enrolled_user()` writes `alice.user_profiles` in the same `conn.transaction()` as the `users` insert, merging via `preferences \|\| EXCLUDED.preferences` (`speaker_db.py:183-191`); canonical `du`/`sie` + `deutsch`/`englisch` (`enrollment.py:162-170`), matching alice-auth's `PATCH /auth/profile` validation. |
+| BUG-2 — premature success TTS | High | **FIXED** | `_run_enrollment_turn` speaks question/retry/abort prompts immediately but holds the terminal prompt; success spoken only after `create_enrolled_user()` returns, else `SPEECH_ENROLLMENT["save_failed"]` (`wyoming_transport.py:307-351`, `config.py:120`). |
+| BUG-3 — frontend missing | High | **FIXED** | All 6 files present and wired (voiceApi, useWavRecorder, useVoiceProfiles, VoiceEnrollmentDialog, VoiceProfilesSection + Mein­Profil/UserTable/Nutzer­Verwaltung/SettingsPage/useAdminUsers/adminApi/profileApi). `npm run build` passes type-check + lint, exit 0. |
+| BUG-4 — min samples `< 1` | Med | **FIXED** | `enroll_router.py:85` rejects `len(files) < 5` with 400. |
+| BUG-5 — set WebApp credentials | High | **FIXED** | `PATCH /auth/admin/users/{id}/set-credentials` (`main.py:1226`) + `SetCredentialsDialog.tsx` + `adminApi.setCredentials()` + `useAdminUsers.setUserCredentials()`; UserTable shows "Zugang einrichten" for users without an email. |
+
+### Acceptance Criteria — 25/25 PASS
+
+- **Sprechererkennung (7/7):** per-turn STT+Speaker-ID run concurrently (`wyoming_transport.py:148-154`); confidence ≥ threshold → user role, else Guest (binary, no re-ask); first-turn greeting (ha_only prefix / llm thinking-message); per-turn re-identification with no role carry-over in CC.
+- **Enrollment ESPHome (8/8):** admin-gated user/guest triggers; non-admin rejection (`config.py:103`); guided display_name/username/anrede/sprache with confirmations; username-collision re-prompt; samples from dialog turns; new `alice.users` + `user_profiles` row; immediate recognisability via in-place profile reload.
+- **Enrollment WebApp (5/5):** conditional "Stimmregistrierung" card; 5-sample recorder (16 kHz mono WAV); admin per-user toggle; admin bootstrap self-enroll; re-enroll overwrites.
+- **Admin-Verwaltung (2/2):** view/delete profiles; assign email+OTP to ESPHome-enrolled users.
+- **device-mapping.yaml (2/2):** `user_id` removed from `Device`; `name`/`room` retained.
+
+### Security Audit — PASS
+JWT enforced on all `/enroll/*` (`_require_auth`); `user_id` strictly from verified token payload (`auth.py` contract, never request body); admin-only guards on profiles/delete/allow/set-credentials; parametrised asyncpg + psycopg2 queries; nginx `^~ /api/speech/enroll` block ordered before the GET-only WS block with explicit method allow-list + scoped CORS; Wyoming port internal-only.
+
+### New Observations (Low — non-blocking, no fix required to ship)
+
+- **OBS-1 (Low):** `admin_set_credentials` sends the OTP email *before* the DB `UPDATE`. If the supplied address is already used by another user, the email is delivered (naming the enrolled user) and the write then fails 409 — a spurious OTP that was never persisted. The pre-check (`main.py:1265`) only verifies the *target* user has no email, not global uniqueness. Mirror the `update_email` pattern (check/handle uniqueness before sending) if hardening later.
+- **OBS-2 (Low):** In `_run_enrollment_turn`, `saved=True` is set only after the post-create `load_all_profiles()` reload. If that reload throws, the user *was* created but Alice speaks `save_failed`. Moving the reload outside the saved-determining block would avoid the misleading message. Extremely unlikely (same pool).
+- **OBS-3 (design note):** Enrollment embeddings reuse short dialog utterances incl. ~0.5 s confirmations ("Ja"). This is the documented design (no separate "say this phrase" step); recognition quality from sub-second clips may be weaker than the WebApp's ~3 s samples. Accepted tradeoff, flagged for field tuning of `SPEAKER_THRESHOLD`.
+
+### Summary
+
+- **Acceptance Criteria:** 25/25 passed
+- **Bugs:** 0 Critical, 0 High, 0 Medium open (BUG-1…5 all resolved). 3 new Low observations, none blocking.
+- **Security:** Pass
+- **Production Ready:** **YES** — all ACs met, no open Critical/High/Medium bugs.
+- **Caveat:** Voice-pipeline ACs verified by code inspection only; a runtime smoke test on `ki.lan` (enroll via WebApp → speak at an ESPHome device → confirm recognition + greeting) is recommended during `/deploy`.
+- **Deploy reminder:** rebuild `alice-speech-gateway`; redeploy `alice-auth` (profile fields + set-credentials); frontend via `deploy-frontend.sh` + `sync-compose.sh`.
+
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-19
+**Environment:** Production (ki.lan)
+**Containers rebuilt:** `alice-speech-gateway` (PyTorch 2.3.1+cu121 pinned for TITAN X / Maxwell CC 5.2; SpeechBrain ECAPA-TDNN), `alice-auth` (new `/auth/profile` allow_voice_enrollment + PATCH set-credentials endpoint)
+**Frontend:** deployed via `deploy-frontend.sh` + `sync-compose.sh`
+**Smoke test:** WebApp voice enrollment completed successfully; speaker recognition confirmed active.

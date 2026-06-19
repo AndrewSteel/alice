@@ -23,6 +23,37 @@ logger = logging.getLogger("alice-speech-gateway.speaker_id")
 _classifier = None  # EncoderClassifier, set by load_model()
 
 
+def _patch_torch_amp() -> None:
+    """
+    SpeechBrain 1.x calls torch.amp.custom_fwd(device_type='cuda', ...), an API
+    introduced in PyTorch 2.4. PyTorch 2.3.x (last release with Maxwell CC 5.2
+    kernels) only has torch.cuda.amp.custom_fwd which does not accept device_type.
+
+    The shim below accepts and ignores device_type — this gateway is CUDA-only —
+    and delegates to torch.cuda.amp.custom_fwd so SpeechBrain's AMP decorators
+    resolve correctly at class-definition time.
+    """
+    import torch
+    if hasattr(torch.amp, "custom_fwd"):
+        return
+
+    def _custom_fwd(fwd=None, *, device_type=None, cast_inputs=None):
+        # device_type is only meaningful for non-CUDA backends; ignore it.
+        if fwd is not None:
+            # Used as bare decorator: @torch.amp.custom_fwd
+            return torch.cuda.amp.custom_fwd(fwd)
+        # Used with keyword args: @torch.amp.custom_fwd(device_type=..., cast_inputs=...)
+        return torch.cuda.amp.custom_fwd(cast_inputs=cast_inputs)
+
+    def _custom_bwd(bwd=None):
+        if bwd is not None:
+            return torch.cuda.amp.custom_bwd(bwd)
+        return torch.cuda.amp.custom_bwd
+
+    torch.amp.custom_fwd = _custom_fwd  # type: ignore[attr-defined]
+    torch.amp.custom_bwd = _custom_bwd  # type: ignore[attr-defined]
+
+
 def load_model(model_path: str, device: str = "cuda") -> None:
     """
     Load the ECAPA-TDNN model. Call once at gateway startup.
@@ -32,11 +63,14 @@ def load_model(model_path: str, device: str = "cuda") -> None:
     """
     global _classifier
     try:
+        _patch_torch_amp()
         from speechbrain.inference.speaker import EncoderClassifier
+        # SpeechBrain requires an explicit device index ("cuda:0", not "cuda").
+        sb_device = f"{device}:0" if device == "cuda" else device
         _classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir=model_path,
-            run_opts={"device": device},
+            run_opts={"device": sb_device},
         )
         logger.info("Speaker-ID model loaded (device=%s, path=%s)", device, model_path)
     except Exception as exc:
@@ -53,10 +87,13 @@ def _extract_sync(wav_bytes: bytes) -> Optional[np.ndarray]:
     if _classifier is None:
         return None
     try:
+        import soundfile as sf
         import torch
         import torchaudio
 
-        signal, sr = torchaudio.load(io.BytesIO(wav_bytes))
+        # Use soundfile directly to avoid torchaudio's torchcodec backend dependency.
+        data, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=True)
+        signal = torch.from_numpy(data.T)  # (channels, time)
         # Resample to 16 kHz (ECAPA-TDNN training rate)
         if sr != 16000:
             signal = torchaudio.functional.resample(signal, sr, 16000)

@@ -22,12 +22,17 @@ from .auth import AuthError, verify_token
 from .speaker_db import (
     delete_embeddings,
     get_user,
-    is_ready,
+    is_ready as db_ready,
     list_enrolled_profiles,
     save_embeddings,
     set_allow_voice_enrollment,
 )
-from .speaker_id import extract_embedding
+from .speaker_id import extract_embedding, is_ready as sid_ready
+
+
+def is_ready() -> bool:
+    """Both DB pool and speaker model must be up."""
+    return db_ready() and sid_ready()
 
 logger = logging.getLogger("alice-speech-gateway.enroll")
 
@@ -82,8 +87,8 @@ async def enroll_self(
     if not is_admin and not user.get("allow_voice_enrollment"):
         raise HTTPException(status_code=403, detail="Stimmregistrierung für diesen Nutzer nicht aktiviert")
 
-    if len(files) < 1:
-        raise HTTPException(status_code=400, detail="Mindestens 1 Audioaufnahme erforderlich")
+    if len(files) < 5:
+        raise HTTPException(status_code=400, detail="Mindestens 5 Audioaufnahmen erforderlich")
 
     embeddings: list[list[float]] = []
     for f in files[:5]:

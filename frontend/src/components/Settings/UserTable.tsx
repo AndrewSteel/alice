@@ -1,8 +1,9 @@
 "use client";
 
-import { MoreVertical, KeyRound, UserX, UserCheck, Trash2 } from "lucide-react";
+import { MoreVertical, KeyRound, UserX, UserCheck, Trash2, Mic, LogIn } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,7 +31,9 @@ interface UserTableProps {
   users: AdminUser[];
   currentUserId: string;
   onResetOtp: (user: AdminUser) => void;
+  onSetCredentials: (user: AdminUser) => void;
   onToggleStatus: (user: AdminUser) => void;
+  onToggleVoice: (user: AdminUser, allow: boolean) => void;
   onDelete: (user: AdminUser) => void;
 }
 
@@ -85,16 +88,56 @@ function StatusBadge({ isActive }: { isActive: boolean }) {
   );
 }
 
+function VoiceCell({
+  user,
+  onToggleVoice,
+}: {
+  user: AdminUser;
+  onToggleVoice: (user: AdminUser, allow: boolean) => void;
+}) {
+  const enrolled = user.speaker_enrollment_complete;
+
+  // Admins may always self-enroll (bootstrap) — the per-user flag is moot.
+  if (user.role === "admin") {
+    return (
+      <div className="flex items-center gap-2">
+        <Badge
+          variant="secondary"
+          className="text-xs bg-gray-700/40 text-gray-300 border-gray-600"
+        >
+          Immer
+        </Badge>
+        {enrolled && <Mic className="h-3.5 w-3.5 text-emerald-400" aria-label="Stimme registriert" />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Switch
+        checked={user.allow_voice_enrollment}
+        onCheckedChange={(checked) => onToggleVoice(user, checked)}
+        aria-label={`Stimmregistrierung fuer ${user.username} ${
+          user.allow_voice_enrollment ? "deaktivieren" : "aktivieren"
+        }`}
+      />
+      {enrolled && <Mic className="h-3.5 w-3.5 text-emerald-400" aria-label="Stimme registriert" />}
+    </div>
+  );
+}
+
 function UserActionMenu({
   user,
   isSelf,
   onResetOtp,
+  onSetCredentials,
   onToggleStatus,
   onDelete,
 }: {
   user: AdminUser;
   isSelf: boolean;
   onResetOtp: (user: AdminUser) => void;
+  onSetCredentials: (user: AdminUser) => void;
   onToggleStatus: (user: AdminUser) => void;
   onDelete: (user: AdminUser) => void;
 }) {
@@ -125,19 +168,13 @@ function UserActionMenu({
             OTP zuruecksetzen
           </DropdownMenuItem>
         ) : (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="px-2 py-1.5 text-sm text-gray-500 flex items-center gap-2 cursor-not-allowed">
-                  <KeyRound className="h-4 w-4" />
-                  OTP zuruecksetzen
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                Keine E-Mail-Adresse hinterlegt
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <DropdownMenuItem
+            onClick={() => onSetCredentials(user)}
+            className="gap-2 focus:bg-gray-700 focus:text-gray-100"
+          >
+            <LogIn className="h-4 w-4" />
+            Zugang einrichten
+          </DropdownMenuItem>
         )}
 
         <DropdownMenuSeparator className="bg-gray-700" />
@@ -213,7 +250,9 @@ export function UserTable({
   users,
   currentUserId,
   onResetOtp,
+  onSetCredentials,
   onToggleStatus,
+  onToggleVoice,
   onDelete,
 }: UserTableProps) {
   return (
@@ -227,6 +266,7 @@ export function UserTable({
               <TableHead className="text-gray-400 max-w-[180px]">E-Mail</TableHead>
               <TableHead className="text-gray-400">Rolle</TableHead>
               <TableHead className="text-gray-400">Status</TableHead>
+              <TableHead className="text-gray-400">Stimme</TableHead>
               <TableHead className="text-gray-400 hidden lg:table-cell">Erstellt</TableHead>
               <TableHead className="text-gray-400 text-right w-10">
                 Aktionen
@@ -260,6 +300,9 @@ export function UserTable({
                   <TableCell>
                     <StatusBadge isActive={user.is_active} />
                   </TableCell>
+                  <TableCell>
+                    <VoiceCell user={user} onToggleVoice={onToggleVoice} />
+                  </TableCell>
                   <TableCell className="text-gray-400 text-sm hidden lg:table-cell">
                     {formatDate(user.created_at)}
                   </TableCell>
@@ -268,6 +311,7 @@ export function UserTable({
                       user={user}
                       isSelf={isSelf}
                       onResetOtp={onResetOtp}
+                      onSetCredentials={onSetCredentials}
                       onToggleStatus={onToggleStatus}
                       onDelete={onDelete}
                     />
@@ -303,6 +347,7 @@ export function UserTable({
                   user={user}
                   isSelf={isSelf}
                   onResetOtp={onResetOtp}
+                  onSetCredentials={onSetCredentials}
                   onToggleStatus={onToggleStatus}
                   onDelete={onDelete}
                 />
@@ -314,6 +359,10 @@ export function UserTable({
               {user.email && (
                 <p className="text-xs text-gray-400 truncate">{user.email}</p>
               )}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-gray-500">Stimme</span>
+                <VoiceCell user={user} onToggleVoice={onToggleVoice} />
+              </div>
               <p className="text-xs text-gray-500">
                 Erstellt: {formatDate(user.created_at)}
               </p>
