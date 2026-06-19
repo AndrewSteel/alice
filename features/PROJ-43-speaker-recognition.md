@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-19 (Deployed to production. Voice enrollment verified end-to-end on ki.lan.)
+**Last Updated:** 2026-06-19 (Production hotfixes applied. Known issues documented below.)
 
 ## Dependencies
 - Requires: PROJ-40 (Speech Gateway Service) — Speaker-ID-Hook im Gateway, Wyoming-Pipeline
@@ -129,13 +129,13 @@ Database
 
 **New table: `alice.speaker_profiles`**
 
-| Field | Type | Notes |
-|---|---|---|
-| `user_id` | UUID PK/FK | References alice.users; one profile per user |
-| `embeddings` | FLOAT[][] | Array of embedding vectors, one per audio sample |
-| `sample_count` | INT | Number of recorded samples (target: 5) |
-| `created_at` | TIMESTAMP | |
-| `updated_at` | TIMESTAMP | |
+| Field          | Type       | Notes                                            |
+| -------------- | ---------- | ------------------------------------------------ |
+| `user_id`      | UUID PK/FK | References alice.users; one profile per user     |
+| `embeddings`   | FLOAT[][]  | Array of embedding vectors, one per audio sample |
+| `sample_count` | INT        | Number of recorded samples (target: 5)           |
+| `created_at`   | TIMESTAMP  |                                                  |
+| `updated_at`   | TIMESTAMP  |                                                  |
 
 Cosine similarity is computed in Python (no pgvector extension needed — user count will never exceed ~20).
 
@@ -212,40 +212,40 @@ Settings → "Stimmprofile" tab (admin only)
 
 ### Tech Decisions
 
-| Decision | Rationale |
-|---|---|
-| SpeechBrain ECAPA-TDNN | Runs locally on CUDA; no cloud; well-maintained; best accuracy/weight ratio for < 20 speakers |
-| Embeddings in PostgreSQL (float array) | User count stays small — no vector DB needed; keeps data in one place |
-| Speaker-ID as module inside gateway | Shares GPU context with Whisper; avoids network hop; < 500 ms target is achievable |
-| WebApp enrollment via gateway HTTP endpoint | Gateway already holds the model; avoids routing raw audio through Next.js |
-| Enrollment state machine inside gateway | Enrollment is a voice dialog, not an LLM conversation; gateway owns the audio loop |
-| 5 samples for both enrollment paths | Consistent quality target; sufficient for ECAPA-TDNN baseline accuracy |
+| Decision                                    | Rationale                                                                                     |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| SpeechBrain ECAPA-TDNN                      | Runs locally on CUDA; no cloud; well-maintained; best accuracy/weight ratio for < 20 speakers |
+| Embeddings in PostgreSQL (float array)      | User count stays small — no vector DB needed; keeps data in one place                         |
+| Speaker-ID as module inside gateway         | Shares GPU context with Whisper; avoids network hop; < 500 ms target is achievable            |
+| WebApp enrollment via gateway HTTP endpoint | Gateway already holds the model; avoids routing raw audio through Next.js                     |
+| Enrollment state machine inside gateway     | Enrollment is a voice dialog, not an LLM conversation; gateway owns the audio loop            |
+| 5 samples for both enrollment paths         | Consistent quality target; sufficient for ECAPA-TDNN baseline accuracy                        |
 
 ### New Dependencies (gateway)
 
-| Package | Purpose |
-|---|---|
-| `speechbrain` | ECAPA-TDNN speaker embedding model |
-| `asyncpg` | Async PostgreSQL client (gateway has no DB connection currently) |
+| Package       | Purpose                                                          |
+| ------------- | ---------------------------------------------------------------- |
+| `speechbrain` | ECAPA-TDNN speaker embedding model                               |
+| `asyncpg`     | Async PostgreSQL client (gateway has no DB connection currently) |
 
 ### Files Changed / Created
 
-| File | Action |
-|---|---|
-| `docker/compose/automations/alice-speech-gateway/app/speaker_id.py` | NEW |
-| `docker/compose/automations/alice-speech-gateway/app/speaker_db.py` | NEW |
-| `docker/compose/automations/alice-speech-gateway/app/enrollment.py` | NEW |
-| `docker/compose/automations/alice-speech-gateway/app/pipeline.py` | MODIFIED |
-| `docker/compose/automations/alice-speech-gateway/app/config.py` | MODIFIED |
-| `docker/compose/automations/alice-speech-gateway/app/wyoming_transport.py` | MODIFIED |
-| `docker/compose/automations/alice-speech-gateway/config/device-mapping.example.yaml` | MODIFIED |
-| `sql/init-schema.sql` | MODIFIED — speaker_profiles table, allow_voice_enrollment column |
-| `frontend/src/components/Settings/MeinProfilSection.tsx` | MODIFIED |
-| `frontend/src/components/Settings/VoiceEnrollmentDialog.tsx` | NEW |
-| `frontend/src/components/Settings/NutzerVerwaltungSection.tsx` | MODIFIED |
-| `frontend/src/components/Settings/UserTable.tsx` | MODIFIED |
-| `frontend/src/components/Settings/VoiceProfilesSection.tsx` | NEW |
-| `frontend/src/components/Settings/SettingsPage.tsx` | MODIFIED |
+| File                                                                                 | Action                                                           |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `docker/compose/automations/alice-speech-gateway/app/speaker_id.py`                  | NEW                                                              |
+| `docker/compose/automations/alice-speech-gateway/app/speaker_db.py`                  | NEW                                                              |
+| `docker/compose/automations/alice-speech-gateway/app/enrollment.py`                  | NEW                                                              |
+| `docker/compose/automations/alice-speech-gateway/app/pipeline.py`                    | MODIFIED                                                         |
+| `docker/compose/automations/alice-speech-gateway/app/config.py`                      | MODIFIED                                                         |
+| `docker/compose/automations/alice-speech-gateway/app/wyoming_transport.py`           | MODIFIED                                                         |
+| `docker/compose/automations/alice-speech-gateway/config/device-mapping.example.yaml` | MODIFIED                                                         |
+| `sql/init-schema.sql`                                                                | MODIFIED — speaker_profiles table, allow_voice_enrollment column |
+| `frontend/src/components/Settings/MeinProfilSection.tsx`                             | MODIFIED                                                         |
+| `frontend/src/components/Settings/VoiceEnrollmentDialog.tsx`                         | NEW                                                              |
+| `frontend/src/components/Settings/NutzerVerwaltungSection.tsx`                       | MODIFIED                                                         |
+| `frontend/src/components/Settings/UserTable.tsx`                                     | MODIFIED                                                         |
+| `frontend/src/components/Settings/VoiceProfilesSection.tsx`                          | NEW                                                              |
+| `frontend/src/components/Settings/SettingsPage.tsx`                                  | MODIFIED                                                         |
 
 ## QA Test Results
 
@@ -430,12 +430,12 @@ No DB migration needed — `alice.user_profiles` already exists; the gateway poo
 
 ### Prior Bugs — Verification
 
-| Bug | Severity | Status | Evidence |
-|---|---|---|---|
-| BUG-1 — `anrede`/`sprache` dropped | High | **FIXED** | `speaker_db.create_enrolled_user()` writes `alice.user_profiles` row in the same transaction (`ON CONFLICT … DO UPDATE` merge via `\|\|`); canonical values `du`/`sie` + `deutsch`/`englisch` set in `enrollment.py:162-170`. |
-| BUG-2 — premature success TTS | High | **FIXED** | `wyoming_transport.py:_run_enrollment_turn` (313-350) holds the terminal prompt; speaks success only after `create_enrolled_user()` succeeds, else `SPEECH_ENROLLMENT["save_failed"]` (`config.py:120`). |
-| BUG-3 — frontend missing | High | **FIXED** | All 5 new files present; `MeinProfilSection`/`UserTable`/`NutzerVerwaltungSection`/`SettingsPage`/`useAdminUsers`/`adminApi`/`profileApi` wired. `npm run build` passes type-check + lint clean. nginx `^~ /api/speech/enroll` block routes POST/GET/DELETE/PATCH → gateway:10301; `enroll_router` mounted + DB pool init in `main.py:115,76-79`. alice-auth exposes `allow_voice_enrollment` (+`speaker_enrollment_complete`). |
-| BUG-4 — min samples `< 1` | Medium | **FIXED** | `enroll_router.py:85` now rejects `len(files) < 5` with 400. |
+| Bug                                | Severity | Status    | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BUG-1 — `anrede`/`sprache` dropped | High     | **FIXED** | `speaker_db.create_enrolled_user()` writes `alice.user_profiles` row in the same transaction (`ON CONFLICT … DO UPDATE` merge via `\|\|`); canonical values `du`/`sie` + `deutsch`/`englisch` set in `enrollment.py:162-170`.                                                                                                                                                                                                   |
+| BUG-2 — premature success TTS      | High     | **FIXED** | `wyoming_transport.py:_run_enrollment_turn` (313-350) holds the terminal prompt; speaks success only after `create_enrolled_user()` succeeds, else `SPEECH_ENROLLMENT["save_failed"]` (`config.py:120`).                                                                                                                                                                                                                        |
+| BUG-3 — frontend missing           | High     | **FIXED** | All 5 new files present; `MeinProfilSection`/`UserTable`/`NutzerVerwaltungSection`/`SettingsPage`/`useAdminUsers`/`adminApi`/`profileApi` wired. `npm run build` passes type-check + lint clean. nginx `^~ /api/speech/enroll` block routes POST/GET/DELETE/PATCH → gateway:10301; `enroll_router` mounted + DB pool init in `main.py:115,76-79`. alice-auth exposes `allow_voice_enrollment` (+`speaker_enrollment_complete`). |
+| BUG-4 — min samples `< 1`          | Medium   | **FIXED** | `enroll_router.py:85` now rejects `len(files) < 5` with 400.                                                                                                                                                                                                                                                                                                                                                                    |
 
 ### New Bug
 
@@ -475,13 +475,13 @@ JWT enforced on all `/enroll/*`; `user_id` from token only; admin-only guards on
 
 ### Prior Bugs — Re-Verified
 
-| Bug | Sev | Status | Evidence (current tree) |
-|---|---|---|---|
+| Bug                            | Sev  | Status    | Evidence (current tree)                                                                                                                                                                                                                                                                                                                |
+| ------------------------------ | ---- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | BUG-1 — anrede/sprache dropped | High | **FIXED** | `speaker_db.create_enrolled_user()` writes `alice.user_profiles` in the same `conn.transaction()` as the `users` insert, merging via `preferences \|\| EXCLUDED.preferences` (`speaker_db.py:183-191`); canonical `du`/`sie` + `deutsch`/`englisch` (`enrollment.py:162-170`), matching alice-auth's `PATCH /auth/profile` validation. |
-| BUG-2 — premature success TTS | High | **FIXED** | `_run_enrollment_turn` speaks question/retry/abort prompts immediately but holds the terminal prompt; success spoken only after `create_enrolled_user()` returns, else `SPEECH_ENROLLMENT["save_failed"]` (`wyoming_transport.py:307-351`, `config.py:120`). |
-| BUG-3 — frontend missing | High | **FIXED** | All 6 files present and wired (voiceApi, useWavRecorder, useVoiceProfiles, VoiceEnrollmentDialog, VoiceProfilesSection + Mein­Profil/UserTable/Nutzer­Verwaltung/SettingsPage/useAdminUsers/adminApi/profileApi). `npm run build` passes type-check + lint, exit 0. |
-| BUG-4 — min samples `< 1` | Med | **FIXED** | `enroll_router.py:85` rejects `len(files) < 5` with 400. |
-| BUG-5 — set WebApp credentials | High | **FIXED** | `PATCH /auth/admin/users/{id}/set-credentials` (`main.py:1226`) + `SetCredentialsDialog.tsx` + `adminApi.setCredentials()` + `useAdminUsers.setUserCredentials()`; UserTable shows "Zugang einrichten" for users without an email. |
+| BUG-2 — premature success TTS  | High | **FIXED** | `_run_enrollment_turn` speaks question/retry/abort prompts immediately but holds the terminal prompt; success spoken only after `create_enrolled_user()` returns, else `SPEECH_ENROLLMENT["save_failed"]` (`wyoming_transport.py:307-351`, `config.py:120`).                                                                           |
+| BUG-3 — frontend missing       | High | **FIXED** | All 6 files present and wired (voiceApi, useWavRecorder, useVoiceProfiles, VoiceEnrollmentDialog, VoiceProfilesSection + Mein­Profil/UserTable/Nutzer­Verwaltung/SettingsPage/useAdminUsers/adminApi/profileApi). `npm run build` passes type-check + lint, exit 0.                                                                    |
+| BUG-4 — min samples `< 1`      | Med  | **FIXED** | `enroll_router.py:85` rejects `len(files) < 5` with 400.                                                                                                                                                                                                                                                                               |
+| BUG-5 — set WebApp credentials | High | **FIXED** | `PATCH /auth/admin/users/{id}/set-credentials` (`main.py:1226`) + `SetCredentialsDialog.tsx` + `adminApi.setCredentials()` + `useAdminUsers.setUserCredentials()`; UserTable shows "Zugang einrichten" for users without an email.                                                                                                     |
 
 ### Acceptance Criteria — 25/25 PASS
 
@@ -516,3 +516,40 @@ JWT enforced on all `/enroll/*` (`_require_auth`); `user_id` strictly from verif
 **Containers rebuilt:** `alice-speech-gateway` (PyTorch 2.3.1+cu121 pinned for TITAN X / Maxwell CC 5.2; SpeechBrain ECAPA-TDNN), `alice-auth` (new `/auth/profile` allow_voice_enrollment + PATCH set-credentials endpoint)
 **Frontend:** deployed via `deploy-frontend.sh` + `sync-compose.sh`
 **Smoke test:** WebApp voice enrollment completed successfully; speaker recognition confirmed active.
+
+## Post-Deployment Findings (2026-06-19)
+
+### Hotfixes Applied
+
+**BUG-5: Guest service user missing from DB (Wyoming 503)**
+- **Symptom:** All Wyoming voice turns returned 503 from `alice-chat-stream`. WebApp keyboard input worked fine.
+- **Root Cause:** `wyoming_transport._token_for()` mints JWTs with `user_id = "00000000-0000-0000-0000-000000000000"` for unidentified speakers. `alice-chat-stream` tries to `INSERT INTO alice.sessions` (FK → `alice.users.id`) — no user with that UUID existed → FK violation → 503.
+- **Fix:** `sql/migrations/017-guest-service-user.sql` — inserts a `voice-guest` user with role `guest` and the fixed null UUID. Applied to production.
+
+**BUG-6: WebApp audio VAD too aggressive after PROJ-43 rebuild**
+- **Symptom:** WebApp microphone input ("weder PC noch Smartphone") produced no transcript. STT log: 720 ms clip, VAD removed all audio.
+- **Root Cause:** Container rebuild likely installed a newer `faster-whisper` 1.x version with stricter default VAD parameters (`min_silence_duration_ms = 2000` causes short clips to be fully filtered).
+- **Fix:** Explicit `vad_parameters` in `stt.py`: `threshold=0.3`, `min_silence_duration_ms=500`. Applied and redeployed.
+
+### Known Production Issues (not yet fixed)
+
+**ISSUE-1: ESPHome admin bootstrap (chicken-and-egg)**
+- **Description:** The first admin cannot enroll themselves via ESPHome. The enrollment trigger in `wyoming_transport.py` requires the requesting speaker to be recognized as admin via Speaker-ID — but Speaker-ID requires prior enrollment. Catch-22.
+- **Current workaround:** Admin must enroll via WebApp first (browser mic), then ESPHome recognition works.
+- **Design note:** The WebApp path has a special case: `role === "admin"` always shows the enrollment card, bypassing the `allow_voice_enrollment` flag. This is the intended bootstrap path.
+- **Limitation:** First-time deployment requires WebApp access for the admin.
+
+**ISSUE-2: Same-device enrollment creates cross-device quality mismatch**
+- **Description:** Embeddings captured on one device (e.g., ESPHome Büro mic) may not match well when speaking on a different device (ESPHome Küche, WebApp mic). Different microphone characteristics (frequency response, noise floor, gain) affect the embedding space.
+- **Observed scores:** Short commands ~0.59, longer sentences ~0.64 (enrolled via WebApp, recognized on ESPHome).
+- **Current workaround:** Threshold lowered from 0.75 → 0.55 in production `.env` to compensate.
+- **Risk:** Lower threshold increases false positive rate. Monitor in production.
+- **Future fix options:** (a) Per-device enrollment (enroll on each device separately, store embeddings tagged by device); (b) Audio normalization before embedding extraction (equalization, noise suppression); (c) Separate threshold per device in `device-mapping.yaml`.
+
+### Production Configuration Delta
+
+| Setting                                           | Default | Production |
+| ------------------------------------------------- | ------- | ---------- |
+| `SPEAKER_THRESHOLD`                               | 0.75    | 0.55       |
+| `stt.py` `vad_parameters.threshold`               | 0.5     | 0.3        |
+| `stt.py` `vad_parameters.min_silence_duration_ms` | 2000    | 500        |

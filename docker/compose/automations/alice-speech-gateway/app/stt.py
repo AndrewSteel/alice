@@ -82,6 +82,10 @@ class WhisperEngine(STTEngine):
                 io.BytesIO(audio),
                 language=lang,
                 vad_filter=True,
+                vad_parameters={
+                    "threshold": 0.3,           # default 0.5 — lower = keep more speech
+                    "min_silence_duration_ms": 500,  # default 2000 — allow short clips
+                },
             )
             return " ".join(seg.text.strip() for seg in segments).strip()
 
