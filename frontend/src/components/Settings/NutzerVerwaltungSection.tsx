@@ -11,6 +11,7 @@ import type { AdminUser } from "@/services/adminApi";
 import { UserTable } from "./UserTable";
 import { CreateUserDialog } from "./CreateUserDialog";
 import { ResetOtpDialog } from "./ResetOtpDialog";
+import { SetCredentialsDialog } from "./SetCredentialsDialog";
 import { DeactivateUserDialog } from "./DeactivateUserDialog";
 import { DeleteUserDialog } from "./DeleteUserDialog";
 
@@ -25,12 +26,15 @@ export function NutzerVerwaltungSection() {
     addUser,
     resetUserOtp,
     toggleUserStatus,
+    toggleVoiceEnrollment,
+    setUserCredentials,
     removeUser,
   } = useAdminUsers();
 
   // Dialog state
   const [createOpen, setCreateOpen] = useState(false);
   const [resetOtpUser, setResetOtpUser] = useState<AdminUser | null>(null);
+  const [credentialsUser, setCredentialsUser] = useState<AdminUser | null>(null);
   const [deactivateUser, setDeactivateUser] = useState<AdminUser | null>(null);
   const [deleteUser, setDeleteUser] = useState<AdminUser | null>(null);
 
@@ -82,6 +86,37 @@ export function NutzerVerwaltungSection() {
       });
       throw err;
     }
+  }
+
+  async function handleToggleVoice(user: AdminUser, allow: boolean) {
+    try {
+      await toggleVoiceEnrollment(user.id, allow);
+      toast({
+        title: allow
+          ? "Stimmregistrierung freigegeben"
+          : "Stimmregistrierung gesperrt",
+        description: allow
+          ? `${user.username} kann sich jetzt per WebApp einrollen.`
+          : `${user.username} kann sich nicht mehr per WebApp einrollen.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Fehler",
+        description:
+          err instanceof Error
+            ? err.message
+            : "Berechtigung konnte nicht geaendert werden.",
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleSetCredentials(userId: string, email: string) {
+    await setUserCredentials(userId, email);
+    toast({
+      title: "Zugang eingerichtet",
+      description: "Ein Einmal-Passwort wurde per E-Mail versendet.",
+    });
   }
 
   async function handleDeleteUser(userId: string) {
@@ -192,7 +227,9 @@ export function NutzerVerwaltungSection() {
           users={users}
           currentUserId={currentUser?.id ?? ""}
           onResetOtp={(u) => setResetOtpUser(u)}
+          onSetCredentials={(u) => setCredentialsUser(u)}
           onToggleStatus={(u) => setDeactivateUser(u)}
+          onToggleVoice={handleToggleVoice}
           onDelete={(u) => setDeleteUser(u)}
         />
       )}
@@ -210,6 +247,15 @@ export function NutzerVerwaltungSection() {
           open={!!resetOtpUser}
           onOpenChange={(open) => !open && setResetOtpUser(null)}
           onConfirm={handleResetOtp}
+        />
+      )}
+
+      {credentialsUser && (
+        <SetCredentialsDialog
+          user={credentialsUser}
+          open={!!credentialsUser}
+          onOpenChange={(open) => !open && setCredentialsUser(null)}
+          onConfirm={handleSetCredentials}
         />
       )}
 

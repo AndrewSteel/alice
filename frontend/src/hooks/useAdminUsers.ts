@@ -9,7 +9,9 @@ import {
   resetOtp,
   updateUserStatus,
   deleteUser,
+  setCredentials as setCredentialsApi,
 } from "@/services/adminApi";
+import { setVoiceEnrollmentAllowed } from "@/services/voiceApi";
 
 interface UseAdminUsersReturn {
   users: AdminUser[];
@@ -19,6 +21,8 @@ interface UseAdminUsersReturn {
   addUser: (data: CreateUserInput) => Promise<void>;
   resetUserOtp: (userId: string) => Promise<void>;
   toggleUserStatus: (userId: string, isActive: boolean) => Promise<void>;
+  toggleVoiceEnrollment: (userId: string, allow: boolean) => Promise<void>;
+  setUserCredentials: (userId: string, email: string) => Promise<void>;
   removeUser: (userId: string) => Promise<void>;
   clearError: () => void;
 }
@@ -82,6 +86,28 @@ export function useAdminUsers(): UseAdminUsersReturn {
     []
   );
 
+  const toggleVoiceEnrollment = useCallback(
+    async (userId: string, allow: boolean) => {
+      await setVoiceEnrollmentAllowed(userId, allow);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId ? { ...u, allow_voice_enrollment: allow } : u
+        )
+      );
+    },
+    []
+  );
+
+  const setUserCredentials = useCallback(
+    async (userId: string, email: string) => {
+      await setCredentialsApi(userId, email);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, email } : u))
+      );
+    },
+    []
+  );
+
   const removeUser = useCallback(async (userId: string) => {
     await deleteUser(userId);
     setUsers((prev) => prev.filter((u) => u.id !== userId));
@@ -97,6 +123,8 @@ export function useAdminUsers(): UseAdminUsersReturn {
     addUser,
     resetUserOtp,
     toggleUserStatus,
+    toggleVoiceEnrollment,
+    setUserCredentials,
     removeUser,
     clearError,
   };

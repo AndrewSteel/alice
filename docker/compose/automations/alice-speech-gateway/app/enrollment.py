@@ -88,7 +88,7 @@ class EnrollmentSession:
     display_name: str = ""
     username: str = ""
     anrede: str = "du"
-    sprache: str = "de"
+    sprache: str = "deutsch"
 
     # Audio samples from the dialog turns (used for embedding)
     audio_samples: list[bytes] = field(default_factory=list)
@@ -165,9 +165,9 @@ class EnrollmentSession:
 
         if self._state == _State.ASKING_SPRACHE:
             if "englisch" in text.lower() or "english" in text.lower():
-                self.sprache = "en"
+                self.sprache = "englisch"
             else:
-                self.sprache = "de"
+                self.sprache = "deutsch"
             self._state = _State.DONE
             key = "done_guest" if self.role == "guest" else "done_user"
             return config.SPEECH_ENROLLMENT[key].format(name=self.display_name)

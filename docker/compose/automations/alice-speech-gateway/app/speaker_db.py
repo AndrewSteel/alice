@@ -178,6 +178,17 @@ async def create_enrolled_user(
                 user_id,
                 role,
             )
+            # Persist enrollment preferences (anrede/sprache) so the agent
+            # addresses and answers the user as chosen during the dialog.
+            await conn.execute(
+                """INSERT INTO alice.user_profiles (user_id, preferences)
+                   VALUES ($1, $2::jsonb)
+                   ON CONFLICT (user_id) DO UPDATE
+                       SET preferences  = alice.user_profiles.preferences || EXCLUDED.preferences,
+                           last_updated = NOW()""",
+                user_id,
+                json.dumps({"anrede": anrede, "sprache": sprache}),
+            )
     logger.info("Created enrolled user %s (role=%s)", username, role)
     return dict(row)
 

@@ -126,7 +126,7 @@ class GatewayWyomingHandler(AsyncEventHandler):
             if device is None:
                 logger.warning("Unknown Wyoming client IP: %r", self._client_ip)
                 await self._speak_error(config.SPEECH_ERRORS["unknown_device"])
-                continue
+                break
 
             if len(audio_pcm) < pcm_rate * pcm_width * config.MIN_AUDIO_SECONDS:
                 await self._speak_error(config.SPEECH_ERRORS["audio_too_short"])
@@ -305,42 +305,56 @@ class GatewayWyomingHandler(AsyncEventHandler):
             transcript = ""
 
         prompt = await session.process_turn(transcript, wav)
-        await self._speak_text(prompt)
 
-        if not session.is_done:
-            return True  # still going
+        # For non-terminal turns (questions, retries) and aborts, speak the
+        # prompt immediately. The success prompt is held back until the DB
+        # write actually succeeds (BUG-2) so the user never hears "Einrollung
+        # abgeschlossen" for a user that was never persisted.
+        if not (session.is_done and session.succeeded):
+            await self._speak_text(prompt)
+            return not session.is_done
 
-        if session.succeeded:
-            sample_audio_list = session.get_sample_audio()
-            embeddings: list[list[float]] = []
-            if sid_mod.is_ready():
-                for sample_wav in sample_audio_list:
-                    emb = await sid_mod.extract_embedding(sample_wav)
-                    if emb is not None:
-                        embeddings.append(emb.tolist())
+        sample_audio_list = session.get_sample_audio()
+        embeddings: list[list[float]] = []
+        if sid_mod.is_ready():
+            for sample_wav in sample_audio_list:
+                emb = await sid_mod.extract_embedding(sample_wav)
+                if emb is not None:
+                    embeddings.append(emb.tolist())
 
-            if embeddings:
+        saved = False
+        if embeddings:
+            try:
+                await speaker_db.create_enrolled_user(
+                    username=session.username,
+                    display_name=session.display_name,
+                    anrede=session.anrede,
+                    sprache=session.sprache,
+                    role=session.role,
+                    embeddings=embeddings,
+                )
+                logger.info(
+                    "Enrollment complete: %s (%d embeddings)", session.username, len(embeddings)
+                )
+                # DB write confirmed — reload failure must not undo this (OBS-2).
+                saved = True
+            except Exception as exc:
+                logger.error("Failed to save enrolled user: %s", exc)
+
+            if saved:
+                # Refresh profiles in-place so the new user is recognisable immediately.
+                # Non-fatal: the user was already persisted.
                 try:
-                    await speaker_db.create_enrolled_user(
-                        username=session.username,
-                        display_name=session.display_name,
-                        anrede=session.anrede,
-                        sprache=session.sprache,
-                        role=session.role,
-                        embeddings=embeddings,
-                    )
-                    logger.info(
-                        "Enrollment complete: %s (%d embeddings)", session.username, len(embeddings)
-                    )
-                    # Refresh profiles in-place so the new user is recognisable immediately
                     speaker_profiles.clear()
                     new_profiles = await speaker_db.load_all_profiles()
                     speaker_profiles.extend(new_profiles)
                 except Exception as exc:
-                    logger.error("Failed to save enrolled user: %s", exc)
-            else:
-                logger.warning("Enrollment %s: no embeddings extracted", session.username)
+                    logger.warning("Profile reload after enrollment failed: %s", exc)
+        else:
+            logger.warning("Enrollment %s: no embeddings extracted", session.username)
 
+        # Speak success only after a confirmed write; otherwise tell the user it failed.
+        await self._speak_text(prompt if saved else config.SPEECH_ENROLLMENT["save_failed"])
         return False  # done
 
     async def _collect_audio(self) -> tuple[bytes, int, int, int] | None:

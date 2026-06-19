@@ -14,6 +14,8 @@ export interface AdminUser {
   must_change_password: boolean;
   created_at: string;
   last_login_at: string | null;
+  allow_voice_enrollment: boolean;
+  speaker_enrollment_complete: boolean;
 }
 
 export interface CreateUserInput {
@@ -230,6 +232,46 @@ export async function deleteUser(userId: string): Promise<void> {
     throw new Error(
       `Serverfehler (${res.status}) beim Loeschen des Nutzers.`
     );
+  }
+}
+
+/**
+ * Sets email + generates OTP for an ESPHome-enrolled user who has no login yet (admin only).
+ */
+export async function setCredentials(userId: string, email: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${ADMIN_BASE}/users/${userId}/set-credentials`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ email }),
+    });
+  } catch {
+    throw new Error("Netzwerkfehler -- Zugangsdaten konnten nicht gesetzt werden.");
+  }
+
+  handleAuthError(res);
+
+  if (res.status === 403) {
+    throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
+  }
+  if (res.status === 404) {
+    throw new Error("Nutzer nicht gefunden.");
+  }
+  if (res.status === 409) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "E-Mail-Adresse bereits vergeben.");
+  }
+  if (res.status === 422) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Ungueltige E-Mail-Adresse.");
+  }
+  if (res.status === 500) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "E-Mail-Versand fehlgeschlagen -- SMTP pruefen.");
+  }
+  if (!res.ok) {
+    throw new Error(`Serverfehler (${res.status}) beim Setzen der Zugangsdaten.`);
   }
 }
 

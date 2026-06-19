@@ -117,6 +117,7 @@ SPEECH_ENROLLMENT = {
     "ask_sprache":  "Welche Sprache? Deutsch oder Englisch?",
     "done_user":    "Einrollung abgeschlossen. {name} wurde als neuer Nutzer angelegt.",
     "done_guest":   "Einrollung abgeschlossen. {name} wurde als neuer Gast angelegt.",
+    "save_failed":  "Die Einrollung konnte nicht gespeichert werden. Bitte versuche es erneut.",
     "aborted":      "Einrollung abgebrochen.",
 }
 
