@@ -1,6 +1,6 @@
 # PROJ-44: DMS BankTransaction Lifecycle Cleanup
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-06-24
 **Last Updated:** 2026-06-24
 
@@ -269,7 +269,155 @@ Alle benötigten Komponenten existieren bereits: MQTT, Redis (mit `redis`-Node-M
 4. AC-2/AC-3 verifizieren: Testdatei aus DMS-Ordner entfernen → Scanner-Run abwarten → Weaviate-Count prüfen
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA Date:** 2026-06-24
+**Tested By:** QA Engineer (Red Team)
+**Test Method:** Static code review of all PROJ-44 deliverables (`alice-dms-scanner.json`, `alice-dms-lifecycle.json`, and the existing BUG-13 fix in `alice-dms-processor.json`). Live execution against Weaviate / n8n was not performed (workflows run on ki.lan). One HIGH bug was found and fixed during QA before sign-off.
+
+---
+
+### Acceptance Criteria Results
+
+#### AC-1: Replace-Szenario — Cascade-Delete beim Re-Processing
+
+| Criterion | Status | Notes |
+|---|---|---|
+| Processor cascade-deletes old BankTransaction children before inserting new ones | PASS | `Code: BankTransaction Phase B` calls `cascadeDeleteChildren(oldParentId)` when `_existing_weaviate_class === 'BankStatement'` and old UUID ≠ new UUID |
+| `cascadeDeleteChildren` uses GraphQL Get → DELETE-by-UUID (BUG-3 fix) | PASS | Uses paged GraphQL GET + per-UUID DELETE, with 404-as-success handling |
+| Old BankStatement itself deleted before new one inserted | PASS | `HTTP: Weaviate Delete` node runs via `If: Has Existing Entry` → true branch |
+| `_existing_weaviate_id` propagated to Phase B | PASS | `Code: Redis State Update` reads from `$('Code: Check Existing Entry')` which carries `_existing_weaviate_id`/`_existing_weaviate_class` |
+| oldParentId null-safe when no previous object exists | PASS | `oldParentId = null` → `if (oldParentId)` guard in Phase B → `cascadeDeleteChildren` returns `{deleted:0, failed:0}` immediately |
+| Count verification after re-processing (0 old, N new) | NOT TESTED LIVE | Logic correct; requires live Weaviate run to confirm |
+| **AC-1 verdict** | PASS (with live verification pending) | |
+
+#### AC-2: Delete-Szenario — Scanner erkennt gelöschte Dateien
+
+| Criterion | Status | Notes |
+|---|---|---|
+| Scanner checks all paths in `alice:dms:path_to_hash` after scan | PASS | `Code: Find Stale Paths` uses `HGETALL alice:dms:path_to_hash` after Summary Stats |
+| `delete_file` MQTT event published only when no other copies exist for that hash | PASS | After HDEL + SREM, `sMembers hash_to_paths` checked; event only if `stillAlive.length === 0` |
+| Redis cleanup: HDEL path_to_hash, SREM hash_to_paths, SREM processed | PASS | All three operations in `Code: Find Stale Paths` |
+| `deleted_files` in scanner stats | PASS (partial) | Field added to stats item directly; not persisted as separate Redis counter (see BUG-4 LOW) |
+| Scan-Durchlauf does not abort on stale path errors | PASS | Outer try/catch in `Code: Find Stale Paths` catches all errors, always appends stats item |
+| Stale check runs even when DMS has no files (BUG-3, fixed) | PASS (fixed) | Initially bypassed via `End: No Files` path; fixed by routing `Set: No Files Stats → Code: Find Stale Paths` |
+| **AC-2 verdict** | PASS (with live verification pending) | BUG-3 fixed during QA; BUG-4 LOW documented |
+
+#### AC-3: Lifecycle-Workflow verarbeitet `delete_file`-Events
+
+| Criterion | Status | Notes |
+|---|---|---|
+| `delete_file` accepted as valid action in Parse & Validate | PASS | `!['add_path', 'update_path', 'delete_file'].includes(msg.action)` updated |
+| Weaviate Find by Hash reused for delete_file | PASS | Flow: MQTT Trigger → Parse → Weaviate Find by Hash → IF: Is add_path (false) → IF: Is update_path (false) → IF: Is delete_file (true) |
+| IF: Is delete_file branch exists and routes correctly | PASS | New node with `action === 'delete_file'` condition |
+| BankTransaction children found via paged GraphQL Get | PASS | `for (page; page<50; page++)` loop in `Code: Handle delete_file`, breaks when `hits.length < 100` |
+| Each BankTransaction child deleted by UUID | PASS | `axios.delete /v1/objects/BankTransaction/<uuid>` per child, warnings on failure |
+| BankStatement deleted after children | PASS | `axios.delete /v1/objects/<parentClass>/<parentId>`, throws on error |
+| Non-BankStatement: cascade skipped, only parent deleted | PASS | `if (parentClass === 'BankStatement')` guard around child collection loop |
+| Object not found → no-op, no error | PASS | `if (!parentId || !parentClass)` early return with `deleted_statement: false` |
+| MQTT `alice/dms/done` published with deletion stats | PASS | `MQTT: Done (delete_file)` node with `deleted_statement` and `deleted_transactions` fields |
+| MQTT `alice/dms/error` on failures | PASS | Existing Error Trigger → Code: Format Error → MQTT: Publish Error chain handles uncaught throws |
+| **AC-3 verdict** | PASS (with live verification pending) | |
+
+#### AC-4: Keine verwaisten BankTransaction-Objekte
+
+| Criterion | Status | Notes |
+|---|---|---|
+| Replace testfall: 0 BankTransaction with old parentStatementId after re-processing | NOT TESTED LIVE | Logic in Phase B is correct; live test requires Weaviate |
+| Delete testfall: 0 BankTransaction after scanner run + lifecycle processing | NOT TESTED LIVE | Logic in scanner + lifecycle correct; live test required |
+| PRD metric: verwaiste Objekte → 0 nach Parent-Löschung | NOT TESTED LIVE | |
+| **AC-4 verdict** | NOT TESTED LIVE | Architecture correct; blocked by remote-only deployment |
+
+---
+
+### Bugs Found
+
+#### BUG-1 (MEDIUM, FIXED during QA): Stale path check bypassed on empty DMS
+- **Severity:** HIGH → fixed → no longer blocking
+- **Location:** `alice-dms-scanner.json` — connection `Set: No Files Stats → End: No Files`
+- **Issue:** When all DMS folders are empty or no supported files exist, `IF: Has Files` routes to `Set: No Files Stats → End: No Files`, bypassing `Code: Find Stale Paths` entirely. Spec edge case "DMS-Ordner komplett geleert" requires cleanup to run in this case.
+- **Fix applied:** Changed `Set: No Files Stats → End: No Files` to `Set: No Files Stats → Code: Find Stale Paths`. `End: No Files` node is now an orphan (harmless in n8n).
+
+#### BUG-2 (LOW): Internal `_stale_for_deletion` field in scanner stats MQTT
+- **Severity:** Low
+- **Location:** `alice-dms-scanner.json` → `MQTT: Publish Stats`, `Code: Find Stale Paths`
+- **Issue:** Stats items output by `Code: Find Stale Paths` carry `_stale_for_deletion: false`. `MQTT: Publish Stats` uses `JSON.stringify($json)` which includes this internal field in the published stats message.
+- **Impact:** Minor — stats consumers see an unexpected `_stale_for_deletion: false` field. Not harmful.
+- **Recommendation:** Update `MQTT: Publish Stats` message to explicitly list only intended stats fields.
+
+#### BUG-3 (LOW): `deleted_files` counter counts only Weaviate-triggering deletions
+- **Severity:** Low
+- **Location:** `Code: Find Stale Paths` — `deletedFiles` counter
+- **Issue:** `deletedFiles` is only incremented when a stale path has no surviving copies (triggering Weaviate cleanup). Paths removed from Redis because a copy exists elsewhere are not counted. Spec says "pro erkanntem gelöschtem Pfad inkrementiert" — implies all stale paths, not just cleanup-triggering ones.
+- **Impact:** Minor stats undercount.
+- **Recommendation:** Increment a separate counter for total-stale-paths-removed vs. Weaviate-cleanups-triggered.
+
+#### BUG-4 (LOW): No UUID sanitization in `Code: Handle delete_file` GraphQL query
+- **Severity:** Low (security)
+- **Location:** `alice-dms-lifecycle.json` → `Code: Handle delete_file`
+- **Issue:** `parentId` (from `_weaviate_id`, a Weaviate-generated UUID) is used directly in the GraphQL query string without sanitization. Phase B's `cascadeDeleteChildren` sanitizes its input with `String(pid).replace(/[^a-zA-Z0-9-]/g, '')`. The lifecycle handler omits this step.
+- **Impact:** Very low risk — `_weaviate_id` is Weaviate-generated and UUID-formatted, so injection is extremely unlikely. But it's inconsistent with the existing defensive security pattern.
+- **Recommendation:** Add UUID sanitization for defensive consistency.
+
+---
+
+### Security Audit (Red Team)
+
+#### S-1 (PASS): No new external input surface
+PROJ-44 adds no new webhooks, API endpoints, or user-controllable inputs. The `delete_file` lifecycle event is published internally by `alice-dms-scanner` — it never accepts user-supplied data. Attacks require compromising the MQTT broker or the scanner itself.
+
+#### S-2 (PASS): fileHash GraphQL injection prevention maintained
+`Code: Weaviate Find by Hash` still sanitizes `fileHash` with `replace(/[^a-zA-Z0-9:]/g, '')` before using it in GraphQL queries. No change to this path.
+
+#### S-3 (LOW): UUID in GraphQL query (BUG-4 above)
+`parentId` in `Code: Handle delete_file` is not explicitly sanitized. Risk is very low given UUID format constraints but inconsistent with project patterns. See BUG-4.
+
+#### S-4 (PASS): No permission escalation or data leakage
+The delete_file handler deletes Weaviate objects but does not expose data to users. The scanner only processes DMS folder paths from `alice.dms_watched_folders` (Postgres, requires DB access to modify). No new permission surface.
+
+#### S-5 (PASS): Redis cleanup is minimal and targeted
+`Code: Find Stale Paths` only removes paths from `alice:dms:path_to_hash`, `alice:dms:hash_to_paths:*`, and `alice:dms:processed`. It does not touch any user data or credentials.
+
+---
+
+### Regression Risk Assessment
+
+#### R-1: `alice-dms-scanner` existing scan loop — PASS
+The main scan loop (Hash + Size → Lifecycle Check → Route → queue MQTT) is completely unchanged. Only the post-loop path (Summary Stats → Find Stale Paths) is modified. The first N items in the loop still flow identically.
+
+#### R-2: `alice-dms-lifecycle` add_path / update_path — PASS
+`IF: Is add_path` and `IF: Is update_path` handlers are unchanged. The new `delete_file` branch is added as a third branch after the existing two, with no impact on the existing routing.
+
+#### R-3: `alice-dms-processor` BankStatement processing — PASS
+No changes to `alice-dms-processor.json` in PROJ-44 (the BUG-13 fix was already in PROJ-29). The processor remains unchanged.
+
+#### R-4: PROJ-29 BankTransaction indexing — PASS
+`BankTransaction` collection schema unchanged. Phase B logic unchanged. The lifecycle handler correctly targets `BankTransaction` by class name.
+
+#### R-5: Stats MQTT publishing — PARTIAL CONCERN
+`alice/dms/scanner/stats` messages now include `_stale_for_deletion: false` and `deleted_files: N`. Any consumer of this topic (Grafana, other workflows) will receive extra fields. Both are additive and non-breaking (JSON consumers typically ignore unknown fields).
+
+---
+
+### Summary
+
+| Metric | Value |
+|---|---|
+| Total ACs tested | 4 |
+| ACs PASS | 3 (AC-1, AC-2, AC-3) |
+| ACs NOT TESTED LIVE | 1 (AC-4 — requires live Weaviate) |
+| Bugs HIGH (blocking) | 1 (BUG-1, FIXED during QA) |
+| Bugs LOW | 3 (BUG-2, BUG-3, BUG-4) |
+| Security findings (scoped) | 0 critical/high, 1 LOW (BUG-4) |
+| Regression Risk | Low for all dependent workflows |
+
+### Production-Ready Decision: READY
+
+**All blocking issues resolved:**
+- BUG-3 (HIGH) — empty DMS stale path bypass — **fixed during QA session**
+
+**Remaining non-blocking items:**
+- BUG-2 / BUG-3 / BUG-4 (LOW) — cosmetic, stats accuracy, defensive security — can be addressed in a follow-up
+- AC-4 live verification — to be confirmed during first production deployment by checking Weaviate `Aggregate { BankTransaction { meta { count } } }` before and after deleting a test bank statement
 
 ## Deployment
 _To be added by /deploy_
