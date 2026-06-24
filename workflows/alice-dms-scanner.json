@@ -946,6 +946,77 @@
       ],
       "id": "code-fallback-handler-01-alice-dms-scanner",
       "name": "Code: Unknown Type Fallback"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst fs = require('fs');\nconst statsItem = $input.first().json;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n\nconst outputItems = [];\nlet deletedFiles = 0;\n\ntry {\n  await client.connect();\n  const pathToHash = await client.hGetAll('alice:dms:path_to_hash');\n\n  for (const [filePath, fileHash] of Object.entries(pathToHash || {})) {\n    if (!fs.existsSync(filePath)) {\n      await client.hDel('alice:dms:path_to_hash', filePath);\n      await client.sRem('alice:dms:hash_to_paths:' + fileHash, filePath);\n      const remaining = await client.sMembers('alice:dms:hash_to_paths:' + fileHash);\n      const stillAlive = remaining.filter(p => { try { fs.accessSync(p, fs.constants.F_OK); return true; } catch(e) { return false; } });\n      if (stillAlive.length === 0) {\n        await client.sRem('alice:dms:processed', fileHash);\n        deletedFiles++;\n        outputItems.push({ json: { _stale_for_deletion: true, file_hash: fileHash, file_path: filePath, detected_at: new Date().toISOString() } });\n        console.log('[alice-dms-scanner] delete_file: ' + filePath + ' (hash: ' + fileHash + ')');\n      } else {\n        console.log('[alice-dms-scanner] stale path removed, alive at ' + stillAlive.length + ' other path(s): ' + filePath);\n      }\n    }\n  }\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n  console.log('[alice-dms-scanner] stale path check error: ' + e.message);\n}\n\noutputItems.push({ json: { _stale_for_deletion: false, ...statsItem, deleted_files: deletedFiles } });\nreturn outputItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        37680,
+        3888
+      ],
+      "id": "proj44-code-find-stale-paths-v1",
+      "name": "Code: Find Stale Paths"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-stale-for-deletion",
+              "leftValue": "={{ $json._stale_for_deletion }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        37968,
+        3888
+      ],
+      "id": "proj44-if-is-stale-deletion-v1",
+      "name": "IF: Is Stale Deletion"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/lifecycle",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ action: 'delete_file', file_hash: $json.file_hash, file_path: $json.file_path, detected_at: $json.detected_at }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        38256,
+        4096
+      ],
+      "id": "proj44-mqtt-publish-delete-file-v1",
+      "name": "MQTT: Publish delete_file (lifecycle)",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -1366,6 +1437,35 @@
     },
     "Code: Summary Stats": {
       "main": [
+        [
+          {
+            "node": "Code: Find Stale Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Find Stale Paths": {
+      "main": [
+        [
+          {
+            "node": "IF: Is Stale Deletion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is Stale Deletion": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish delete_file (lifecycle)",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "MQTT: Publish Stats",

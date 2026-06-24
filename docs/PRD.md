@@ -29,7 +29,7 @@ Phase 2 transformiert Alice von einem text-basierten in einen vollständigen **S
 | P0       | WebApp Voice Interface (PROJ-41)                 | 2.1   | Planned |
 | P1       | Home Assistant Voice Integration (PROJ-42)       | 2.2   | Planned |
 | P1       | Speaker Recognition / Speaker-ID (PROJ-43)       | 2.2   | Planned |
-| P1       | DMS BankTransaction Lifecycle Cleanup (PROJ-44)  | 2.1   | Roadmap |
+| P1       | DMS BankTransaction Lifecycle Cleanup (PROJ-44)  | 2.1   | Planned |
 | P1       | Chat-Protokoll-Speicherung & Titelgenerierung (PROJ-51) | 2.2 | Planned |
 | P1       | Admin-Chatarchiv (PROJ-52)                       | 2.2   | Planned |
 | P2       | Display Registry & Output Router (PROJ-45)       | 2.3   | Roadmap |

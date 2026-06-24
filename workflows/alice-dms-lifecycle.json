@@ -8,7 +8,10 @@
       },
       "type": "n8n-nodes-base.mqttTrigger",
       "typeVersion": 1,
-      "position": [3408, 896],
+      "position": [
+        3408,
+        896
+      ],
       "id": "6891990e-7703-4cb7-ad51-6754ba6d8ba9",
       "name": "MQTT Trigger: alice/dms/lifecycle",
       "webhookId": "alice-dms-lifecycle-trigger-v1",
@@ -21,11 +24,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('Malformed MQTT message: cannot parse JSON payload. ' + e.message);\n}\n\nif (!msg.action || !msg.file_hash || !msg.file_path) {\n  throw new Error('Invalid lifecycle message: missing required fields (action, file_hash, file_path). Got keys: ' + JSON.stringify(Object.keys(msg)));\n}\n\nif (!['add_path', 'update_path'].includes(msg.action)) {\n  console.warn('[alice-dms-lifecycle] Unknown action: ' + msg.action + ' — discarding message');\n  return [];\n}\n\nreturn [{ json: { ...msg } }];"
+        "jsCode": "const raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('Malformed MQTT message: cannot parse JSON payload. ' + e.message);\n}\n\nif (!msg.action || !msg.file_hash || !msg.file_path) {\n  throw new Error('Invalid lifecycle message: missing required fields (action, file_hash, file_path). Got keys: ' + JSON.stringify(Object.keys(msg)));\n}\n\nif (!['add_path', 'update_path', 'delete_file'].includes(msg.action)) {\n  console.warn('[alice-dms-lifecycle] Unknown action: ' + msg.action + ' — discarding message');\n  return [];\n}\n\nreturn [{ json: { ...msg } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3712, 896],
+      "position": [
+        3712,
+        896
+      ],
       "id": "270c3ec9-f0f9-4c97-90dd-768f61c43f1e",
       "name": "Code: Parse & Validate"
     },
@@ -35,7 +41,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4016, 896],
+      "position": [
+        4016,
+        896
+      ],
       "id": "2f78a94c-0f3d-42ee-b1a1-f190f37a8327",
       "name": "Code: Weaviate Find by Hash"
     },
@@ -66,7 +75,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [4320, 896],
+      "position": [
+        4320,
+        896
+      ],
       "id": "5206f2c5-7703-47a4-b43a-f69f8f3a9509",
       "name": "IF: Is add_path"
     },
@@ -76,7 +88,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4608, 704],
+      "position": [
+        4608,
+        704
+      ],
       "id": "3665cabc-4f8c-455e-a568-f3fa45f1eaee",
       "name": "Code: PATCH additionalPaths"
     },
@@ -86,7 +101,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4912, 704],
+      "position": [
+        4912,
+        704
+      ],
       "id": "091aef77-aa23-41fe-9db7-16ee57155492",
       "name": "Code: Redis Update (add_path)"
     },
@@ -98,7 +116,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [5216, 704],
+      "position": [
+        5216,
+        704
+      ],
       "id": "9daf5c5d-9840-4b09-9edd-19bdb538f1b5",
       "name": "MQTT: Done (add_path)",
       "credentials": {
@@ -134,7 +155,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [4608, 1104],
+      "position": [
+        4608,
+        1104
+      ],
       "id": "9774ea74-5968-4ab9-ae23-c9df62d1c4ae",
       "name": "IF: Is update_path"
     },
@@ -144,7 +168,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4912, 1104],
+      "position": [
+        4912,
+        1104
+      ],
       "id": "faa66ff3-d2ce-44c9-b5ac-04b03bdea0d1",
       "name": "Code: PATCH filePath"
     },
@@ -154,7 +181,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [5216, 1104],
+      "position": [
+        5216,
+        1104
+      ],
       "id": "3ca1ea58-4f42-432b-bc89-64eb0e8926b6",
       "name": "Code: Redis Update (update_path)"
     },
@@ -166,7 +196,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [5520, 1104],
+      "position": [
+        5520,
+        1104
+      ],
       "id": "423c9631-e4a9-4010-a3eb-1ffb3101bc34",
       "name": "MQTT: Done (update_path)",
       "credentials": {
@@ -178,14 +211,17 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, Redis still updated\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Post-Deploy: Error Workflow Config\nAfter importing, set Settings → Error Workflow to this workflow's\nown ID so the Error Trigger node catches execution errors.\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-21: Weaviate additionalPaths field on all 6 collections\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
+        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22, PROJ-44).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n- `delete_file` — File deleted from DMS; no copies remain. (PROJ-44)\n  If BankStatement: cascade-delete all BankTransaction children first.\n  Then DELETE parent Weaviate object.\n  Redis already cleaned up by alice-dms-scanner before publishing.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, no-op (already cleaned up)\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Weaviate DELETE failure → throw\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-29: BankTransaction collection with parentStatementId\n- PROJ-44: delete_file cascade-delete\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
         "height": 520,
         "width": 400,
         "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [3408, 496],
+      "position": [
+        3408,
+        496
+      ],
       "id": "71adc790-fb1c-44d5-bb4b-d834fed0a360",
       "name": "Sticky Note"
     },
@@ -193,7 +229,10 @@
       "parameters": {},
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [3408, 1296],
+      "position": [
+        3408,
+        1296
+      ],
       "id": "b4f70dc9-8b2a-432a-853a-01121dcfa04d",
       "name": "Error Trigger"
     },
@@ -203,7 +242,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3712, 1296],
+      "position": [
+        3712,
+        1296
+      ],
       "id": "2fed30de-6522-4848-b293-7a894ee6b534",
       "name": "Code: Format Error"
     },
@@ -218,9 +260,80 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [4016, 1296],
+      "position": [
+        4016,
+        1296
+      ],
       "id": "c94c30d1-cce8-47a9-8195-3adc05ba24e2",
       "name": "MQTT: Publish Error",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-action-delete-file",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "delete_file",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4912,
+        1296
+      ],
+      "id": "proj44-if-is-delete-file-v1",
+      "name": "IF: Is delete_file"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst parentId = item._weaviate_id;\nconst parentClass = item._weaviate_class;\n\n// No Weaviate object for this hash — already cleaned up or never indexed\nif (!parentId || !parentClass) {\n  console.log('[alice-dms-lifecycle] delete_file: no Weaviate object for hash ' + item.file_hash + ' — skipping');\n  return [{ json: { ...item, _deleted_statement: false, _deleted_transactions: 0 } }];\n}\n\nlet deletedTransactions = 0;\n\n// Cascade-delete BankTransaction children if parent is a BankStatement\nif (parentClass === 'BankStatement') {\n  let cursor = null;\n  const childUuids = [];\n  for (let page = 0; page < 50; page++) {\n    const afterClause = cursor ? (', after: \"' + cursor + '\"') : '';\n    const q = '{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"' + parentId + '\" }, limit: 100' + afterClause + ') { _additional { id } } } }';\n    try {\n      const r = await axios.post(WEAVIATE + '/v1/graphql', { query: q }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n      const hits = r.data && r.data.data && r.data.data.Get && r.data.data.Get.BankTransaction ? r.data.data.Get.BankTransaction : [];\n      for (const h of hits) { if (h._additional && h._additional.id) childUuids.push(h._additional.id); }\n      if (hits.length < 100) break;\n      cursor = hits[hits.length - 1]._additional.id;\n    } catch(e) {\n      console.warn('[alice-dms-lifecycle] GraphQL page ' + page + ' failed: ' + e.message);\n      break;\n    }\n  }\n  for (const uuid of childUuids) {\n    try {\n      await axios.delete(WEAVIATE + '/v1/objects/BankTransaction/' + uuid, { timeout: 10000 });\n      deletedTransactions++;\n    } catch(e) {\n      console.warn('[alice-dms-lifecycle] Failed to delete BankTransaction ' + uuid + ': ' + e.message);\n    }\n  }\n  console.log('[alice-dms-lifecycle] Deleted ' + deletedTransactions + ' BankTransaction children for ' + parentId);\n}\n\n// Delete parent object\ntry {\n  await axios.delete(WEAVIATE + '/v1/objects/' + parentClass + '/' + parentId, { timeout: 10000 });\n  console.log('[alice-dms-lifecycle] Deleted parent ' + parentClass + '/' + parentId);\n} catch(e) {\n  throw new Error('Failed to delete parent ' + parentClass + '/' + parentId + ': ' + e.message);\n}\n\nreturn [{ json: { ...item, _deleted_statement: true, _deleted_transactions: deletedTransactions } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5216,
+        1296
+      ],
+      "id": "proj44-code-handle-delete-file-v1",
+      "name": "Code: Handle delete_file"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "message": "={{ JSON.stringify({ action: 'delete_file', file_hash: $json.file_hash, file_path: $json.file_path, deleted_statement: $json._deleted_statement, deleted_transactions: $json._deleted_transactions, timestamp: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        5520,
+        1296
+      ],
+      "id": "proj44-mqtt-done-delete-file-v1",
+      "name": "MQTT: Done (delete_file)",
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -312,6 +425,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "IF: Is delete_file",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -353,6 +473,28 @@
         [
           {
             "node": "MQTT: Publish Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is delete_file": {
+      "main": [
+        [
+          {
+            "node": "Code: Handle delete_file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Handle delete_file": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Done (delete_file)",
             "type": "main",
             "index": 0
           }
