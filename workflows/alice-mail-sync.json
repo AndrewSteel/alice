@@ -16,7 +16,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id::text, owner_id::text, imap_host, imap_port, imap_username, password_enc, ssl_enabled, last_uid, sync_interval FROM alice.imap_mailboxes WHERE next_sync_at <= NOW() AND status != 'error' LIMIT 5",
+        "query": "SELECT id::text, owner_id::text, imap_host, imap_port, imap_username, password_enc, ssl_enabled, last_uid, sync_interval FROM alice.imap_mailboxes WHERE next_sync_at <= NOW() LIMIT 5",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -216,14 +216,6 @@
       },
       "continueOnFail": true
     },
-    {
-      "parameters": { "options": {} },
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
-      "position": [1680, -160],
-      "id": "s13-loop-back",
-      "name": "Loop Back"
-    }
   ],
   "connections": {
     "Schedule: Every Minute": { "main": [[{ "node": "PG: Get Pending Mailboxes", "type": "main", "index": 0 }]] },
@@ -244,12 +236,11 @@
         [{ "node": "PG: Set Error Status", "type": "main", "index": 0 }]
       ]
     },
-    "PG: Set Error Status": { "main": [[{ "node": "Loop Back", "type": "main", "index": 0 }]] },
+    "PG: Set Error Status": { "main": [[{ "node": "Split: One Mailbox at a Time", "type": "main", "index": 0 }]] },
     "Process + Classify + Store Emails": { "main": [[{ "node": "Notify: Passthrough", "type": "main", "index": 0 }]] },
     "Notify: Passthrough": { "main": [[{ "node": "PG: Send Notifications", "type": "main", "index": 0 }]] },
     "PG: Send Notifications": { "main": [[{ "node": "PG: Update Sync Status", "type": "main", "index": 0 }]] },
-    "PG: Update Sync Status": { "main": [[{ "node": "Loop Back", "type": "main", "index": 0 }]] },
-    "Loop Back": { "main": [[{ "node": "Split: One Mailbox at a Time", "type": "main", "index": 0 }]] }
+    "PG: Update Sync Status": { "main": [[{ "node": "Split: One Mailbox at a Time", "type": "main", "index": 0 }]] }
   },
   "settings": {
     "executionOrder": "v1"

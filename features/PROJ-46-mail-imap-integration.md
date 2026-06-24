@@ -1,6 +1,6 @@
 # PROJ-46: Mail IMAP Integration
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-06-24
 **Last Updated:** 2026-06-24
 
@@ -219,7 +219,125 @@ n8n schreibt "Wichtig"-Mails als system-generierte Nachricht direkt in `alice.me
 **DB Migration applied:** 2026-06-24 — production postgres confirmed OK.
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA Date:** 2026-06-24 | **Tester:** QA Engineer (Claude Sonnet 4.6)
+**Result: APPROVED — No Critical or High bugs remaining**
+
+---
+
+### Acceptance Criteria Results
+
+#### Settings-Tab: Postfach-Verwaltung
+
+| # | Criterion | Result | Notes |
+|---|---|---|---|
+| 1 | Neuer Tab "E-Mail-Postfächer" im Settings-Menü | ✅ PASS | Tab für alle Nutzer sichtbar (nicht nur Admin) |
+| 2 | Jeder eingeloggte Nutzer kann eigene Postfächer anlegen | ✅ PASS | Kein Admin-Check auf Tab-Ebene |
+| 3 | Alle 8 Felder beim Anlegen konfigurierbar (Defaults: Port 993, SSL an, Intervall 15 min) | ✅ PASS | Alle Felder in AddMailboxDialog vorhanden mit korrekten Defaults |
+| 4 | Test-Verbindung nach Speichern; Fehlermeldung inline | ✅ PASS | alice-mail-reader /test Endpoint, Ergebnis direkt im Dialog |
+| 5 | Bearbeiten vorausgefüllt (Passwort leer) | ✅ PASS | EditMailboxDialog füllt alle Felder außer Passwort vor |
+| 6 | Eigentümer + Admin können löschen; Weaviate-Objekte werden mitgelöscht | ✅ PASS | DELETE /v1/batch/objects mit mailboxId-Filter; Cascade für DB |
+| 7 | Nach Löschung keine Benachrichtigungen mehr | ✅ PASS | CASCADE DELETE auf imap_mailbox_access; Sync findet kein Postfach mehr |
+
+#### Nutzerzuweisung
+
+| # | Criterion | Result | Notes |
+|---|---|---|---|
+| 8 | Eigentümer kann Nutzer als freigeschaltet markieren (Multi-Select) | ✅ PASS | AccessDialog mit Checkboxen für alle aktiven Nutzer |
+| 9 | Freigeschaltete Nutzer können Mails per Chat abfragen | ✅ PASS | alice-mail-tools prüft imap_mailbox_access + owner |
+| 10 | Nur Eigentümer und Admin sehen Zugangsdaten-Felder | ✅ PASS | canManage = isOwner \|\| isAdmin im Frontend; API gibt Host/Port/User zurück aber nie Passwort |
+
+#### Admin-Sonderrechte
+
+| # | Criterion | Result | Notes |
+|---|---|---|---|
+| 11 | Admin sieht alle Postfächer aller Nutzer | ✅ PASS | SQL WHERE ($2 = 'admin' OR owner_id = userId) |
+| 12 | Admin kann löschen, aber keine Zugangsdaten ändern | ✅ PASS | Delete-Button für Admin sichtbar; Edit-Button nur für Eigentümer |
+
+#### Mail-Indexierung (n8n)
+
+| # | Criterion | Result | Notes |
+|---|---|---|---|
+| 13 | n8n pollt IMAP-Server im eingestellten Intervall | ✅ PASS | Schedule-Trigger jede Minute; next_sync_at-Tracking |
+| 14 | Bereits indexierte Mails nicht erneut verarbeitet | ✅ PASS | Weaviate-Dedup-Check via messageId + mailboxId vor dem Speichern |
+| 15 | Alle Metadaten in Weaviate gespeichert (Absender, Empfänger, Betreff, Datum, Message-ID, Postfach-ID, Kategorie, Zusammenfassung, Anhang-Metadaten) | ✅ PASS | Alle Felder im weaviateObj vorhanden; mailboxId + imapUid wurden in Prod-Schema ergänzt |
+| 16 | LLM klassifiziert in Wichtig / Werbung / Social Media / Spam | ✅ PASS | Ollama-Aufruf mit Klassifikations-Prompt; Fallback "unklassifiziert" bei Ausfall |
+| 17 | Startdatum für rückwirkende Indexierung | ⚠️ PARTIAL | start_date wird gespeichert aber nicht im IMAP-Fetch verwendet. Stattdessen UID-basierter Sync (ab UID 0 = alle Mails). Neue Postfächer indexieren ALLE verfügbaren Mails, nicht nur ab Startdatum. (BUG-4 — Medium) |
+| 18 | Verbindungsfehler werden geloggt; nächster Zyklus wiederholt | ✅ PASS | status=error gesetzt, next_sync_at gesetzt; WHERE-Filter wurde gefixed (vorher permanenter Ausschluss von error-Postfächern) |
+
+#### Reaktive Mail-Abfragen (Chat)
+
+| # | Criterion | Result | Notes |
+|---|---|---|---|
+| 19 | Mails per Sprache/Text abfragen | ✅ PASS | search_emails-Tool mit Weaviate Hybrid Search |
+| 20 | Alice sucht nur in autorisierten Postfächern | ✅ PASS | PG: Get Authorized Mailboxes filtert nach Eigentümerschaft + Access-Tabelle |
+| 21 | Vollständiger Mail-Body auf Anfrage | ✅ PASS | get_email_body-Tool lädt live vom IMAP über alice-mail-reader |
+| 22 | Anhang-Abfragen möglich | ✅ PASS | Anhang-Metadaten in Weaviate gespeichert, in Suchergebnissen enthalten |
+| 23 | Anhänge werden nicht automatisch eingespeist | ✅ PASS | Nur Metadaten; kein Download-Mechanismus implementiert |
+| 24 | IMAP nicht verfügbar: klare Fehlermeldung | ✅ PASS | alice-mail-reader gibt Fehler-JSON zurück; n8n-Tool gibt error-Objekt an Chat |
+
+#### Proaktive Benachrichtigungen
+
+| # | Criterion | Result | Notes |
+|---|---|---|---|
+| 25 | "Wichtig"-Mails als Chat-Nachricht an freigeschaltete Nutzer | ✅ PASS | PG: Send Notifications schreibt in alice.messages (letzte LLM-Session) |
+| 26 | Nachricht enthält Absender, Betreff, Datum, Zusammenfassung | ✅ PASS | Formatierte Nachricht mit allen Feldern |
+| 27 | Werbung/Social Media/Spam erzeugen keine Benachrichtigung | ✅ PASS | Nur category='Wichtig' löst Benachrichtigung aus |
+| 28 | Benachrichtigung maximal einmal pro Nutzer | ✅ PASS | Weaviate-Dedup verhindert doppelte Indexierung; damit auch keine doppelten Notifications |
+
+---
+
+### Bugs Found and Fixed
+
+| Bug | Severity | Description | Status |
+|---|---|---|---|
+| BUG-1 | High | `Loop Back` war ein zweiter `SplitInBatches`-Node statt direkter Rückverbindung — hätte Multi-Postfach-Iteration gebrochen | **FIXED** in alice-mail-sync.json |
+| BUG-2 | High (Initial assessment) | Weaviate `Email`-Kollektion hatte `mailboxId`/`imapUid`-Felder nicht | **FIXED**: Properties via API zu Prod-Schema hinzugefügt; schemas/email.json war korrekt |
+| BUG-3 | Medium | Fehlerhafte Postfächer waren durch `status != 'error'` dauerhaft von Sync ausgeschlossen (Spec: "nächster Zyklus wiederholt") | **FIXED** in alice-mail-sync.json |
+| BUG-4 | Medium | `start_date` wird gespeichert aber nicht im IMAP-Fetch verwendet; Sync ist UID-basiert (ab UID 0 = alle Mails, nicht ab Startdatum) | **OPEN** — Known Gap; neue Postfächer indexieren alle Mails (mehr als erwartet, nicht weniger) |
+| BUG-5 | Low | AddMailboxDialog zeigt bei fehlgeschlagenem Verbindungstest nicht explizit, dass das Postfach trotzdem gespeichert wurde | **OPEN** — Minor UX |
+
+---
+
+### Security Audit
+
+| Check | Result |
+|---|---|
+| JWT erforderlich für alle API-Endpunkte | ✅ Alle Webhooks mit `authentication: "jwtAuth"` |
+| Passwort nie im Klartext gespeichert oder zurückgegeben | ✅ AES-256-CBC in DB; kein SELECT auf password_enc in API |
+| Passwort nie in API-Response | ✅ Kein Feld `password` oder `password_enc` im GET-Response |
+| SQL-Injection | ✅ Alle Queries parametrisiert ($1, $2, ...) |
+| Autorisierung: Nutzer sieht nur eigene Postfächer | ✅ WHERE owner_id = userId; Admin-Bypass explizit per role-Check |
+| Autorisierung: Mail-Tools nur für autorisierte Nutzer | ✅ alice-mail-tools prüft DB-Zugriff vor Weaviate-Query |
+| XSS im Frontend | ✅ React rendert alle Strings als Text-Nodes (kein dangerouslySetInnerHTML) |
+| Passwort-Speicherung im Browser | ✅ Passwort wird nach Submit nicht im State gehalten |
+
+---
+
+### Regression Test
+
+- Existing Settings tabs (Mein Profil, Allgemein, DMS, Nutzerverwaltung, Stimmprofile, Chatarchiv): ✅ Frontend Build erfolgreich, Settings-Route kompiliert ohne Fehler
+- Weaviate Email-Kollektion: ✅ Bestehende DMS-E-Mails-Funktionalität unberührt (additive Schema-Änderung)
+- alice.users, alice.sessions, alice.messages: ✅ Nur gelesen, nicht verändert
+
+---
+
+### Production-Ready Decision
+
+**✅ READY — Keine Critical oder High Bugs**
+
+Offene Punkte (Medium/Low, kein Blocker):
+- BUG-4: start_date-Filterung im IMAP-Fetch fehlt (neue Postfächer indexieren alle Mails)
+- BUG-5: Fehlende explizite "Postfach gespeichert"-Meldung bei fehlgeschlagenem Connection-Test
+
+**Deployment-Checkliste:**
+1. Deploy n8n-workflow `alice-mail-api`
+2. Deploy n8n-workflow `alice-mail-sync`
+3. Deploy n8n-workflow `alice-mail-tools`
+4. Deploy `alice-mail-reader` (neuer Docker-Container) auf ki.lan
+5. Deploy `alice-chat-stream` (tools.py-Update + N8N_TOOL_MAIL_URL in .env)
+6. Deploy nginx-Config (PUT-Methode für /api/webhook/alice/)
+7. Deploy Frontend
 
 ## Deployment
 _To be added by /deploy_
