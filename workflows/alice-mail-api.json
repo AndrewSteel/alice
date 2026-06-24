@@ -1,0 +1,865 @@
+{
+  "name": "alice-mail-api",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "alice/mailboxes",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 0],
+      "id": "r1-webhook",
+      "name": "Webhook: GET Mailboxes",
+      "webhookId": "alice-mail-api-get-mailboxes",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nreturn [{ json: { userId: payload.sub || payload.user_id, role: payload.role || 'user' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 0],
+      "id": "r1-jwt",
+      "name": "JWT: GET Mailboxes"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id::text, m.owner_id::text, u.display_name AS owner_name, m.display_name, m.imap_host, m.imap_port, m.imap_username, m.ssl_enabled, m.sync_interval, m.start_date::text, m.status, m.mails_indexed, m.last_synced_at::text, m.last_error, m.next_sync_at::text, m.created_at::text, m.updated_at::text, COALESCE(JSON_AGG(JSON_BUILD_OBJECT('user_id', a.user_id::text, 'display_name', au.display_name, 'username', au.username)) FILTER (WHERE a.user_id IS NOT NULL), '[]'::json) AS access_users FROM alice.imap_mailboxes m LEFT JOIN alice.users u ON u.id = m.owner_id LEFT JOIN alice.imap_mailbox_access a ON a.mailbox_id = m.id LEFT JOIN alice.users au ON au.id = a.user_id WHERE (m.owner_id = $1::uuid OR $2 = 'admin') GROUP BY m.id, u.display_name ORDER BY m.created_at DESC",
+        "options": {
+          "queryReplacement": "={{ [$json.userId, $json.role] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-288, 0],
+      "id": "r1-pg",
+      "name": "PG: List Mailboxes",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nreturn [{ json: { mailboxes: rows } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "r1-agg",
+      "name": "Agg: GET Mailboxes"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [288, 0],
+      "id": "r1-respond",
+      "name": "Respond: GET 200"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice/mailboxes",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 480],
+      "id": "r2-webhook",
+      "name": "Webhook: POST Mailbox",
+      "webhookId": "alice-mail-api-post-mailbox",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst body = $json.body || {};\n\nconst displayName = String(body.display_name || '').trim();\nconst imapHost = String(body.imap_host || '').trim();\nconst imapPort = parseInt(body.imap_port) || 993;\nconst imapUsername = String(body.imap_username || '').trim();\nconst password = String(body.password || '').trim();\nconst sslEnabled = body.ssl_enabled !== false;\nconst syncInterval = parseInt(body.sync_interval) || 15;\nconst startDate = body.start_date || null;\n\nif (!displayName) return [{ json: { _error: 'display_name ist erforderlich', _status: 400 } }];\nif (!imapHost)    return [{ json: { _error: 'imap_host ist erforderlich', _status: 400 } }];\nif (!imapUsername) return [{ json: { _error: 'imap_username ist erforderlich', _status: 400 } }];\nif (!password)    return [{ json: { _error: 'password ist erforderlich', _status: 400 } }];\nif (imapPort < 1 || imapPort > 65535) return [{ json: { _error: 'imap_port muss zwischen 1 und 65535 liegen', _status: 400 } }];\nif (syncInterval < 1 || syncInterval > 1440) return [{ json: { _error: 'sync_interval muss zwischen 1 und 1440 liegen', _status: 400 } }];\n\n// AES-256-CBC password encryption using Node.js built-in crypto\nconst crypto = require('crypto');\nconst KEY = crypto.createHash('sha256').update('alice-mail-enc-key-2026').digest();\nconst iv = crypto.randomBytes(16);\nconst cipher = crypto.createCipheriv('aes-256-cbc', KEY, iv);\nconst enc = Buffer.concat([cipher.update(password, 'utf8'), cipher.final()]);\nconst passwordEnc = iv.toString('hex') + ':' + enc.toString('hex');\n\nreturn [{ json: { userId, displayName, imapHost, imapPort, imapUsername, passwordEnc, password, sslEnabled, syncInterval, startDate } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 480],
+      "id": "r2-validate",
+      "name": "JWT+Validate: POST Mailbox"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "r2-err-check",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notExists" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-288, 480],
+      "id": "r2-if-valid",
+      "name": "IF: POST Valid"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alice.imap_mailboxes (owner_id, display_name, imap_host, imap_port, imap_username, password_enc, ssl_enabled, sync_interval, start_date) VALUES ($1::uuid, $2, $3, $4::integer, $5, $6, $7::boolean, $8::integer, $9::date) RETURNING id::text, owner_id::text, display_name, imap_host, imap_port, imap_username, ssl_enabled, sync_interval, start_date::text, status, mails_indexed, last_synced_at::text, created_at::text",
+        "options": {
+          "queryReplacement": "={{ [$json.userId, $json.displayName, $json.imapHost, $json.imapPort, $json.imapUsername, $json.passwordEnc, $json.sslEnabled, $json.syncInterval, $json.startDate] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [0, 400],
+      "id": "r2-pg-insert",
+      "name": "PG: Insert Mailbox",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=http://alice-mail-reader:8007/test",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ host: $('JWT+Validate: POST Mailbox').first().json.imapHost, port: $('JWT+Validate: POST Mailbox').first().json.imapPort, username: $('JWT+Validate: POST Mailbox').first().json.imapUsername, password: $('JWT+Validate: POST Mailbox').first().json.password, ssl: $('JWT+Validate: POST Mailbox').first().json.sslEnabled }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [288, 400],
+      "id": "r2-test-conn",
+      "name": "HTTP: Test Connection",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE alice.imap_mailboxes SET status = CASE WHEN $2::boolean THEN 'active' ELSE 'error' END, last_error = CASE WHEN $2::boolean THEN NULL ELSE $3 END WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$('PG: Insert Mailbox').first().json.id, $json.ok === true, $json.message || null] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [576, 400],
+      "id": "r2-pg-status",
+      "name": "PG: Set Connection Status",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const mailbox = $('PG: Insert Mailbox').first().json;\nconst connTest = $('HTTP: Test Connection').first().json;\nreturn [{ json: { mailbox, connection_test: { ok: connTest.ok === true, message: connTest.message || '' } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [864, 400],
+      "id": "r2-merge",
+      "name": "Merge: POST Response"
+    },
+    {
+      "parameters": {
+        "options": { "responseCode": 201 }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1152, 400],
+      "id": "r2-respond-201",
+      "name": "Respond: POST 201"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._error } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 640],
+      "id": "r2-err-body",
+      "name": "Body: POST Error"
+    },
+    {
+      "parameters": {
+        "options": { "responseCode": 400 }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [288, 640],
+      "id": "r2-respond-400",
+      "name": "Respond: POST 400"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "PUT",
+        "path": "alice/mailboxes",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 960],
+      "id": "r3-webhook",
+      "name": "Webhook: PUT Mailbox",
+      "webhookId": "alice-mail-api-put-mailbox",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst body = $json.body || {};\nconst id = String(body.id || '').trim();\nif (!id) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\n\nconst updates = {};\nif (body.display_name !== undefined) updates.displayName = String(body.display_name).trim();\nif (body.imap_host !== undefined) updates.imapHost = String(body.imap_host).trim();\nif (body.imap_port !== undefined) updates.imapPort = parseInt(body.imap_port);\nif (body.imap_username !== undefined) updates.imapUsername = String(body.imap_username).trim();\nif (body.ssl_enabled !== undefined) updates.sslEnabled = body.ssl_enabled !== false;\nif (body.sync_interval !== undefined) updates.syncInterval = parseInt(body.sync_interval);\nif (body.start_date !== undefined) updates.startDate = body.start_date || null;\n\nlet passwordEnc = null;\nlet password = null;\nif (body.password) {\n  password = String(body.password);\n  const crypto = require('crypto');\n  const KEY = crypto.createHash('sha256').update('alice-mail-enc-key-2026').digest();\n  const iv = crypto.randomBytes(16);\n  const cipher = crypto.createCipheriv('aes-256-cbc', KEY, iv);\n  const enc = Buffer.concat([cipher.update(password, 'utf8'), cipher.final()]);\n  passwordEnc = iv.toString('hex') + ':' + enc.toString('hex');\n  updates.passwordEnc = passwordEnc;\n}\n\nreturn [{ json: { userId, role, id, updates, password } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 960],
+      "id": "r3-validate",
+      "name": "JWT+Parse: PUT Mailbox"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text, owner_id::text FROM alice.imap_mailboxes WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-288, 960],
+      "id": "r3-pg-get",
+      "name": "PG: GET Mailbox for Auth",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('JWT+Parse: PUT Mailbox').first().json;\nconst row = $input.first().json;\nif (!row.id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nif (row.owner_id !== input.userId && input.role !== 'admin') {\n  return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\n}\n// Build dynamic SQL SET clause\nconst u = input.updates;\nconst sets = [];\nconst params = [input.id];\nlet idx = 2;\nif (u.displayName !== undefined) { sets.push(`display_name = $${idx++}`); params.push(u.displayName); }\nif (u.imapHost !== undefined) { sets.push(`imap_host = $${idx++}`); params.push(u.imapHost); }\nif (u.imapPort !== undefined) { sets.push(`imap_port = $${idx++}::integer`); params.push(u.imapPort); }\nif (u.imapUsername !== undefined) { sets.push(`imap_username = $${idx++}`); params.push(u.imapUsername); }\nif (u.sslEnabled !== undefined) { sets.push(`ssl_enabled = $${idx++}::boolean`); params.push(u.sslEnabled); }\nif (u.syncInterval !== undefined) { sets.push(`sync_interval = $${idx++}::integer`); params.push(u.syncInterval); }\nif (u.startDate !== undefined) { sets.push(`start_date = $${idx++}::date`); params.push(u.startDate); }\nif (u.passwordEnc !== undefined) { sets.push(`password_enc = $${idx++}`); params.push(u.passwordEnc); }\nif (sets.length === 0) return [{ json: { _error: 'Keine Felder zum Aktualisieren', _status: 400 } }];\nconst sql = `UPDATE alice.imap_mailboxes SET ${sets.join(', ')}, status = 'active', last_error = NULL WHERE id = $1::uuid RETURNING id::text, display_name, imap_host, imap_port, imap_username, ssl_enabled, sync_interval, start_date::text, status, mails_indexed, updated_at::text`;\nreturn [{ json: { sql, params, mailboxId: input.id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 960],
+      "id": "r3-auth-check",
+      "name": "Auth+Build SQL: PUT"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "r3-err",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notExists" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [288, 960],
+      "id": "r3-if-ok",
+      "name": "IF: PUT Ok"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [576, 880],
+      "id": "r3-pg-update",
+      "name": "PG: Update Mailbox",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [864, 880],
+      "id": "r3-respond-200",
+      "name": "Respond: PUT 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._error } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 1120],
+      "id": "r3-err-body",
+      "name": "Body: PUT Error"
+    },
+    {
+      "parameters": {
+        "options": { "responseCode": "={{ $('Auth+Build SQL: PUT').first().json._status || 400 }}" }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [576, 1120],
+      "id": "r3-respond-err",
+      "name": "Respond: PUT Error"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "DELETE",
+        "path": "alice/mailboxes",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 1440],
+      "id": "r4-webhook",
+      "name": "Webhook: DELETE Mailbox",
+      "webhookId": "alice-mail-api-delete-mailbox",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst body = $json.body || {};\nconst id = String(body.id || '').trim();\nif (!id) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 1440],
+      "id": "r4-jwt",
+      "name": "JWT: DELETE Mailbox"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text, owner_id::text FROM alice.imap_mailboxes WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-288, 1440],
+      "id": "r4-pg-get",
+      "name": "PG: GET Mailbox for Delete",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('JWT: DELETE Mailbox').first().json;\nif (input._error) return [{ json: input }];\nconst row = $input.first().json;\nif (!row.id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nif (row.owner_id !== input.userId && input.role !== 'admin') {\n  return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\n}\nreturn [{ json: { mailboxId: input.id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 1440],
+      "id": "r4-auth",
+      "name": "Auth: DELETE Mailbox"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "r4-err",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notExists" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [288, 1440],
+      "id": "r4-if-ok",
+      "name": "IF: DELETE Ok"
+    },
+    {
+      "parameters": {
+        "url": "http://weaviate:8080/v1/batch/objects",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ match: { class: 'Email', where: { path: ['mailboxId'], operator: 'Equal', valueText: $json.mailboxId } } }) }}",
+        "method": "DELETE",
+        "options": { "timeout": 15000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [576, 1360],
+      "id": "r4-weaviate-del",
+      "name": "HTTP: Delete Weaviate Emails",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM alice.imap_mailboxes WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$('Auth: DELETE Mailbox').first().json.mailboxId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [864, 1360],
+      "id": "r4-pg-del",
+      "name": "PG: Delete Mailbox",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { deleted: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1152, 1360],
+      "id": "r4-ok-body",
+      "name": "Body: DELETE Ok"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1440, 1360],
+      "id": "r4-respond-200",
+      "name": "Respond: DELETE 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._error } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 1600],
+      "id": "r4-err-body",
+      "name": "Body: DELETE Error"
+    },
+    {
+      "parameters": {
+        "options": { "responseCode": "={{ $('Auth: DELETE Mailbox').first().json._status || 400 }}" }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [576, 1600],
+      "id": "r4-respond-err",
+      "name": "Respond: DELETE Error"
+    },
+
+    {
+      "parameters": {
+        "path": "alice/mailboxes/access",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 1920],
+      "id": "r5-webhook",
+      "name": "Webhook: GET Access",
+      "webhookId": "alice-mail-api-get-access",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst mailboxId = String($json.query?.id || '').trim();\nif (!mailboxId) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, mailboxId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 1920],
+      "id": "r5-jwt",
+      "name": "JWT: GET Access"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.owner_id::text, u.id::text AS user_id, u.display_name, u.username, (a.user_id IS NOT NULL) AS has_access FROM alice.imap_mailboxes m CROSS JOIN alice.users u LEFT JOIN alice.imap_mailbox_access a ON a.mailbox_id = m.id AND a.user_id = u.id WHERE m.id = $1::uuid AND ($2 = 'admin' OR m.owner_id = $3::uuid) AND u.is_active = true ORDER BY u.display_name",
+        "options": {
+          "queryReplacement": "={{ [$json.mailboxId, $json.role, $json.userId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-288, 1920],
+      "id": "r5-pg",
+      "name": "PG: Get Access List",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nreturn [{ json: { users: rows } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 1920],
+      "id": "r5-agg",
+      "name": "Agg: Access List"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [288, 1920],
+      "id": "r5-respond",
+      "name": "Respond: GET Access 200"
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "PUT",
+        "path": "alice/mailboxes/access",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 2400],
+      "id": "r6-webhook",
+      "name": "Webhook: PUT Access",
+      "webhookId": "alice-mail-api-put-access",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst body = $json.body || {};\nconst mailboxId = String(body.mailbox_id || '').trim();\nconst userIds = Array.isArray(body.user_ids) ? body.user_ids.map(String) : [];\nif (!mailboxId) return [{ json: { _error: 'mailbox_id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, mailboxId, userIds } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 2400],
+      "id": "r6-jwt",
+      "name": "JWT: PUT Access"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT owner_id::text FROM alice.imap_mailboxes WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.mailboxId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-288, 2400],
+      "id": "r6-pg-owner",
+      "name": "PG: Check Owner",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('JWT: PUT Access').first().json;\nconst row = $input.first().json;\nif (!row.owner_id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nif (row.owner_id !== input.userId && input.role !== 'admin') {\n  return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\n}\nreturn [{ json: { mailboxId: input.mailboxId, userIds: input.userIds } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 2400],
+      "id": "r6-auth",
+      "name": "Auth: PUT Access"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "r6-err",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notExists" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [288, 2400],
+      "id": "r6-if-ok",
+      "name": "IF: PUT Access Ok"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM alice.imap_mailbox_access WHERE mailbox_id = $1::uuid; INSERT INTO alice.imap_mailbox_access (mailbox_id, user_id) SELECT $1::uuid, unnest($2::uuid[]) ON CONFLICT DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [$json.mailboxId, $json.userIds] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [576, 2320],
+      "id": "r6-pg-update",
+      "name": "PG: Replace Access",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { updated: true, mailbox_id: $('Auth: PUT Access').first().json.mailboxId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [864, 2320],
+      "id": "r6-ok-body",
+      "name": "Body: PUT Access Ok"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1152, 2320],
+      "id": "r6-respond-200",
+      "name": "Respond: PUT Access 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._error } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, 2560],
+      "id": "r6-err-body",
+      "name": "Body: PUT Access Error"
+    },
+    {
+      "parameters": {
+        "options": { "responseCode": "={{ $('Auth: PUT Access').first().json._status || 400 }}" }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [576, 2560],
+      "id": "r6-respond-err",
+      "name": "Respond: PUT Access Error"
+    },
+
+    {
+      "parameters": {
+        "path": "alice/users",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-848, 2880],
+      "id": "r7-webhook",
+      "name": "Webhook: GET Users",
+      "webhookId": "alice-mail-api-get-users",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text, username, display_name, role FROM alice.users WHERE is_active = true ORDER BY display_name",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-560, 2880],
+      "id": "r7-pg",
+      "name": "PG: List Users",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nreturn [{ json: { users: rows } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-288, 2880],
+      "id": "r7-agg",
+      "name": "Agg: Users"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [0, 2880],
+      "id": "r7-respond",
+      "name": "Respond: GET Users 200"
+    }
+  ],
+  "connections": {
+    "Webhook: GET Mailboxes": { "main": [[{ "node": "JWT: GET Mailboxes", "type": "main", "index": 0 }]] },
+    "JWT: GET Mailboxes": { "main": [[{ "node": "PG: List Mailboxes", "type": "main", "index": 0 }]] },
+    "PG: List Mailboxes": { "main": [[{ "node": "Agg: GET Mailboxes", "type": "main", "index": 0 }]] },
+    "Agg: GET Mailboxes": { "main": [[{ "node": "Respond: GET 200", "type": "main", "index": 0 }]] },
+
+    "Webhook: POST Mailbox": { "main": [[{ "node": "JWT+Validate: POST Mailbox", "type": "main", "index": 0 }]] },
+    "JWT+Validate: POST Mailbox": { "main": [[{ "node": "IF: POST Valid", "type": "main", "index": 0 }]] },
+    "IF: POST Valid": {
+      "main": [
+        [{ "node": "PG: Insert Mailbox", "type": "main", "index": 0 }],
+        [{ "node": "Body: POST Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Insert Mailbox": { "main": [[{ "node": "HTTP: Test Connection", "type": "main", "index": 0 }]] },
+    "HTTP: Test Connection": { "main": [[{ "node": "PG: Set Connection Status", "type": "main", "index": 0 }]] },
+    "PG: Set Connection Status": { "main": [[{ "node": "Merge: POST Response", "type": "main", "index": 0 }]] },
+    "Merge: POST Response": { "main": [[{ "node": "Respond: POST 201", "type": "main", "index": 0 }]] },
+    "Body: POST Error": { "main": [[{ "node": "Respond: POST 400", "type": "main", "index": 0 }]] },
+
+    "Webhook: PUT Mailbox": { "main": [[{ "node": "JWT+Parse: PUT Mailbox", "type": "main", "index": 0 }]] },
+    "JWT+Parse: PUT Mailbox": { "main": [[{ "node": "PG: GET Mailbox for Auth", "type": "main", "index": 0 }]] },
+    "PG: GET Mailbox for Auth": { "main": [[{ "node": "Auth+Build SQL: PUT", "type": "main", "index": 0 }]] },
+    "Auth+Build SQL: PUT": { "main": [[{ "node": "IF: PUT Ok", "type": "main", "index": 0 }]] },
+    "IF: PUT Ok": {
+      "main": [
+        [{ "node": "PG: Update Mailbox", "type": "main", "index": 0 }],
+        [{ "node": "Body: PUT Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Update Mailbox": { "main": [[{ "node": "Respond: PUT 200", "type": "main", "index": 0 }]] },
+    "Body: PUT Error": { "main": [[{ "node": "Respond: PUT Error", "type": "main", "index": 0 }]] },
+
+    "Webhook: DELETE Mailbox": { "main": [[{ "node": "JWT: DELETE Mailbox", "type": "main", "index": 0 }]] },
+    "JWT: DELETE Mailbox": { "main": [[{ "node": "PG: GET Mailbox for Delete", "type": "main", "index": 0 }]] },
+    "PG: GET Mailbox for Delete": { "main": [[{ "node": "Auth: DELETE Mailbox", "type": "main", "index": 0 }]] },
+    "Auth: DELETE Mailbox": { "main": [[{ "node": "IF: DELETE Ok", "type": "main", "index": 0 }]] },
+    "IF: DELETE Ok": {
+      "main": [
+        [{ "node": "HTTP: Delete Weaviate Emails", "type": "main", "index": 0 }],
+        [{ "node": "Body: DELETE Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Delete Weaviate Emails": { "main": [[{ "node": "PG: Delete Mailbox", "type": "main", "index": 0 }]] },
+    "PG: Delete Mailbox": { "main": [[{ "node": "Body: DELETE Ok", "type": "main", "index": 0 }]] },
+    "Body: DELETE Ok": { "main": [[{ "node": "Respond: DELETE 200", "type": "main", "index": 0 }]] },
+    "Body: DELETE Error": { "main": [[{ "node": "Respond: DELETE Error", "type": "main", "index": 0 }]] },
+
+    "Webhook: GET Access": { "main": [[{ "node": "JWT: GET Access", "type": "main", "index": 0 }]] },
+    "JWT: GET Access": { "main": [[{ "node": "PG: Get Access List", "type": "main", "index": 0 }]] },
+    "PG: Get Access List": { "main": [[{ "node": "Agg: Access List", "type": "main", "index": 0 }]] },
+    "Agg: Access List": { "main": [[{ "node": "Respond: GET Access 200", "type": "main", "index": 0 }]] },
+
+    "Webhook: PUT Access": { "main": [[{ "node": "JWT: PUT Access", "type": "main", "index": 0 }]] },
+    "JWT: PUT Access": { "main": [[{ "node": "PG: Check Owner", "type": "main", "index": 0 }]] },
+    "PG: Check Owner": { "main": [[{ "node": "Auth: PUT Access", "type": "main", "index": 0 }]] },
+    "Auth: PUT Access": { "main": [[{ "node": "IF: PUT Access Ok", "type": "main", "index": 0 }]] },
+    "IF: PUT Access Ok": {
+      "main": [
+        [{ "node": "PG: Replace Access", "type": "main", "index": 0 }],
+        [{ "node": "Body: PUT Access Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Replace Access": { "main": [[{ "node": "Body: PUT Access Ok", "type": "main", "index": 0 }]] },
+    "Body: PUT Access Ok": { "main": [[{ "node": "Respond: PUT Access 200", "type": "main", "index": 0 }]] },
+    "Body: PUT Access Error": { "main": [[{ "node": "Respond: PUT Access Error", "type": "main", "index": 0 }]] },
+
+    "Webhook: GET Users": { "main": [[{ "node": "PG: List Users", "type": "main", "index": 0 }]] },
+    "PG: List Users": { "main": [[{ "node": "Agg: Users", "type": "main", "index": 0 }]] },
+    "Agg: Users": { "main": [[{ "node": "Respond: GET Users 200", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

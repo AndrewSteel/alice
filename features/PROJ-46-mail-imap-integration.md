@@ -1,6 +1,6 @@
 # PROJ-46: Mail IMAP Integration
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-06-24
 **Last Updated:** 2026-06-24
 
@@ -195,6 +195,28 @@ n8n schreibt "Wichtig"-Mails als system-generierte Nachricht direkt in `alice.me
 - n8n IMAP Email Node (in n8n Core enthalten)
 - Weaviate: neues Schema für `Email`-Kollektion (via `init-weaviate-schema.sh`)
 - Frontend: keine neuen npm-Packages (alle shadcn-Komponenten bereits vorhanden)
+
+## Implementation Notes
+
+### Backend (PROJ-46 backend phase)
+
+**New files:**
+- `sql/migrations/046-imap-mailboxes.sql` — Creates `alice.imap_mailboxes` + `alice.imap_mailbox_access` tables with RLS
+- `docker/compose/automations/alice-mail-reader/` — Python Flask IMAP service (stdlib imaplib, 3 endpoints: /test, /fetch, /body)
+- `workflows/alice-mail-api.json` — 7 REST webhook routes for CRUD mailbox management
+- `workflows/alice-mail-sync.json` — Schedule trigger (every minute), fetches/classifies/stores emails via alice-mail-reader + Ollama + Weaviate
+- `workflows/alice-mail-tools.json` — Chat tool webhooks: search_emails (Weaviate), get_email_body (IMAP live fetch)
+
+**Modified files:**
+- `schemas/email.json` — Added `mailboxId` and `imapUid` fields
+- `docker/compose/automations/alice-chat-stream/app/tools.py` — Added search_emails + get_email_body tools
+- `docker/compose/automations/alice-chat-stream/.env.example` — Added N8N_TOOL_MAIL_URL
+
+**Deviations from spec:**
+- Tech design said "n8n IMAP Email Node, kein Custom-Container" — but n8n's IMAP node is a trigger-only and cannot be called dynamically with per-mailbox credentials. Created alice-mail-reader (tiny Python service, ~180 lines) as an HTTP-callable IMAP adapter instead.
+- Password encryption uses AES-256-CBC via Node.js crypto built-in (available in n8n Code nodes) instead of pgcrypto, since pgcrypto was not installed on the server.
+
+**DB Migration applied:** 2026-06-24 — production postgres confirmed OK.
 
 ## QA Test Results
 _To be added by /qa_

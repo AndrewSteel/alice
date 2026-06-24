@@ -1,0 +1,261 @@
+{
+  "name": "alice-mail-tools",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-800, 0],
+      "id": "t0-exec-trigger",
+      "name": "Execute Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-mail-tools",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-800, 240],
+      "id": "t0-webhook",
+      "name": "Webhook: Mail Tools",
+      "webhookId": "alice-mail-tools-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || {};\nreturn [{ json: { ...body, __via_webhook: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 240],
+      "id": "t0-adapter",
+      "name": "Webhook Adapter"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json;\nconst operation = input.operation || 'search_emails';\nconst userId = input.user_id || '';\nconst query = input.query || '';\nconst limit = Math.min(parseInt(input.limit) || 5, 20);\nconst dateFrom = input.date_from || null;\nconst dateTo = input.date_to || null;\nconst mailboxId = input.mailbox_id || null;\nconst uid = input.uid || null;\nconst host = input.host || null;\nconst port = input.port || 993;\nconst username = input.username || null;\nconst password = input.password || null;\nconst ssl = input.ssl !== false;\nreturn [{ json: { operation, userId, query, limit, dateFrom, dateTo, mailboxId, uid, host, port, username, password, ssl, __via_webhook: input.__via_webhook === true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 0],
+      "id": "t1-normalize",
+      "name": "Input Normalizer"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "op-search", "leftValue": "={{ $json.operation }}", "rightValue": "search_emails", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "search"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "op-body", "leftValue": "={{ $json.operation }}", "rightValue": "get_email_body", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "body"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [-80, 0],
+      "id": "t2-router",
+      "name": "Operation Router"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id::text AS mailbox_id FROM alice.imap_mailboxes m WHERE m.owner_id = $1::uuid UNION SELECT a.mailbox_id::text FROM alice.imap_mailbox_access a WHERE a.user_id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$('Input Normalizer').first().json.userId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [160, -80],
+      "id": "t3-pg-access",
+      "name": "PG: Get Authorized Mailboxes",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Weaviate semantic search over authorized mailboxes\nconst axios = require('axios');\nconst input = $('Input Normalizer').first().json;\nconst accessRows = $input.all().map(i => i.json);\nconst mailboxIds = accessRows.map(r => r.mailbox_id).filter(Boolean);\n\nif (mailboxIds.length === 0) {\n  return [{ json: { results: [], error: null } }];\n}\n\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst { query, limit, dateFrom, dateTo } = input;\n\n// Build where clause\nconst mailboxFilter = mailboxIds.length === 1\n  ? `{ path: [\"mailboxId\"], operator: Equal, valueText: \"${mailboxIds[0]}\" }`\n  : `{ operator: Or, operands: [${mailboxIds.map(id => `{ path: [\"mailboxId\"], operator: Equal, valueText: \"${id}\" }`).join(', ')}] }`;\n\nconst dateConds = [];\nif (dateFrom) dateConds.push(`{ path: [\"date\"], operator: GreaterThanEqual, valueDate: \"${dateFrom}T00:00:00Z\" }`);\nif (dateTo)   dateConds.push(`{ path: [\"date\"], operator: LessThanEqual, valueDate: \"${dateTo}T23:59:59Z\" }`);\n\nlet whereClause;\nif (dateConds.length > 0) {\n  whereClause = `where: { operator: And, operands: [${mailboxFilter}, ${dateConds.join(', ')}] }`;\n} else {\n  whereClause = `where: ${mailboxFilter}`;\n}\n\nconst escapedQuery = query.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/\\n/g, ' ').replace(/\\r/g, '').replace(/[\\x00-\\x1f]/g, '');\n\nconst gql = `{ Get { Email(hybrid: { query: \"${escapedQuery}\", alpha: 0.5 } ${whereClause} limit: ${limit}) { _additional { id } messageId mailboxId imapUid subject sender date category summary attachments hasAttachments } } }`;\n\ntry {\n  const res = await axios.post(`${WEAVIATE_URL}/v1/graphql`, { query: gql }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n  const emails = res.data?.data?.Get?.Email || [];\n  const results = emails.map(e => ({\n    weaviate_id: e._additional?.id,\n    mailbox_id: e.mailboxId,\n    imap_uid: e.imapUid,\n    message_id: e.messageId,\n    subject: e.subject,\n    sender: e.sender,\n    date: e.date,\n    category: e.category,\n    summary: e.summary,\n    has_attachments: e.hasAttachments,\n    attachments: e.attachments || []\n  }));\n  return [{ json: { results, error: null } }];\n} catch(err) {\n  return [{ json: { results: [], error: err.message } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, -80],
+      "id": "t4-search",
+      "name": "Weaviate: Search Emails"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "via-wh-s",
+              "leftValue": "={{ $('Input Normalizer').first().json.__via_webhook }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [640, -80],
+      "id": "t5-respond-search",
+      "name": "Respond? (Search)"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, -160],
+      "id": "t5-respond-wh-search",
+      "name": "Respond: Search"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch full email body from IMAP via alice-mail-reader\n// Requires mailbox credentials from Postgres\nconst axios = require('axios');\nconst input = $('Input Normalizer').first().json;\nconst { userId, mailboxId, uid } = input;\n\nif (!mailboxId || !uid) {\n  return [{ json: { body: null, error: 'mailbox_id und uid sind erforderlich' } }];\n}\n\ntry {\n  // Get mailbox credentials\n  const pgRes = await axios.post('http://n8n:5678/webhook-test/dummy', {}).catch(() => null); // placeholder\n  // We use a different approach: credentials come pre-resolved from the caller (alice-chat-stream passes them),\n  // or we fetch them in the PG node below\n  return [{ json: { _fetch_body: true, mailboxId, uid } }];\n} catch(e) {\n  return [{ json: { body: null, error: e.message } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 160],
+      "id": "t6-body-prep",
+      "name": "Prep: Get Body"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.imap_host, m.imap_port, m.imap_username, m.password_enc, m.ssl_enabled FROM alice.imap_mailboxes m WHERE m.id = $1::uuid AND (m.owner_id = $2::uuid OR EXISTS (SELECT 1 FROM alice.imap_mailbox_access a WHERE a.mailbox_id = m.id AND a.user_id = $2::uuid))",
+        "options": {
+          "queryReplacement": "={{ [$json.mailboxId, $('Input Normalizer').first().json.userId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [400, 160],
+      "id": "t7-pg-creds",
+      "name": "PG: Get Mailbox Creds",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const creds = $json;\nif (!creds.imap_host) return [{ json: { body: null, error: 'Postfach nicht gefunden oder kein Zugriff' } }];\n// Decrypt password\nconst crypto = require('crypto');\nconst KEY = crypto.createHash('sha256').update('alice-mail-enc-key-2026').digest();\nconst [ivHex, encHex] = creds.password_enc.split(':');\nconst iv = Buffer.from(ivHex, 'hex');\nconst enc = Buffer.from(encHex, 'hex');\nconst decipher = crypto.createDecipheriv('aes-256-cbc', KEY, iv);\nconst password = Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');\nconst uid = $('Prep: Get Body').first().json.uid;\nreturn [{ json: { host: creds.imap_host, port: creds.imap_port, username: creds.imap_username, password, ssl: creds.ssl_enabled, uid } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 160],
+      "id": "t8-decrypt-body",
+      "name": "Decrypt: Body Creds"
+    },
+    {
+      "parameters": {
+        "url": "http://alice-mail-reader:8007/body",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ host: $json.host, port: $json.port, username: $json.username, password: $json.password, ssl: $json.ssl, uid: $json.uid }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 160],
+      "id": "t9-http-body",
+      "name": "HTTP: Fetch Body",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "via-wh-b",
+              "leftValue": "={{ $('Input Normalizer').first().json.__via_webhook }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1120, 160],
+      "id": "t10-respond-body",
+      "name": "Respond? (Body)"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1360, 80],
+      "id": "t10-respond-wh-body",
+      "name": "Respond: Body"
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": { "main": [[{ "node": "Input Normalizer", "type": "main", "index": 0 }]] },
+    "Webhook: Mail Tools": { "main": [[{ "node": "Webhook Adapter", "type": "main", "index": 0 }]] },
+    "Webhook Adapter": { "main": [[{ "node": "Input Normalizer", "type": "main", "index": 0 }]] },
+    "Input Normalizer": { "main": [[{ "node": "Operation Router", "type": "main", "index": 0 }]] },
+    "Operation Router": {
+      "main": [
+        [{ "node": "PG: Get Authorized Mailboxes", "type": "main", "index": 0 }],
+        [{ "node": "Prep: Get Body", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Get Authorized Mailboxes": { "main": [[{ "node": "Weaviate: Search Emails", "type": "main", "index": 0 }]] },
+    "Weaviate: Search Emails": { "main": [[{ "node": "Respond? (Search)", "type": "main", "index": 0 }]] },
+    "Respond? (Search)": {
+      "main": [
+        [{ "node": "Respond: Search", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Prep: Get Body": { "main": [[{ "node": "PG: Get Mailbox Creds", "type": "main", "index": 0 }]] },
+    "PG: Get Mailbox Creds": { "main": [[{ "node": "Decrypt: Body Creds", "type": "main", "index": 0 }]] },
+    "Decrypt: Body Creds": { "main": [[{ "node": "HTTP: Fetch Body", "type": "main", "index": 0 }]] },
+    "HTTP: Fetch Body": { "main": [[{ "node": "Respond? (Body)", "type": "main", "index": 0 }]] },
+    "Respond? (Body)": {
+      "main": [
+        [{ "node": "Respond: Body", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

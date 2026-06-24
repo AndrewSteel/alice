@@ -272,6 +272,34 @@
           "vectorizePropertyName": false
         }
       }
+    },
+    {
+      "name": "mailboxId",
+      "description": "IMAP mailbox UUID (alice.imap_mailboxes.id) — used for access control in PROJ-46",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "imapUid",
+      "description": "IMAP UID of the message (integer as string) — used to fetch the full body on demand",
+      "dataType": ["text"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "tokenization": "field",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     }
   ]
 }

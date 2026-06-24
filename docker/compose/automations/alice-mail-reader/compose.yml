@@ -1,0 +1,22 @@
+services:
+  alice-mail-reader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-mail-reader
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8007/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      backend:
+        aliases: [alice-mail-reader]
+
+networks:
+  backend:
+    external: true
+    name: backend
