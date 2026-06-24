@@ -10,6 +10,7 @@ import { DmsSection } from "./DmsSection";
 import { NutzerVerwaltungSection } from "./NutzerVerwaltungSection";
 import { VoiceProfilesSection } from "./VoiceProfilesSection";
 import { ChatarchivSection } from "./ChatarchivSection";
+import { MailboxSection } from "./MailboxSection";
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -85,6 +86,12 @@ export function SettingsPage() {
                   Chatarchiv
                 </TabsTrigger>
               )}
+              <TabsTrigger
+                value="email"
+                className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+              >
+                E-Mail
+              </TabsTrigger>
             </TabsList>
 
             {/* Tab Content */}
@@ -115,6 +122,9 @@ export function SettingsPage() {
                   <ChatarchivSection />
                 </TabsContent>
               )}
+              <TabsContent value="email" className="mt-0">
+                <MailboxSection />
+              </TabsContent>
             </div>
           </div>
         </Tabs>
