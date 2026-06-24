@@ -1,6 +1,6 @@
 # PROJ-44: DMS BankTransaction Lifecycle Cleanup
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-24
 **Last Updated:** 2026-06-24
 
@@ -420,4 +420,16 @@ No changes to `alice-dms-processor.json` in PROJ-44 (the BUG-13 fix was already 
 - AC-4 live verification — to be confirmed during first production deployment by checking Weaviate `Aggregate { BankTransaction { meta { count } } }` before and after deleting a test bank statement
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-24
+**Deployed By:** Andrew Steel
+
+### Deployed Artifacts
+
+- `workflows/alice-dms-scanner.json` — Stale-Path-Detection deployed to n8n
+- `workflows/alice-dms-lifecycle.json` — delete_file-Handler deployed to n8n
+
+### Post-Deployment Verification
+
+- AC-4 live verification: check `Aggregate { BankTransaction { meta { count } } }` in Weaviate before and after deleting a test bank statement to confirm no orphans remain
+- Low-priority follow-up items (BUG-2, BUG-3, BUG-4) can be addressed in a maintenance pass
