@@ -1,0 +1,257 @@
+{
+  "name": "alice-mail-sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 1 }]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "id": "s1-trigger",
+      "name": "Schedule: Every Minute"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text, owner_id::text, imap_host, imap_port, imap_username, password_enc, ssl_enabled, last_uid, sync_interval FROM alice.imap_mailboxes WHERE next_sync_at <= NOW() AND status != 'error' LIMIT 5",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-960, 0],
+      "id": "s2-pg-pending",
+      "name": "PG: Get Pending Mailboxes",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "s3-has-mailboxes",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "exists" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-720, 0],
+      "id": "s3-if-has-work",
+      "name": "IF: Has Mailboxes"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-480, -80],
+      "id": "s4-split",
+      "name": "Split: One Mailbox at a Time"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE alice.imap_mailboxes SET status = 'syncing' WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-240, -80],
+      "id": "s5-pg-set-syncing",
+      "name": "PG: Set Syncing",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decrypt IMAP password (AES-256-CBC)\nconst crypto = require('crypto');\nconst KEY = crypto.createHash('sha256').update('alice-mail-enc-key-2026').digest();\nconst mailbox = $('Split: One Mailbox at a Time').first().json;\nconst [ivHex, encHex] = mailbox.password_enc.split(':');\nconst iv = Buffer.from(ivHex, 'hex');\nconst enc = Buffer.from(encHex, 'hex');\nconst decipher = crypto.createDecipheriv('aes-256-cbc', KEY, iv);\nconst password = Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');\nreturn [{ json: {\n  mailboxId: mailbox.id,\n  ownerId: mailbox.owner_id,\n  host: mailbox.imap_host,\n  port: mailbox.imap_port,\n  username: mailbox.imap_username,\n  password,\n  ssl: mailbox.ssl_enabled,\n  lastUid: mailbox.last_uid || 0,\n  syncInterval: mailbox.sync_interval || 15\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, -80],
+      "id": "s6-decrypt",
+      "name": "Decrypt Password"
+    },
+    {
+      "parameters": {
+        "url": "http://alice-mail-reader:8007/fetch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ host: $json.host, port: $json.port, username: $json.username, password: $json.password, ssl: $json.ssl, since_uid: $json.lastUid }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, -80],
+      "id": "s7-fetch",
+      "name": "HTTP: Fetch Emails",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "s8-has-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notExists" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, -80],
+      "id": "s8-if-fetch-ok",
+      "name": "IF: Fetch Ok"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE alice.imap_mailboxes SET status = 'error', last_error = $2, next_sync_at = NOW() + (sync_interval * INTERVAL '1 minute') WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$('Decrypt Password').first().json.mailboxId, $json.error || 'IMAP-Verbindung fehlgeschlagen'] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 80],
+      "id": "s8b-pg-error",
+      "name": "PG: Set Error Status",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process fetched emails: classify with Ollama, store in Weaviate\nconst axios = require('axios');\nconst fetchResult = $json;\nconst ctx = $('Decrypt Password').first().json;\nconst emails = fetchResult.emails || [];\nconst maxUid = fetchResult.max_uid || ctx.lastUid;\n\nif (emails.length === 0) {\n  return [{ json: { processed: 0, wichtig: [], maxUid } }];\n}\n\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst OLLAMA_URL = 'http://ollama:11434';\nconst wichtigEmails = [];\nlet processedCount = 0;\n\nfor (const em of emails) {\n  try {\n    // Deduplicate: check if message_id + mailbox_id already in Weaviate\n    const uniqueId = `${ctx.mailboxId}::${em.message_id || em.uid}`;\n    const dedupeGql = {\n      query: `{ Get { Email(where: { operator: And, operands: [ { path: [\"messageId\"], operator: Equal, valueText: ${JSON.stringify(uniqueId)} }, { path: [\"mailboxId\"], operator: Equal, valueText: ${JSON.stringify(ctx.mailboxId)} } ] } limit: 1) { _additional { id } } } }`\n    };\n    let alreadyExists = false;\n    try {\n      const dedupeRes = await axios.post(`${WEAVIATE_URL}/v1/graphql`, dedupeGql, { timeout: 5000 });\n      const existing = dedupeRes.data?.data?.Get?.Email || [];\n      alreadyExists = existing.length > 0;\n    } catch(e) { /* Weaviate temporarily unavailable, skip dedupe */ }\n    if (alreadyExists) continue;\n\n    // Classify + summarize with Ollama (non-blocking on failure)\n    let category = 'unklassifiziert';\n    let summary = '';\n    try {\n      const prompt = `Du bist ein E-Mail-Klassifikator. Klassifiziere diese E-Mail und gib eine kurze Zusammenfassung (2-3 Sätze auf Deutsch).\\n\\nAbsender: ${em.sender}\\nBetreff: ${em.subject}\\nVorschau: ${em.body_preview || ''}\\n\\nAntworte NUR mit validem JSON: {\"kategorie\": \"Wichtig|Werbung|Social Media|Spam\", \"zusammenfassung\": \"...\"}\\nKeine anderen Texte.`;\n      const ollamaRes = await axios.post(`${OLLAMA_URL}/api/generate`, {\n        model: 'qwen3:14b',\n        prompt,\n        stream: false,\n        options: { temperature: 0.1, num_predict: 200 }\n      }, { timeout: 30000 });\n      const raw = (ollamaRes.data?.response || '').trim();\n      // Extract JSON from response (LLM might add thinking tokens)\n      const jsonMatch = raw.match(/\\{[^{}]+\\}/);\n      if (jsonMatch) {\n        const parsed = JSON.parse(jsonMatch[0]);\n        category = parsed.kategorie || 'unklassifiziert';\n        summary = parsed.zusammenfassung || '';\n      }\n    } catch(e) { /* Ollama unavailable or parse error: store without classification */ }\n\n    // Store in Weaviate\n    const attachmentsText = (em.attachments || []).map(a => `${a.name} (${a.mime_type}, ${a.size_bytes} bytes)`);\n    const weaviateObj = {\n      class: 'Email',\n      properties: {\n        messageId: uniqueId,\n        mailboxId: ctx.mailboxId,\n        imapUid: String(em.uid),\n        subject: em.subject || '',\n        sender: em.sender || '',\n        senderName: em.sender ? em.sender.replace(/<[^>]+>/, '').trim() : '',\n        recipients: [em.recipients || ''],\n        date: em.date ? new Date(em.date).toISOString() : new Date().toISOString(),\n        category,\n        summary,\n        attachments: attachmentsText,\n        hasAttachments: (em.attachments || []).length > 0,\n        content: em.body_preview || ''\n      }\n    };\n    await axios.post(`${WEAVIATE_URL}/v1/objects`, weaviateObj, { timeout: 10000 });\n    processedCount++;\n\n    if (category === 'Wichtig') {\n      wichtigEmails.push({\n        sender: em.sender,\n        subject: em.subject,\n        date: em.date,\n        summary\n      });\n    }\n  } catch(e) {\n    // Skip individual email errors, continue processing\n  }\n}\n\nreturn [{ json: { processed: processedCount, wichtig: wichtigEmails, maxUid } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, -160],
+      "id": "s9-process",
+      "name": "Process + Classify + Store Emails"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send proactive notifications for 'Wichtig' emails\nconst axios = require('axios');\nconst { wichtig } = $json;\nconst ctx = $('Decrypt Password').first().json;\nif (!wichtig || wichtig.length === 0) return $input.all();\n\n// This is a passthrough — notifications are sent in PG directly below\n// We return the data as-is for the update step\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, -160],
+      "id": "s10-notify-pass",
+      "name": "Notify: Passthrough"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH access_users AS (\n  SELECT a.user_id\n  FROM alice.imap_mailbox_access a\n  WHERE a.mailbox_id = $1::uuid\n  UNION SELECT m.owner_id FROM alice.imap_mailboxes m WHERE m.id = $1::uuid\n),\ntarget_sessions AS (\n  SELECT DISTINCT ON (s.user_id) s.session_id, s.user_id\n  FROM alice.sessions s\n  INNER JOIN access_users au ON au.user_id = s.user_id\n  WHERE s.session_type = 'llm'\n  ORDER BY s.user_id, s.last_activity DESC\n)\nINSERT INTO alice.messages (session_id, user_id, role, content, msg_type)\nSELECT ts.session_id, ts.user_id, 'assistant', $2, 'llm_response'\nFROM target_sessions ts\nWHERE $3::integer > 0",
+        "options": {
+          "queryReplacement": "={{ [$('Decrypt Password').first().json.mailboxId, '📧 Neue wichtige Mails:\\n' + ($json.wichtig || []).map(e => `• **${e.subject || '(kein Betreff)'}** von ${e.sender}\\n  ${e.summary || ''}`).join('\\n\\n'), ($json.wichtig || []).length] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1200, -160],
+      "id": "s11-pg-notify",
+      "name": "PG: Send Notifications",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE alice.imap_mailboxes SET status = 'active', last_uid = GREATEST(last_uid, $2::bigint), last_synced_at = NOW(), last_error = NULL, mails_indexed = mails_indexed + $3::integer, next_sync_at = NOW() + (sync_interval * INTERVAL '1 minute') WHERE id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$('Decrypt Password').first().json.mailboxId, $('Process + Classify + Store Emails').first().json.maxUid, $('Process + Classify + Store Emails').first().json.processed] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1440, -160],
+      "id": "s12-pg-done",
+      "name": "PG: Update Sync Status",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1680, -160],
+      "id": "s13-loop-back",
+      "name": "Loop Back"
+    }
+  ],
+  "connections": {
+    "Schedule: Every Minute": { "main": [[{ "node": "PG: Get Pending Mailboxes", "type": "main", "index": 0 }]] },
+    "PG: Get Pending Mailboxes": { "main": [[{ "node": "IF: Has Mailboxes", "type": "main", "index": 0 }]] },
+    "IF: Has Mailboxes": {
+      "main": [
+        [{ "node": "Split: One Mailbox at a Time", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split: One Mailbox at a Time": { "main": [[{ "node": "PG: Set Syncing", "type": "main", "index": 0 }]] },
+    "PG: Set Syncing": { "main": [[{ "node": "Decrypt Password", "type": "main", "index": 0 }]] },
+    "Decrypt Password": { "main": [[{ "node": "HTTP: Fetch Emails", "type": "main", "index": 0 }]] },
+    "HTTP: Fetch Emails": { "main": [[{ "node": "IF: Fetch Ok", "type": "main", "index": 0 }]] },
+    "IF: Fetch Ok": {
+      "main": [
+        [{ "node": "Process + Classify + Store Emails", "type": "main", "index": 0 }],
+        [{ "node": "PG: Set Error Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Set Error Status": { "main": [[{ "node": "Loop Back", "type": "main", "index": 0 }]] },
+    "Process + Classify + Store Emails": { "main": [[{ "node": "Notify: Passthrough", "type": "main", "index": 0 }]] },
+    "Notify: Passthrough": { "main": [[{ "node": "PG: Send Notifications", "type": "main", "index": 0 }]] },
+    "PG: Send Notifications": { "main": [[{ "node": "PG: Update Sync Status", "type": "main", "index": 0 }]] },
+    "PG: Update Sync Status": { "main": [[{ "node": "Loop Back", "type": "main", "index": 0 }]] },
+    "Loop Back": { "main": [[{ "node": "Split: One Mailbox at a Time", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
