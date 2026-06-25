@@ -4,11 +4,13 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: alice-mail-reader
+    env_file:
+      - .env
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8007/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8007/health')\" || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

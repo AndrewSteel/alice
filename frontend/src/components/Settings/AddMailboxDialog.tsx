@@ -34,9 +34,10 @@ export function AddMailboxDialog({ open, onOpenChange, onSubmit }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connResult, setConnResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [prefill, setPrefill] = useState<typeof DEFAULTS | null>(null);
 
   function reset() {
-    setForm(DEFAULTS);
+    setForm(prefill ?? DEFAULTS);
     setError(null);
     setConnResult(null);
   }
@@ -79,7 +80,10 @@ export function AddMailboxDialog({ open, onOpenChange, onSubmit }: Props) {
       });
       setConnResult(result.connection_test);
       if (result.connection_test.ok) {
+        setPrefill(null);
         setTimeout(() => { handleOpenChange(false); }, 1200);
+      } else {
+        setPrefill({ ...form, password: "" });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Erstellen.");

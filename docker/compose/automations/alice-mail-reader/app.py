@@ -4,18 +4,27 @@ Called by n8n (alice-mail-sync) to fetch email metadata and bodies.
 
 Endpoints:
   GET  /health         — liveness check
-  POST /test           — test IMAP login
+  POST /encrypt        — encrypt a plaintext IMAP password (used by alice-mail-api)
+  POST /test           — test IMAP login (accepts password_enc)
   POST /fetch          — fetch emails since a given IMAP UID, returns metadata + body preview
   POST /body           — fetch full body of a single email by UID
+
+Passwords are encrypted with AES-256-CBC. The key is derived from MAIL_ENC_KEY (env).
+Plaintext passwords never leave this container.
 """
 
 from __future__ import annotations
 
 import email as email_lib
 from email.header import decode_header
+import hashlib
 import imaplib
-import json
 import logging
+import os
+from datetime import datetime
+
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 from flask import Flask, request, jsonify
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -25,6 +34,33 @@ app = Flask(__name__)
 MAX_EMAILS_PER_FETCH = 50
 
 
+def _get_key() -> bytes:
+    raw = os.environ.get("MAIL_ENC_KEY", "")
+    if not raw:
+        raise RuntimeError("MAIL_ENC_KEY not configured")
+    return hashlib.sha256(raw.encode()).digest()
+
+
+def _encrypt_password(plaintext: str) -> str:
+    iv = os.urandom(16)
+    cipher = AES.new(_get_key(), AES.MODE_CBC, iv)
+    return iv.hex() + ":" + cipher.encrypt(pad(plaintext.encode("utf-8"), 16)).hex()
+
+
+def _decrypt_password(password_enc: str) -> str:
+    iv_hex, enc_hex = password_enc.split(":")
+    cipher = AES.new(_get_key(), AES.MODE_CBC, bytes.fromhex(iv_hex))
+    return unpad(cipher.decrypt(bytes.fromhex(enc_hex)), 16).decode("utf-8")
+
+
+def _safe_decode(payload: bytes, charset: str | None) -> str:
+    cs = charset or "utf-8"
+    try:
+        return payload.decode(cs, errors="replace")
+    except (LookupError, UnicodeDecodeError):
+        return payload.decode("latin-1", errors="replace")
+
+
 def _decode_header(value: str | None) -> str:
     if not value:
         return ""
@@ -32,7 +68,7 @@ def _decode_header(value: str | None) -> str:
     out = []
     for raw, charset in parts:
         if isinstance(raw, bytes):
-            out.append(raw.decode(charset or "utf-8", errors="replace"))
+            out.append(_safe_decode(raw, charset))
         else:
             out.append(raw)
     return " ".join(out).strip()
@@ -45,13 +81,11 @@ def _get_text(msg) -> str:
             if part.get_content_type() == "text/plain":
                 payload = part.get_payload(decode=True)
                 if payload:
-                    cs = part.get_content_charset() or "utf-8"
-                    return payload.decode(cs, errors="replace")[:500]
+                    return _safe_decode(payload, part.get_content_charset())[:500]
     else:
         payload = msg.get_payload(decode=True)
         if payload:
-            cs = msg.get_content_charset() or "utf-8"
-            return payload.decode(cs, errors="replace")[:500]
+            return _safe_decode(payload, msg.get_content_charset())[:500]
     return ""
 
 
@@ -65,8 +99,7 @@ def _get_full_body(msg) -> str:
             payload = part.get_payload(decode=True)
             if not payload:
                 continue
-            cs = part.get_content_charset() or "utf-8"
-            text = payload.decode(cs, errors="replace")
+            text = _safe_decode(payload, part.get_content_charset())
             if ct == "text/html" and not html_body:
                 html_body = text
             elif ct == "text/plain" and not plain_body:
@@ -74,8 +107,7 @@ def _get_full_body(msg) -> str:
     else:
         payload = msg.get_payload(decode=True)
         if payload:
-            cs = msg.get_content_charset() or "utf-8"
-            plain_body = payload.decode(cs, errors="replace")
+            plain_body = _safe_decode(payload, msg.get_content_charset())
     return html_body or plain_body
 
 
@@ -112,12 +144,26 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/encrypt", methods=["POST"])
+def encrypt_password():
+    data = request.json or {}
+    plaintext = data.get("password", "")
+    if not plaintext:
+        return jsonify({"error": "password required"}), 400
+    try:
+        return jsonify({"password_enc": _encrypt_password(plaintext)})
+    except Exception as exc:
+        log.exception("encrypt_password failed")
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/test", methods=["POST"])
 def test_connection():
     data = request.json or {}
     try:
+        password = _decrypt_password(data["password_enc"])
         imap = _connect(data)
-        imap.login(data["username"], data["password"])
+        imap.login(data["username"], password)
         imap.select("INBOX", readonly=True)
         imap.logout()
         return jsonify({"ok": True, "message": "Verbindung erfolgreich"})
@@ -132,15 +178,25 @@ def test_connection():
 def fetch_emails():
     data = request.json or {}
     since_uid = int(data.get("since_uid", 0))
+    since_date = data.get("since_date")  # ISO date string e.g. "2026-01-15", only used when since_uid=0
+    limit = min(int(data.get("limit", 10)), MAX_EMAILS_PER_FETCH)
     folder = data.get("folder", "INBOX")
 
     try:
+        password = _decrypt_password(data["password_enc"])
         imap = _connect(data)
-        imap.login(data["username"], data["password"])
+        imap.login(data["username"], password)
         imap.select(folder, readonly=True)
 
         if since_uid > 0:
             typ, search_data = imap.uid("search", None, f"UID {since_uid + 1}:*")
+        elif since_date:
+            try:
+                dt = datetime.strptime(since_date[:10], "%Y-%m-%d")
+                imap_date = dt.strftime("%d-%b-%Y")  # IMAP format: 15-Jan-2026
+                typ, search_data = imap.uid("search", None, f"SINCE {imap_date}")
+            except (ValueError, Exception):
+                typ, search_data = imap.uid("search", None, "ALL")
         else:
             typ, search_data = imap.uid("search", None, "ALL")
 
@@ -149,7 +205,7 @@ def fetch_emails():
             return jsonify({"emails": [], "max_uid": since_uid, "error": "search failed"})
 
         uid_bytes = search_data[0].split() if search_data[0] else []
-        uid_bytes = uid_bytes[:MAX_EMAILS_PER_FETCH]
+        uid_bytes = uid_bytes[:limit]
 
         emails = []
         max_uid = since_uid
@@ -168,11 +224,11 @@ def fetch_emails():
             attachments = _get_attachments(msg)
             emails.append({
                 "uid": uid_int,
-                "message_id": msg.get("Message-ID", "").strip("<>").strip(),
+                "message_id": str(msg.get("Message-ID") or "").strip("<>").strip(),
                 "subject": _decode_header(msg.get("Subject")),
-                "sender": msg.get("From", ""),
-                "recipients": msg.get("To", ""),
-                "date": msg.get("Date", ""),
+                "sender": _decode_header(msg.get("From")),
+                "recipients": _decode_header(msg.get("To")),
+                "date": str(msg.get("Date") or ""),
                 "body_preview": _get_text(msg),
                 "attachments": attachments,
                 "has_attachments": len(attachments) > 0,
@@ -199,8 +255,9 @@ def fetch_body():
         return jsonify({"error": "uid required"}), 400
 
     try:
+        password = _decrypt_password(data["password_enc"])
         imap = _connect(data)
-        imap.login(data["username"], data["password"])
+        imap.login(data["username"], password)
         imap.select(folder, readonly=True)
 
         typ, msg_data = imap.uid("fetch", uid.encode(), "(RFC822)")
@@ -211,7 +268,6 @@ def fetch_body():
         raw = msg_data[0][1]
         msg = email_lib.message_from_bytes(raw)
         body = _get_full_body(msg)
-
         imap.logout()
         return jsonify({"body": body})
 
