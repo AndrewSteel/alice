@@ -135,7 +135,8 @@ export async function createMailbox(data: CreateMailboxInput): Promise<CreateMai
   }
   if (!res.ok) throw new Error(`Serverfehler (${res.status}).`);
   const body = await res.json();
-  return unwrapSingle<CreateMailboxResult>(body, "mailbox") as unknown as CreateMailboxResult;
+  const item = Array.isArray(body) && body.length > 0 ? body[0] : body;
+  return item as CreateMailboxResult;
 }
 
 export async function updateMailbox(data: UpdateMailboxInput): Promise<Mailbox> {

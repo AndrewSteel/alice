@@ -167,9 +167,9 @@ export function MailboxSection() {
                     </TableCell>
                     <TableCell className="text-gray-400 text-sm text-right">{mb.mails_indexed}</TableCell>
                     <TableCell className="text-gray-500 text-sm">
-                      {mb.access_users.length === 0
+                      {(mb.access_users ?? []).length === 0
                         ? "nur Eigentümer"
-                        : mb.access_users.map((u) => u.display_name).join(", ")}
+                        : (mb.access_users ?? []).map((u) => u.display_name).join(", ")}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">

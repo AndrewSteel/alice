@@ -15,8 +15,8 @@ export function useMailboxes() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     setError(null);
     try {
       const data = await getMailboxes();
@@ -24,7 +24,7 @@ export function useMailboxes() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Laden.");
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, []);
 
@@ -32,13 +32,13 @@ export function useMailboxes() {
 
   async function addMailbox(data: CreateMailboxInput): Promise<CreateMailboxResult> {
     const result = await createMailbox(data);
-    await load();
+    await load(true);
     return result;
   }
 
   async function editMailbox(data: UpdateMailboxInput): Promise<void> {
     await updateMailbox(data);
-    await load();
+    await load(true);
   }
 
   async function removeMailbox(id: string): Promise<void> {

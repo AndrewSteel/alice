@@ -1,8 +1,8 @@
 # PROJ-46: Mail IMAP Integration
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-24
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-06-25
 
 ## Dependencies
 - Requires: PROJ-1–PROJ-39 (Auth, JWT, User-Management) — für Login und Nutzerverwaltung
@@ -294,8 +294,16 @@ n8n schreibt "Wichtig"-Mails als system-generierte Nachricht direkt in `alice.me
 | BUG-1 | High | `Loop Back` war ein zweiter `SplitInBatches`-Node statt direkter Rückverbindung — hätte Multi-Postfach-Iteration gebrochen | **FIXED** in alice-mail-sync.json |
 | BUG-2 | High (Initial assessment) | Weaviate `Email`-Kollektion hatte `mailboxId`/`imapUid`-Felder nicht | **FIXED**: Properties via API zu Prod-Schema hinzugefügt; schemas/email.json war korrekt |
 | BUG-3 | Medium | Fehlerhafte Postfächer waren durch `status != 'error'` dauerhaft von Sync ausgeschlossen (Spec: "nächster Zyklus wiederholt") | **FIXED** in alice-mail-sync.json |
-| BUG-4 | Medium | `start_date` wird gespeichert aber nicht im IMAP-Fetch verwendet; Sync ist UID-basiert (ab UID 0 = alle Mails, nicht ab Startdatum) | **OPEN** — Known Gap; neue Postfächer indexieren alle Mails (mehr als erwartet, nicht weniger) |
+| BUG-4 | Medium | `start_date` wird gespeichert aber nicht im IMAP-Fetch verwendet; Sync ist UID-basiert (ab UID 0 = alle Mails, nicht ab Startdatum) | **FIXED** — `start_date` wird jetzt im `Decrypt Password`-Node (jetzt: `Prepare Mailbox Data`) als `sinceDate` weitergegeben und in alice-mail-reader als IMAP `SINCE`-Kriterium verwendet |
 | BUG-5 | Low | AddMailboxDialog zeigt bei fehlgeschlagenem Verbindungstest nicht explizit, dass das Postfach trotzdem gespeichert wurde | **OPEN** — Minor UX |
+| BUG-6 | High | `Split: One Mailbox at a Time` — Done-Branch (main[0]) war auf Verarbeitungs-Node verdrahtet; Loop-Branch (main[1]) war leer. Multi-Postfach-Iteration damit kaputt | **FIXED** in alice-mail-sync.json — Done→leer, Loop→`PG: Set Syncing` |
+| BUG-7 | High | `HTTP: Fetch Emails` nutzte GET statt POST — alice-mail-reader `/fetch` akzeptiert nur POST | **FIXED** in alice-mail-sync.json — `method: POST` |
+| BUG-8 | High | Workflow crashte nach ~5 s wegen falschem Docker-Hostname `ollama` statt `ollama-3090` — TCP-Timeout brach n8n Task-Runner WebSocket ab | **FIXED** in alice-mail-sync.json — Hostname korrigiert |
+| BUG-9 | High | Fehlende Verbindung Schedule → `PG: Check Active Syncs` — Connection-Key nutzte alten Node-Namen `"Schedule: Every 5 Minutes"`, Node heißt `"Schedule: Every Minute"` | **FIXED** in alice-mail-sync.json — Key auf aktuellen Namen korrigiert |
+| BUG-10 | Medium | Keine Concurrency-Absicherung — parallele Sync-Läufe möglich | **FIXED** — `PG: Check Active Syncs` + `IF: Free to Run?` blockiert neuen Lauf wenn Postfach `status='syncing'` und `updated_at > NOW() - 30min` |
+| BUG-11 | Medium | `unknown encoding: unknown-8bit` — Python `errors="replace"` fängt `UnicodeDecodeError` aber nicht `LookupError` bei unbekanntem Charset-Namen | **FIXED** in alice-mail-reader/app.py — `_safe_decode()` fängt beide Exception-Typen, Fallback auf `latin-1` |
+| BUG-12 | Medium | `email.header.Header`-Objekte in `sender`/`recipients`-Feldern nicht JSON-serialisierbar — Response-Fehler 500 | **FIXED** in alice-mail-reader/app.py — `sender` und `recipients` laufen jetzt durch `_decode_header()`, `date` durch `str()` |
+| SEC-1 | Security | Passwort-Entschlüsselung in n8n — Klartext-Passwort sichtbar in Execution Logs für alle n8n-Nutzer; AES-Schlüssel hardcodiert im Workflow-Code | **FIXED** — Verschlüsselung/Entschlüsselung vollständig nach `alice-mail-reader` verlagert; n8n übergibt nur `password_enc`; Schlüssel nur in Container-Env (`MAIL_ENC_KEY`) |
 
 ---
 
@@ -340,4 +348,16 @@ Offene Punkte (Medium/Low, kein Blocker):
 7. Deploy Frontend
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-25
+
+- n8n-workflow `alice-mail-api` — deployed
+- n8n-workflow `alice-mail-sync` — deployed
+- n8n-workflow `alice-mail-tools` — deployed
+- `alice-mail-reader` Docker container — rebuilt (added `pycryptodome`) and deployed on ki.lan
+- Frontend — deployed
+
+**Post-deployment fixes deployed (2026-06-25):**
+- alice-mail-sync: SplitInBatches-Verdrahtung, HTTP POST, Hostname, Schedule-Connection, Concurrency, start_date, Rename `Decrypt Password` → `Prepare Mailbox Data`
+- alice-mail-reader: `_safe_decode()` für Charset-Fehler, Header-Serialisierung, `/encrypt`-Endpoint, password_enc-basierte Authentifizierung
+- alice-mail-api: Passwort-Verschlüsselung via `/encrypt`-Endpoint statt inline Crypto
