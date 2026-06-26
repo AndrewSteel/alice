@@ -14,10 +14,7 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [
-        -1680,
-        0
-      ],
+      "position": [-1680, 0],
       "id": "s1-trigger",
       "name": "Schedule: Every Minute"
     },
@@ -29,10 +26,7 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        -1440,
-        0
-      ],
+      "position": [-1440, 0],
       "id": "s1b-check-running",
       "name": "PG: Check Active Syncs",
       "credentials": {
@@ -69,10 +63,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        -1200,
-        0
-      ],
+      "position": [-1200, 0],
       "id": "s1c-if-free",
       "name": "IF: Free to Run?"
     },
@@ -84,10 +75,7 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        -960,
-        0
-      ],
+      "position": [-960, 0],
       "id": "s2-pg-pending",
       "name": "PG: Get Pending Mailboxes",
       "credentials": {
@@ -124,10 +112,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        -720,
-        0
-      ],
+      "position": [-720, 0],
       "id": "s3-if-has-work",
       "name": "IF: Has Mailboxes"
     },
@@ -138,10 +123,7 @@
       },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [
-        -480,
-        -80
-      ],
+      "position": [-480, -80],
       "id": "s4-split",
       "name": "Split: One Mailbox at a Time"
     },
@@ -155,10 +137,7 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        -240,
-        -80
-      ],
+      "position": [-240, -80],
       "id": "s5-pg-set-syncing",
       "name": "PG: Set Syncing",
       "credentials": {
@@ -175,10 +154,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        0,
-        -80
-      ],
+      "position": [0, -80],
       "id": "s6-decrypt",
       "name": "Prepare Mailbox Data"
     },
@@ -188,17 +164,14 @@
         "url": "http://alice-mail-reader:8007/fetch",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ host: $json.host, port: $json.port, username: $json.username, password_enc: $json.passwordEnc, ssl: $json.ssl, since_uid: $json.lastUid, since_date: $json.sinceDate, limit: 10 }) }}",
+        "jsonBody": "={{ JSON.stringify({ host: $json.host, port: $json.port, username: $json.username, password_enc: $json.passwordEnc, ssl: $json.ssl, since_uid: $json.lastUid, since_date: $json.sinceDate, limit: 250 }) }}",
         "options": {
           "timeout": 60000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        240,
-        -80
-      ],
+      "position": [240, -80],
       "id": "s7-fetch",
       "name": "HTTP: Fetch Emails",
       "continueOnFail": true
@@ -229,10 +202,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        480,
-        -80
-      ],
+      "position": [480, -80],
       "id": "s8-if-fetch-ok",
       "name": "IF: Fetch Ok"
     },
@@ -246,10 +216,7 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        720,
-        80
-      ],
+      "position": [720, 80],
       "id": "s8b-pg-error",
       "name": "PG: Set Error Status",
       "credentials": {
@@ -266,10 +233,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        720,
-        -160
-      ],
+      "position": [720, -160],
       "id": "s9-process",
       "name": "Process + Classify + Store Emails"
     },
@@ -279,10 +243,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        960,
-        -160
-      ],
+      "position": [960, -160],
       "id": "s10-notify-pass",
       "name": "Notify: Passthrough"
     },
@@ -296,10 +257,7 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        1200,
-        -160
-      ],
+      "position": [1200, -160],
       "id": "s11-pg-notify",
       "name": "PG: Send Notifications",
       "credentials": {
@@ -320,10 +278,7 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [
-        1440,
-        -160
-      ],
+      "position": [1440, -160],
       "id": "s12-pg-done",
       "name": "PG: Update Sync Status",
       "credentials": {
