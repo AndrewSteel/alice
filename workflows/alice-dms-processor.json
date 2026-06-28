@@ -14,7 +14,10 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [52528, -3840],
+      "position": [
+        52528,
+        -3840
+      ],
       "id": "6bfb0e71-712b-4885-a277-58ca94b3fb85",
       "name": "Schedule: Nightly 02:00"
     },
@@ -24,7 +27,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [52832, -3840],
+      "position": [
+        52832,
+        -3840
+      ],
       "id": "d474e147-b929-4041-ae7d-105d35f4cb61",
       "name": "Code: Init"
     },
@@ -34,7 +40,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [53136, -3840],
+      "position": [
+        53136,
+        -3840
+      ],
       "id": "56510362-5d45-44ed-aa51-8fdcaf201fa7",
       "name": "Code: Fetch Batch"
     },
@@ -64,7 +73,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [53440, -3840],
+      "position": [
+        53440,
+        -3840
+      ],
       "id": "551c3431-fd2e-4e2b-8d18-c314bc632de7",
       "name": "IF: Queue Empty"
     },
@@ -74,7 +86,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [53728, -3536],
+      "position": [
+        53728,
+        -3536
+      ],
       "id": "75241ff6-d235-408f-ac58-31b83373e8e6",
       "name": "Code: Final Log"
     },
@@ -82,7 +97,10 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [54032, -3536],
+      "position": [
+        54032,
+        -3536
+      ],
       "id": "90c1601a-b5df-446a-a0ef-5326af7508ae",
       "name": "End: Empty Queue"
     },
@@ -94,7 +112,10 @@
       },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [53728, -3840],
+      "position": [
+        53728,
+        -3840
+      ],
       "id": "ddd356a2-0940-436f-8257-34bf7f7c2b2a",
       "name": "Split In Batches"
     },
@@ -104,7 +125,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [54032, -3840],
+      "position": [
+        54032,
+        -3840
+      ],
       "id": "4190dc47-d0ff-4bad-aa40-09c25f883af9",
       "name": "Code: Time Check"
     },
@@ -135,7 +159,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [54336, -3840],
+      "position": [
+        54336,
+        -3840
+      ],
       "id": "bb5f498d-ac86-4a64-bbab-40004d9842ee",
       "name": "IF: Time Limit Reached"
     },
@@ -145,7 +172,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [54640, -3536],
+      "position": [
+        54640,
+        -3536
+      ],
       "id": "f0a30b0a-0dc2-456c-9cf4-24ba0f34dbd0",
       "name": "Code: Final Log (Time)"
     },
@@ -153,7 +183,10 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [54928, -3536],
+      "position": [
+        54928,
+        -3536
+      ],
       "id": "c51785e6-4672-44e8-8b4d-122dae34aa5f",
       "name": "End: Time Limit"
     },
@@ -163,7 +196,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [54032, -4144],
+      "position": [
+        54032,
+        -4144
+      ],
       "id": "09f47562-2cf9-4359-af57-abf5bf51e5f6",
       "name": "Code: Parse + Dedup Check"
     },
@@ -194,7 +230,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [54336, -4144],
+      "position": [
+        54336,
+        -4144
+      ],
       "id": "731ae20e-ba5e-4983-afd6-a70e78adeac6",
       "name": "IF: Skip Item"
     },
@@ -225,7 +264,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [54640, -4144],
+      "position": [
+        54640,
+        -4144
+      ],
       "id": "7c68be37-c13f-42a2-8cc8-188860eec93d",
       "name": "IF: Extraction Failed"
     },
@@ -235,7 +277,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [54928, -4336],
+      "position": [
+        54928,
+        -4336
+      ],
       "id": "075c42e0-a283-4620-a12c-52a4561b4206",
       "name": "Code: Handle Failed"
     },
@@ -250,7 +295,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [55232, -4336],
+      "position": [
+        55232,
+        -4336
+      ],
       "id": "aebba215-2866-4aa5-8b4e-e73cccf62225",
       "name": "MQTT: Publish Error",
       "credentials": {
@@ -287,7 +335,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [54928, -4144],
+      "position": [
+        54928,
+        -4144
+      ],
       "id": "a72ebb48-50b2-4230-be17-be1adfb2342d",
       "name": "IF: Auto Classify"
     },
@@ -304,7 +355,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [55232, -4128],
+      "position": [
+        55232,
+        -4128
+      ],
       "id": "56894083-896f-45e0-8006-395aa1b2f9b4",
       "name": "HTTP: Ollama Classify",
       "continueOnFail": true
@@ -315,7 +369,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [55536, -4128],
+      "position": [
+        55536,
+        -4128
+      ],
       "id": "1f1b8a2b-378c-4321-9449-e851f8936074",
       "name": "Code: Parse Classify Result"
     },
@@ -325,7 +382,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [55232, -3840],
+      "position": [
+        55232,
+        -3840
+      ],
       "id": "1d0bad7f-355d-407e-9123-9f2b041b9cb6",
       "name": "Code: Use Suggested Type"
     },
@@ -335,7 +395,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [55840, -3840],
+      "position": [
+        55840,
+        -3840
+      ],
       "id": "9f904d23-fe76-4842-bd08-7619f23b62f5",
       "name": "Code: Build Extraction Prompt"
     },
@@ -352,7 +415,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [56128, -3840],
+      "position": [
+        56128,
+        -3840
+      ],
       "id": "f2a69bd4-dc2b-4eac-a702-a3cad8221ca8",
       "name": "HTTP: Ollama Extract",
       "continueOnFail": true
@@ -384,7 +450,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [56432, -3840],
+      "position": [
+        56432,
+        -3840
+      ],
       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "IF: Extract Error"
     },
@@ -394,7 +463,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [56736, -4144],
+      "position": [
+        56736,
+        -4144
+      ],
       "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
       "name": "Code: Handle Extract Error"
     },
@@ -409,7 +481,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [57040, -4144],
+      "position": [
+        57040,
+        -4144
+      ],
       "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
       "name": "MQTT: Publish Error (Extract)",
       "credentials": {
@@ -425,17 +500,23 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [56736, -3840],
+      "position": [
+        56736,
+        -3840
+      ],
       "id": "88b2fa59-ed79-4a08-b55b-bd82e324c0f1",
       "name": "Code: Parse Extract Result"
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\n\n// className allowlist \u2014 prevents GraphQL injection via manipulated _document_type\nconst validClasses = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst className = item._document_type;\nif (!className || !validClasses.includes(className)) {\n  console.warn(`[Build Weaviate Query] Invalid className: ${className} \u2014 skipping document`);\n  return [{ json: { ...item, _skip: true, _skip_reason: `Invalid className: ${className}` } }];\n}\n\n// Full escape for filePath \u2014 prevents GraphQL string injection via control characters\nconst rawPath = item.file_path || '';\nconst filePath = rawPath\n  .replace(/\\\\/g, '\\\\\\\\')\n  .replace(/\"/g, '\\\\\"')\n  .replace(/\\n/g, '\\\\n')\n  .replace(/\\r/g, '\\\\r')\n  .replace(/\\t/g, '\\\\t')\n  .replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n\nif (!filePath) {\n  console.warn('[Build Weaviate Query] Empty filePath after escaping \u2014 skipping document');\n  return [{ json: { ...item, _skip: true, _skip_reason: 'Empty filePath after escaping' } }];\n}\n\nconst query = `{ Get { ${className}(where: { path: [\"filePath\"], operator: Equal, valueText: \"${filePath}\" }, limit: 1) { _additional { id } } } }`;\nreturn [{ json: { ...item, _weaviate_query: query } }];"
+        "jsCode": "const item = $input.first().json;\n\n// className allowlist — prevents GraphQL injection via manipulated _document_type\nconst validClasses = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst className = item._document_type;\nif (!className || !validClasses.includes(className)) {\n  console.warn(`[Build Weaviate Query] Invalid className: ${className} — skipping document`);\n  return [{ json: { ...item, _skip: true, _skip_reason: `Invalid className: ${className}` } }];\n}\n\n// Full escape for filePath — prevents GraphQL string injection via control characters\nconst rawPath = item.file_path || '';\nconst filePath = rawPath\n  .replace(/\\\\/g, '\\\\\\\\')\n  .replace(/\"/g, '\\\\\"')\n  .replace(/\\n/g, '\\\\n')\n  .replace(/\\r/g, '\\\\r')\n  .replace(/\\t/g, '\\\\t')\n  .replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n\nif (!filePath) {\n  console.warn('[Build Weaviate Query] Empty filePath after escaping — skipping document');\n  return [{ json: { ...item, _skip: true, _skip_reason: 'Empty filePath after escaping' } }];\n}\n\nconst query = `{ Get { ${className}(where: { path: [\"filePath\"], operator: Equal, valueText: \"${filePath}\" }, limit: 1) { _additional { id } } } }`;\nreturn [{ json: { ...item, _weaviate_query: query } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [57040, -3840],
+      "position": [
+        57040,
+        -3840
+      ],
       "id": "6ef29f54-0d0a-48e8-b85a-0de3b1d3250d",
       "name": "Code: Build Weaviate Query"
     },
@@ -450,7 +531,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [57392, -3840],
+      "position": [
+        57392,
+        -3840
+      ],
       "id": "be60d4fd-1622-4327-98a7-0a25f89c2cf3",
       "name": "HTTP: Weaviate Search",
       "continueOnFail": true
@@ -461,7 +545,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [57632, -3840],
+      "position": [
+        57632,
+        -3840
+      ],
       "id": "596c8300-2749-43e6-99af-500bf2710bf4",
       "name": "Code: Check Existing Entry"
     },
@@ -473,7 +560,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [58240, -4128],
+      "position": [
+        58240,
+        -4128
+      ],
       "id": "5a46dd3d-2583-40ca-98fd-bd22ab4ac243",
       "name": "HTTP: Weaviate Delete",
       "continueOnFail": true
@@ -484,7 +574,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [58544, -3840],
+      "position": [
+        58544,
+        -3840
+      ],
       "id": "4af92ff0-4d1e-4ea0-a97d-c8384829924e",
       "name": "Code: Build Weaviate Payload"
     },
@@ -499,7 +592,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [58832, -3840],
+      "position": [
+        58832,
+        -3840
+      ],
       "id": "4c6f7463-3769-4d92-94ee-de4cdfe27457",
       "name": "HTTP: Weaviate Insert",
       "continueOnFail": true
@@ -510,17 +606,23 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [59136, -3840],
+      "position": [
+        59136,
+        -3840
+      ],
       "id": "c380c331-6f93-4c65-86e6-a5bb4fe257e4",
       "name": "Code: Redis State Update"
     },
     {
       "parameters": {
-        "jsCode": "// PROJ-29 Phase B: BankTransaction chunk extraction + batch indexing\n// Runs only when the parent document is a BankStatement that was just inserted.\n// For all other doc types this node is a passthrough.\n//\n// Bug fixes:\n//   BUG-3: Use GraphQL Get + DELETE-by-ID instead of delete-by-where (more reliable; body\n//          on DELETE is dropped by some HTTP stacks).\n//   BUG-13: Cascade-delete BankTransaction children for the OLD parent UUID when this is a\n//          replace (same path, different hash) \u2014 prevents orphans.\n//   BUG-4: Add 1\u00d7 retry per chunk on Ollama failure / unparseable JSON.\n//   BUG-5: Skip transactions with null transactionDate (do not pollute the collection).\n//   BUG-6: Drop empty purpose so it is not embedded as an empty-string vector.\n//   BUG-8: Emit _phase_b_failure flag so downstream MQTT nodes can publish a Phase B\n//          summary to alice/dms/error on partial failure (mqtt module is not in\n//          NODE_FUNCTION_ALLOW_EXTERNAL — published via dedicated n8n MQTT nodes).\n\nconst axios = require('axios');\nconst redis = require('redis');\n\nconst item = $input.first().json;\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst CHUNK_SIZE = 8000;\nconst OLLAMA_TIMEOUT_MS = 180000; // 3 min per chunk\n\n// Passthrough for non-BankStatement or failed inserts\nif (item._document_type !== 'BankStatement' || !item._weaviate_inserted || !item._new_weaviate_id) {\n  return [{ json: item }];\n}\n\nconst parentId = item._new_weaviate_id;\n// BUG-13: capture OLD parent UUID if this was a replace (existing class was BankStatement)\nconst oldParentId = (item._existing_weaviate_class === 'BankStatement' && item._existing_weaviate_id && item._existing_weaviate_id !== parentId)\n  ? item._existing_weaviate_id\n  : null;\nconst plaintext = item.plaintext || '';\nconst extractedHeader = item._extracted || {};\nconst bankName = extractedHeader.bankName || null;\nconst accountIban = extractedHeader.iban || null;\nconst statementCurrency = extractedHeader.currency || 'EUR';\nconst now = new Date().toISOString();\n\nlet ollamaModel = 'qwen3.5:27b-q4_K_M';\ntry { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(String(val).replace(',', '.'));\n  return isNaN(n) ? null : Math.abs(n);\n}\nfunction normDirection(val) {\n  if (!val) return null;\n  const v = String(val).toLowerCase().trim();\n  if (['credit', 'eingang', 'in', 'gutschrift', '+'].includes(v)) return 'credit';\n  if (['debit', 'ausgang', 'out', 'lastschrift', 'belastung', '-'].includes(v)) return 'debit';\n  return null;\n}\n\n// BUG-3 helper: resolve all BankTransaction children for a given parentStatementId via\n// GraphQL Get (paged), then DELETE each by UUID. This is more reliable than delete-by-where\n// because (a) HTTP DELETE bodies are dropped by some HTTP stacks, (b) Weaviate batch-delete\n// API formats vary across versions, and (c) per-ID delete returns explicit per-object status.\n// Returns { deleted, failed }.\nasync function cascadeDeleteChildren(pid) {\n  let deleted = 0;\n  let failed = 0;\n  if (!pid) return { deleted, failed };\n  // Sanitize: only allow UUID-shaped strings (defensive \u2014 pid comes from internal sources only)\n  const safePid = String(pid).replace(/[^a-zA-Z0-9-]/g, '');\n  if (!safePid || safePid !== pid) {\n    console.warn(`[Phase B] cascadeDeleteChildren: invalid parent UUID '${pid}' \u2014 skipping cascade`);\n    return { deleted, failed };\n  }\n  const PAGE = 100;\n  // Loop until no more results returned\n  while (true) {\n    const gql = `{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"${safePid}\" }, limit: ${PAGE}) { _additional { id } } } }`;\n    let ids = [];\n    try {\n      const r = await axios.post(`${WEAVIATE_URL}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 15000\n      });\n      const hits = r.data?.data?.Get?.BankTransaction || [];\n      ids = hits.map(h => h?._additional?.id).filter(Boolean);\n    } catch(e) {\n      console.warn(`[Phase B] cascadeDeleteChildren GraphQL Get failed for parent ${safePid}: ${e.message}`);\n      break;\n    }\n    if (ids.length === 0) break;\n    for (const id of ids) {\n      try {\n        await axios.delete(`${WEAVIATE_URL}/v1/objects/BankTransaction/${id}`, { timeout: 10000 });\n        deleted++;\n      } catch(e) {\n        // 404 means already deleted \u2014 not an error\n        if (e.response?.status === 404) {\n          deleted++;\n        } else {\n          failed++;\n          console.warn(`[Phase B] cascadeDeleteChildren: delete failed for ${id}: ${e.message}`);\n        }\n      }\n    }\n    // If less than page size returned we are done\n    if (ids.length < PAGE) break;\n  }\n  return { deleted, failed };\n}\n\n// 1a. BUG-13: Cascade-delete children of the OLD parent UUID on replace\nlet oldDeleted = 0;\nif (oldParentId) {\n  const r = await cascadeDeleteChildren(oldParentId);\n  oldDeleted = r.deleted;\n  console.log(`[Phase B] Cascade-deleted ${r.deleted} BankTransactions of replaced parent ${oldParentId} (${r.failed} failed)`);\n}\n\n// 1b. BUG-3: Delete any pre-existing children of the NEW parent UUID (idempotency for re-processing)\nconst { deleted: newDeleted } = await cascadeDeleteChildren(parentId);\nif (newDeleted > 0) {\n  console.log(`[Phase B] Deleted ${newDeleted} pre-existing BankTransactions for new parent ${parentId}`);\n}\n\n// 2. Split plaintext into chunks at newline boundaries\nfunction splitChunks(text, maxLen) {\n  if (!text) return [];\n  if (text.length <= maxLen) return [text];\n  const chunks = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + maxLen, text.length);\n    if (end < text.length) {\n      // Try to find the last newline within the window\n      const lastNl = text.lastIndexOf('\\n', end);\n      if (lastNl > start + Math.floor(maxLen / 2)) {\n        end = lastNl + 1;\n      }\n    }\n    chunks.push(text.slice(start, end));\n    start = end;\n  }\n  return chunks;\n}\n\nconst chunks = splitChunks(plaintext, CHUNK_SIZE);\nconsole.log(`[Phase B] BankStatement ${parentId}: ${chunks.length} chunk(s) of plaintext (${plaintext.length} chars)`);\n\n// 3. Per-chunk Ollama call to extract a JSON array of transactions (with 1\u00d7 retry, BUG-4)\nconst extractionPromptHeader = `You are a bank-statement transaction extractor. From the following text fragment of a bank statement, extract every individual booking line as a JSON array. Respond ONLY with a JSON object {\"transactions\": [...]} \u2014 no prose, no explanation.\n\nEach element MUST be an object with these fields:\n  \"transactionDate\":  \"YYYY-MM-DD\"  (booking date, required)\n  \"valueDate\":        \"YYYY-MM-DD\"  (Wertstellung, optional, null if absent)\n  \"amount\":           number         (always POSITIVE, sign goes into 'direction')\n  \"currency\":         string         (e.g. \"EUR\")\n  \"direction\":        \"credit\" or \"debit\"  (credit = Eingang/Gutschrift, debit = Ausgang/Lastschrift)\n  \"counterparty\":     string         (sender name on credits, recipient name on debits)\n  \"purpose\":          string         (Verwendungszweck / booking text; empty string if absent)\n  \"counterpartyIban\": string or null (IBAN of the other side if present)\n  \"balanceAfter\":     number or null (account balance after this booking if present)\n  \"rawText\":          string         (the original booking line as-is)\n\nIMPORTANT:\n- Ignore lines that look like statement headers, totals, page footers, opening/closing balances.\n- Ignore incomplete transactions at the very start or end of the fragment that look truncated.\n- Dates must be ISO format YYYY-MM-DD. If only DD.MM. is present, use the year from context if obvious; otherwise null.\n- Numbers must be plain JSON numbers (use \".\" as decimal separator, no thousands separators).\n- If no transactions are visible in the fragment, return {\"transactions\": []}.\n\nText fragment:\n`;\n\nasync function extractChunk(chunkText) {\n  const ollamaResp = await axios.post('http://ollama-3090:11434/api/generate', {\n    model: ollamaModel,\n    prompt: extractionPromptHeader + chunkText,\n    stream: false,\n    format: 'json',\n    options: { temperature: 0 }\n  }, { timeout: OLLAMA_TIMEOUT_MS });\n  const respText = ollamaResp.data?.response || '';\n  const parsed = JSON.parse(respText); // throws if invalid JSON \u2014 caught by caller\n  if (!Array.isArray(parsed.transactions)) throw new Error('response missing transactions array');\n  return parsed.transactions;\n}\n\nlet allTx = [];\nlet chunkRetries = 0;\nlet chunkFailures = 0;\nfor (let i = 0; i < chunks.length; i++) {\n  const chunkText = chunks[i];\n  let txs = null;\n  try {\n    txs = await extractChunk(chunkText);\n  } catch(e1) {\n    console.warn(`[Phase B] chunk ${i + 1}/${chunks.length} attempt 1 failed: ${e1.message} \u2014 retrying once`);\n    chunkRetries++;\n    try {\n      txs = await extractChunk(chunkText);\n    } catch(e2) {\n      chunkFailures++;\n      console.warn(`[Phase B] chunk ${i + 1}/${chunks.length} retry failed: ${e2.message} \u2014 dropping chunk`);\n      continue;\n    }\n  }\n  console.log(`[Phase B] chunk ${i + 1}/${chunks.length}: ${txs.length} transactions extracted`);\n  allTx.push(...txs);\n}\n\n// 4. Deduplicate by (transactionDate, amount, counterparty)\nconst seen = new Set();\nconst dedup = [];\nfor (const tx of allTx) {\n  const date = tx.transactionDate || '';\n  const amount = tx.amount != null ? String(tx.amount) : '';\n  const cp = (tx.counterparty || '').trim().toLowerCase();\n  const key = `${date}|${amount}|${cp}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n  dedup.push(tx);\n}\nconsole.log(`[Phase B] Deduplicated: ${allTx.length} -> ${dedup.length} transactions`);\n\n// 5. Empty-list handling: log warning, do not fail. Downstream MQTT routing emits the\n// summary based on _phase_b_failure flag (set below).\nif (dedup.length === 0) {\n  console.warn(`[Phase B] WARN: No transactions extracted from BankStatement ${parentId} (file=${item.file_path})`);\n  return [{ json: {\n    ...item,\n    _transactions_indexed: 0,\n    _transactions_failed: 0,\n    _transactions_extracted: 0,\n    _phase_b_chunk_failures: chunkFailures,\n    _phase_b_chunk_retries: chunkRetries,\n    _phase_b_chunks_total: chunks.length,\n    _phase_b_skipped_null_date: 0,\n    _phase_b_old_children_deleted: oldDeleted,\n    // chunkFailures with zero extracted is a partial failure signal for MQTT routing\n    _phase_b_failure: chunkFailures > 0\n  } }];\n}\n\n// 6. Build BankTransaction objects + batch insert via Weaviate /v1/batch/objects\nlet skippedNullDate = 0;\nconst objects = [];\nfor (const tx of dedup) {\n  const txDate = toISODate(tx.transactionDate);\n  // BUG-5: skip transactions without a valid transactionDate (required field)\n  if (!txDate) {\n    skippedNullDate++;\n    console.warn(`[Phase B] Skipping transaction with null transactionDate (parent=${parentId}): ${JSON.stringify({ amount: tx.amount, counterparty: tx.counterparty }).slice(0, 200)}`);\n    continue;\n  }\n  const purposeStr = (tx.purpose || '').toString().trim();\n  const props = {\n    parentStatementId: parentId,\n    transactionDate: txDate,\n    valueDate: toISODate(tx.valueDate),\n    amount: toNum(tx.amount),\n    currency: tx.currency || statementCurrency,\n    direction: normDirection(tx.direction),\n    counterparty: (tx.counterparty || '').toString(),\n    // BUG-6: drop purpose entirely when empty (avoids embedding an empty-string vector)\n    purpose: purposeStr || null,\n    counterpartyIban: tx.counterpartyIban || null,\n    balanceAfter: toNum(tx.balanceAfter),\n    bankName,\n    accountIban,\n    rawText: (tx.rawText || '').toString(),\n    createdBy: 'alice-dms-processor',\n    createdAt: now\n  };\n  // Drop null/undefined values \u2014 Weaviate does not accept null for typed fields\n  const cleaned = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  objects.push({ class: 'BankTransaction', properties: cleaned });\n}\nif (skippedNullDate > 0) {\n  console.warn(`[Phase B] Skipped ${skippedNullDate} transactions with missing transactionDate`);\n}\n\nlet successCount = 0;\nlet failCount = 0;\nif (objects.length > 0) {\n  try {\n    const batchResp = await axios.post(`${WEAVIATE_URL}/v1/batch/objects`, {\n      objects\n    }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 60000\n    });\n    const results = Array.isArray(batchResp.data) ? batchResp.data : [];\n    for (const r of results) {\n      const errs = r?.result?.errors?.error;\n      if (errs && errs.length) {\n        failCount++;\n        console.warn(`[Phase B] BankTransaction insert error: ${JSON.stringify(errs)}`);\n      } else {\n        successCount++;\n      }\n    }\n    // Fallback: if results array missing, treat HTTP-200 as full success\n    if (results.length === 0 && objects.length > 0) {\n      successCount = objects.length;\n    }\n  } catch(e) {\n    console.warn(`[Phase B] Weaviate batch insert failed: ${e.message}`);\n    failCount = objects.length;\n  }\n}\n\n// 7. Update Redis stats counter\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst rclient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait rclient.connect();\ntry {\n  if (successCount > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'transactions_indexed', successCount);\n  }\n  if (chunkFailures > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'phase_b_chunk_failures', chunkFailures);\n  }\n  if (chunkRetries > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'phase_b_chunk_retries', chunkRetries);\n  }\n} finally {\n  await rclient.quit();\n}\n\n// 8. BUG-8: Set partial/full-failure flag so downstream MQTT node can publish to alice/dms/error\nconst phaseBFailure = (failCount > 0) || (chunkFailures > 0) || (objects.length > 0 && successCount === 0);\n\nconsole.log(`[Phase B] BankTransaction batch insert: ${successCount} ok, ${failCount} failed (parent=${parentId}, chunkFailures=${chunkFailures})`);\nreturn [{ json: {\n  ...item,\n  _transactions_indexed: successCount,\n  _transactions_failed: failCount,\n  _transactions_extracted: dedup.length,\n  _phase_b_chunk_failures: chunkFailures,\n  _phase_b_chunk_retries: chunkRetries,\n  _phase_b_chunks_total: chunks.length,\n  _phase_b_skipped_null_date: skippedNullDate,\n  _phase_b_old_children_deleted: oldDeleted,\n  _phase_b_failure: phaseBFailure\n} }];"
+        "jsCode": "// PROJ-29 Phase B: BankTransaction chunk extraction + batch indexing\n// Runs only when the parent document is a BankStatement that was just inserted.\n// For all other doc types this node is a passthrough.\n//\n// Bug fixes:\n//   BUG-3: Use GraphQL Get + DELETE-by-ID instead of delete-by-where (more reliable; body\n//          on DELETE is dropped by some HTTP stacks).\n//   BUG-13: Cascade-delete BankTransaction children for the OLD parent UUID when this is a\n//          replace (same path, different hash) — prevents orphans.\n//   BUG-4: Add 1× retry per chunk on Ollama failure / unparseable JSON.\n//   BUG-5: Skip transactions with null transactionDate (do not pollute the collection).\n//   BUG-6: Drop empty purpose so it is not embedded as an empty-string vector.\n//   BUG-8: Emit _phase_b_failure flag so downstream MQTT nodes can publish a Phase B\n//          summary to alice/dms/error on partial failure (mqtt module is not in\n//          NODE_FUNCTION_ALLOW_EXTERNAL — published via dedicated n8n MQTT nodes).\n\nconst axios = require('axios');\nconst redis = require('redis');\n\nconst item = $input.first().json;\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst CHUNK_SIZE = 8000;\nconst OLLAMA_TIMEOUT_MS = 180000; // 3 min per chunk\n\n// Passthrough for non-BankStatement or failed inserts\nif (item._document_type !== 'BankStatement' || !item._weaviate_inserted || !item._new_weaviate_id) {\n  return [{ json: item }];\n}\n\nconst parentId = item._new_weaviate_id;\n// BUG-13: capture OLD parent UUID if this was a replace (existing class was BankStatement)\nconst oldParentId = (item._existing_weaviate_class === 'BankStatement' && item._existing_weaviate_id && item._existing_weaviate_id !== parentId)\n  ? item._existing_weaviate_id\n  : null;\nconst plaintext = item.plaintext || '';\nconst extractedHeader = item._extracted || {};\nconst bankName = extractedHeader.bankName || null;\nconst accountIban = extractedHeader.iban || null;\nconst statementCurrency = extractedHeader.currency || 'EUR';\nconst now = new Date().toISOString();\n\nlet ollamaModel = 'qwen3.5:27b-q4_K_M';\ntry { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\n\nfunction toISODate(val) {\n  if (!val) return null;\n  try {\n    const d = new Date(val);\n    if (isNaN(d.getTime())) return null;\n    return d.toISOString();\n  } catch(e) { return null; }\n}\nfunction toNum(val) {\n  if (val === null || val === undefined || val === '') return null;\n  const n = parseFloat(String(val).replace(',', '.'));\n  return isNaN(n) ? null : Math.abs(n);\n}\nfunction normDirection(val) {\n  if (!val) return null;\n  const v = String(val).toLowerCase().trim();\n  if (['credit', 'eingang', 'in', 'gutschrift', '+'].includes(v)) return 'credit';\n  if (['debit', 'ausgang', 'out', 'lastschrift', 'belastung', '-'].includes(v)) return 'debit';\n  return null;\n}\n\n// BUG-3 helper: resolve all BankTransaction children for a given parentStatementId via\n// GraphQL Get (paged), then DELETE each by UUID. This is more reliable than delete-by-where\n// because (a) HTTP DELETE bodies are dropped by some HTTP stacks, (b) Weaviate batch-delete\n// API formats vary across versions, and (c) per-ID delete returns explicit per-object status.\n// Returns { deleted, failed }.\nasync function cascadeDeleteChildren(pid) {\n  let deleted = 0;\n  let failed = 0;\n  if (!pid) return { deleted, failed };\n  // Sanitize: only allow UUID-shaped strings (defensive — pid comes from internal sources only)\n  const safePid = String(pid).replace(/[^a-zA-Z0-9-]/g, '');\n  if (!safePid || safePid !== pid) {\n    console.warn(`[Phase B] cascadeDeleteChildren: invalid parent UUID '${pid}' — skipping cascade`);\n    return { deleted, failed };\n  }\n  const PAGE = 100;\n  // Loop until no more results returned\n  while (true) {\n    const gql = `{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"${safePid}\" }, limit: ${PAGE}) { _additional { id } } } }`;\n    let ids = [];\n    try {\n      const r = await axios.post(`${WEAVIATE_URL}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 15000\n      });\n      const hits = r.data?.data?.Get?.BankTransaction || [];\n      ids = hits.map(h => h?._additional?.id).filter(Boolean);\n    } catch(e) {\n      console.warn(`[Phase B] cascadeDeleteChildren GraphQL Get failed for parent ${safePid}: ${e.message}`);\n      break;\n    }\n    if (ids.length === 0) break;\n    for (const id of ids) {\n      try {\n        await axios.delete(`${WEAVIATE_URL}/v1/objects/BankTransaction/${id}`, { timeout: 10000 });\n        deleted++;\n      } catch(e) {\n        // 404 means already deleted — not an error\n        if (e.response?.status === 404) {\n          deleted++;\n        } else {\n          failed++;\n          console.warn(`[Phase B] cascadeDeleteChildren: delete failed for ${id}: ${e.message}`);\n        }\n      }\n    }\n    // If less than page size returned we are done\n    if (ids.length < PAGE) break;\n  }\n  return { deleted, failed };\n}\n\n// 1a. BUG-13: Cascade-delete children of the OLD parent UUID on replace\nlet oldDeleted = 0;\nif (oldParentId) {\n  const r = await cascadeDeleteChildren(oldParentId);\n  oldDeleted = r.deleted;\n  console.log(`[Phase B] Cascade-deleted ${r.deleted} BankTransactions of replaced parent ${oldParentId} (${r.failed} failed)`);\n}\n\n// 1b. BUG-3: Delete any pre-existing children of the NEW parent UUID (idempotency for re-processing)\nconst { deleted: newDeleted } = await cascadeDeleteChildren(parentId);\nif (newDeleted > 0) {\n  console.log(`[Phase B] Deleted ${newDeleted} pre-existing BankTransactions for new parent ${parentId}`);\n}\n\n// 2. Split plaintext into chunks at newline boundaries\nfunction splitChunks(text, maxLen) {\n  if (!text) return [];\n  if (text.length <= maxLen) return [text];\n  const chunks = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + maxLen, text.length);\n    if (end < text.length) {\n      // Try to find the last newline within the window\n      const lastNl = text.lastIndexOf('\\n', end);\n      if (lastNl > start + Math.floor(maxLen / 2)) {\n        end = lastNl + 1;\n      }\n    }\n    chunks.push(text.slice(start, end));\n    start = end;\n  }\n  return chunks;\n}\n\nconst chunks = splitChunks(plaintext, CHUNK_SIZE);\nconsole.log(`[Phase B] BankStatement ${parentId}: ${chunks.length} chunk(s) of plaintext (${plaintext.length} chars)`);\n\n// 3. Per-chunk Ollama call to extract a JSON array of transactions (with 1× retry, BUG-4)\nconst extractionPromptHeader = `You are a bank-statement transaction extractor. From the following text fragment of a bank statement, extract every individual booking line as a JSON array. Respond ONLY with a JSON object {\"transactions\": [...]} — no prose, no explanation.\n\nEach element MUST be an object with these fields:\n  \"transactionDate\":  \"YYYY-MM-DD\"  (booking date, required)\n  \"valueDate\":        \"YYYY-MM-DD\"  (Wertstellung, optional, null if absent)\n  \"amount\":           number         (always POSITIVE, sign goes into 'direction')\n  \"currency\":         string         (e.g. \"EUR\")\n  \"direction\":        \"credit\" or \"debit\"  (credit = Eingang/Gutschrift, debit = Ausgang/Lastschrift)\n  \"counterparty\":     string         (sender name on credits, recipient name on debits)\n  \"purpose\":          string         (Verwendungszweck / booking text; empty string if absent)\n  \"counterpartyIban\": string or null (IBAN of the other side if present)\n  \"balanceAfter\":     number or null (account balance after this booking if present)\n  \"rawText\":          string         (the original booking line as-is)\n\nIMPORTANT:\n- Ignore lines that look like statement headers, totals, page footers, opening/closing balances.\n- Ignore incomplete transactions at the very start or end of the fragment that look truncated.\n- Dates must be ISO format YYYY-MM-DD. If only DD.MM. is present, use the year from context if obvious; otherwise null.\n- Numbers must be plain JSON numbers (use \".\" as decimal separator, no thousands separators).\n- If no transactions are visible in the fragment, return {\"transactions\": []}.\n\nText fragment:\n`;\n\nasync function extractChunk(chunkText) {\n  const ollamaResp = await axios.post('http://ollama-3090:11434/api/generate', {\n    model: ollamaModel,\n    prompt: extractionPromptHeader + chunkText,\n    stream: false,\n    format: 'json',\n    options: { temperature: 0 }\n  }, { timeout: OLLAMA_TIMEOUT_MS });\n  const respText = ollamaResp.data?.response || '';\n  const parsed = JSON.parse(respText); // throws if invalid JSON — caught by caller\n  if (!Array.isArray(parsed.transactions)) throw new Error('response missing transactions array');\n  return parsed.transactions;\n}\n\nlet allTx = [];\nlet chunkRetries = 0;\nlet chunkFailures = 0;\nfor (let i = 0; i < chunks.length; i++) {\n  const chunkText = chunks[i];\n  let txs = null;\n  try {\n    txs = await extractChunk(chunkText);\n  } catch(e1) {\n    console.warn(`[Phase B] chunk ${i + 1}/${chunks.length} attempt 1 failed: ${e1.message} — retrying once`);\n    chunkRetries++;\n    try {\n      txs = await extractChunk(chunkText);\n    } catch(e2) {\n      chunkFailures++;\n      console.warn(`[Phase B] chunk ${i + 1}/${chunks.length} retry failed: ${e2.message} — dropping chunk`);\n      continue;\n    }\n  }\n  console.log(`[Phase B] chunk ${i + 1}/${chunks.length}: ${txs.length} transactions extracted`);\n  allTx.push(...txs);\n}\n\n// 4. Deduplicate by (transactionDate, amount, counterparty)\nconst seen = new Set();\nconst dedup = [];\nfor (const tx of allTx) {\n  const date = tx.transactionDate || '';\n  const amount = tx.amount != null ? String(tx.amount) : '';\n  const cp = (tx.counterparty || '').trim().toLowerCase();\n  const key = `${date}|${amount}|${cp}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n  dedup.push(tx);\n}\nconsole.log(`[Phase B] Deduplicated: ${allTx.length} -> ${dedup.length} transactions`);\n\n// 5. Empty-list handling: log warning, do not fail. Downstream MQTT routing emits the\n// summary based on _phase_b_failure flag (set below).\nif (dedup.length === 0) {\n  console.warn(`[Phase B] WARN: No transactions extracted from BankStatement ${parentId} (file=${item.file_path})`);\n  return [{ json: {\n    ...item,\n    _transactions_indexed: 0,\n    _transactions_failed: 0,\n    _transactions_extracted: 0,\n    _phase_b_chunk_failures: chunkFailures,\n    _phase_b_chunk_retries: chunkRetries,\n    _phase_b_chunks_total: chunks.length,\n    _phase_b_skipped_null_date: 0,\n    _phase_b_old_children_deleted: oldDeleted,\n    // chunkFailures with zero extracted is a partial failure signal for MQTT routing\n    _phase_b_failure: chunkFailures > 0\n  } }];\n}\n\n// 6. Build BankTransaction objects + batch insert via Weaviate /v1/batch/objects\nlet skippedNullDate = 0;\nconst objects = [];\nfor (const tx of dedup) {\n  const txDate = toISODate(tx.transactionDate);\n  // BUG-5: skip transactions without a valid transactionDate (required field)\n  if (!txDate) {\n    skippedNullDate++;\n    console.warn(`[Phase B] Skipping transaction with null transactionDate (parent=${parentId}): ${JSON.stringify({ amount: tx.amount, counterparty: tx.counterparty }).slice(0, 200)}`);\n    continue;\n  }\n  const purposeStr = (tx.purpose || '').toString().trim();\n  const props = {\n    parentStatementId: parentId,\n    transactionDate: txDate,\n    valueDate: toISODate(tx.valueDate),\n    amount: toNum(tx.amount),\n    currency: tx.currency || statementCurrency,\n    direction: normDirection(tx.direction),\n    counterparty: (tx.counterparty || '').toString(),\n    // BUG-6: drop purpose entirely when empty (avoids embedding an empty-string vector)\n    purpose: purposeStr || null,\n    counterpartyIban: tx.counterpartyIban || null,\n    balanceAfter: toNum(tx.balanceAfter),\n    bankName,\n    accountIban,\n    rawText: (tx.rawText || '').toString(),\n    createdBy: 'alice-dms-processor',\n    createdAt: now\n  };\n  // Drop null/undefined values — Weaviate does not accept null for typed fields\n  const cleaned = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  objects.push({ class: 'BankTransaction', properties: cleaned });\n}\nif (skippedNullDate > 0) {\n  console.warn(`[Phase B] Skipped ${skippedNullDate} transactions with missing transactionDate`);\n}\n\nlet successCount = 0;\nlet failCount = 0;\nif (objects.length > 0) {\n  try {\n    const batchResp = await axios.post(`${WEAVIATE_URL}/v1/batch/objects`, {\n      objects\n    }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 60000\n    });\n    const results = Array.isArray(batchResp.data) ? batchResp.data : [];\n    for (const r of results) {\n      const errs = r?.result?.errors?.error;\n      if (errs && errs.length) {\n        failCount++;\n        console.warn(`[Phase B] BankTransaction insert error: ${JSON.stringify(errs)}`);\n      } else {\n        successCount++;\n      }\n    }\n    // Fallback: if results array missing, treat HTTP-200 as full success\n    if (results.length === 0 && objects.length > 0) {\n      successCount = objects.length;\n    }\n  } catch(e) {\n    console.warn(`[Phase B] Weaviate batch insert failed: ${e.message}`);\n    failCount = objects.length;\n  }\n}\n\n// 7. Update Redis stats counter\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst rclient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait rclient.connect();\ntry {\n  if (successCount > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'transactions_indexed', successCount);\n  }\n  if (chunkFailures > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'phase_b_chunk_failures', chunkFailures);\n  }\n  if (chunkRetries > 0) {\n    await rclient.hIncrBy('alice:dms:run:stats', 'phase_b_chunk_retries', chunkRetries);\n  }\n} finally {\n  await rclient.quit();\n}\n\n// 8. BUG-8: Set partial/full-failure flag so downstream MQTT node can publish to alice/dms/error\nconst phaseBFailure = (failCount > 0) || (chunkFailures > 0) || (objects.length > 0 && successCount === 0);\n\nconsole.log(`[Phase B] BankTransaction batch insert: ${successCount} ok, ${failCount} failed (parent=${parentId}, chunkFailures=${chunkFailures})`);\nreturn [{ json: {\n  ...item,\n  _transactions_indexed: successCount,\n  _transactions_failed: failCount,\n  _transactions_extracted: dedup.length,\n  _phase_b_chunk_failures: chunkFailures,\n  _phase_b_chunk_retries: chunkRetries,\n  _phase_b_chunks_total: chunks.length,\n  _phase_b_skipped_null_date: skippedNullDate,\n  _phase_b_old_children_deleted: oldDeleted,\n  _phase_b_failure: phaseBFailure\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [59616, -3840],
+      "position": [
+        59616,
+        -3840
+      ],
       "id": "f29a1c01-b5e6-4f2e-9d5a-bktx29phase2",
       "name": "Code: BankTransaction Phase B"
     },
@@ -550,7 +652,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [59920, -3680],
+      "position": [
+        59920,
+        -3680
+      ],
       "id": "a7c3fae0-1b2d-4c9f-94a1-bktx29phase2b",
       "name": "IF: Phase B Failure"
     },
@@ -565,7 +670,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [60224, -3680],
+      "position": [
+        60224,
+        -3680
+      ],
       "id": "b8d4f0a1-2c3e-4d5f-94a2-bktx29phase2c",
       "name": "MQTT: Phase B Error",
       "credentials": {
@@ -579,14 +687,17 @@
       "parameters": {
         "topic": "alice/dms/done",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, document_type: $json._document_type, llm_classified: $json._llm_classified, inserted: $json._weaviate_inserted, transactions_indexed: $json._transactions_indexed || 0, timestamp: new Date().toISOString() }) }}",
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, document_type: $json._document_type, llm_classified: $json._llm_classified, inserted: $json._weaviate_inserted, transactions_indexed: $json._transactions_indexed || 0, weaviate_uuid: $json._new_weaviate_id, file_type: ($json.file_path || \"\").split(\".\").pop().toLowerCase(), timestamp: new Date().toISOString() }) }}",
         "options": {
           "qos": 1
         }
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [59920, -3840],
+      "position": [
+        59920,
+        -3840
+      ],
       "id": "482e3b2c-c3f9-4a2b-bc2c-478d383d8754",
       "name": "MQTT: Publish Done",
       "credentials": {
@@ -622,7 +733,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [59312, -3840],
+      "position": [
+        59312,
+        -3840
+      ],
       "id": "90f33720-edf5-42d9-9a14-aff814fddfc2",
       "name": "IF: Insert Success"
     },
@@ -637,7 +751,10 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [59616, -4144],
+      "position": [
+        59616,
+        -4144
+      ],
       "id": "e732a0e2-66de-48e1-9512-cda4c698fcf8",
       "name": "MQTT: Publish Error (Weaviate)",
       "credentials": {
@@ -649,13 +766,16 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-processor\n\nNightly batch processor (02:00).\n\nReads plaintext items from Redis list `alice:dms:plaintext`,\nclassifies via LLM (Ollama, model from OLLAMA_MODEL_DMS env),\nextracts structured data per document type,\nstores to Weaviate collections.\n\n### Document Types\n- Invoice, BankStatement, Document\n- Email, SecuritySettlement, Contract\n- BankTransaction (Phase B child of BankStatement, PROJ-29)\n\n### PROJ-29: BankStatement \u2192 BankTransaction\nAfter a BankStatement object is inserted, Phase B runs:\n1. Cascade-delete BankTransaction children of OLD parent UUID on replace (BUG-13)\n2. Delete pre-existing children of NEW parent UUID via GraphQL Get + DELETE-by-ID (BUG-3)\n3. Split plaintext into ~8000-char chunks at line breaks\n4. Per-chunk Ollama call (1\u00d7 retry on failure, BUG-4) \u2192 JSON array of transactions\n5. Dedup by (transactionDate, amount, counterparty)\n6. Skip transactions with null transactionDate (BUG-5); drop empty purpose (BUG-6)\n7. Batch insert via /v1/batch/objects \u2192 BankTransaction collection\n8. Increment Redis stats: transactions_indexed, phase_b_chunk_failures, phase_b_chunk_retries\n9. On any failure (BUG-8) \u2192 IF: Phase B Failure routes to MQTT alice/dms/error\n\n### Redis Keys\n- `alice:dms:plaintext` \u2014 input queue (List)\n- `alice:dms:processed` \u2014 processed hashes (Set)\n- `alice:dms:queued_files` \u2014 in-flight hashes (Set)\n- `alice:dms:path_to_hash` \u2014 path->hash map (Hash)\n- `alice:dms:hash_to_paths:<hash>` \u2014 hash->paths (Set)\n- `alice:dms:run:start_time` \u2014 run timestamp (String)\n- `alice:dms:run:stats` \u2014 run counters (Hash, incl. transactions_indexed,\n  phase_b_chunk_failures, phase_b_chunk_retries)\n\n### Safety\n- BATCH_SIZE = 50\n- MAX_RUNTIME = 2h\n- Dedup check before processing\n- Upsert: delete existing Weaviate entry before insert\n- Weaviate failure: MQTT error published, item skipped, batch continues\n- Phase B failures: warn-logged, parent BankStatement still indexed,\n  alice/dms/error MQTT signal published\n- Stats: processed/failed/skipped/llm_classified/transactions_indexed/etc.",
+        "content": "## alice-dms-processor\n\nNightly batch processor (02:00).\n\nReads plaintext items from Redis list `alice:dms:plaintext`,\nclassifies via LLM (Ollama, model from OLLAMA_MODEL_DMS env),\nextracts structured data per document type,\nstores to Weaviate collections.\n\n### Document Types\n- Invoice, BankStatement, Document\n- Email, SecuritySettlement, Contract\n- BankTransaction (Phase B child of BankStatement, PROJ-29)\n\n### PROJ-29: BankStatement → BankTransaction\nAfter a BankStatement object is inserted, Phase B runs:\n1. Cascade-delete BankTransaction children of OLD parent UUID on replace (BUG-13)\n2. Delete pre-existing children of NEW parent UUID via GraphQL Get + DELETE-by-ID (BUG-3)\n3. Split plaintext into ~8000-char chunks at line breaks\n4. Per-chunk Ollama call (1× retry on failure, BUG-4) → JSON array of transactions\n5. Dedup by (transactionDate, amount, counterparty)\n6. Skip transactions with null transactionDate (BUG-5); drop empty purpose (BUG-6)\n7. Batch insert via /v1/batch/objects → BankTransaction collection\n8. Increment Redis stats: transactions_indexed, phase_b_chunk_failures, phase_b_chunk_retries\n9. On any failure (BUG-8) → IF: Phase B Failure routes to MQTT alice/dms/error\n\n### Redis Keys\n- `alice:dms:plaintext` — input queue (List)\n- `alice:dms:processed` — processed hashes (Set)\n- `alice:dms:queued_files` — in-flight hashes (Set)\n- `alice:dms:path_to_hash` — path->hash map (Hash)\n- `alice:dms:hash_to_paths:<hash>` — hash->paths (Set)\n- `alice:dms:run:start_time` — run timestamp (String)\n- `alice:dms:run:stats` — run counters (Hash, incl. transactions_indexed,\n  phase_b_chunk_failures, phase_b_chunk_retries)\n\n### Safety\n- BATCH_SIZE = 50\n- MAX_RUNTIME = 2h\n- Dedup check before processing\n- Upsert: delete existing Weaviate entry before insert\n- Weaviate failure: MQTT error published, item skipped, batch continues\n- Phase B failures: warn-logged, parent BankStatement still indexed,\n  alice/dms/error MQTT signal published\n- Stats: processed/failed/skipped/llm_classified/transactions_indexed/etc.",
         "height": 520,
         "width": 380
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [52528, -4448],
+      "position": [
+        52528,
+        -4448
+      ],
       "id": "44f3fb99-41b5-4111-948f-4c2fa248315f",
       "name": "Sticky: Overview"
     },
@@ -688,7 +808,10 @@
       "name": "IF: Weaviate Skip",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [57200, -3840]
+      "position": [
+        57200,
+        -3840
+      ]
     },
     {
       "parameters": {
@@ -717,7 +840,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [57888, -3840],
+      "position": [
+        57888,
+        -3840
+      ],
       "id": "c818983d-fd61-475c-8db5-3463448dd955",
       "name": "If: Has Existing Entry"
     }

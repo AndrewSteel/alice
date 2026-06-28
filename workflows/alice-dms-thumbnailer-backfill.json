@@ -1,0 +1,489 @@
+{
+  "name": "alice-dms-thumbnailer-backfill",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-dms-thumbnailer-backfill\n\nOne-time manual backfill: generates thumbnails for all Weaviate documents\nthat don't have a thumbnail_path set yet.\n\n**Trigger**: POST /webhook/alice/dms/thumb-backfill\n**Processes**: Invoice, BankStatement, BankTransaction, Document, Email, SecuritySettlement, Contract\n**Progress**: logged as { processed, failed, skipped_already_has_thumb, remaining }\n**Safe to re-run**: skips documents that already have thumbnail_path",
+        "height": 200,
+        "width": 440,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -220
+      ],
+      "id": "sticky-backfill",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-dms-thumbnailer-backfill",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "webhook-trigger",
+      "name": "Webhook: POST /thumb-backfill",
+      "webhookId": "alice-dms-thumbnailer-backfill-v1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initialize backfill — pass collections list downstream\nconst COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst LIMIT = 100;\nreturn [{ json: { collections: COLLECTIONS, limit: LIMIT } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ],
+      "id": "code-init",
+      "name": "Code: Init Collections"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "collections",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "id": "split-collections",
+      "name": "Split: Per Collection"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst { collections, limit } = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = limit || 100;\n\nconst allDocs = [];\n\nfor (const collection of collections) {\n  let cursor = null;\n  let pageCount = 0;\n\n  while (true) {\n    pageCount++;\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { _additional { id } filePath fileHash thumbnail_path } } }`;\n\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 30000\n      });\n      if (r.data?.errors) {\n        console.warn('[backfill] GraphQL error for', collection, ':', JSON.stringify(r.data.errors));\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      console.warn('[backfill] Request failed for', collection, ':', e.message);\n      break;\n    }\n\n    if (results.length === 0) break;\n\n    for (const doc of results) {\n      if (!doc.thumbnail_path) {\n        allDocs.push({\n          weaviate_uuid: doc._additional?.id,\n          file_path: doc.filePath || doc.file_path || null,\n          document_type: collection\n        });\n      }\n    }\n\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n\n  const collCount = allDocs.filter(d => d.document_type === collection).length;\n  console.log('[backfill]', collection, ': found', collCount, 'docs without thumbnail');\n}\n\nconsole.log('[backfill] Total docs to process:', allDocs.length);\nreturn allDocs.map(d => ({ json: d }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ],
+      "id": "code-query-weaviate",
+      "name": "Code: Query Weaviate (no thumbnail)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-has-file-path",
+              "leftValue": "={{ $json.file_path }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "check-has-uuid",
+              "leftValue": "={{ $json.weaviate_uuid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ],
+      "id": "if-has-path",
+      "name": "IF: Has file_path and UUID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://alice-dms-thumbnailer:8004/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type, file_type: ($json.file_path || '').split('.').pop().toLowerCase() }) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        -100
+      ],
+      "id": "http-generate",
+      "name": "HTTP: POST /generate",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-generate-ok",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        -100
+      ],
+      "id": "if-generate-ok",
+      "name": "IF: Generate OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process ALL items, not just first — required for batch backfill\nreturn $input.all().map(item => {\n  const resp = item.json;\n  const body = resp.body || resp;\n  const thumbPath = body.thumbnail_path || null;\n  const uuid = body.weaviate_uuid || null;\n  const docType = body.document_type || 'Document';\n  if (!thumbPath || !uuid) {\n    throw new Error('Missing thumbnail_path or uuid in response: ' + JSON.stringify(body));\n  }\n  return { json: { thumbnail_path: thumbPath, weaviate_uuid: uuid, document_type: docType } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        -200
+      ],
+      "id": "code-extract-path",
+      "name": "Code: Extract Path"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://weaviate:8080/v1/objects/' + $json.document_type + '/' + $json.weaviate_uuid }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { thumbnail_path: $json.thumbnail_path } }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        -200
+      ],
+      "id": "http-weaviate-patch",
+      "name": "HTTP: PATCH Weaviate",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process ALL items, not just first — required for batch backfill\nreturn $input.all().map(item => {\n  const resp = item.json;\n  const statusCode = resp.statusCode || 0;\n  if (statusCode >= 200 && statusCode < 300) {\n    return { json: { result: 'processed' } };\n  } else {\n    console.warn('[backfill] PATCH failed (HTTP', statusCode, ')');\n    return { json: { result: 'failed', reason: 'weaviate_patch_failed' } };\n  }\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        -200
+      ],
+      "id": "code-log-patch",
+      "name": "Code: Log PATCH Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  console.warn('[backfill] Generation failed for UUID:', uuid);\n  return { json: { result: 'failed', uuid, reason: 'generation_failed' } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        0
+      ],
+      "id": "code-log-gen-error",
+      "name": "Code: Log Generation Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  console.warn('[backfill] Skipping doc without file_path:', uuid);\n  return { json: { result: 'skipped', uuid, reason: 'no_file_path' } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        100
+      ],
+      "id": "code-log-skip",
+      "name": "Code: Log Skip (no file_path)"
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        3000,
+        0
+      ],
+      "id": "merge-results",
+      "name": "Merge: All Results"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet processed = 0, failed = 0, skipped = 0;\nfor (const item of items) {\n  const result = item.json.result;\n  if (result === 'processed') processed++;\n  else if (result === 'failed') failed++;\n  else if (result === 'skipped') skipped++;\n}\nconst summary = { processed, failed, skipped_no_path: skipped, total: items.length };\nconsole.log('[backfill] Summary:', JSON.stringify(summary));\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ],
+      "id": "code-summary",
+      "name": "Code: Summary"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3600,
+        0
+      ],
+      "id": "respond-webhook",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook: POST /thumb-backfill": {
+      "main": [
+        [
+          {
+            "node": "Code: Init Collections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Init Collections": {
+      "main": [
+        [
+          {
+            "node": "Code: Query Weaviate (no thumbnail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Query Weaviate (no thumbnail)": {
+      "main": [
+        [
+          {
+            "node": "IF: Has file_path and UUID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has file_path and UUID": {
+      "main": [
+        [
+          {
+            "node": "HTTP: POST /generate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Skip (no file_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: POST /generate": {
+      "main": [
+        [
+          {
+            "node": "IF: Generate OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Generate OK": {
+      "main": [
+        [
+          {
+            "node": "Code: Extract Path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Generation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Extract Path": {
+      "main": [
+        [
+          {
+            "node": "HTTP: PATCH Weaviate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: PATCH Weaviate": {
+      "main": [
+        [
+          {
+            "node": "Code: Log PATCH Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log PATCH Result": {
+      "main": [
+        [
+          {
+            "node": "Merge: All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log Generation Error": {
+      "main": [
+        [
+          {
+            "node": "Merge: All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log Skip (no file_path)": {
+      "main": [
+        [
+          {
+            "node": "Merge: All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: All Results": {
+      "main": [
+        [
+          {
+            "node": "Code: Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 86400
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}
