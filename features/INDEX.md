@@ -32,7 +32,9 @@
 | PROJ-52 | 2.2   | Admin-Chatarchiv — Neuer Settings-Tab: Liste aller Chats aller Nutzer (30 Tage), Detail-Ansicht mit allen Nachrichtentypen, Löschen-Funktion, Admin-only | Deployed  | [Spec](PROJ-52-admin-chat-archive.md) | 2026-06-17 |
 
 | PROJ-53 | 2.3   | Mail-Anhang DMS-Import — E-Mail-Anhänge automatisch oder nutzergesteuert in DMS-Pipeline einspeisung; Abhängigkeit von PROJ-46                                               | Roadmap  | —                                         | 2026-06-24 |
+| PROJ-54 | 2.3   | Vision-Chat: Flip-Card Ergebnisansicht — Visuelle Darstellung von Suchergebnissen als Flip-Cards; Split-Screen Vision/Text; responsive Grid-Layout                           | Deployed  | [Spec](PROJ-54-vision-chat-flip-card-results.md) | 2026-06-27 |
+| PROJ-55 | 2.3   | DMS Thumbnail-Generierung — Quadratische 1:1-Thumbnails nach DMS-Import (PDF/Office/Bilder), Ablage im Warm-Storage, API-Endpunkt, Backfill für Bestandsdokumente            | Deployed  | [Spec](PROJ-55-dms-thumbnail-generation.md)      | 2026-06-27 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-54
+## Next Available ID: PROJ-56

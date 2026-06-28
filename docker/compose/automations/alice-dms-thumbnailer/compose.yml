@@ -1,0 +1,39 @@
+services:
+  alice-dms-thumbnailer:
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-dms-thumbnailer
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - ${JWT_PUBLIC_KEY_PATH}:${JWT_PUBLIC_KEY_PATH}:ro
+      - ${THUMB_DIR}:${THUMB_DIR}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python3 -c "import urllib.request; urllib.request.urlopen(''http://localhost:8004/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-dms-thumbnailer]
+      backend:
+        aliases: [alice-dms-thumbnailer]
+
+networks:
+  automation:
+    external: true
+    name: automation
+  backend:
+    external: true
+    name: backend

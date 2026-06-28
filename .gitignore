@@ -41,6 +41,9 @@ docker/compose/automations/dms-extractor-ocr/.env
 docker/compose/automations/dms-extractor-pdf/.env
 docker/compose/automations/dms-extractor-office/.env
 docker/compose/automations/dms-extractor-txt/.env
+docker/compose/automations/alice-chat-stream/.env
+docker/compose/automations/alice-dms-thumbnailer/.env
+docker/compose/automations/alice-speech-gateway/.env
 
 # esphome Konfigurationen (können sensible Informationen enthalten)
 devices/ha-voice-pe/secrets.yaml

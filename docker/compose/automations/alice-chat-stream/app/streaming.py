@@ -322,11 +322,18 @@ async def stream_chat(
                     "result_preview": _preview(result),
                 })
 
+                # Strip internal debug/metadata keys before the LLM sees the
+                # result — these contain raw Weaviate responses that the model
+                # would otherwise count/summarise, causing discrepancies with
+                # the filtered `results` array (PROJ-54 bug #2).
+                _LLM_STRIP_KEYS = {"_debug", "_meta", "_raw"}
+                result_for_llm = {k: v for k, v in result.items() if k not in _LLM_STRIP_KEYS}
+
                 # Pass the result back to Ollama
                 tool_msg: dict[str, Any] = {
                     "role": "tool",
                     "name": tool_name,
-                    "content": json.dumps(result, ensure_ascii=False),
+                    "content": json.dumps(result_for_llm, ensure_ascii=False),
                 }
                 tc_id = tc.get("id")
                 if tc_id:
@@ -343,6 +350,11 @@ async def stream_chat(
                 if summary:
                     end_evt["summary"] = summary
                 yield (_sse(end_evt), {})
+
+                # PROJ-54: emit vision_results when tool returns docs with weaviate_uuid.
+                vision_items = _extract_vision_results(result)
+                if vision_items:
+                    yield (_sse({"type": "vision_results", "results": vision_items}), {})
 
             if not done_flag:
                 # Some Ollama versions don't set done=true on the chunk that contains
@@ -367,6 +379,88 @@ async def stream_chat(
             yield (_sse({"type": "conversation_end"}), {})
         yield (_sse({"type": "done", "usage": usage}), side)
         yield (b"data: [DONE]\n\n", {})
+
+
+def _extract_vision_results(result: dict[str, Any]) -> list[dict] | None:
+    """
+    PROJ-54: detect if a tool result contains documents with weaviate_uuid/weaviate_id.
+    alice-tool-search returns items with weaviate_id + collection fields.
+    Returns a list of VisionResult dicts, or None if no vision results found.
+    """
+    candidates: list[Any] = []
+    for key in ("results", "hits", "documents", "items"):
+        v = result.get(key)
+        if isinstance(v, list) and v:
+            candidates = v
+            break
+
+    if not candidates:
+        return None
+
+    vision: list[dict] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        # alice-tool-search uses weaviate_id; fallback to weaviate_uuid for other tools
+        uuid = (
+            item.get("weaviate_id")
+            or item.get("weaviate_uuid")
+            or (item.get("_additional") or {}).get("id")
+        )
+        if not uuid:
+            continue
+
+        # alice-tool-search uses collection; other tools may use document_type / doc_type
+        doc_type = str(
+            item.get("collection")
+            or item.get("document_type")
+            or item.get("doc_type")
+            or "Document"
+        )
+
+        # alice-tool-search uses title_or_summary for summary text
+        summary = (
+            item.get("title_or_summary")
+            or item.get("summary")
+            or item.get("ai_summary")
+            or None
+        )
+
+        # Build metadata from known fields; key_fields dict flattened if present
+        meta: dict[str, Any] = {}
+        for k in ("date", "amount", "sender", "iban", "subject",
+                  "invoiceDate", "totalAmount", "amountGross", "issuer",
+                  "statementDate", "bankName", "accountIban",
+                  "transactionDate", "counterparty", "direction",
+                  "sentAt", "fromAddress", "emailSubject",
+                  "score"):
+            if item.get(k) is not None:
+                meta[k] = item[k]
+        # Flatten key_fields dict from alice-tool-search results
+        key_fields = item.get("key_fields")
+        if isinstance(key_fields, dict):
+            for k, v in key_fields.items():
+                if v is not None:
+                    meta.setdefault(k, v)
+
+        # filename: not directly in tool results; derive from key_fields or leave empty
+        filename = str(
+            item.get("filename")
+            or item.get("fileName")
+            or item.get("file_path")
+            or item.get("title")
+            or ""
+        )
+
+        vision.append({
+            "uuid": str(uuid),
+            "document_type": doc_type,
+            "filename": filename,
+            "metadata": meta,
+            "summary": str(summary) if summary else None,
+        })
+
+    return vision if vision else None
 
 
 def _preview(value: Any, maxlen: int = 300) -> Any:

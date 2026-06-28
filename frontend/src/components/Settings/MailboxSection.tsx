@@ -108,7 +108,7 @@ export function MailboxSection() {
           {isAdmin ? "Alle Postfächer" : "Meine Postfächer"}
         </h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={reload} className="text-gray-400 hover:text-gray-100"
+          <Button variant="ghost" size="icon" onClick={() => reload()} className="text-gray-400 hover:text-gray-100"
             title="Aktualisieren">
             <RefreshCw className="h-4 w-4" />
           </Button>

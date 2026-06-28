@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+PyJWT>=2.8,<3.0
+cryptography>=42,<44
+Pillow>=10.0,<12.0
