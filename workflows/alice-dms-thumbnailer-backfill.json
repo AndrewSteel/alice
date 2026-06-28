@@ -10,32 +10,41 @@
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [0, -220],
+      "position": [
+        0,
+        -220
+      ],
       "id": "sticky-backfill",
       "name": "Sticky Note"
     },
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "alice/dms/thumb-backfill",
+        "path": "alice-dms-thumbnailer-backfill",
         "authentication": "none",
         "responseMode": "responseNode",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "id": "webhook-trigger",
       "name": "Webhook: POST /thumb-backfill",
       "webhookId": "alice-dms-thumbnailer-backfill-v1"
     },
     {
       "parameters": {
-        "jsCode": "// Initialize backfill state\nconst COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst LIMIT = 100;\nreturn [{ json: { collections: COLLECTIONS, limit: LIMIT, stats: { processed: 0, failed: 0, skipped_already_has_thumb: 0 } } }];"
+        "jsCode": "// Initialize backfill — pass collections list downstream\nconst COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nconst LIMIT = 100;\nreturn [{ json: { collections: COLLECTIONS, limit: LIMIT } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [300, 0],
+      "position": [
+        300,
+        0
+      ],
       "id": "code-init",
       "name": "Code: Init Collections"
     },
@@ -46,17 +55,23 @@
       },
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [600, 0],
+      "position": [
+        600,
+        0
+      ],
       "id": "split-collections",
       "name": "Split: Per Collection"
     },
     {
       "parameters": {
-        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst cls = item.json || item;\nconst collection = typeof cls === 'string' ? cls : JSON.stringify(cls);\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 100;\n\nconsole.log('[backfill] Processing collection:', collection);\n\n// Fetch all objects without thumbnail_path using GraphQL\n// We paginate using cursor (after) if needed\nlet allDocs = [];\nlet cursor = null;\n\nwhile (true) {\n  const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n  const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { _additional { id } filePath fileHash thumbnail_path } } }`;\n  \n  let results;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 30000\n    });\n    results = r.data?.data?.Get?.[collection] || [];\n  } catch(e) {\n    console.warn('[backfill] GraphQL query failed for', collection, ':', e.message);\n    break;\n  }\n  \n  if (results.length === 0) break;\n  \n  // Only take docs without thumbnail_path\n  for (const doc of results) {\n    if (!doc.thumbnail_path) {\n      allDocs.push({\n        weaviate_uuid: doc._additional?.id,\n        file_path: doc.filePath || doc.file_path || null,\n        document_type: collection\n      });\n    }\n  }\n  \n  if (results.length < LIMIT) break;\n  \n  // Use last ID as cursor for next page\n  cursor = results[results.length - 1]?._additional?.id;\n  if (!cursor) break;\n}\n\nconsole.log('[backfill]', collection, ': found', allDocs.length, 'docs without thumbnail');\nreturn allDocs.map(d => ({ json: d }));"
+        "jsCode": "const axios = require('axios');\nconst { collections, limit } = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = limit || 100;\n\nconst allDocs = [];\n\nfor (const collection of collections) {\n  let cursor = null;\n  let pageCount = 0;\n\n  while (true) {\n    pageCount++;\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { _additional { id } filePath fileHash thumbnail_path } } }`;\n\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 30000\n      });\n      if (r.data?.errors) {\n        console.warn('[backfill] GraphQL error for', collection, ':', JSON.stringify(r.data.errors));\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      console.warn('[backfill] Request failed for', collection, ':', e.message);\n      break;\n    }\n\n    if (results.length === 0) break;\n\n    for (const doc of results) {\n      if (!doc.thumbnail_path) {\n        allDocs.push({\n          weaviate_uuid: doc._additional?.id,\n          file_path: doc.filePath || doc.file_path || null,\n          document_type: collection\n        });\n      }\n    }\n\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n\n  const collCount = allDocs.filter(d => d.document_type === collection).length;\n  console.log('[backfill]', collection, ': found', collCount, 'docs without thumbnail');\n}\n\nconsole.log('[backfill] Total docs to process:', allDocs.length);\nreturn allDocs.map(d => ({ json: d }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 0],
+      "position": [
+        900,
+        0
+      ],
       "id": "code-query-weaviate",
       "name": "Code: Query Weaviate (no thumbnail)"
     },
@@ -95,7 +110,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1200, 0],
+      "position": [
+        1200,
+        0
+      ],
       "id": "if-has-path",
       "name": "IF: Has file_path and UUID"
     },
@@ -127,7 +145,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1500, -100],
+      "position": [
+        1500,
+        -100
+      ],
       "id": "http-generate",
       "name": "HTTP: POST /generate",
       "onError": "continueRegularOutput"
@@ -158,7 +179,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1800, -100],
+      "position": [
+        1800,
+        -100
+      ],
       "id": "if-generate-ok",
       "name": "IF: Generate OK"
     },
@@ -168,7 +192,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2100, -200],
+      "position": [
+        2100,
+        -200
+      ],
       "id": "code-extract-path",
       "name": "Code: Extract Path"
     },
@@ -200,7 +227,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2400, -200],
+      "position": [
+        2400,
+        -200
+      ],
       "id": "http-weaviate-patch",
       "name": "HTTP: PATCH Weaviate",
       "onError": "continueRegularOutput"
@@ -211,7 +241,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2700, -200],
+      "position": [
+        2700,
+        -200
+      ],
       "id": "code-log-patch",
       "name": "Code: Log PATCH Result"
     },
@@ -221,7 +254,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2100, 0],
+      "position": [
+        2100,
+        0
+      ],
       "id": "code-log-gen-error",
       "name": "Code: Log Generation Error"
     },
@@ -231,19 +267,23 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1500, 100],
+      "position": [
+        1500,
+        100
+      ],
       "id": "code-log-skip",
       "name": "Code: Log Skip (no file_path)"
     },
     {
       "parameters": {
-        "mode": "combine",
-        "combineBy": "combineAll",
-        "options": {}
+        "mode": "append"
       },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [3000, 0],
+      "position": [
+        3000,
+        0
+      ],
       "id": "merge-results",
       "name": "Merge: All Results"
     },
@@ -253,7 +293,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3300, 0],
+      "position": [
+        3300,
+        0
+      ],
       "id": "code-summary",
       "name": "Code: Summary"
     },
@@ -265,7 +308,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [3600, 0],
+      "position": [
+        3600,
+        0
+      ],
       "id": "respond-webhook",
       "name": "Respond to Webhook"
     }
@@ -273,74 +319,159 @@
   "connections": {
     "Webhook: POST /thumb-backfill": {
       "main": [
-        [{ "node": "Code: Init Collections", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code: Init Collections",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Init Collections": {
       "main": [
-        [{ "node": "Split: Per Collection", "type": "main", "index": 0 }]
-      ]
-    },
-    "Split: Per Collection": {
-      "main": [
-        [{ "node": "Code: Query Weaviate (no thumbnail)", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code: Query Weaviate (no thumbnail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Query Weaviate (no thumbnail)": {
       "main": [
-        [{ "node": "IF: Has file_path and UUID", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF: Has file_path and UUID",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF: Has file_path and UUID": {
       "main": [
-        [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }],
-        [{ "node": "Code: Log Skip (no file_path)", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "HTTP: POST /generate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Skip (no file_path)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "HTTP: POST /generate": {
       "main": [
-        [{ "node": "IF: Generate OK", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF: Generate OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF: Generate OK": {
       "main": [
-        [{ "node": "Code: Extract Path", "type": "main", "index": 0 }],
-        [{ "node": "Code: Log Generation Error", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code: Extract Path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Generation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Extract Path": {
       "main": [
-        [{ "node": "HTTP: PATCH Weaviate", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "HTTP: PATCH Weaviate",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "HTTP: PATCH Weaviate": {
       "main": [
-        [{ "node": "Code: Log PATCH Result", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code: Log PATCH Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Log PATCH Result": {
       "main": [
-        [{ "node": "Merge: All Results", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Merge: All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Log Generation Error": {
       "main": [
-        [{ "node": "Merge: All Results", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Merge: All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Log Skip (no file_path)": {
       "main": [
-        [{ "node": "Merge: All Results", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Merge: All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Merge: All Results": {
       "main": [
-        [{ "node": "Code: Summary", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code: Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code: Summary": {
       "main": [
-        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },

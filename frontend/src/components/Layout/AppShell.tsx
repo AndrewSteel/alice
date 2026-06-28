@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Sidebar } from "@/components/Sidebar/Sidebar";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
+import { InputArea } from "@/components/Chat/InputArea";
 import { VisionPanel } from "@/components/Vision/VisionPanel";
 import { useChatSessions } from "@/hooks/useChatSessions";
 import { useVisionPanel } from "@/hooks/useVisionPanel";
@@ -82,8 +83,19 @@ export function AppShell() {
 
   function handleNewChat() {
     createNewSession();
+    vision.reset();
     setMobileOpen(false);
   }
+
+  // Mobile/narrow viewports have no split mode — toggling must switch the
+  // whole view between text-only and vision-only. On desktop the split-based
+  // show/hide handlers apply.
+  const onShowText = isMobile
+    ? () => vision.setDisplayMode("text")
+    : vision.showTextPanel;
+  const onHideText = isMobile
+    ? () => vision.setDisplayMode("vision")
+    : vision.hideTextPanel;
 
   function handleSelectSession(id: string) {
     selectSession(id);
@@ -156,9 +168,7 @@ export function AppShell() {
                 className="ml-auto text-gray-400 hover:text-gray-100"
                 title={effectiveMode === "vision" ? "Chat anzeigen" : "Karten anzeigen"}
                 onClick={() =>
-                  effectiveMode === "vision"
-                    ? vision.showTextPanel()
-                    : vision.hideTextPanel()
+                  effectiveMode === "vision" ? onShowText() : onHideText()
                 }
               >
                 <MessageSquare className="h-5 w-5" />
@@ -195,8 +205,8 @@ export function AppShell() {
                 <VisionPanel
                   results={vision.results}
                   textPanelVisible={showText}
-                  onShowTextPanel={vision.showTextPanel}
-                  onHideTextPanel={vision.hideTextPanel}
+                  onShowTextPanel={onShowText}
+                  onHideTextPanel={onHideText}
                 />
               </div>
             )}
@@ -216,8 +226,6 @@ export function AppShell() {
                     isLoading={isLoading}
                     messagesLoading={messagesLoading}
                     isStreaming={isStreaming}
-                    onSend={sendMessage}
-                    onStop={stopStreaming}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-500">
@@ -227,6 +235,17 @@ export function AppShell() {
               </div>
             )}
           </main>
+
+          {/* Persistent footer — input + voice always reachable regardless of
+              which panel(s) are visible (Vision-only, Text-only, or Split). */}
+          <footer className="shrink-0 border-t border-gray-700 bg-gray-800">
+            <InputArea
+              onSend={sendMessage}
+              disabled={isLoading || !!messagesLoading || !activeSessionId}
+              isStreaming={isStreaming}
+              onStop={stopStreaming}
+            />
+          </footer>
         </div>
       </div>
     </TooltipProvider>

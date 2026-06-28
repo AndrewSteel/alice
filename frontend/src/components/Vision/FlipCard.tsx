@@ -15,12 +15,58 @@ interface FlipCardProps {
   onFaceChange?: (face: CardFace) => void;
 }
 
+// ISO date/datetime → German dd.MM.yyyy; everything else passes through.
+function formatMetaValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString("de-DE", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+    }
+  }
+  return s;
+}
+
+// German labels for metadata keys that fall outside the doc-type label map.
+const EXTRA_META_LABELS: Record<string, string> = {
+  date: "Datum",
+  amount: "Betrag",
+  totalAmount: "Betrag",
+  sender: "Absender",
+  issuer: "Aussteller",
+  subject: "Betreff",
+  emailSubject: "Betreff",
+  fromAddress: "Von",
+  iban: "IBAN",
+  counterparty: "Gegenseite",
+  bankName: "Bank",
+};
+
+// Technical/search fields that must never appear on the detail face.
+const HIDDEN_META_KEYS = new Set([
+  "score",
+  "distance",
+  "certainty",
+  "weaviate_id",
+  "weaviate_uuid",
+  "id",
+  "uuid",
+  "collection",
+  "document_type",
+  "filename",
+]);
+
 function MetadataRow({ label, value }: { label: string; value: unknown }) {
   if (value === null || value === undefined || value === "") return null;
   return (
     <div className="flex justify-between gap-2 text-xs text-gray-300 py-0.5">
       <span className="text-gray-500 shrink-0">{label}</span>
-      <span className="text-right truncate">{String(value)}</span>
+      <span className="text-right truncate">{formatMetaValue(value)}</span>
     </div>
   );
 }
@@ -52,12 +98,13 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
 
   return (
     <div
-      className="relative w-full aspect-square"
+      className="relative w-full"
       style={{ perspective: "800px" }}
     >
-      {/* Card container — 3D flip */}
+      {/* Card container — 3D flip. The front face sits in normal flow and
+          defines the card height; the back face overlays it absolutely. */}
       <div
-        className="w-full h-full transition-transform duration-500"
+        className="relative w-full transition-transform duration-500"
         style={{
           transformStyle: "preserve-3d",
           transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)",
@@ -65,7 +112,7 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
       >
         {/* ── Front face ── */}
         <div
-          className="absolute inset-0 flex flex-col bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer"
+          className="relative flex flex-col bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer"
           style={{ backfaceVisibility: "hidden" }}
           onClick={() => setFace("back")}
         >
@@ -76,8 +123,8 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
             </p>
           </div>
 
-          {/* Thumbnail — square, fills available space */}
-          <div className="flex-1 min-h-0 overflow-hidden">
+          {/* Thumbnail — strict 1:1 square preview */}
+          <div className="aspect-square w-full overflow-hidden">
             <ThumbnailImage
               uuid={result.uuid}
               alt={result.filename}
@@ -93,7 +140,7 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
               .map(([k, label]) => (
                 <span key={k} className="mr-2">
                   <span className="text-gray-600">{label}: </span>
-                  {String(result.metadata[k])}
+                  {formatMetaValue(result.metadata[k])}
                 </span>
               ))}
             {!Object.keys(metaLabels).some((k) => result.metadata[k]) && (
@@ -151,12 +198,20 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
                 {Object.entries(metaLabels).map(([k, label]) => (
                   <MetadataRow key={k} label={label} value={result.metadata[k]} />
                 ))}
-                {/* Extra metadata fields not in the labels map */}
+                {/* Extra metadata fields not in the labels map — German
+                    labels where known, technical/search fields hidden. */}
                 {Object.entries(result.metadata)
-                  .filter(([k]) => !metaLabels[k])
-                  .slice(0, 4)
+                  .filter(
+                    ([k, v]) =>
+                      !metaLabels[k] &&
+                      !HIDDEN_META_KEYS.has(k) &&
+                      v !== null &&
+                      v !== undefined &&
+                      v !== ""
+                  )
+                  .slice(0, 6)
                   .map(([k, v]) => (
-                    <MetadataRow key={k} label={k} value={v} />
+                    <MetadataRow key={k} label={EXTRA_META_LABELS[k] ?? k} value={v} />
                   ))}
               </div>
             </>

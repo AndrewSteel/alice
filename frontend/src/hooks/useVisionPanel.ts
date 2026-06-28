@@ -14,6 +14,10 @@ export interface UseVisionPanelReturn {
   onTextResponse: () => void;
   showTextPanel: () => void;
   hideTextPanel: () => void;
+  /** Direct mode switch — used by mobile toggle (split mode is not allowed there). */
+  setDisplayMode: (mode: DisplayMode) => void;
+  /** Reset to the post-login state: text-only, no cards. */
+  reset: () => void;
 }
 
 export function useVisionPanel(): UseVisionPanelReturn {
@@ -37,6 +41,11 @@ export function useVisionPanel(): UseVisionPanelReturn {
     setDisplayMode((prev) => (prev === "split" ? "vision" : prev));
   }, []);
 
+  const reset = useCallback(() => {
+    setResultsState([]);
+    setDisplayMode("text");
+  }, []);
+
   return {
     displayMode,
     results,
@@ -44,5 +53,7 @@ export function useVisionPanel(): UseVisionPanelReturn {
     onTextResponse,
     showTextPanel,
     hideTextPanel,
+    setDisplayMode,
+    reset,
   };
 }

@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 
-# Placeholder image baked into the image (generated at build time)
-RUN python3 -c "from PIL import Image, ImageDraw; img = Image.new('RGB', (400, 400), color=(240, 240, 240)); d = ImageDraw.Draw(img); d.rectangle([170, 150, 230, 250], fill=(200, 200, 200)); d.rectangle([150, 190, 250, 260], fill=(200, 200, 200)); img.save('/app/placeholder.jpg', 'JPEG', quality=85)"
+# Placeholder image — dark theme matching the Alice UI (gray-800 bg, document card)
+RUN python3 -c "from PIL import Image, ImageDraw; img = Image.new('RGB', (400, 400), color=(31, 41, 55)); d = ImageDraw.Draw(img); d.rounded_rectangle([115, 100, 285, 300], radius=10, fill=(55, 65, 81)); d.polygon([(235, 118), (268, 151), (268, 118)], fill=(31, 41, 55)); [d.line([(142, y), (258, y)], fill=(107, 114, 128), width=2) for y in [195, 218, 241, 264]]; img.save('/app/placeholder.jpg', 'JPEG', quality=85)"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8004"]

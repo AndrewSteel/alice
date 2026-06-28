@@ -27,7 +27,11 @@ export function ThumbnailImage({ uuid, alt, className = "" }: ThumbnailImageProp
         const res = await fetch(`/api/dms/thumbnail/${encodeURIComponent(uuid)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          if (!cancelled) setError(true);
+          return;
+        }
         const blob = await res.blob();
         if (cancelled) return;
         const url = URL.createObjectURL(blob);

@@ -17,7 +17,7 @@ import uuid as uuid_mod
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, field_validator
 
@@ -42,6 +42,20 @@ app = FastAPI(title="alice-dms-thumbnailer", version="1.0.0")
 async def startup():
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("Thumbnail directory: %s", THUMB_DIR)
+    if not PLACEHOLDER_PATH.exists():
+        logger.warning("Placeholder not found at %s — generating fallback", PLACEHOLDER_PATH)
+        try:
+            from PIL import Image, ImageDraw
+            img = Image.new("RGB", (400, 400), color=(31, 41, 55))  # type: ignore[arg-type]
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle([115, 100, 285, 300], radius=10, fill=(55, 65, 81))
+            d.polygon([(235, 118), (268, 151), (268, 118)], fill=(31, 41, 55))
+            for _y in [195, 218, 241, 264]:
+                d.line([(142, _y), (258, _y)], fill=(107, 114, 128), width=2)
+            img.save(str(PLACEHOLDER_PATH), "JPEG", quality=85)
+            logger.info("Fallback placeholder written to %s", PLACEHOLDER_PATH)
+        except Exception as exc:
+            logger.error("Could not generate placeholder: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +153,7 @@ def _render_text_preview(text_path: str) -> Image.Image | None:
         text = "".join(lines).strip()
         if not text:
             return None
-        img = Image.new("RGB", (800, 800), color=(255, 255, 255))
+        img = Image.new("RGB", (800, 800), color=(255, 255, 255))  # type: ignore[arg-type]
         from PIL import ImageDraw, ImageFont
         draw = ImageDraw.Draw(img)
         try:
@@ -190,7 +204,7 @@ def generate_thumbnail(original_path: str, file_type: str) -> Image.Image | None
         if img is None:
             return None
 
-        img = img.resize((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
+        img = img.resize((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
         if img.mode != "RGB":
             img = img.convert("RGB")
         return img
@@ -227,7 +241,7 @@ async def generate(req: GenerateRequest):
 
     img.save(str(thumb_path), "JPEG", quality=85)
     logger.info("Thumbnail saved: %s", thumb_path)
-    return {"thumbnail_path": str(thumb_path), "weaviate_uuid": req.weaviate_uuid}
+    return {"thumbnail_path": str(thumb_path), "weaviate_uuid": req.weaviate_uuid, "document_type": req.document_type}
 
 
 # ---------------------------------------------------------------------------
