@@ -1,6 +1,6 @@
 # PROJ-54: Vision-Chat: Flip-Card Ergebnisansicht
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-27
 **Last Updated:** 2026-06-27 (Layout-Konzept überarbeitet: Split-Screen statt rechte Seitenleiste)
 
@@ -365,3 +365,122 @@ Trigger manually once to generate thumbnails for all existing Weaviate documents
 curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-backfill
 ```
 (verify exact webhook path in n8n UI)
+
+## Post-Deploy Fixes — Test Round 1 (2026-06-28)
+
+First production test produced 10 findings. **Frontend fixes implemented** (this round):
+
+| # | Finding | Fix |
+|---|---|---|
+| 2 | Preview frame was landscape (~2:1), not square | `FlipCard` restructured: front face now sits in normal flow and defines card height; thumbnail wrapper is strict `aspect-square`. The card grows taller than 1:1 but the **image** is exactly 1:1 as required. |
+| 3 | Input line + voice icons were inside the text panel → unreachable when text-chat hidden | Moved `InputArea` out of `ChatWindow` into a **persistent `<footer>` in `AppShell`**, rendered in all display modes (Vision-only, Text-only, Split). `ChatWindow` now renders only `MessageList`. |
+| 4 | Mobile: header toggle to show text-chat had no effect; no swipe | Root cause: mobile coerces `split`→`vision`, but the toggle called the split-based `showTextPanel/hideTextPanel` (no-op after coercion). Added `setDisplayMode` to `useVisionPanel`; on mobile the toggles switch fully between `text` and `vision`. |
+| 5 | Same toggle icon in WebApp header also failed | Same root cause as #4 (split-mode coercion on narrow viewport). Fixed via the mobile-aware handlers passed to both the mobile header and `VisionPanel`. |
+| 6 | Card back mixed DE/EN labels + raw ISO dates | Added `formatMetaValue()` (ISO → `dd.MM.yyyy`), `EXTRA_META_LABELS` (German labels for extra keys), and `HIDDEN_META_KEYS` (hides `score`, `distance`, ids, etc.). Applied to back face and front metadata bar. |
+| 8 | "Neuer Chat" did not close the Vision panel | Added `reset()` to `useVisionPanel` (clears results, mode → `text`); `AppShell.handleNewChat()` now calls it, restoring the post-login single-window state. |
+
+**Backend findings — handed off to `/backend`** (frontend renders correctly; data is missing upstream):
+
+| # | Finding | Root cause / location |
+|---|---|---|
+| 1 | Generated thumbnailer placeholder not used; Ubuntu "file not found" icon shown | `alice-dms-thumbnailer` (`app/main.py` / `Dockerfile`) — placeholder generated at build time but not served on cache miss. |
+| 7 | Filename shows "Unbekannt" | `workflows/alice-tool-search.json` → **Weaviate Search** node: `allFields` never selects a filename property, and the output object emits no `filename`. `streaming.py` fallbacks all miss → empty. Add the filename property to the GraphQL selection + output. |
+| 9 | "Alle Mails aus Januar 2026" capped at 20 (the limit) | `alice-tool-search` uses a flat `limit` with no pagination (`results.slice(0, limit)`). Needs higher/derived limit or cursor pagination for "alle …" queries. |
+| 10 | Mail summary shows "Keine Zusammenfassung verfügbar" despite curl returning data | `alice-tool-search`: `summary` is only selected for `SUMMARY_COLLECTIONS`; mail/Email is excluded → `title_or_summary: ''` → `streaming.py` maps to `null`. Add mail summary/subject to the selection or to `SUMMARY_COLLECTIONS`. |
+
+### Build verification (round 1)
+- `npm run build` (Frontend): ✅ no TypeScript errors
+
+## Post-Deploy Fixes — Round 2 (2026-06-28)
+
+### Frontend fixes (this round)
+- **#2 Square thumbnail**: `FlipCard` restructured — front face in normal flow; thumbnail wrapped in `aspect-square` div.
+- **#3 Persistent input footer**: `InputArea` moved out of `ChatWindow` into a shared `<footer>` in `AppShell`, visible in all display modes.
+- **#4/#5 Mobile toggle broken**: Added `setDisplayMode`/`reset` to `useVisionPanel`; mobile toggle now switches fully between `text`/`vision` instead of using the split-mode no-op handlers.
+- **#6 Mixed DE/EN labels + raw ISO dates**: Added `formatMetaValue()`, `EXTRA_META_LABELS`, `HIDDEN_META_KEYS` to `FlipCard`.
+- **#8 New chat keeps vision open**: `handleNewChat` calls `vision.reset()` → back to text-only state.
+
+### Backend fixes (this round)
+
+| # | File | Change |
+|---|------|--------|
+| **#7 filename "Unbekannt"** | `workflows/alice-tool-search.json` → Weaviate Search node | Added `'fileName'` to `allFields` GraphQL selection; emits `filename: item.fileName \|\| ''` in result object. |
+| **#10 mail summary missing** | Same node | `title_or_summary` now falls back to `item.subject` for Email collection when `summary` is empty. |
+| **#9 limit 20 für "alle Mails"** | Same file → Input Normalizer node | Raised cap 20→100; when LLM provides no explicit limit but both `date_from` and `date_to` are given (bounded date range), default limit is 50 instead of 5. |
+| **#1 thumbnailer placeholder** | `docker/compose/automations/alice-dms-thumbnailer/app/main.py` | Added startup guard: if `placeholder.jpg` is missing at boot (Docker build artefact lost), regenerate it from Python/Pillow. Also fixed `ThumbnailImage.tsx`: non-OK HTTP responses now call `setError(true)` instead of silently staying in Skeleton state. |
+
+### Build verification (round 2)
+- `npm run build` (Frontend): ✅ no TypeScript errors
+
+## Post-Deploy Fixes — Round 3 (2026-06-28)
+
+### Test findings
+
+| # | Symptom | Root cause |
+|---|---------|------------|
+| **A** | Thumbnail shows browser broken-image icon + alt text (filename) | nginx nie neu geladen nach Konfig-Änderung — `/api/dms/thumbnail/`-Route war zwar in alice.conf vorhanden und per `sync-compose.sh` auf dem Server, aber nginx lief noch mit dem alten In-Memory-Config. Alle Requests fielen durch zum SPA-Fallback `try_files … /index.html` → nginx gab HTML mit HTTP 200 zurück → Blob enthielt kein JPEG → Browser zeigte kaputtes Bild + Alt-Text. Thumbnailer wurde nie aufgerufen (daher leere Logs). |
+| **B** | Vision-Chat zeigt 3 Treffer, Text-Chat sagt "4 Rechnungen" | `streaming.py` schickte das komplette Tool-Result an den LLM inkl. `_debug.raw` (ungefilterte Weaviate-Rohdaten vor dem `score < 0.01`-Filter). LLM zählte aus `_debug.raw` 4 Ergebnisse, `results` enthielt nach Score-Filter nur 3. |
+
+### Fixes
+
+| # | Datei | Änderung |
+|---|-------|----------|
+| **A** | `scripts/sync-compose.sh` | nginx reload nach rsync ausgeführt (derzeit auskommentiert — manuell bei Konfig-Änderungen nötig: `ssh stan@ki.lan "docker exec nginx nginx -s reload"`) |
+| **B** | `docker/compose/automations/alice-chat-stream/app/streaming.py` | `_debug`, `_meta`, `_raw` Keys werden aus dem Tool-Result herausgefiltert bevor es an den LLM übergeben wird. LLM sieht nur `results` + `error`. |
+| **C** | `docker/compose/automations/alice-dms-thumbnailer/Dockerfile` | Placeholder-Design überarbeitet: dunkelgrauer Hintergrund (gray-800, passend zur Alice-UI) + Dokumentkarten-Form statt hellgrauem Icon das dem Ubuntu-Systemicon ähnelte. Dockerfile-Einzeiler fixiert (Mehrzeilen-Python in `RUN` bricht den Dockerfile-Parser). |
+
+### Deploy-Schritte für Round 3
+
+```bash
+# 1. Sync + nginx config sofort aktivieren
+./sync-compose.sh
+ssh stan@ki.lan "docker exec nginx nginx -s reload"
+
+# 2. alice-chat-stream neu bauen (streaming.py Änderung — _debug strip)
+ssh stan@ki.lan "docker compose -f /srv/compose/automations/alice-chat-stream/compose.yml up -d --build --force-recreate"
+
+# 3. alice-dms-thumbnailer neu bauen (neuer Placeholder)
+ssh stan@ki.lan "docker compose -f /srv/compose/automations/alice-dms-thumbnailer/compose.yml up -d --build --force-recreate"
+
+# 4. Backfill auslösen (einmalig — generiert Thumbnails für alle bestehenden Weaviate-Dokumente)
+curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-backfill
+```
+
+### Offene Punkte
+
+- `on_event("startup")` in `main.py` ist deprecated (FastAPI empfiehlt `lifespan` event handlers) — funktioniert noch, sollte bei nächster Gelegenheit migriert werden
+- `sync-compose.sh` nginx-Reload ist auskommentiert — bei Nginx-Konfig-Änderungen manuell `nginx -s reload` ausführen oder Kommentare entfernen
+
+## Re-Test — Round 3 Verification (2026-06-28)
+
+**QA Date:** 2026-06-28
+**Scope:** Verification der noch nicht committeten Post-Deploy-Fixes (Rounds 1–3) im Working Tree.
+**Verdict:** READY — keine neuen Critical/High Bugs; alle Änderungen verifiziert.
+
+### Geprüfte Änderungen (uncommitted diff)
+
+| Bereich | Datei | Verifikation |
+|---|---|---|
+| LLM zählt Treffer falsch (Bug B) | `streaming.py` — `_LLM_STRIP_KEYS` entfernt `_debug`/`_meta`/`_raw` vor LLM | ✅ Strip betrifft nur `result_for_llm` (Zeile ~328); `_extract_vision_results(result)` liest weiterhin das ungefilterte Original → `results`-Array bleibt vollständig. `_debug` (enthält `raw`) wird korrekt entfernt. |
+| Persistenter Input-Footer (#3) | `AppShell.tsx` / `ChatWindow.tsx` | ✅ `InputArea` aus `ChatWindow` entfernt, einmalig im `<footer>` von `AppShell` gerendert (alle Modi). Kein Doppel-Render. `disabled`-Bedingung um `!activeSessionId` erweitert. |
+| Mobile-Toggle (#4/#5) | `AppShell.tsx` / `useVisionPanel.ts` | ✅ `setDisplayMode`/`reset` im Hook ergänzt; `onShowText`/`onHideText` schalten auf Mobile direkt `text`↔`vision`, auf Desktop über Split-Handler. |
+| Neuer Chat schließt Vision (#8) | `useVisionPanel.ts` / `AppShell.handleNewChat` | ✅ `reset()` setzt `results=[]`, `displayMode="text"`. |
+| Quadratisches Thumbnail (#2) | `FlipCard.tsx` | ✅ Front-Face in normalem Flow; Thumbnail in striktem `aspect-square`-Wrapper. |
+| DE-Labels + ISO-Datum (#6) | `FlipCard.tsx` | ✅ `formatMetaValue()` (ISO→`dd.MM.yyyy`), `EXTRA_META_LABELS`, `HIDDEN_META_KEYS` (versteckt `score`, ids, `collection`, `filename` etc.). Konsistent mit `metadata`-Shape aus `_extract_vision_results` (das `score` mitliefert). |
+| Thumbnail-Fehlerzustand | `ThumbnailImage.tsx` | ✅ Non-OK HTTP-Response → `setError(true)` statt dauerhaftem Skeleton. |
+| Filename "Unbekannt" (#7) | `alice-tool-search.json` (Weaviate Search) | ✅ `'fileName'` in GraphQL-Selection; `filename: item.fileName || ''` im Result. `_extract_vision_results` liest `item.get("filename")` → Filename jetzt befüllt. |
+| Mail-Summary fehlte (#10) | `alice-tool-search.json` | ✅ `title_or_summary` fällt für Email auf `item.subject` zurück. |
+| Limit 20 für "alle Mails" (#9) | `alice-tool-search.json` (Input Normalizer) | ✅ Cap 20→100; bei beidseitig begrenztem Datumsbereich ohne explizites Limit Default 50 statt 5. |
+
+### Verifikationsergebnisse
+
+- **Frontend Build** (`npm run build`): ✅ Compiled successfully, keine TypeScript-/Lint-Fehler
+- **Backend Unit Tests** (`pytest tests/`): ✅ 15/15 passed (`test_extract_vision_results.py`)
+- **Workflow JSON** (`alice-tool-search.json`): ✅ valides JSON
+- **Live-Test** (vom Nutzer bestätigt): Vision-Chat zeigt Flip-Cards wie spezifiziert
+
+### Security Re-Check
+- `_debug`/`raw` (ungefilterte Weaviate-Rohdaten) werden nicht mehr an das LLM gegeben → kein Informations-/Zähl-Leak. ✅
+- Keine neuen externen Routen oder Auth-Pfade. ✅
+
+**Keine neuen Bugs. PROJ-54 bleibt READY.**

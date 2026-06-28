@@ -1,6 +1,6 @@
 # PROJ-55: DMS Thumbnail-Generierung
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-27
 **Last Updated:** 2026-06-27
 
@@ -223,3 +223,30 @@ The backfill workflow was not yet triggered. To generate thumbnails for all exis
 curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-backfill
 ```
 (verify exact webhook path in n8n UI before running)
+
+## Re-Test — Post-Deploy Verification (2026-06-28)
+
+**QA Date:** 2026-06-28
+**Scope:** Verification der noch nicht committeten Änderungen am Thumbnailer-Container und Backfill-Workflow.
+**Verdict:** READY — keine neuen Critical/High Bugs.
+
+### Geprüfte Änderungen (uncommitted diff)
+
+| AC-Bezug | Datei | Verifikation |
+|---|---|---|
+| #1 Placeholder-Design | `Dockerfile` | ✅ Neuer Dark-Theme-Placeholder (gray-800 Hintergrund, Dokumentkarte) ersetzt das Ubuntu-ähnliche Icon. Python-Einzeiler im `RUN` (Dockerfile-Parser-sicher). |
+| #13 Placeholder immer verfügbar | `main.py` `startup()` | ✅ Boot-Guard: fehlt `placeholder.jpg`, wird er aus Pillow regeneriert (gleiches Design wie Dockerfile). Verhindert "file not found" bei verlorenem Build-Artefakt. |
+| #11/#13 Serving | `main.py` `serve_thumbnail()` | ✅ Logging ergänzt (Treffer/Placeholder/Invalid-UUID); UUID-Regex `[0-9a-f-]{36}` weiterhin als Path-Traversal-Schutz; nie 404. |
+| NAS-Mount | `compose.yml` / `nas-volumes.yml` / `.env.example` | ✅ `extends: nas-base` (`/mnt/nas/andreas`, `/mnt/nas/lilly` read-only) ersetzt eigenen `DOCUMENTS_ROOT`-Mount; `DOCUMENTS_ROOT=/mnt/nas`. `nas-volumes.yml` mit Service `nas-base` existiert. Pfad-Validator (`startswith(DOCUMENTS_ROOT)`) passt zu gemounteten Subpfaden. |
+| #16/#18 Backfill | `alice-dms-thumbnailer-backfill.json` | ✅ Restrukturiert: ein Code-Node iteriert alle 7 Collections (statt `Split: Per Collection`); Cursor-Pagination beibehalten; GraphQL-`errors` werden jetzt erkannt und geloggt. Merge `combineAll`→`append` (korrekte Aggregation der Erfolg/Fehler/Skip-Zweige für den Summary-Node). Webhook-Pfad auf `alice-dms-thumbnailer-backfill` korrigiert. Valides JSON. |
+
+### Verifikationsergebnisse
+- **Workflow JSON** (`alice-dms-thumbnailer-backfill.json`): ✅ valides JSON
+- **compose `extends`-Referenz**: ✅ `nas-volumes.yml` Service `nas-base` vorhanden
+- **Live-Test** (vom Nutzer bestätigt): Thumbnails werden in der Flip-Card-Ansicht angezeigt
+
+### Security Re-Check
+- Pfad-Validator broadened auf `/mnt/nas`; Mounts sind read-only und nur `andreas`/`lilly`-Subpfade → kein Schreibzugriff, kein Zugriff außerhalb gemounteter Verzeichnisse. ✅
+- **Low (vorbestehend, kein Regress):** `startswith(DOCUMENTS_ROOT)` ist ein String-Präfix-Check ohne Pfadtrenner — `/mnt/nasX` würde die Validierung passieren, ist aber nicht gemountet und daher nicht lesbar. Bei Gelegenheit auf `Path.is_relative_to()` umstellen.
+
+**Keine neuen Bugs. PROJ-55 bleibt READY.**

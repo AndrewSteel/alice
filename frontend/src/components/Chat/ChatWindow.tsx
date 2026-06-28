@@ -1,7 +1,6 @@
 "use client";
 
 import { MessageList } from "./MessageList";
-import { InputArea } from "./InputArea";
 import { Message } from "./types";
 
 interface ChatWindowProps {
@@ -9,8 +8,6 @@ interface ChatWindowProps {
   isLoading: boolean;
   messagesLoading?: boolean;
   isStreaming?: boolean;
-  onSend: (text: string, source?: string) => void;
-  onStop?: () => void;
 }
 
 export function ChatWindow({
@@ -18,8 +15,6 @@ export function ChatWindow({
   isLoading,
   messagesLoading,
   isStreaming = false,
-  onSend,
-  onStop,
 }: ChatWindowProps) {
   return (
     <div className="flex flex-col h-full bg-gray-800">
@@ -28,12 +23,6 @@ export function ChatWindow({
         isLoading={isLoading}
         messagesLoading={messagesLoading}
         isStreaming={isStreaming}
-      />
-      <InputArea
-        onSend={onSend}
-        disabled={isLoading || !!messagesLoading}
-        isStreaming={isStreaming}
-        onStop={onStop}
       />
     </div>
   );

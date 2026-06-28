@@ -1,5 +1,8 @@
 services:
   alice-dms-thumbnailer:
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,7 +13,6 @@ services:
       - .env
     volumes:
       - ${JWT_PUBLIC_KEY_PATH}:${JWT_PUBLIC_KEY_PATH}:ro
-      - ${DOCUMENTS_ROOT}:${DOCUMENTS_ROOT}:ro
       - ${THUMB_DIR}:${THUMB_DIR}
     healthcheck:
       test:

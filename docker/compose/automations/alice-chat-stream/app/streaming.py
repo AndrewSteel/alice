@@ -322,11 +322,18 @@ async def stream_chat(
                     "result_preview": _preview(result),
                 })
 
+                # Strip internal debug/metadata keys before the LLM sees the
+                # result — these contain raw Weaviate responses that the model
+                # would otherwise count/summarise, causing discrepancies with
+                # the filtered `results` array (PROJ-54 bug #2).
+                _LLM_STRIP_KEYS = {"_debug", "_meta", "_raw"}
+                result_for_llm = {k: v for k, v in result.items() if k not in _LLM_STRIP_KEYS}
+
                 # Pass the result back to Ollama
                 tool_msg: dict[str, Any] = {
                     "role": "tool",
                     "name": tool_name,
-                    "content": json.dumps(result, ensure_ascii=False),
+                    "content": json.dumps(result_for_llm, ensure_ascii=False),
                 }
                 tc_id = tc.get("id")
                 if tc_id:
