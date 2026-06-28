@@ -10,6 +10,7 @@ import {
   fetchSessionMessages,
   renameSessionApi,
   deleteSessionApi,
+  VisionResult,
 } from "@/services/api";
 import { Message } from "@/components/Chat/types";
 
@@ -45,7 +46,12 @@ function newId(): string {
 
 // ---------- Hook ----------
 
-export function useChatSessions() {
+export interface UseChatSessionsOptions {
+  onVisionResults?: (results: VisionResult[]) => void;
+  onTextResponse?: () => void;
+}
+
+export function useChatSessions(options: UseChatSessionsOptions = {}) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messagesBySession, setMessagesBySession] = useState<
@@ -364,7 +370,12 @@ export function useChatSessions() {
       // PROJ-37: thinking→token transition opens a NEW assistant bubble so
       // reasoning text and answer text stay in separate messages. Anything
       // else (tool_call, error, …) also opens a new assistant bubble.
+      let textResponseFired = false;
       const appendToken = (token: string) => {
+        if (!textResponseFired) {
+          textResponseFired = true;
+          options.onTextResponse?.();
+        }
         setMessagesBySession((prev) => {
           const current = prev[sessionId];
           if (!current || current.length === 0) return prev;
@@ -553,6 +564,7 @@ export function useChatSessions() {
         onThinking: appendThinking,
         onToolStart: handleToolStart,
         onToolEnd: handleToolEnd,
+        onVisionResults: options.onVisionResults,
         onDone: finishStream,
         onError: handleError,
       }, source);

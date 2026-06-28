@@ -346,6 +346,15 @@ export async function sendMessage(
 
 // ---------- Streaming Chat (PROJ-31) ----------
 
+// PROJ-54: vision result item shape from alice-chat-stream
+export interface VisionResult {
+  uuid: string;
+  document_type: string;
+  filename: string;
+  metadata: Record<string, unknown>;
+  summary: string | null;
+}
+
 export interface StreamCallbacks {
   onToken: (text: string) => void;
   /** PROJ-37: reasoning-token chunk emitted before the answer text. */
@@ -353,6 +362,8 @@ export interface StreamCallbacks {
   onToolStart: (tool: string, status?: string) => void;
   /** PROJ-37: tool_end now carries an optional German outcome summary. */
   onToolEnd: (tool: string, summary?: string) => void;
+  /** PROJ-54: structured document results for flip-card display. */
+  onVisionResults?: (results: VisionResult[]) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -367,6 +378,7 @@ interface SseEvent {
     | "thinking"
     | "tool_start"
     | "tool_end"
+    | "vision_results"
     | "done"
     | "error";
   content?: string;
@@ -374,6 +386,7 @@ interface SseEvent {
   status?: string;
   summary?: string;
   message?: string;
+  results?: VisionResult[];
 }
 
 /**
@@ -508,6 +521,11 @@ export function streamChat(
             case "tool_end":
               if (evt.tool) {
                 callbacks.onToolEnd(evt.tool, evt.summary);
+              }
+              break;
+            case "vision_results":
+              if (Array.isArray(evt.results) && evt.results.length > 0) {
+                callbacks.onVisionResults?.(evt.results);
               }
               break;
             case "error":

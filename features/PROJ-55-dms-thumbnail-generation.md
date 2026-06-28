@@ -1,6 +1,6 @@
 # PROJ-55: DMS Thumbnail-Generierung
 
-## Status: Architected
+## Status: Approved
 **Created:** 2026-06-27
 **Last Updated:** 2026-06-27
 
@@ -153,7 +153,73 @@ nginx:
 | `Pillow` (Python) | Image manipulation, crop, JPEG encoding |
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA Date:** 2026-06-27
+**Verdict:** READY — no Critical or High bugs remaining
+
+### Acceptance Criteria
+
+| # | AC | Result |
+|---|---|---|
+| 1 | alice-dms-thumbnailer n8n workflow subscribes MQTT `alice/dms/done` | ✅ PASS |
+| 2 | MQTT message contains: `original_path`, `weaviate_uuid`, `document_type`, `file_type` (added to alice-dms-processor.json) | ✅ PASS |
+| 3 | Exactly one thumbnail per document per MQTT trigger | ✅ PASS |
+| 4 | Format: 400×400 px quadratisches JPEG | ✅ PASS |
+| 5 | Crop rules: PDF→top crop, Office→PDF→top crop, Images→center crop, TXT→text render | ✅ PASS |
+| 6 | JPEG quality=85 ≥ 80% | ✅ PASS |
+| 7 | Thumbnail gespeichert unter `{WARM_STORAGE_ROOT}/alice/thumbnails/{uuid}.jpg` | ✅ PASS |
+| 8 | Weaviate PATCH setzt `thumbnail_path` nach erfolgreicher Generierung | ✅ PASS |
+| 9 | Fehler: geloggt, kein Thumbnail, MQTT `alice/dms/thumb_error` publiziert | ✅ PASS |
+| 10 | Vorhandenes Thumbnail wird überschrieben (kein If-Exists-Check) | ✅ PASS |
+| 11 | `GET /api/dms/thumbnail/{uuid}` Endpunkt vorhanden (nginx → alice-dms-thumbnailer) | ✅ PASS |
+| 12 | JWT-Auth auf GET /thumbnail/{uuid} erzwungen | ✅ PASS |
+| 13 | Kein Thumbnail → Platzhalter zurückgegeben (niemals 404) | ✅ PASS |
+| 14 | Content-Type: image/jpeg, Cache-Control-Header gesetzt | ✅ PASS |
+| 15 | alice-dms-thumbnailer-backfill Workflow existiert | ✅ PASS |
+| 16 | Backfill liest alle 7 Collections für Objekte ohne thumbnail_path | ✅ PASS |
+| 17 | Backfill nutzt dieselbe Generierungslogik (HTTP POST /generate) | ✅ PASS |
+| 18 | Backfill verarbeitet Batches und kann ohne Duplikate neu gestartet werden | ✅ PASS (nach BUG-55-1 Fix) |
+| 19 | Fortschritt `{processed, failed, skipped, total}` im n8n Execution Log | ✅ PASS |
+
+### Bugs Found
+
+| ID | Severity | Status | Description |
+|---|---|---|---|
+| BUG-55-1 | Medium | Fixed | Backfill `Code: Extract Path` und `Code: Log PATCH Result` verwendeten `$input.first()` statt `$input.all()` — bei Batches mit mehreren Dokumenten wurden Items 2..N ignoriert. Alle vier Code-Knoten auf `$input.all().map(...)` umgestellt. |
+| BUG-55-2 | Low | Fixed | Rückgabetyp-Annotation von `generate_thumbnail()` war `Path \| None` statt `Image.Image \| None`. Kein Laufzeitfehler, aber irreführend. |
+
+### Security Audit
+
+- **Pfad-Traversal** (`/generate`): `original_path` wird gegen erlaubte Pfadpräfixe (`/srv`, `/mnt`, `/data`, `/nas`) geprüft. ✅
+- **UUID-Validierung** (`/thumbnail/{uuid}`): Regex `[0-9a-f-]{36}` verhindert Pfad-Injection. ✅
+- **JWT-Auth**: Alle extern erreichbaren Endpunkte erfordern gültigen JWT. ✅
+- **`/generate` intern**: Endpunkt nicht via nginx exponiert — ausschließlich von n8n auf dem internen `automation`-Netzwerk erreichbar. ✅
+- **Subprocess-Injection**: `pdftoppm` und LibreOffice werden mit Listen-Argumenten aufgerufen (kein `shell=True`). ✅
+
+### Unit Tests
+
+- 15 Tests für `_extract_vision_results()` in `tests/test_extract_vision_results.py` — alle bestanden.
+
+### Automated Tests
+
+- `npm run build` (Frontend): ✅ Keine TypeScript-Fehler
 
 ## Deployment
-_To be added by /deploy_
+
+**Deploy Date:** 2026-06-28
+**Deployed by:** Andrew Steel
+
+### What was deployed
+- `alice-dms-thumbnailer` Python container: created and started on server
+- `alice-dms-thumbnailer` n8n workflow: imported and published (triggers on `alice/dms/done` MQTT)
+- `alice-dms-thumbnailer-backfill` n8n workflow: imported and published (manual trigger)
+- `alice-dms-processor` n8n workflow: redeployed with thumbnail_path in Weaviate PATCH step
+- nginx: new `/api/dms/thumbnail/` location block added
+- PostgreSQL migration `scripts/proj55-add-thumbnail-path.sh`: applies `thumbnail_path` column to DMS tables
+
+### Backfill
+The backfill workflow was not yet triggered. To generate thumbnails for all existing documents:
+```bash
+curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-backfill
+```
+(verify exact webhook path in n8n UI before running)

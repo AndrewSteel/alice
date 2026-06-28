@@ -1,6 +1,6 @@
 # PROJ-54: Vision-Chat: Flip-Card Ergebnisansicht
 
-## Status: Architected
+## Status: Approved
 **Created:** 2026-06-27
 **Last Updated:** 2026-06-27 (Layout-Konzept überarbeitet: Split-Screen statt rechte Seitenleiste)
 
@@ -271,7 +271,97 @@ Via CSS `grid-template-columns`:
 | None required | CSS 3D flip is Tailwind-only; touch events are native; blob fetch is native |
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA Date:** 2026-06-27
+**Verdict:** READY — no Critical or High bugs remaining
+
+### Acceptance Criteria
+
+| # | AC | Result |
+|---|---|---|
+| **Trigger & LLM** | | |
+| 1 | Visuelle Ergebnisse erscheinen automatisch als Flip-Cards wenn Tool `vision_results` SSE-Event sendet | ✅ PASS (nach BUG-54-1 Fix) |
+| 2 | Nicht-visuelle Anfragen zeigen normale Text-Antwort; Karten-Raster bleibt erhalten | ✅ PASS |
+| **Flip Card Front** | | |
+| 3 | Kopfzeile: Dateiname (Fallback "Unbekannt") | ✅ PASS |
+| 4 | Vorschaubild: ThumbnailImage fetcht `/api/dms/thumbnail/{uuid}` mit Auth-Header | ✅ PASS |
+| 5 | Metadaten-Bereich unterhalb Thumbnail (dokumenttyp-abhängig) | ✅ PASS |
+| 6 | Icon-Leiste mit ∑-Button | ✅ PASS |
+| 7 | ∑-Button → wechselt zu Summary-Seite | ✅ PASS |
+| 8 | Klick auf Karte (außerhalb Icon-Leiste) → wechselt zur Rückseite | ✅ PASS |
+| **Flip Card Rückseite** | | |
+| 9 | Zeigt Weaviate-Felder passend zum Dokumenttyp | ✅ PASS |
+| 10 | Klick auf Rückseite → wechselt zur Vorderseite | ✅ PASS |
+| **Flip Card Summary** | | |
+| 11 | Zeigt AI-Zusammenfassung oder "Keine Zusammenfassung verfügbar." | ✅ PASS |
+| 12 | Klick auf Summary-Seite → wechselt zur Vorderseite | ✅ PASS |
+| **Layout — Split Screen** | | |
+| 13 | Nach Login: ausschließlich Text-Chat sichtbar (displayMode = "text") | ✅ PASS |
+| 14 | Vision-Bereich kann nicht manuell aktiviert werden — nur via `vision_results` SSE-Event | ✅ PASS |
+| 15 | Bei Vision-Aktivierung: Text-Chat blendet sich automatisch aus (Modus: vision) | ✅ PASS |
+| 16 | Text-Chat jederzeit manuell wieder einblendbar (Modus: split) | ✅ PASS |
+| 17 | Text-Chat manuell ausblendbar → Modus: vision | ✅ PASS |
+| 18 | Sidebar unabhängig ein-/ausblendbar | ✅ PASS |
+| **Desktop** | | |
+| 19 | Split-Verhältnis: 2/3 Vision + 1/3 Text (`flex-[2]` + `flex-[1]`) | ✅ PASS |
+| 20 | Responsives Karten-Raster nutzt verfügbare Vision-Panel-Breite | ✅ PASS |
+| **Mobile** | | |
+| 21 | Kein Split-Modus auf Mobile — immer nur ein Bereich sichtbar | ✅ PASS |
+| 22 | Startzustand: Text-Chat | ✅ PASS |
+| 23 | Swipe-Geste (≥50 px horizontal): links → Vision, rechts → Text | ✅ PASS |
+| 24 | Toggle-Icon in Mobile-Header wenn Vision-Ergebnisse vorhanden | ✅ PASS |
+| 25 | Portrait: 2 Karten pro Reihe (`grid-cols-2`) | ✅ PASS |
+| 26 | Landscape: 4 Karten pro Reihe (`sm:grid-cols-4`) | ✅ PASS |
+| **Thumbnail-Integration** | | |
+| 27 | ThumbnailImage fetcht `/api/dms/thumbnail/{uuid}` mit `Authorization: Bearer` Header | ✅ PASS |
+| 28 | Kein Thumbnail → Platzhalter-Bild (Thumbnailer liefert immer ein Bild) | ✅ PASS |
+
+### Bugs Found
+
+| ID | Severity | Status | Description |
+|---|---|---|---|
+| BUG-54-1 | High | Fixed | `_extract_vision_results` in `streaming.py` prüfte auf `weaviate_uuid`-Feld, aber `alice-tool-search` gibt `weaviate_id` zurück — `vision_results` SSE-Event wurde nie gesendet. Behoben: Fallback-Kette `weaviate_id` → `weaviate_uuid` → `_additional.id`. |
+| BUG-54-2 | Medium | Fixed | Falsche Feld-Mappings: Tool gibt `collection` (nicht `document_type`) und `title_or_summary` (nicht `summary`) zurück. Behoben: Mapping-Logik in `_extract_vision_results` erweitert um alle Varianten. |
+
+### Security Audit
+
+- **JWT-Auth für Thumbnail-Fetch**: Token aus localStorage, via fetch()-Header gesendet — kein Cookie, kein `<img src>` ohne Auth. ✅
+- **Vision-Ergebnisse aus SSE-Stream**: Gleiche Auth wie bestehender Chat-Stream. ✅
+- **Kein neuer Angriffspfad**: Keine neuen API-Routen im Frontend. ✅
+- **Object URL Memory Leak**: `URL.revokeObjectURL()` wird im Unmount-Effect von `ThumbnailImage` aufgerufen. ✅
+
+### Unit Tests
+
+- 15 Tests für `_extract_vision_results()` in `docker/compose/automations/alice-chat-stream/tests/test_extract_vision_results.py` — alle bestanden.
+
+### Automated Tests
+
+- `npm run build` (Frontend): ✅ Keine TypeScript-Fehler
 
 ## Deployment
-_To be added by /deploy_
+
+**Deploy Date:** 2026-06-28
+**Deployed by:** Andrew Steel
+
+### What was deployed
+- Frontend rebuilt and synced to nginx via `deploy-frontend.sh` + `sync-compose.sh`
+- New components: `VisionPanel`, `FlipCard`, `FlipCardGrid`, `ThumbnailImage`, `VisionEmptyState`
+- New hook: `useVisionPanel`
+- `useChatSessions`, `api.ts`, `AppShell.tsx` extended for vision_results SSE handling
+- `streaming.py` extended with `_extract_vision_results()` and `vision_results` SSE emission
+
+### Known issue — alice-chat-stream container not rebuilt
+The `streaming.py` backend changes were synced locally but the alice-chat-stream container was **not rebuilt on the server**. First production test ("Zeige mir alle Rechnungen aus 2024") showed results in text-chat instead of vision-chat because the server container still runs the old code without `_extract_vision_results`.
+
+**Fix:** Run these two commands:
+```bash
+./scripts/sync-compose.sh
+ssh stan@ki.lan "docker compose -f /srv/compose/automations/alice-chat-stream/compose.yml up -d --build --force-recreate"
+```
+
+### alice-dms-thumbnailer-backfill
+Trigger manually once to generate thumbnails for all existing Weaviate documents:
+```bash
+curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-backfill
+```
+(verify exact webhook path in n8n UI)
