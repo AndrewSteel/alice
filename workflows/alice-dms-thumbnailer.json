@@ -1,0 +1,240 @@
+{
+  "name": "alice-dms-thumbnailer",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-dms-thumbnailer\n\nSubscribes to `alice/dms/done` MQTT topic.\nFor each successfully inserted document, calls the alice-dms-thumbnailer\ncontainer (POST /generate) to create a 400×400 JPEG thumbnail on warm storage,\nthen PATCHes the Weaviate object with the thumbnail_path.\n\nOn failure: logs error and publishes to `alice/dms/thumb_error`.\n\n**Trigger**: MQTT `alice/dms/done`\n**Container**: alice-dms-thumbnailer:8004\n**Storage**: /srv/warm/alice/thumbnails/{uuid}.jpg",
+        "height": 200,
+        "width": 400,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -200],
+      "id": "sticky-note-thumbnailer",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "topics": "alice/dms/done",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqttTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "mqtt-trigger-dms-done",
+      "name": "MQTT: alice/dms/done",
+      "webhookId": "alice-dms-thumbnailer-trigger-v1",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  console.log('[alice-dms-thumbnailer] Skipping non-inserted document:', msg.file_path);\n  return [];\n}\n\nif (!msg.weaviate_uuid || !msg.file_path) {\n  console.warn('[alice-dms-thumbnailer] Missing weaviate_uuid or file_path — skipping:', JSON.stringify(msg));\n  return [];\n}\n\nconsole.log('[alice-dms-thumbnailer] Processing:', msg.weaviate_uuid, msg.file_path);\nreturn [{ json: { ...msg } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 0],
+      "id": "code-parse-validate",
+      "name": "Code: Parse & Filter"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://alice-dms-thumbnailer:8004/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type || 'Document', file_type: $json.file_type || $json.file_path.split('.').pop().toLowerCase() }) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 0],
+      "id": "http-generate-thumbnail",
+      "name": "HTTP: POST /generate",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-success",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [900, 0],
+      "id": "if-generate-ok",
+      "name": "IF: Generate OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst thumbPath = body.thumbnail_path || null;\nconst uuid = body.weaviate_uuid || $('Code: Parse & Filter').first().json.weaviate_uuid;\nconst docType = $('Code: Parse & Filter').first().json.document_type || 'Document';\n\nif (!thumbPath || !uuid) {\n  throw new Error('Missing thumbnail_path or weaviate_uuid in generate response: ' + JSON.stringify(body));\n}\n\nconsole.log('[alice-dms-thumbnailer] Thumbnail generated:', thumbPath);\nreturn [{ json: { thumbnail_path: thumbPath, weaviate_uuid: uuid, document_type: docType } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, -100],
+      "id": "code-extract-path",
+      "name": "Code: Extract Thumbnail Path"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://weaviate:8080/v1/objects/' + $json.document_type + '/' + $json.weaviate_uuid }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { thumbnail_path: $json.thumbnail_path } }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, -100],
+      "id": "http-weaviate-patch",
+      "name": "HTTP: PATCH Weaviate thumbnail_path",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nif (statusCode >= 200 && statusCode < 300) {\n  const uuid = $('Code: Extract Thumbnail Path').first().json.weaviate_uuid;\n  console.log('[alice-dms-thumbnailer] Weaviate PATCH OK for UUID:', uuid);\n  return [{ json: { success: true, weaviate_uuid: uuid } }];\n} else {\n  const uuid = $('Code: Extract Thumbnail Path').first().json.weaviate_uuid;\n  console.warn('[alice-dms-thumbnailer] Weaviate PATCH failed (HTTP ' + statusCode + ') for UUID:', uuid);\n  return [{ json: { success: false, weaviate_uuid: uuid, status_code: statusCode } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, -100],
+      "id": "code-log-success",
+      "name": "Code: Log Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nconsole.warn('[alice-dms-thumbnailer] Generation failed for:', original.weaviate_uuid, original.file_path, 'Status:', item.statusCode);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path, status_code: item.statusCode } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 100],
+      "id": "code-log-error",
+      "name": "Code: Log Error"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/thumb_error",
+        "message": "={{ JSON.stringify({ workflow: 'alice-dms-thumbnailer', weaviate_uuid: $json.weaviate_uuid, file_path: $json.file_path, error: $json.error, timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [1500, 100],
+      "id": "mqtt-publish-error",
+      "name": "MQTT: Publish thumb_error",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "MQTT: alice/dms/done": {
+      "main": [
+        [{ "node": "Code: Parse & Filter", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Parse & Filter": {
+      "main": [
+        [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: POST /generate": {
+      "main": [
+        [{ "node": "IF: Generate OK", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Generate OK": {
+      "main": [
+        [{ "node": "Code: Extract Thumbnail Path", "type": "main", "index": 0 }],
+        [{ "node": "Code: Log Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Extract Thumbnail Path": {
+      "main": [
+        [{ "node": "HTTP: PATCH Weaviate thumbnail_path", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: PATCH Weaviate thumbnail_path": {
+      "main": [
+        [{ "node": "Code: Log Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Log Error": {
+      "main": [
+        [{ "node": "MQTT: Publish thumb_error", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}
