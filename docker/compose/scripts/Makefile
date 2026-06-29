@@ -22,6 +22,9 @@ STACKS ?= \
   automations/dms-extractor-ocr \
   automations/dms-extractor-txt \
   automations/dms-extractor-office \
+  automations/dms-extractor-image \
+  automations/alice-dms-thumbnailer \
+  data/nominatim \
   ai/ollama \
   ai/openwebui \
   ai/piper \

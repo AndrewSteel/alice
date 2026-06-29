@@ -766,6 +766,117 @@
     },
     {
       "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const items = await client.lRange('alice:dms:image', 0, -1);\n  if (items.length === 0) {\n    return [{ json: { _image_empty: true } }];\n  }\n  const results = [];\n  for (const raw of items) {\n    try {\n      const parsed = JSON.parse(raw);\n      results.push({ json: { ...parsed, _image_empty: false, _raw_json: raw } });\n    } catch(e) {\n      await client.lRem('alice:dms:image', 0, raw).catch(() => {});\n    }\n  }\n  if (results.length === 0) {\n    return [{ json: { _image_empty: true } }];\n  }\n  console.log('[Image Batch] Found ' + results.length + ' image items to process');\n  return results;\n} finally {\n  await client.quit();\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [53136, -5200],
+      "id": "img-01-fetch-items",
+      "name": "Code: Fetch Image Items"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"version": 2, "caseSensitive": true, "typeValidation": "strict", "leftValue": "", "rightValue": ""},
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-image-empty",
+              "leftValue": "={{ $json._image_empty }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [53440, -5200],
+      "id": "img-02-queue-empty",
+      "name": "IF: Image Queue Empty"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [53728, -4960],
+      "id": "img-03-end-image",
+      "name": "End: Image Done"
+    },
+    {
+      "parameters": {"options": {"reset": false}},
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [53728, -5200],
+      "id": "img-04-split",
+      "name": "Split: Image Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item._raw_json) {\n    await client.lRem('alice:dms:image', 0, item._raw_json).catch(() => {});\n  }\n  const fileHash = item.file_hash;\n  if (!fileHash) {\n    return [{ json: { ...item, _image_action: 'skip' } }];\n  }\n  // Search Weaviate Image collection by file_hash\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  let existingId = null;\n  let existingPaths = [];\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) {\n      existingId = results[0]._additional?.id;\n      existingPaths = results[0].additionalPaths || [];\n    }\n  } catch(e) {\n    console.log('[Image] Weaviate search error: ' + e.message);\n  }\n  if (existingId) {\n    const filePath = item.file_path;\n    if (filePath && !existingPaths.includes(filePath)) {\n      try {\n        await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`,\n          { properties: { additionalPaths: [...existingPaths, filePath] } },\n          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n        );\n      } catch(e) { console.log('[Image] additionalPaths patch error: ' + e.message); }\n    }\n    return [{ json: { ...item, _image_action: 'add_path', _image_existing_id: existingId } }];\n  }\n  // New image: build Weaviate properties\n  const exif = item.exif || {};\n  const geo = item.geocoding || {};\n  const now = new Date().toISOString();\n  function toISODate(val) { if (!val) return null; try { const d = new Date(val); return isNaN(d.getTime()) ? null : d.toISOString(); } catch(e) { return null; } }\n  const props = {\n    file_path: item.file_path || '',\n    file_hash: fileHash,\n    file_type: item.file_type || '',\n    file_size: item.file_size || 0,\n    detected_at: toISODate(item.detected_at) || now,\n    extracted_at: toISODate(item.extracted_at) || now,\n    extractor: item.extractor || 'dms-extractor-image',\n    ai_description: (item.ai_description || '').slice(0, 50000),\n    extraction_failed: item.extraction_failed || false,\n    additionalPaths: []\n  };\n  if (exif.datetime) { const d = toISODate(exif.datetime); if (d) props.exif_datetime = d; }\n  if (exif.latitude != null) props.latitude = parseFloat(exif.latitude);\n  if (exif.longitude != null) props.longitude = parseFloat(exif.longitude);\n  if (exif.altitude != null) props.altitude = parseFloat(exif.altitude);\n  if (exif.camera_make) props.camera_make = String(exif.camera_make);\n  if (exif.camera_model) props.camera_model = String(exif.camera_model);\n  if (geo.country) props.country = String(geo.country);\n  if (geo.country_code) props.country_code = String(geo.country_code);\n  if (geo.city) props.city = String(geo.city);\n  if (geo.district) props.district = String(geo.district);\n  const cleanProps = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  let newId = null;\n  let insertOk = false;\n  try {\n    const insertResp = await axios.post('http://weaviate:8080/v1/objects', { class: 'Image', properties: cleanProps }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n    newId = insertResp.data?.id;\n    insertOk = !!newId;\n  } catch(e) { console.log('[Image] Weaviate insert error: ' + e.message); }\n  if (insertOk) {\n    await client.sAdd('alice:dms:processed', fileHash).catch(() => {});\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1).catch(() => {});\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1).catch(() => {});\n  }\n  return [{ json: { ...item, _image_action: insertOk ? 'new' : 'error', _new_weaviate_id: newId, _image_insert_ok: insertOk } }];\n} catch(e) {\n  console.log('[Image] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'error', _image_error: e.message } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [54032, -5200],
+      "id": "img-05-process",
+      "name": "Code: Process Image Item"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"version": 2, "caseSensitive": true, "typeValidation": "strict", "leftValue": "", "rightValue": ""},
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-image-new",
+              "leftValue": "={{ $json._image_action }}",
+              "rightValue": "new",
+              "operator": {"type": "string", "operation": "equals"}
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [54336, -5200],
+      "id": "img-06-is-new",
+      "name": "IF: Image Is New"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, weaviate_uuid: $json._new_weaviate_id, original_path: $json.file_path, document_type: 'Image', file_type: $json.file_type || ($json.file_path || '').split('.').pop().toLowerCase(), timestamp: new Date().toISOString() }) }}",
+        "options": {"qos": 1}
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [54640, -5200],
+      "id": "img-07-done",
+      "name": "MQTT: Publish Image Done",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Image Processing Sub-Flow (PROJ-56)\n\nRuns after plaintext queue is done.\nReads from Redis list `alice:dms:image`,\nchecks dedup by file_hash in Weaviate Image collection,\ninserts new images or appends additionalPaths for duplicates,\npublishes alice/dms/done for new inserts (triggers PROJ-55 thumbnailer).",
+        "height": 200,
+        "width": 380
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [53136, -5500],
+      "id": "img-sticky-note",
+      "name": "Sticky: Image Processing"
+    },
+    {
+      "parameters": {
         "content": "## alice-dms-processor\n\nNightly batch processor (02:00).\n\nReads plaintext items from Redis list `alice:dms:plaintext`,\nclassifies via LLM (Ollama, model from OLLAMA_MODEL_DMS env),\nextracts structured data per document type,\nstores to Weaviate collections.\n\n### Document Types\n- Invoice, BankStatement, Document\n- Email, SecuritySettlement, Contract\n- BankTransaction (Phase B child of BankStatement, PROJ-29)\n\n### PROJ-29: BankStatement → BankTransaction\nAfter a BankStatement object is inserted, Phase B runs:\n1. Cascade-delete BankTransaction children of OLD parent UUID on replace (BUG-13)\n2. Delete pre-existing children of NEW parent UUID via GraphQL Get + DELETE-by-ID (BUG-3)\n3. Split plaintext into ~8000-char chunks at line breaks\n4. Per-chunk Ollama call (1× retry on failure, BUG-4) → JSON array of transactions\n5. Dedup by (transactionDate, amount, counterparty)\n6. Skip transactions with null transactionDate (BUG-5); drop empty purpose (BUG-6)\n7. Batch insert via /v1/batch/objects → BankTransaction collection\n8. Increment Redis stats: transactions_indexed, phase_b_chunk_failures, phase_b_chunk_retries\n9. On any failure (BUG-8) → IF: Phase B Failure routes to MQTT alice/dms/error\n\n### Redis Keys\n- `alice:dms:plaintext` — input queue (List)\n- `alice:dms:processed` — processed hashes (Set)\n- `alice:dms:queued_files` — in-flight hashes (Set)\n- `alice:dms:path_to_hash` — path->hash map (Hash)\n- `alice:dms:hash_to_paths:<hash>` — hash->paths (Set)\n- `alice:dms:run:start_time` — run timestamp (String)\n- `alice:dms:run:stats` — run counters (Hash, incl. transactions_indexed,\n  phase_b_chunk_failures, phase_b_chunk_retries)\n\n### Safety\n- BATCH_SIZE = 50\n- MAX_RUNTIME = 2h\n- Dedup check before processing\n- Upsert: delete existing Weaviate entry before insert\n- Weaviate failure: MQTT error published, item skipped, batch continues\n- Phase B failures: warn-logged, parent BankStatement still indexed,\n  alice/dms/error MQTT signal published\n- Stats: processed/failed/skipped/llm_classified/transactions_indexed/etc.",
         "height": 520,
         "width": 380
@@ -906,6 +1017,98 @@
         [
           {
             "node": "End: Empty Queue",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code: Fetch Image Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Fetch Image Items": {
+      "main": [
+        [
+          {
+            "node": "IF: Image Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Image Queue Empty": {
+      "main": [
+        [
+          {
+            "node": "End: Image Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split: Image Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split: Image Batches": {
+      "main": [
+        [
+          {
+            "node": "End: Image Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Process Image Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Process Image Item": {
+      "main": [
+        [
+          {
+            "node": "IF: Image Is New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Image Is New": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Publish Image Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split: Image Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Image Done": {
+      "main": [
+        [
+          {
+            "node": "Split: Image Batches",
             "type": "main",
             "index": 0
           }
