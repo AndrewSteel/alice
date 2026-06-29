@@ -142,7 +142,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst path = require('path');\n\nconst SUPPORTED_EXTENSIONS = new Set(['.pdf','.txt','.md','.docx','.doc','.xlsx','.xls','.odt','.ods']);\nconst MAX_DEPTH = 10;\n\nfunction isSymlink(fullPath) {\n  try {\n    return fs.lstatSync(fullPath).isSymbolicLink();\n  } catch(e) {\n    return false;\n  }\n}\n\nfunction scanDir(dirPath, depth) {\n  if (depth > MAX_DEPTH) return [];\n  let results = [];\n  let entries;\n  try {\n    entries = fs.readdirSync(dirPath, { withFileTypes: true });\n  } catch(e) {\n    if (e.code === 'ELOOP') {\n      console.log(`ELOOP skipped (server-side symlink loop): ${dirPath}`);\n    }\n    return [];\n  }\n  for (const entry of entries) {\n    // Skip Dirent-level symlinks (works for local fs)\n    if (entry.isSymbolicLink()) continue;\n    const fullPath = path.join(dirPath, entry.name);\n    // Also check via lstatSync — catches NFS/SMB server-side symlinks\n    if (isSymlink(fullPath)) continue;\n    if (entry.isDirectory()) {\n      results = results.concat(scanDir(fullPath, depth + 1));\n    } else if (entry.isFile()) {\n      const ext = path.extname(entry.name).toLowerCase();\n      if (SUPPORTED_EXTENSIONS.has(ext)) {\n        try {\n          const stat = fs.statSync(fullPath);\n          results.push({ file_path: fullPath, file_type: ext.slice(1), file_size: stat.size });\n        } catch(e) {\n          console.log(`stat error on ${fullPath}: ${e.code} ${e.message}`);\n        }\n      }\n    }\n  }\n  return results;\n}\n\nconst folders = $input.all();\nconst allFiles = [];\nconst errors = [];\n\nfor (const folderItem of folders) {\n  const folderPath = folderItem.json.path;\n  const suggestedType = folderItem.json.suggested_type || 'auto';\n  try {\n    fs.accessSync(folderPath, fs.constants.R_OK);\n    const files = scanDir(folderPath, 0);\n    for (const f of files) {\n      allFiles.push({ ...f, suggested_type: suggestedType, folder_id: folderItem.json.id });\n    }\n  } catch(e) {\n    errors.push({ folder: folderPath, error: e.message, code: e.code });\n    console.log(`Folder access error [${e.code}]: ${folderPath} — ${e.message}`);\n  }\n}\n\n// If no files found, return a single item with empty marker\nif (allFiles.length === 0) {\n  return [{ json: { _no_files: true, scanned_dirs: folders.length, scanned_files: 0, new_files: 0, skipped_files: 0, errors: errors } }];\n}\n\n// Return files as individual items, attach scan metadata to first item\nconsole.log(`Scan complete: ${folders.length} dirs, ${allFiles.length} files found, ${errors.length} errors`);\nif (errors.length > 0) console.log('Scan errors:', JSON.stringify(errors));\n\nreturn allFiles.map(f => ({ json: { ...f, _no_files: false } }));"
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\n\nconst SUPPORTED_EXTENSIONS = new Set(['.pdf','.txt','.md','.docx','.doc','.xlsx','.xls','.odt','.ods','.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff']);\nconst MAX_DEPTH = 10;\n\nfunction isSymlink(fullPath) {\n  try {\n    return fs.lstatSync(fullPath).isSymbolicLink();\n  } catch(e) {\n    return false;\n  }\n}\n\nfunction scanDir(dirPath, depth) {\n  if (depth > MAX_DEPTH) return [];\n  let results = [];\n  let entries;\n  try {\n    entries = fs.readdirSync(dirPath, { withFileTypes: true });\n  } catch(e) {\n    if (e.code === 'ELOOP') {\n      console.log(`ELOOP skipped (server-side symlink loop): ${dirPath}`);\n    }\n    return [];\n  }\n  for (const entry of entries) {\n    // Skip Dirent-level symlinks (works for local fs)\n    if (entry.isSymbolicLink()) continue;\n    const fullPath = path.join(dirPath, entry.name);\n    // Also check via lstatSync — catches NFS/SMB server-side symlinks\n    if (isSymlink(fullPath)) continue;\n    if (entry.isDirectory()) {\n      results = results.concat(scanDir(fullPath, depth + 1));\n    } else if (entry.isFile()) {\n      const ext = path.extname(entry.name).toLowerCase();\n      if (SUPPORTED_EXTENSIONS.has(ext)) {\n        try {\n          const stat = fs.statSync(fullPath);\n          results.push({ file_path: fullPath, file_type: ext.slice(1), file_size: stat.size });\n        } catch(e) {\n          console.log(`stat error on ${fullPath}: ${e.code} ${e.message}`);\n        }\n      }\n    }\n  }\n  return results;\n}\n\nconst folders = $input.all();\nconst allFiles = [];\nconst errors = [];\n\nfor (const folderItem of folders) {\n  const folderPath = folderItem.json.path;\n  const suggestedType = folderItem.json.suggested_type || 'auto';\n  try {\n    fs.accessSync(folderPath, fs.constants.R_OK);\n    const files = scanDir(folderPath, 0);\n    for (const f of files) {\n      allFiles.push({ ...f, suggested_type: suggestedType, folder_id: folderItem.json.id });\n    }\n  } catch(e) {\n    errors.push({ folder: folderPath, error: e.message, code: e.code });\n    console.log(`Folder access error [${e.code}]: ${folderPath} — ${e.message}`);\n  }\n}\n\n// If no files found, return a single item with empty marker\nif (allFiles.length === 0) {\n  return [{ json: { _no_files: true, scanned_dirs: folders.length, scanned_files: 0, new_files: 0, skipped_files: 0, errors: errors } }];\n}\n\n// Return files as individual items, attach scan metadata to first item\nconsole.log(`Scan complete: ${folders.length} dirs, ${allFiles.length} files found, ${errors.length} errors`);\nif (errors.length > 0) console.log('Scan errors:', JSON.stringify(errors));\n\nreturn allFiles.map(f => ({ json: { ...f, _no_files: false } }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -731,6 +731,63 @@
               },
               "renameOutput": true,
               "outputKey": "Office"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-jpg",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "jpg",
+                    "operator": {"type": "string", "operation": "equals"}
+                  },
+                  {
+                    "id": "route-jpeg",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "jpeg",
+                    "operator": {"type": "string", "operation": "equals"}
+                  },
+                  {
+                    "id": "route-png",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "png",
+                    "operator": {"type": "string", "operation": "equals"}
+                  },
+                  {
+                    "id": "route-webp",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "webp",
+                    "operator": {"type": "string", "operation": "equals"}
+                  },
+                  {
+                    "id": "route-heic",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "heic",
+                    "operator": {"type": "string", "operation": "equals"}
+                  },
+                  {
+                    "id": "route-tif",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "tif",
+                    "operator": {"type": "string", "operation": "equals"}
+                  },
+                  {
+                    "id": "route-tiff",
+                    "leftValue": "={{ $json.file_type }}",
+                    "rightValue": "tiff",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": true,
+              "outputKey": "Image"
             }
           ]
         },
@@ -836,6 +893,30 @@
       ],
       "id": "742d6835-2bd5-4200-b426-6d6e95272fe8",
       "name": "MQTT: Publish Office",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/image",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, detected_at: new Date().toISOString(), file_size: $json.file_size, file_hash: $json.file_hash, file_type: $json.file_type, suggested_type: $json.suggested_type, priority: $json.priority, action: $json._lifecycle_action === 'replace' ? 'replace' : 'new', old_hash: $json._old_hash || null }) }}",
+        "options": {
+          "qos": 1
+        }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        36528,
+        4384
+      ],
+      "id": "mqtt-image-01-alice-dms-scanner-v1",
+      "name": "MQTT: Publish Image",
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -1362,7 +1443,25 @@
         ],
         [
           {
+            "node": "MQTT: Publish Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Code: Unknown Type Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQTT: Publish Image": {
+      "main": [
+        [
+          {
+            "node": "Code: Mark Queued",
             "type": "main",
             "index": 0
           }

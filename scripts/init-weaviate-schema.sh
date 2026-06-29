@@ -130,6 +130,7 @@ SCHEMAS=(
     "email.json"
     "contract.json"
     "ha-intent.json"
+    "image.json"
 )
 
 # Legacy German collection names (replaced by English names in PROJ-19)

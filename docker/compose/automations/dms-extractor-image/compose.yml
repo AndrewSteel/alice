@@ -1,0 +1,31 @@
+services:
+  dms-extractor-image:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dms-extractor-image
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import time; t=int(open('/tmp/heartbeat').read()); exit(0 if time.time()*1000-t<90000 else 1)\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      backend:
+        aliases: [dms-extractor-image]
+
+networks:
+  backend:
+    external: true
+    name: backend
