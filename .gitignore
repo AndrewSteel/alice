@@ -114,3 +114,6 @@ Thumbs.db
 *.bak
 *.backup
 *.sql.bak
+
+# Dokumentationen
+docs/planning/*
