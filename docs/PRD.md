@@ -36,6 +36,7 @@ Phase 2 transformiert Alice von einem text-basierten in einen vollständigen **S
 | P2       | Mail IMAP Integration (PROJ-46)                  | 2.3   | Planned |
 | P2       | Vision-Chat: Flip-Card Ergebnisansicht (PROJ-54) | 2.3   | Planned |
 | P2       | DMS Thumbnail-Generierung (PROJ-55)              | 2.3   | Planned |
+| P2       | DMS Bildanalyse (PROJ-56)                        | 2.3   | Planned |
 
 ## Success Metrics
 

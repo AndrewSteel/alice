@@ -41,6 +41,12 @@ const SERVICES: ServiceLink[] = [
     external: true,
   },
   {
+    label: "Storage",
+    url: "http://storage.lan:5000",
+    icon: HardDrive,
+    external: true,
+  },
+  {
     label: "Knox",
     url: "http://knox.lan:5000",
     icon: HardDrive,
