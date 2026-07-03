@@ -4,5 +4,6 @@
 services:
   nas-base:
     volumes:
+      - /mnt/nas/shared:/mnt/nas/shared:ro
       - /mnt/nas/andreas:/mnt/nas/andreas:ro
       - /mnt/nas/lilly:/mnt/nas/lilly:ro

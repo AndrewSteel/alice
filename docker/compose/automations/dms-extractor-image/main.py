@@ -51,7 +51,7 @@ REDIS_KEY = "alice:dms:image"
 
 NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim:8080")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "llava:13b")
+OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen3.5:27b-q4_K_M")
 
 AI_DESCRIPTION_MAX_CHARS = 50000
 OLLAMA_MAX_IMAGE_PX = 1024  # resize before sending to Ollama

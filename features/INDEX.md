@@ -35,7 +35,7 @@
 | PROJ-54 | 2.3   | Vision-Chat: Flip-Card Ergebnisansicht — Visuelle Darstellung von Suchergebnissen als Flip-Cards; Split-Screen Vision/Text; responsive Grid-Layout                           | Deployed  | [Spec](PROJ-54-vision-chat-flip-card-results.md) | 2026-06-27 |
 | PROJ-55 | 2.3   | DMS Thumbnail-Generierung — Quadratische 1:1-Thumbnails nach DMS-Import (PDF/Office/Bilder), Ablage im Warm-Storage, API-Endpunkt, Backfill für Bestandsdokumente            | Deployed  | [Spec](PROJ-55-dms-thumbnail-generation.md)      | 2026-06-27 |
 
-| PROJ-56 | 2.3   | DMS Bildanalyse — KI-Bildbeschreibung (Ollama Vision), EXIF-Extraktion, GPS-Reverse-Geocoding (lokales Nominatim), neue Weaviate-Collection "Image"                        | Approved  | [Spec](PROJ-56-dms-image-analysis.md)            | 2026-06-29 |
+| PROJ-56 | 2.3   | DMS Bildanalyse — KI-Bildbeschreibung (Ollama Vision), EXIF-Extraktion, GPS-Reverse-Geocoding (lokales Nominatim), neue Weaviate-Collection "Image"                        | Deployed  | [Spec](PROJ-56-dms-image-analysis.md)            | 2026-06-29 |
 
 <!-- Add features above this line -->
 
