@@ -132,7 +132,8 @@ wyoming_satellite:
   speaker: ${speaker_id} # reuse the speaker defined by the official package
   light: voice_assistant_leds  # LED ring state machine (PROJ-49)
   # On-device VAD / continued-conversation tuning (tune on hardware):
-  silence_threshold: 700  # room noise typically < 300 RMS, speech > 700 RMS
+  silence_threshold: 700  # PROJ-57: floor + boot-time starting point for the
+                          # adaptive noise-floor threshold, not a fixed value
   silence_ms: 900
   listen_timeout_ms: 6000 # total utterance window; keep short to minimise STT latency
 
