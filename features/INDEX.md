@@ -37,6 +37,10 @@
 
 | PROJ-56 | 2.3   | DMS Bildanalyse — KI-Bildbeschreibung (Ollama Vision), EXIF-Extraktion, GPS-Reverse-Geocoding (lokales Nominatim), neue Weaviate-Collection "Image"                        | Deployed  | [Spec](PROJ-56-dms-image-analysis.md)            | 2026-06-29 |
 
+| PROJ-57 | 2.2   | On-Device VAD Noise Robustness — wyoming_satellite Silence-Detector nutzt Fixed-RMS-Threshold (700) statt adaptivem Noise-Floor; Hintergrundgeräusche (Lüfter, Dunstabzugshaube, Kühlschrank, Staubsauger) verhindern sauberes Beenden der Utterance | Deployed | [Spec](PROJ-57-on-device-vad-noise-robustness.md) | 2026-07-03 |
+
+| PROJ-58 | 2.2   | Sprache-vs-TV/Radio-Trennung — Streaming Speaker-ID im Gateway zur Unterscheidung von Nutzer-Stimme und sprachähnlichem Hintergrund (TV, Radio); Latenz-Machbarkeit ungeklärt, benötigt Machbarkeitsprüfung in /architecture | Roadmap  | —                                         | 2026-07-03 |
+
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-57
+## Next Available ID: PROJ-59

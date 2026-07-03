@@ -80,6 +80,11 @@ class WyomingSatellite : public Component {
   void begin_utterance_();
   void end_utterance_();
   bool is_silent_(const std::vector<int16_t> &data) const;
+  // PROJ-57: continuously nudge noise_floor_estimate_ towards the current frame's
+  // RMS while IDLE (wake-word mic is already running, so this is free to sample).
+  // Takes a pre-computed sum-of-squares rather than a sample buffer so the IDLE
+  // path in on_mic_data_() never has to heap-allocate a converted PCM buffer.
+  void update_noise_floor_(uint64_t sum_sq, size_t num_samples);
 
   // --- wyoming framing ---
   bool connect_();
@@ -114,6 +119,19 @@ class WyomingSatellite : public Component {
   uint16_t silence_threshold_{700};
   uint32_t silence_ms_{900};
   uint32_t listen_timeout_ms_{8000};
+
+  // PROJ-57: adaptive noise floor. configured_min_threshold_ is the YAML value
+  // (captured once in setup()) and acts both as the boot-time starting point and
+  // as the lower bound below which the adaptive threshold never drops — this is
+  // what keeps a quiet room's behavior identical to before this feature.
+  // noise_floor_estimate_ is a slow EWMA of ambient RMS, updated only while IDLE
+  // (never during CAPTURE, so the user's own voice can't skew it). silence_threshold_
+  // is recomputed from it once per utterance in begin_utterance_() and then frozen
+  // for the rest of that utterance — is_silent_() keeps reading silence_threshold_
+  // unchanged.
+  uint16_t configured_min_threshold_{700};
+  float noise_floor_estimate_{700.0f};
+  static constexpr float NOISE_MARGIN_FACTOR = 1.8f;
 
   light::LightState *light_{nullptr};
   std::unique_ptr<socket::Socket> socket_;
