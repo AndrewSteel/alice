@@ -17,7 +17,9 @@ wyoming_satellite:
   port: 10300
   microphone: va_mic       # id of a `microphone:` component (from the package)
   speaker: va_speaker      # id of a `speaker:` component (from the package)
-  silence_threshold: 700   # RMS amplitude (0-32767) below which a frame = silence
+  silence_threshold: 700   # PROJ-57: boot-time starting point AND floor for the
+                           # adaptive noise-floor threshold (0-32767 RMS) — no
+                           # longer a fixed value, see PROJ-57 spec/tech design
   silence_ms: 900          # trailing silence that ends one utterance
   listen_timeout_ms: 8000  # no-speech silence that ends the session
 ```

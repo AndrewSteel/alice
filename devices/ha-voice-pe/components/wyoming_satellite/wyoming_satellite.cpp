@@ -44,6 +44,10 @@ void WyomingSatellite::setup() {
   this->mic_->add_data_callback([this](const std::vector<uint8_t> &data) {
     this->on_mic_data_(data);
   });
+  // PROJ-57: the YAML silence_threshold becomes the floor + boot-time starting
+  // point for the adaptive noise floor, not a fixed threshold anymore.
+  this->configured_min_threshold_ = this->silence_threshold_;
+  this->noise_floor_estimate_ = static_cast<float>(this->silence_threshold_);
   ESP_LOGCONFIG(TAG, "wyoming_satellite ready (target %s:%u)", this->host_.c_str(), this->port_);
 }
 
@@ -81,6 +85,17 @@ void WyomingSatellite::loop() {
         ESP_LOGD(TAG, "Listen timeout (%.0f s) without speech — ending session silently",
                  this->listen_timeout_ms_ / 1000.0f);
         this->finish_session_();
+        break;
+      }
+      // PROJ-57 safety net: an absolute cap independent of speech_seen_/is_silent_.
+      // If ambient noise never dips below the (adaptive) threshold for the whole
+      // utterance — e.g. a vacuum cleaner right next to the device — the two
+      // branches above never fire and capture would otherwise run forever.
+      if (this->capturing_utterance_ &&
+          (millis() - this->utterance_start_ms_) > this->listen_timeout_ms_) {
+        ESP_LOGD(TAG, "Hard timeout (%.0f s) while capturing — ending utterance (safety net)",
+                 this->listen_timeout_ms_ / 1000.0f);
+        this->end_utterance_();
       }
       break;
 
@@ -142,14 +157,40 @@ void WyomingSatellite::stop() {
 // ---------------------------------------------------------------------------
 
 void WyomingSatellite::on_mic_data_(const std::vector<uint8_t> &data) {
-  if (this->state_ != State::CAPTURE || data.empty())
+  if (data.empty())
     return;
+  // PROJ-57: also process frames while IDLE (wake-word mic is already running)
+  // so the noise floor keeps tracking ambient level between utterances. No
+  // other state (CONNECTING/AWAIT_RESPONSE) needs this — nothing above is
+  // used for VAD then.
+  if (this->state_ != State::CAPTURE && this->state_ != State::IDLE)
+    return;
+
+  const size_t frames = data.size() / 8;
+
+  if (this->state_ == State::IDLE) {
+    // Wake-word-listening frame: only the RMS is needed for the noise floor
+    // estimate, so extract samples without heap-allocating a pcm16 buffer —
+    // this path runs on every mic frame for as long as the device is idle
+    // (i.e. almost always), so it must stay allocation-free.
+    uint64_t sum_sq = 0;
+    for (size_t i = 0; i < frames * 8; i += 8) {
+      const int32_t s32 =
+          static_cast<int32_t>(data[i]) |
+          (static_cast<int32_t>(data[i + 1]) << 8) |
+          (static_cast<int32_t>(data[i + 2]) << 16) |
+          (static_cast<int32_t>(data[i + 3]) << 24);
+      const int16_t s16 = static_cast<int16_t>(s32 >> 16);
+      sum_sq += static_cast<int32_t>(s16) * static_cast<int32_t>(s16);
+    }
+    this->update_noise_floor_(sum_sq, frames);
+    return;
+  }
 
   // The I2S hardware delivers 32-bit stereo PCM (little-endian, MSB-justified):
   // 8 bytes per sample pair — 4 bytes left channel + 4 bytes right channel.
   // Convert to 16-bit mono: take the left channel and extract bits 31-16.
   // This matches the format declared in audio_format_json() (width=2, channels=1).
-  const size_t frames = data.size() / 8;
   std::vector<uint8_t> pcm16;
   pcm16.reserve(frames * 2);
   for (size_t i = 0; i < frames * 8; i += 8) {
@@ -191,6 +232,16 @@ void WyomingSatellite::on_mic_data_(const std::vector<uint8_t> &data) {
   }
 }
 
+void WyomingSatellite::update_noise_floor_(uint64_t sum_sq, size_t num_samples) {
+  if (num_samples == 0)
+    return;
+  const float rms = std::sqrt(static_cast<float>(sum_sq) / num_samples);
+  // Slow EWMA: converges over a few seconds of IDLE audio, so a single loud
+  // transient (door slam, cough) can't swing the estimate on its own.
+  static constexpr float ALPHA = 0.02f;
+  this->noise_floor_estimate_ += ALPHA * (rms - this->noise_floor_estimate_);
+}
+
 bool WyomingSatellite::is_silent_(const int16_t *samples, size_t num_samples) const {
   if (num_samples == 0)
     return true;
@@ -202,6 +253,17 @@ bool WyomingSatellite::is_silent_(const int16_t *samples, size_t num_samples) co
 }
 
 void WyomingSatellite::begin_utterance_() {
+  // PROJ-57: freeze this utterance's speech threshold from the current noise
+  // floor estimate. Frozen (not updated during CAPTURE) so the user's own voice
+  // can't drag the threshold up mid-utterance. Floored at configured_min_threshold_
+  // so a quiet room (noise floor well below the old fixed 700) behaves exactly
+  // as before this feature.
+  this->silence_threshold_ = std::max(
+      this->configured_min_threshold_,
+      static_cast<uint16_t>(this->noise_floor_estimate_ * NOISE_MARGIN_FACTOR));
+  ESP_LOGD(TAG, "Adaptive silence threshold for this utterance: %u (noise floor ~%.0f)",
+           this->silence_threshold_, this->noise_floor_estimate_);
+
   const std::string fmt = audio_format_json();
   // AudioStart carries the audio format as its data object, no payload.
   if (!this->socket_)
