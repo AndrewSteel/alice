@@ -34,6 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/services/auth";
 
 import { useAudioPermission } from "./useAudioPermission";
+import { SILENCE_THRESHOLD, useSilenceDetector } from "./useSilenceDetector";
 
 export type VoiceMode2Status =
   | "idle"
@@ -52,8 +53,8 @@ const TTS_SAMPLE_RATE = 22050;
 // fast to silence/utterance-end.
 const RECORD_TIMESLICE_MS = 250;
 // Local silence detector: we tell the gateway "end of utterance" after
-// this much continuous silence while in `listening`.
-const SILENCE_THRESHOLD = 0.010;
+// this much continuous silence while in `listening` (SILENCE_THRESHOLD is
+// defined in the shared useSilenceDetector hook).
 const SILENCE_HANG_MS = 900;
 const SILENCE_CHECK_INTERVAL_MS = 100;
 // If no speech at all is detected for this long while in `listening`, end the
@@ -107,12 +108,8 @@ export function useVoiceMode2(): UseVoiceMode2Result {
   // without capturing a stale closure (stopRef itself is stable).
   const stopRef = useRef<() => void>(() => {});
 
-  // Silence detection
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const silenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
+  // Silence detection (mechanism lives in useSilenceDetector; these track the
+  // mode-specific utterance state used by the per-tick decision below).
   const lastVoiceAtRef = useRef<number>(0);
   const utteranceHasVoiceRef = useRef<boolean>(false);
   // True between sending end_of_utterance and receiving stt_complete/listening
@@ -191,101 +188,69 @@ export function useVoiceMode2(): UseVoiceMode2Result {
 
   // ----- silence detector -----
 
-  const stopSilenceDetector = useCallback(() => {
-    if (silenceIntervalRef.current) {
-      clearInterval(silenceIntervalRef.current);
-      silenceIntervalRef.current = null;
+  // Per-tick decision (mode-specific): flush the utterance after the hang,
+  // or end the session after prolonged no-speech.
+  const handleSilenceSample = useCallback((rms: number, now: number) => {
+    if (rms > SILENCE_THRESHOLD) {
+      lastVoiceAtRef.current = now;
+      utteranceHasVoiceRef.current = true;
     }
-    if (analyserSourceRef.current) {
-      try {
-        analyserSourceRef.current.disconnect();
-      } catch {
-        /* ignore */
+
+    // Only flush utterances when we're actually capturing (listening).
+    // Capturing during `speaking` is barge-in territory — the gateway
+    // owns interrupt detection in that case.
+    if (
+      statusRef.current === "listening" &&
+      utteranceHasVoiceRef.current &&
+      now - lastVoiceAtRef.current > SILENCE_HANG_MS
+    ) {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "end_of_utterance" }));
       }
-      analyserSourceRef.current = null;
+      utteranceHasVoiceRef.current = false;
+      utteranceInFlightRef.current = true; // block no-speech close until gateway acks
+      // lastVoiceAtRef intentionally NOT reset here — the no-speech timer
+      // restarts only when the gateway sends `listening` (after TTS).
+      return;
     }
-    analyserRef.current = null;
+
+    // No speech at all for NO_SPEECH_SESSION_END_MS → end the session.
+    // Handles: (1) CC opened but user never speaks, (2) post-TTS silence.
+    // Guards:
+    //   utteranceInFlight — blocked while gateway processes the utterance
+    //   playbackQueue empty — blocked while browser is still playing audio
+    //     (gateway sends `listening` before playback finishes; lastVoiceAtRef
+    //     is reset in node.onended when the last chunk plays out)
+    if (
+      statusRef.current === "listening" &&
+      !utteranceHasVoiceRef.current &&
+      !utteranceInFlightRef.current &&
+      playbackQueueRef.current.length === 0 &&
+      now - lastVoiceAtRef.current > NO_SPEECH_SESSION_END_MS
+    ) {
+      stopRef.current();
+    }
   }, []);
 
-  const startSilenceDetector = useCallback((stream: MediaStream) => {
-    const ctx = audioCtxRef.current;
-    if (!ctx) return;
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    const source = ctx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    analyserSourceRef.current = source;
+  const { start: startSilenceDetectorRaw, stop: stopSilenceDetector } =
+    useSilenceDetector({
+      checkIntervalMs: SILENCE_CHECK_INTERVAL_MS,
+      onSample: handleSilenceSample,
+      resumeOnSuspend: true,
+    });
 
-    // Connect analyser into the processing graph so browsers that only
-    // analyse nodes connected to the destination actually deliver audio.
-    // Gain = 0 means the mic is never heard through the speakers.
-    const silentGain = ctx.createGain();
-    silentGain.gain.value = 0;
-    analyser.connect(silentGain);
-    silentGain.connect(ctx.destination);
-
-    const buf = new Float32Array(analyser.fftSize);
-    utteranceHasVoiceRef.current = false;
-    utteranceInFlightRef.current = false;
-    lastVoiceAtRef.current = performance.now();
-
-    silenceIntervalRef.current = setInterval(() => {
-      const silenceCtx = audioCtxRef.current;
-      if (!analyserRef.current || !silenceCtx) return;
-      // Resume if Chrome auto-suspended the context between turns.
-      if (silenceCtx.state === "suspended") {
-        silenceCtx.resume();
-        return;
-      }
-      analyserRef.current.getFloatTimeDomainData(buf);
-      let sumSq = 0;
-      for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
-      const rms = Math.sqrt(sumSq / buf.length);
-
-      const now = performance.now();
-      if (rms > SILENCE_THRESHOLD) {
-        lastVoiceAtRef.current = now;
-        utteranceHasVoiceRef.current = true;
-      }
-
-      // Only flush utterances when we're actually capturing (listening).
-      // Capturing during `speaking` is barge-in territory — the gateway
-      // owns interrupt detection in that case.
-      if (
-        statusRef.current === "listening" &&
-        utteranceHasVoiceRef.current &&
-        now - lastVoiceAtRef.current > SILENCE_HANG_MS
-      ) {
-        const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "end_of_utterance" }));
-        }
-        utteranceHasVoiceRef.current = false;
-        utteranceInFlightRef.current = true; // block no-speech close until gateway acks
-        // lastVoiceAtRef intentionally NOT reset here — the no-speech timer
-        // restarts only when the gateway sends `listening` (after TTS).
-        return;
-      }
-
-      // No speech at all for NO_SPEECH_SESSION_END_MS → end the session.
-      // Handles: (1) CC opened but user never speaks, (2) post-TTS silence.
-      // Guards:
-      //   utteranceInFlight — blocked while gateway processes the utterance
-      //   playbackQueue empty — blocked while browser is still playing audio
-      //     (gateway sends `listening` before playback finishes; lastVoiceAtRef
-      //     is reset in node.onended when the last chunk plays out)
-      if (
-        statusRef.current === "listening" &&
-        !utteranceHasVoiceRef.current &&
-        !utteranceInFlightRef.current &&
-        playbackQueueRef.current.length === 0 &&
-        now - lastVoiceAtRef.current > NO_SPEECH_SESSION_END_MS
-      ) {
-        stopRef.current();
-      }
-    }, SILENCE_CHECK_INTERVAL_MS);
-  }, []);
+  const startSilenceDetector = useCallback(
+    (stream: MediaStream) => {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      utteranceHasVoiceRef.current = false;
+      utteranceInFlightRef.current = false;
+      lastVoiceAtRef.current = performance.now();
+      startSilenceDetectorRaw(stream, ctx);
+    },
+    [startSilenceDetectorRaw],
+  );
 
   // ----- session teardown -----
 

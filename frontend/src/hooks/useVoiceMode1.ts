@@ -26,19 +26,19 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/services/auth";
 
 import { useAudioPermission } from "./useAudioPermission";
+import { SILENCE_THRESHOLD, useSilenceDetector } from "./useSilenceDetector";
 
 const WS_URL_BASE = "/api/speech/ws/stt";
 
 // Stream ~every 250 ms so the gateway can build interim transcripts.
 const RECORD_TIMESLICE_MS = 250;
-// Client-side silence detection: -40 dBFS ≈ 0.010 linear RMS.
-// Two thresholds:
+// Client-side silence detection (SILENCE_THRESHOLD is defined in the shared
+// useSilenceDetector hook). Two hang thresholds:
 //   SILENCE_HANG_AFTER_SPEECH_MS — after speech was heard, 900 ms trailing
 //     silence triggers auto-stop (original responsive behaviour).
 //   SILENCE_HANG_NO_SPEECH_MS   — if no speech is ever detected (mic gain
 //     too low to cross the threshold), auto-stop fires 1 500 ms after the
 //     button was pressed, so the button can never get permanently stuck.
-const SILENCE_THRESHOLD = 0.01;
 const SILENCE_HANG_AFTER_SPEECH_MS = 900;
 const SILENCE_HANG_NO_SPEECH_MS = 1500;
 const SILENCE_CHECK_INTERVAL_MS = 50;
@@ -90,12 +90,8 @@ export function useVoiceMode1({
   // BUG-7: blocks a second toggle() tap while the WS is still opening.
   const connectingRef = useRef<boolean>(false);
 
-  // Silence detection
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const silenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
+  // Silence detection (mechanism lives in useSilenceDetector; these track the
+  // mode-specific speech state used by the per-tick decision below).
   const lastVoiceAtRef = useRef<number>(0);
   const speechDetectedRef = useRef<boolean>(false);
 
@@ -114,69 +110,40 @@ export function useVoiceMode1({
 
   // ----- silence detector -----
 
-  const stopSilenceDetector = useCallback(() => {
-    if (silenceIntervalRef.current) {
-      clearInterval(silenceIntervalRef.current);
-      silenceIntervalRef.current = null;
+  // Per-tick decision (mode-specific): auto-stop after the appropriate hang.
+  const handleSilenceSample = useCallback((rms: number, now: number) => {
+    if (rms > SILENCE_THRESHOLD) {
+      lastVoiceAtRef.current = now;
+      speechDetectedRef.current = true;
     }
-    if (analyserSourceRef.current) {
-      try {
-        analyserSourceRef.current.disconnect();
-      } catch {
-        /* ignore */
-      }
-      analyserSourceRef.current = null;
+
+    // Auto-stop: use the shorter post-speech hang when speech has been
+    // heard, otherwise fall back to the longer no-speech hang so the
+    // button can't get permanently stuck on low-gain devices.
+    const hang = speechDetectedRef.current
+      ? SILENCE_HANG_AFTER_SPEECH_MS
+      : SILENCE_HANG_NO_SPEECH_MS;
+    if (now - lastVoiceAtRef.current > hang) {
+      finalizeRef.current();
     }
-    analyserRef.current = null;
   }, []);
 
-  const startSilenceDetector = useCallback((stream: MediaStream) => {
-    const ctx = audioCtxRef.current;
-    if (!ctx) return;
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    const source = ctx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    analyserSourceRef.current = source;
+  const { start: startSilenceDetectorRaw, stop: stopSilenceDetector } =
+    useSilenceDetector({
+      checkIntervalMs: SILENCE_CHECK_INTERVAL_MS,
+      onSample: handleSilenceSample,
+    });
 
-    // Connect the analyser into the graph at gain 0 so browsers that only
-    // process nodes wired to the destination still deliver audio data. The
-    // mic is never audible through the speakers.
-    const silentGain = ctx.createGain();
-    silentGain.gain.value = 0;
-    analyser.connect(silentGain);
-    silentGain.connect(ctx.destination);
-
-    const buf = new Float32Array(analyser.fftSize);
-    speechDetectedRef.current = false;
-    lastVoiceAtRef.current = performance.now();
-
-    silenceIntervalRef.current = setInterval(() => {
-      const analyserNode = analyserRef.current;
-      if (!analyserNode) return;
-      analyserNode.getFloatTimeDomainData(buf);
-      let sumSq = 0;
-      for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
-      const rms = Math.sqrt(sumSq / buf.length);
-
-      const now = performance.now();
-      if (rms > SILENCE_THRESHOLD) {
-        lastVoiceAtRef.current = now;
-        speechDetectedRef.current = true;
-      }
-
-      // Auto-stop: use the shorter post-speech hang when speech has been
-      // heard, otherwise fall back to the longer no-speech hang so the
-      // button can't get permanently stuck on low-gain devices.
-      const hang = speechDetectedRef.current
-        ? SILENCE_HANG_AFTER_SPEECH_MS
-        : SILENCE_HANG_NO_SPEECH_MS;
-      if (now - lastVoiceAtRef.current > hang) {
-        finalizeRef.current();
-      }
-    }, SILENCE_CHECK_INTERVAL_MS);
-  }, []);
+  const startSilenceDetector = useCallback(
+    (stream: MediaStream) => {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      speechDetectedRef.current = false;
+      lastVoiceAtRef.current = performance.now();
+      startSilenceDetectorRaw(stream, ctx);
+    },
+    [startSilenceDetectorRaw],
+  );
 
   // ----- teardown -----
 
