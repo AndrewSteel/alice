@@ -53,14 +53,14 @@ function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
     admin: "bg-purple-900/40 text-purple-300 border-purple-800",
     user: "bg-blue-900/40 text-blue-300 border-blue-800",
-    guest: "bg-gray-700/40 text-gray-300 border-gray-600",
+    guest: "bg-muted/40 text-foreground border-border",
     child: "bg-green-900/40 text-green-300 border-green-800",
   };
 
   return (
     <Badge
       variant="secondary"
-      className={`text-xs ${styles[role] || "bg-gray-700/40 text-gray-300 border-gray-600"}`}
+      className={`text-xs ${styles[role] || "bg-muted/40 text-foreground border-border"}`}
     >
       {role}
     </Badge>
@@ -103,7 +103,7 @@ function VoiceCell({
       <div className="flex items-center gap-2">
         <Badge
           variant="secondary"
-          className="text-xs bg-gray-700/40 text-gray-300 border-gray-600"
+          className="text-xs bg-muted/40 text-foreground border-border"
         >
           Immer
         </Badge>
@@ -149,7 +149,7 @@ function UserActionMenu({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 text-gray-400 hover:text-gray-100"
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
           aria-label={`Aktionen fuer ${user.username}`}
         >
           <MoreVertical className="h-4 w-4" />
@@ -157,12 +157,12 @@ function UserActionMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="bg-gray-800 border-gray-700 text-gray-100"
+        className="bg-card border-border text-foreground"
       >
         {hasEmail ? (
           <DropdownMenuItem
             onClick={() => onResetOtp(user)}
-            className="gap-2 focus:bg-gray-700 focus:text-gray-100"
+            className="gap-2 focus:bg-accent focus:text-foreground"
           >
             <KeyRound className="h-4 w-4" />
             OTP zuruecksetzen
@@ -170,20 +170,20 @@ function UserActionMenu({
         ) : (
           <DropdownMenuItem
             onClick={() => onSetCredentials(user)}
-            className="gap-2 focus:bg-gray-700 focus:text-gray-100"
+            className="gap-2 focus:bg-accent focus:text-foreground"
           >
             <LogIn className="h-4 w-4" />
             Zugang einrichten
           </DropdownMenuItem>
         )}
 
-        <DropdownMenuSeparator className="bg-gray-700" />
+        <DropdownMenuSeparator className="bg-muted" />
 
         {isSelf ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="px-2 py-1.5 text-sm text-gray-500 flex items-center gap-2 cursor-not-allowed">
+                <div className="px-2 py-1.5 text-sm text-muted-foreground flex items-center gap-2 cursor-not-allowed">
                   {user.is_active ? (
                     <UserX className="h-4 w-4" />
                   ) : (
@@ -200,7 +200,7 @@ function UserActionMenu({
         ) : (
           <DropdownMenuItem
             onClick={() => onToggleStatus(user)}
-            className="gap-2 focus:bg-gray-700 focus:text-gray-100"
+            className="gap-2 focus:bg-accent focus:text-foreground"
           >
             {user.is_active ? (
               <>
@@ -216,13 +216,13 @@ function UserActionMenu({
           </DropdownMenuItem>
         )}
 
-        <DropdownMenuSeparator className="bg-gray-700" />
+        <DropdownMenuSeparator className="bg-muted" />
 
         {isSelf ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="px-2 py-1.5 text-sm text-gray-500 flex items-center gap-2 cursor-not-allowed">
+                <div className="px-2 py-1.5 text-sm text-muted-foreground flex items-center gap-2 cursor-not-allowed">
                   <Trash2 className="h-4 w-4" />
                   Loeschen
                 </div>
@@ -235,7 +235,7 @@ function UserActionMenu({
         ) : (
           <DropdownMenuItem
             onClick={() => onDelete(user)}
-            className="gap-2 text-red-400 focus:bg-gray-700 focus:text-red-400"
+            className="gap-2 text-red-400 focus:bg-accent focus:text-red-400"
           >
             <Trash2 className="h-4 w-4" />
             Loeschen
@@ -256,19 +256,19 @@ export function UserTable({
   onDelete,
 }: UserTableProps) {
   return (
-    <div className="rounded-lg border border-gray-700 overflow-hidden">
+    <div className="rounded-lg border border-border overflow-hidden">
       {/* Desktop table */}
       <div className="hidden md:block">
         <Table>
           <TableHeader>
-            <TableRow className="border-gray-700 hover:bg-transparent">
-              <TableHead className="text-gray-400">Nutzer</TableHead>
-              <TableHead className="text-gray-400 max-w-[180px]">E-Mail</TableHead>
-              <TableHead className="text-gray-400">Rolle</TableHead>
-              <TableHead className="text-gray-400">Status</TableHead>
-              <TableHead className="text-gray-400">Stimme</TableHead>
-              <TableHead className="text-gray-400 hidden lg:table-cell">Erstellt</TableHead>
-              <TableHead className="text-gray-400 text-right w-10">
+            <TableRow className="border-border hover:bg-transparent">
+              <TableHead className="text-muted-foreground">Nutzer</TableHead>
+              <TableHead className="text-muted-foreground max-w-[180px]">E-Mail</TableHead>
+              <TableHead className="text-muted-foreground">Rolle</TableHead>
+              <TableHead className="text-muted-foreground">Status</TableHead>
+              <TableHead className="text-muted-foreground">Stimme</TableHead>
+              <TableHead className="text-muted-foreground hidden lg:table-cell">Erstellt</TableHead>
+              <TableHead className="text-muted-foreground text-right w-10">
                 Aktionen
               </TableHead>
             </TableRow>
@@ -279,18 +279,18 @@ export function UserTable({
               return (
                 <TableRow
                   key={user.id}
-                  className={`border-gray-700 hover:bg-gray-800/50 ${
+                  className={`border-border hover:bg-accent/50 ${
                     !user.is_active ? "opacity-50" : ""
                   }`}
                 >
                   <TableCell className="min-w-0">
-                    <p className="text-sm font-medium text-gray-100">{user.username}</p>
+                    <p className="text-sm font-medium text-foreground">{user.username}</p>
                     {user.display_name && (
-                      <p className="text-xs text-gray-400">{user.display_name}</p>
+                      <p className="text-xs text-muted-foreground">{user.display_name}</p>
                     )}
                   </TableCell>
                   <TableCell className="max-w-[180px]">
-                    <span className="block text-sm text-gray-300 truncate" title={user.email || undefined}>
+                    <span className="block text-sm text-foreground truncate" title={user.email || undefined}>
                       {user.email || "--"}
                     </span>
                   </TableCell>
@@ -303,7 +303,7 @@ export function UserTable({
                   <TableCell>
                     <VoiceCell user={user} onToggleVoice={onToggleVoice} />
                   </TableCell>
-                  <TableCell className="text-gray-400 text-sm hidden lg:table-cell">
+                  <TableCell className="text-muted-foreground text-sm hidden lg:table-cell">
                     {formatDate(user.created_at)}
                   </TableCell>
                   <TableCell className="text-right w-10">
@@ -324,7 +324,7 @@ export function UserTable({
       </div>
 
       {/* Mobile card list */}
-      <div className="md:hidden divide-y divide-gray-700">
+      <div className="md:hidden divide-y divide-border">
         {users.map((user) => {
           const isSelf = user.id === currentUserId;
           return (
@@ -334,11 +334,11 @@ export function UserTable({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-100 truncate">
+                  <p className="text-sm font-medium text-foreground truncate">
                     {user.username}
                   </p>
                   {user.display_name && (
-                    <p className="text-xs text-gray-400 truncate">
+                    <p className="text-xs text-muted-foreground truncate">
                       {user.display_name}
                     </p>
                   )}
@@ -357,13 +357,13 @@ export function UserTable({
                 <StatusBadge isActive={user.is_active} />
               </div>
               {user.email && (
-                <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
               )}
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-gray-500">Stimme</span>
+                <span className="text-xs text-muted-foreground">Stimme</span>
                 <VoiceCell user={user} onToggleVoice={onToggleVoice} />
               </div>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted-foreground">
                 Erstellt: {formatDate(user.created_at)}
               </p>
             </div>

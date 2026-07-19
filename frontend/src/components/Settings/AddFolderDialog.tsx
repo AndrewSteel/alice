@@ -84,17 +84,17 @@ export function AddFolderDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-md">
+      <DialogContent className="bg-card border-border text-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Ordner hinzufügen</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Füge einen NAS-Pfad zur DMS-Überwachung hinzu.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="add-path" className="text-gray-300">
+            <Label htmlFor="add-path" className="text-foreground">
               Pfad <span className="text-red-400">*</span>
             </Label>
             <Input
@@ -102,27 +102,27 @@ export function AddFolderDialog({
               value={path}
               onChange={(e) => setPath(e.target.value)}
               placeholder="/mnt/nas/dokumente/rechnungen"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500 font-mono text-sm"
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground font-mono text-sm"
               maxLength={500}
               autoFocus
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="add-type" className="text-gray-300">
+            <Label htmlFor="add-type" className="text-foreground">
               Dokumenttyp-Hint
             </Label>
             <Select value={suggestedType} onValueChange={setSuggestedType}>
               <SelectTrigger
                 id="add-type"
-                className="bg-gray-900 border-gray-600 text-gray-100"
+                className="bg-background border-border text-foreground"
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-700">
+              <SelectContent className="bg-card border-border">
                 <SelectItem
                   value={AUTO_VALUE}
-                  className="text-gray-300 focus:bg-gray-700 focus:text-gray-100"
+                  className="text-foreground focus:bg-accent focus:text-foreground"
                 >
                   Automatisch (LLM)
                 </SelectItem>
@@ -130,7 +130,7 @@ export function AddFolderDialog({
                   <SelectItem
                     key={t}
                     value={t}
-                    className="text-gray-300 focus:bg-gray-700 focus:text-gray-100"
+                    className="text-foreground focus:bg-accent focus:text-foreground"
                   >
                     {t}
                   </SelectItem>
@@ -140,7 +140,7 @@ export function AddFolderDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="add-desc" className="text-gray-300">
+            <Label htmlFor="add-desc" className="text-foreground">
               Beschreibung
             </Label>
             <Input
@@ -148,7 +148,7 @@ export function AddFolderDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="z.B. Rechnungen 2026"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500"
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
 
@@ -160,7 +160,7 @@ export function AddFolderDialog({
               variant="ghost"
               onClick={() => handleOpenChange(false)}
               disabled={submitting}
-              className="text-gray-400 hover:text-gray-100"
+              className="text-muted-foreground hover:text-foreground"
             >
               Abbrechen
             </Button>

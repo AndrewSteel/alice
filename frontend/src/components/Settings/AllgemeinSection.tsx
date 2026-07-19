@@ -7,21 +7,21 @@ export function AllgemeinSection() {
   const { user } = useAuth();
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">Allgemein</CardTitle>
+        <CardTitle className="text-foreground">Allgemein</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           <div>
-            <p className="text-sm text-gray-400">Angemeldet als</p>
-            <p className="text-gray-100 font-medium">{user?.username}</p>
+            <p className="text-sm text-muted-foreground">Angemeldet als</p>
+            <p className="text-foreground font-medium">{user?.username}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-400">Rolle</p>
-            <p className="text-gray-100 font-medium capitalize">{user?.role}</p>
+            <p className="text-sm text-muted-foreground">Rolle</p>
+            <p className="text-foreground font-medium capitalize">{user?.role}</p>
           </div>
-          <p className="text-sm text-gray-500 pt-2">
+          <p className="text-sm text-muted-foreground pt-2">
             Weitere Einstellungen folgen in einem spaeteren Update.
           </p>
         </div>

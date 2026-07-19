@@ -17,15 +17,15 @@ export function SettingsPage() {
   const isAdmin = user?.role === "admin";
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="border-b border-gray-700 bg-gray-900 sticky top-0 z-10">
+      <header className="border-b border-border bg-background sticky top-0 z-10">
         <div className="max-w-5xl mx-auto flex items-center gap-3 px-4 py-3 md:px-6">
           <Button
             variant="ghost"
             size="icon"
             onClick={() => { window.location.href = "/"; }}
-            className="text-gray-400 hover:text-gray-100 shrink-0"
+            className="text-muted-foreground hover:text-foreground shrink-0"
             aria-label="Zurueck zum Chat"
           >
             <ArrowLeft className="h-5 w-5" />
@@ -39,24 +39,24 @@ export function SettingsPage() {
         <Tabs defaultValue="mein-profil" orientation="vertical" className="w-full">
           <div className="flex flex-col md:flex-row md:gap-6">
             {/* Tab Navigation */}
-            <TabsList className="flex flex-row md:flex-col w-full md:w-44 shrink-0 overflow-x-auto rounded-md border border-gray-700 bg-gray-800 p-1 md:h-fit md:sticky md:top-20">
+            <TabsList className="flex flex-row md:flex-col w-full md:w-44 shrink-0 overflow-x-auto rounded-md border border-border bg-card p-1 md:h-fit md:sticky md:top-20">
               <TabsTrigger
                 value="mein-profil"
-                className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
               >
                 <span className="md:hidden">Profil</span>
                 <span className="hidden md:inline">Mein Profil</span>
               </TabsTrigger>
               <TabsTrigger
                 value="allgemein"
-                className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
               >
                 Allgemein
               </TabsTrigger>
               {isAdmin && (
                 <TabsTrigger
                   value="dms"
-                  className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                  className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
                   DMS
                 </TabsTrigger>
@@ -64,7 +64,7 @@ export function SettingsPage() {
               {isAdmin && (
                 <TabsTrigger
                   value="nutzerverwaltung"
-                  className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                  className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
                   <span className="md:hidden">Nutzer</span>
                   <span className="hidden md:inline">Nutzerverwaltung</span>
@@ -73,7 +73,7 @@ export function SettingsPage() {
               {isAdmin && (
                 <TabsTrigger
                   value="stimmprofile"
-                  className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                  className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
                   Stimmprofile
                 </TabsTrigger>
@@ -81,14 +81,14 @@ export function SettingsPage() {
               {isAdmin && (
                 <TabsTrigger
                   value="chatarchiv"
-                  className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                  className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
                   Chatarchiv
                 </TabsTrigger>
               )}
               <TabsTrigger
                 value="email"
-                className="flex-1 md:flex-none md:w-full md:justify-start text-gray-400 data-[state=active]:text-gray-100 data-[state=active]:bg-gray-700"
+                className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
               >
                 E-Mail
               </TabsTrigger>

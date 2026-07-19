@@ -99,8 +99,8 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
         className={cn(
           "group flex items-center min-w-0 rounded-md px-3 py-2 text-sm cursor-pointer select-none transition-colors",
           isActive
-            ? "bg-gray-700 text-gray-100"
-            : "text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
         )}
       >
         {isRenaming ? (
@@ -116,7 +116,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
             onClick={(e) => e.stopPropagation()}
             aria-label="Chat umbenennen"
             maxLength={60}
-            className="h-6 py-0 px-1 text-sm bg-gray-600 border-gray-500 text-gray-100 focus-visible:ring-1 focus-visible:ring-gray-400"
+            className="h-6 py-0 px-1 text-sm bg-muted border-input text-foreground focus-visible:ring-1 focus-visible:ring-ring"
           />
         ) : (
           <>
@@ -125,7 +125,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
                 <TooltipTrigger asChild>
                   <span className="truncate flex-1 min-w-0">{session.title}</span>
                 </TooltipTrigger>
-                <TooltipContent side="top" className="bg-white text-black border-gray-200">
+                <TooltipContent side="top" className="bg-white text-black border-border">
                   {session.title}
                 </TooltipContent>
               </Tooltip>
@@ -142,7 +142,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 p-0 text-gray-400 hover:text-gray-100 hover:bg-gray-600"
+                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground hover:bg-accent"
                       onClick={(e) => e.stopPropagation()}
                       aria-label="Optionen"
                     >
@@ -151,19 +151,19 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     align="end"
-                    className="bg-gray-800 border-gray-700 w-40"
+                    className="bg-card border-border w-40"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <DropdownMenuItem
                       onClick={() => startRename()}
-                      className="text-gray-200 focus:bg-gray-700 focus:text-gray-100 cursor-pointer"
+                      className="text-foreground focus:bg-accent focus:text-foreground cursor-pointer"
                     >
                       <Pencil className="mr-2 h-4 w-4" />
                       Umbenennen
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setShowDeleteDialog(true)}
-                      className="text-red-400 focus:bg-gray-700 focus:text-red-300 cursor-pointer"
+                      className="text-red-400 focus:bg-accent focus:text-red-300 cursor-pointer"
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
                       Loeschen
@@ -178,16 +178,16 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
 
       {/* Delete Confirmation Dialog (AC-A6, AC-A7) */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent className="bg-gray-800 border-gray-700">
+        <AlertDialogContent className="bg-card border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-gray-100">Chat loeschen?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-400">
+            <AlertDialogTitle className="text-foreground">Chat loeschen?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
               Der Chat &quot;{session.title}&quot; wird unwiderruflich geloescht.
               Diese Aktion kann nicht rueckgaengig gemacht werden.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600 hover:text-gray-100">
+            <AlertDialogCancel className="bg-muted text-foreground border-border hover:bg-accent hover:text-foreground">
               Abbrechen
             </AlertDialogCancel>
             <AlertDialogAction

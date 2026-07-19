@@ -74,10 +74,10 @@ export function VoiceProfilesSection() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-7 w-48 bg-gray-700" />
+        <Skeleton className="h-7 w-48 bg-muted" />
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full bg-gray-700" />
+            <Skeleton key={i} className="h-12 w-full bg-muted" />
           ))}
         </div>
       </div>
@@ -88,7 +88,7 @@ export function VoiceProfilesSection() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-gray-100">Stimmprofile</h2>
+        <h2 className="text-lg font-semibold text-foreground">Stimmprofile</h2>
         <div className="rounded-lg border border-red-800 bg-red-900/20 p-4">
           <p className="text-sm text-red-400">{error}</p>
           <Button
@@ -109,44 +109,44 @@ export function VoiceProfilesSection() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">Stimmprofile</h2>
+        <h2 className="text-lg font-semibold text-foreground">Stimmprofile</h2>
         <Button
           variant="ghost"
           size="icon"
           onClick={reload}
-          className="h-9 w-9 text-gray-400 hover:text-gray-100"
+          className="h-9 w-9 text-muted-foreground hover:text-foreground"
           aria-label="Liste aktualisieren"
         >
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
 
-      <p className="text-sm text-gray-400">
+      <p className="text-sm text-muted-foreground">
         Nutzer, deren Stimme registriert ist. Beim Loeschen werden alle
         Stimmproben entfernt; der Nutzer selbst bleibt erhalten.
       </p>
 
       {profiles.length === 0 ? (
-        <div className="rounded-lg border border-gray-700 p-8 text-center">
-          <Mic className="mx-auto h-6 w-6 text-gray-500" />
-          <p className="mt-2 text-gray-400">
+        <div className="rounded-lg border border-border p-8 text-center">
+          <Mic className="mx-auto h-6 w-6 text-muted-foreground" />
+          <p className="mt-2 text-muted-foreground">
             Noch keine Stimmprofile registriert.
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-gray-700 overflow-hidden">
+        <div className="rounded-lg border border-border overflow-hidden">
           {/* Desktop table */}
           <div className="hidden md:block">
             <Table>
               <TableHeader>
-                <TableRow className="border-gray-700 hover:bg-transparent">
-                  <TableHead className="text-gray-400">Nutzer</TableHead>
-                  <TableHead className="text-gray-400">Rolle</TableHead>
-                  <TableHead className="text-gray-400">Proben</TableHead>
-                  <TableHead className="text-gray-400 hidden lg:table-cell">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">Nutzer</TableHead>
+                  <TableHead className="text-muted-foreground">Rolle</TableHead>
+                  <TableHead className="text-muted-foreground">Proben</TableHead>
+                  <TableHead className="text-muted-foreground hidden lg:table-cell">
                     Registriert
                   </TableHead>
-                  <TableHead className="text-gray-400 text-right w-10">
+                  <TableHead className="text-muted-foreground text-right w-10">
                     Aktion
                   </TableHead>
                 </TableRow>
@@ -155,28 +155,28 @@ export function VoiceProfilesSection() {
                 {profiles.map((p) => (
                   <TableRow
                     key={p.user_id}
-                    className="border-gray-700 hover:bg-gray-800/50"
+                    className="border-border hover:bg-accent/50"
                   >
                     <TableCell>
-                      <p className="text-sm font-medium text-gray-100">
+                      <p className="text-sm font-medium text-foreground">
                         {p.display_name || p.username}
                       </p>
                       {p.display_name && (
-                        <p className="text-xs text-gray-400">{p.username}</p>
+                        <p className="text-xs text-muted-foreground">{p.username}</p>
                       )}
                     </TableCell>
                     <TableCell>
                       <Badge
                         variant="secondary"
-                        className="text-xs bg-gray-700/40 text-gray-300 border-gray-600"
+                        className="text-xs bg-muted/40 text-foreground border-border"
                       >
                         {p.role}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-gray-300 text-sm tabular-nums">
+                    <TableCell className="text-foreground text-sm tabular-nums">
                       {p.sample_count}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm hidden lg:table-cell">
+                    <TableCell className="text-muted-foreground text-sm hidden lg:table-cell">
                       {formatDate(p.created_at)}
                     </TableCell>
                     <TableCell className="text-right">
@@ -184,7 +184,7 @@ export function VoiceProfilesSection() {
                         variant="ghost"
                         size="icon"
                         onClick={() => setDeleteTarget(p)}
-                        className="h-8 w-8 text-gray-400 hover:text-red-400"
+                        className="h-8 w-8 text-muted-foreground hover:text-red-400"
                         aria-label={`Stimmprofil von ${p.username} loeschen`}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -197,28 +197,28 @@ export function VoiceProfilesSection() {
           </div>
 
           {/* Mobile card list */}
-          <div className="md:hidden divide-y divide-gray-700">
+          <div className="md:hidden divide-y divide-border">
             {profiles.map((p) => (
               <div
                 key={p.user_id}
                 className="p-4 flex items-start justify-between gap-2"
               >
                 <div className="min-w-0 space-y-1">
-                  <p className="text-sm font-medium text-gray-100 truncate">
+                  <p className="text-sm font-medium text-foreground truncate">
                     {p.display_name || p.username}
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge
                       variant="secondary"
-                      className="text-xs bg-gray-700/40 text-gray-300 border-gray-600"
+                      className="text-xs bg-muted/40 text-foreground border-border"
                     >
                       {p.role}
                     </Badge>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-muted-foreground">
                       {p.sample_count} Proben
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-muted-foreground">
                     Registriert: {formatDate(p.created_at)}
                   </p>
                 </div>
@@ -226,7 +226,7 @@ export function VoiceProfilesSection() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setDeleteTarget(p)}
-                  className="h-8 w-8 shrink-0 text-gray-400 hover:text-red-400"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-400"
                   aria-label={`Stimmprofil von ${p.username} loeschen`}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -241,14 +241,14 @@ export function VoiceProfilesSection() {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && !isDeleting && setDeleteTarget(null)}
       >
-        <AlertDialogContent className="bg-gray-800 border-gray-700 text-gray-100">
+        <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-red-400">
               Stimmprofil loeschen
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-400">
+            <AlertDialogDescription className="text-muted-foreground">
               Das Stimmprofil von{" "}
-              <span className="font-medium text-gray-300">
+              <span className="font-medium text-foreground">
                 {deleteTarget?.username}
               </span>{" "}
               wird dauerhaft entfernt. Der Nutzer wird an Sprachgeraeten nicht
@@ -258,7 +258,7 @@ export function VoiceProfilesSection() {
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={isDeleting}
-              className="bg-transparent border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+              className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
             >
               Abbrechen
             </AlertDialogCancel>

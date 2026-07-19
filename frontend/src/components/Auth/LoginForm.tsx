@@ -44,7 +44,7 @@ export function LoginForm() {
       {/* Logo */}
       <div className="flex items-center gap-2 mb-8">
         <Bot className="h-8 w-8 text-blue-500" aria-hidden />
-        <span className="text-2xl font-bold text-gray-100">Alice</span>
+        <span className="text-2xl font-bold text-foreground">Alice</span>
       </div>
 
       <form
@@ -54,7 +54,7 @@ export function LoginForm() {
         noValidate
       >
         <div className="space-y-1.5">
-          <Label htmlFor="username" className="text-gray-300">
+          <Label htmlFor="username" className="text-foreground">
             Benutzername
           </Label>
           <Input
@@ -64,14 +64,14 @@ export function LoginForm() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             disabled={isLoading}
-            className="bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500"
+            className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
             placeholder="Benutzername"
             required
           />
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="password" className="text-gray-300">
+          <Label htmlFor="password" className="text-foreground">
             Passwort
           </Label>
           <div className="relative">
@@ -82,14 +82,14 @@ export function LoginForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isLoading}
-              className="bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500 pr-10"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 pr-10"
               placeholder="Passwort"
               required
             />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               aria-label={showPassword ? "Passwort verbergen" : "Passwort anzeigen"}
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

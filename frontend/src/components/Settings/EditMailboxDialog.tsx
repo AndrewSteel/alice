@@ -79,62 +79,62 @@ export function EditMailboxDialog({ mailbox, open, onOpenChange, onSubmit }: Pro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-card border-border text-foreground sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Postfach bearbeiten</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Zugangsdaten aktualisieren. Passwortfeld leer lassen, um es unverändert zu behalten.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label className="text-gray-300">Anzeigename <span className="text-red-400">*</span></Label>
+            <Label className="text-foreground">Anzeigename <span className="text-red-400">*</span></Label>
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
-              className="bg-gray-900 border-gray-600 text-gray-100" />
+              className="bg-background border-border text-foreground" />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2 space-y-2">
-              <Label className="text-gray-300">IMAP-Host</Label>
+              <Label className="text-foreground">IMAP-Host</Label>
               <Input value={imapHost} onChange={(e) => setImapHost(e.target.value)}
-                className="bg-gray-900 border-gray-600 text-gray-100 font-mono text-sm" />
+                className="bg-background border-border text-foreground font-mono text-sm" />
             </div>
             <div className="space-y-2">
-              <Label className="text-gray-300">Port</Label>
+              <Label className="text-foreground">Port</Label>
               <Input value={imapPort} onChange={(e) => setImapPort(e.target.value)}
-                type="number" min={1} max={65535} className="bg-gray-900 border-gray-600 text-gray-100" />
+                type="number" min={1} max={65535} className="bg-background border-border text-foreground" />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label className="text-gray-300">Benutzername</Label>
+            <Label className="text-foreground">Benutzername</Label>
             <Input value={imapUsername} onChange={(e) => setImapUsername(e.target.value)}
-              autoComplete="username" className="bg-gray-900 border-gray-600 text-gray-100" />
+              autoComplete="username" className="bg-background border-border text-foreground" />
           </div>
 
           <div className="space-y-2">
-            <Label className="text-gray-300">Neues Passwort <span className="text-gray-500 text-xs">(leer = unverändert)</span></Label>
+            <Label className="text-foreground">Neues Passwort <span className="text-muted-foreground text-xs">(leer = unverändert)</span></Label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password" placeholder="••••••••"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-600" />
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground" />
           </div>
 
           <div className="flex items-center gap-3">
             <Switch id="edit-ssl" checked={sslEnabled} onCheckedChange={setSslEnabled} />
-            <Label htmlFor="edit-ssl" className="text-gray-300 cursor-pointer">SSL/TLS aktivieren</Label>
+            <Label htmlFor="edit-ssl" className="text-foreground cursor-pointer">SSL/TLS aktivieren</Label>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label className="text-gray-300">Sync-Intervall (Min.) <span className="text-red-400">*</span></Label>
+              <Label className="text-foreground">Sync-Intervall (Min.) <span className="text-red-400">*</span></Label>
               <Input value={syncInterval} onChange={(e) => setSyncInterval(e.target.value)}
-                type="number" min={1} max={1440} className="bg-gray-900 border-gray-600 text-gray-100" />
+                type="number" min={1} max={1440} className="bg-background border-border text-foreground" />
             </div>
             <div className="space-y-2">
-              <Label className="text-gray-300">Startdatum (optional)</Label>
+              <Label className="text-foreground">Startdatum (optional)</Label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-                className="bg-gray-900 border-gray-600 text-gray-100" />
+                className="bg-background border-border text-foreground" />
             </div>
           </div>
 
@@ -147,7 +147,7 @@ export function EditMailboxDialog({ mailbox, open, onOpenChange, onSubmit }: Pro
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}
-              className="text-gray-400 hover:text-gray-100">Abbrechen</Button>
+              className="text-muted-foreground hover:text-foreground">Abbrechen</Button>
             <Button type="submit" disabled={submitting} className="bg-blue-600 hover:bg-blue-700 text-white">
               {submitting ? "Wird gespeichert..." : "Speichern"}
             </Button>

@@ -87,15 +87,15 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
   }
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">Passwort aendern</CardTitle>
+        <CardTitle className="text-foreground">Passwort aendern</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Current password */}
           <div className="space-y-2">
-            <Label htmlFor="pw-current" className="text-gray-300">
+            <Label htmlFor="pw-current" className="text-foreground">
               Aktuelles Passwort
             </Label>
             <div className="relative">
@@ -111,13 +111,13 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
                     return next;
                   });
                 }}
-                className="bg-gray-800 border-gray-600 text-gray-100 pr-10"
+                className="bg-card border-border text-foreground pr-10"
                 autoComplete="current-password"
               />
               <button
                 type="button"
                 onClick={() => setShowCurrent(!showCurrent)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 aria-label={showCurrent ? "Passwort verbergen" : "Passwort anzeigen"}
               >
                 {showCurrent ? (
@@ -134,7 +134,7 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
 
           {/* New password */}
           <div className="space-y-2">
-            <Label htmlFor="pw-new" className="text-gray-300">
+            <Label htmlFor="pw-new" className="text-foreground">
               Neues Passwort
             </Label>
             <div className="relative">
@@ -150,13 +150,13 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
                     return next;
                   });
                 }}
-                className="bg-gray-800 border-gray-600 text-gray-100 pr-10"
+                className="bg-card border-border text-foreground pr-10"
                 autoComplete="new-password"
               />
               <button
                 type="button"
                 onClick={() => setShowNew(!showNew)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 aria-label={showNew ? "Passwort verbergen" : "Passwort anzeigen"}
               >
                 {showNew ? (
@@ -173,7 +173,7 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
 
           {/* Confirm password */}
           <div className="space-y-2">
-            <Label htmlFor="pw-confirm" className="text-gray-300">
+            <Label htmlFor="pw-confirm" className="text-foreground">
               Neues Passwort wiederholen
             </Label>
             <div className="relative">
@@ -189,13 +189,13 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
                     return next;
                   });
                 }}
-                className="bg-gray-800 border-gray-600 text-gray-100 pr-10"
+                className="bg-card border-border text-foreground pr-10"
                 autoComplete="new-password"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 aria-label={showConfirm ? "Passwort verbergen" : "Passwort anzeigen"}
               >
                 {showConfirm ? (

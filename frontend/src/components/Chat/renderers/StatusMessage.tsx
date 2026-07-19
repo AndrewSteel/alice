@@ -9,7 +9,7 @@ interface StatusMessageProps {
 export function StatusMessage({ message }: StatusMessageProps) {
   return (
     <div className="px-4 py-1">
-      <p className="text-[13px] text-gray-500 italic">{message.content}</p>
+      <p className="text-[13px] text-muted-foreground italic">{message.content}</p>
     </div>
   );
 }

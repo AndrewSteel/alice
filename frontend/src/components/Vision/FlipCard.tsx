@@ -64,8 +64,8 @@ const HIDDEN_META_KEYS = new Set([
 function MetadataRow({ label, value }: { label: string; value: unknown }) {
   if (value === null || value === undefined || value === "") return null;
   return (
-    <div className="flex justify-between gap-2 text-xs text-gray-300 py-0.5">
-      <span className="text-gray-500 shrink-0">{label}</span>
+    <div className="flex justify-between gap-2 text-xs text-foreground py-0.5">
+      <span className="text-muted-foreground shrink-0">{label}</span>
       <span className="text-right truncate">{formatMetaValue(value)}</span>
     </div>
   );
@@ -112,13 +112,13 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
       >
         {/* ── Front face ── */}
         <div
-          className="relative flex flex-col bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer"
+          className="relative flex flex-col bg-card border border-border rounded-lg overflow-hidden cursor-pointer"
           style={{ backfaceVisibility: "hidden" }}
           onClick={() => setFace("back")}
         >
           {/* Filename header */}
-          <div className="px-2 py-1.5 bg-gray-900 border-b border-gray-700">
-            <p className="text-xs text-gray-300 font-medium truncate" title={result.filename}>
+          <div className="px-2 py-1.5 bg-background border-b border-border">
+            <p className="text-xs text-foreground font-medium truncate" title={result.filename}>
               {result.filename || "Unbekannt"}
             </p>
           </div>
@@ -133,30 +133,30 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
           </div>
 
           {/* Metadata bar */}
-          <div className="px-2 py-1 bg-gray-850 border-t border-gray-700 text-xs text-gray-400 truncate">
+          <div className="px-2 py-1 bg-card border-t border-border text-xs text-muted-foreground truncate">
             {Object.entries(metaLabels)
               .filter(([k]) => result.metadata[k])
               .slice(0, 2)
               .map(([k, label]) => (
                 <span key={k} className="mr-2">
-                  <span className="text-gray-600">{label}: </span>
+                  <span className="text-muted-foreground">{label}: </span>
                   {formatMetaValue(result.metadata[k])}
                 </span>
               ))}
             {!Object.keys(metaLabels).some((k) => result.metadata[k]) && (
-              <span className="text-gray-600">{result.document_type}</span>
+              <span className="text-muted-foreground">{result.document_type}</span>
             )}
           </div>
 
           {/* Icon bar */}
           <div
-            className="flex items-center gap-1 px-2 py-1 bg-gray-900 border-t border-gray-700"
+            className="flex items-center gap-1 px-2 py-1 bg-background border-t border-border"
             onClick={(e) => e.stopPropagation()}
           >
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-gray-400 hover:text-gray-100"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
               title="Zusammenfassung"
               onClick={() => setFace("summary")}
             >
@@ -167,7 +167,7 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
 
         {/* ── Back face (and Summary) — shown when flipped ── */}
         <div
-          className="absolute inset-0 flex flex-col bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer"
+          className="absolute inset-0 flex flex-col bg-card border border-border rounded-lg overflow-hidden cursor-pointer"
           style={{
             backfaceVisibility: "hidden",
             transform: "rotateY(180deg)",
@@ -176,21 +176,21 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
         >
           {face === "summary" ? (
             <>
-              <div className="px-2 py-1.5 bg-gray-900 border-b border-gray-700">
-                <p className="text-xs text-gray-400 font-medium">Zusammenfassung</p>
+              <div className="px-2 py-1.5 bg-background border-b border-border">
+                <p className="text-xs text-muted-foreground font-medium">Zusammenfassung</p>
               </div>
               <div className="flex-1 overflow-y-auto p-3">
                 {result.summary ? (
-                  <p className="text-xs text-gray-300 leading-relaxed">{result.summary}</p>
+                  <p className="text-xs text-foreground leading-relaxed">{result.summary}</p>
                 ) : (
-                  <p className="text-xs text-gray-600 italic">Keine Zusammenfassung verfügbar.</p>
+                  <p className="text-xs text-muted-foreground italic">Keine Zusammenfassung verfügbar.</p>
                 )}
               </div>
             </>
           ) : (
             <>
-              <div className="px-2 py-1.5 bg-gray-900 border-b border-gray-700">
-                <p className="text-xs text-gray-400 font-medium">Details</p>
+              <div className="px-2 py-1.5 bg-background border-b border-border">
+                <p className="text-xs text-muted-foreground font-medium">Details</p>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-0.5">
                 <MetadataRow label="Typ" value={result.document_type} />

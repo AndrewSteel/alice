@@ -90,8 +90,8 @@ interface ServiceLinksProps {
 
 export function ServiceLinks({ onLinkClick }: ServiceLinksProps) {
   return (
-    <div className="border-t border-gray-700 px-3 py-3">
-      <p className="px-1 mb-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+    <div className="border-t border-border px-3 py-3">
+      <p className="px-1 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
         Services
       </p>
       <nav aria-label="Externe Services" className="space-y-0.5">
@@ -105,13 +105,13 @@ export function ServiceLinks({ onLinkClick }: ServiceLinksProps) {
               rel="noopener noreferrer"
               aria-label={service.label}
               onClick={onLinkClick}
-              className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-gray-100 transition-colors group"
+              className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-foreground transition-colors group"
             >
               <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="truncate flex-1">{service.label}</span>
               {service.external && (
                 <ExternalLink
-                  className="h-3 w-3 shrink-0 text-gray-600 group-hover:text-gray-400 transition-colors"
+                  className="h-3 w-3 shrink-0 text-muted-foreground group-hover:text-muted-foreground transition-colors"
                   aria-hidden="true"
                 />
               )}

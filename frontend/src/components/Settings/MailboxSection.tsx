@@ -73,10 +73,10 @@ export function MailboxSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Skeleton className="h-7 w-40 bg-gray-700" />
-          <Skeleton className="h-9 w-44 bg-gray-700" />
+          <Skeleton className="h-7 w-40 bg-muted" />
+          <Skeleton className="h-9 w-44 bg-muted" />
         </div>
-        {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full bg-gray-700" />)}
+        {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full bg-muted" />)}
       </div>
     );
   }
@@ -104,11 +104,11 @@ export function MailboxSection() {
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">
+        <h2 className="text-lg font-semibold text-foreground">
           {isAdmin ? "Alle Postfächer" : "Meine Postfächer"}
         </h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => reload()} className="text-gray-400 hover:text-gray-100"
+          <Button variant="ghost" size="icon" onClick={() => reload()} className="text-muted-foreground hover:text-foreground"
             title="Aktualisieren">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -121,25 +121,25 @@ export function MailboxSection() {
       </div>
 
       {mailboxes.length === 0 ? (
-        <div className="rounded-lg border border-gray-700 bg-gray-800 p-10 text-center">
-          <Mail className="h-10 w-10 text-gray-600 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">Noch kein Postfach konfiguriert.</p>
-          <p className="text-sm text-gray-500 mt-1">
+        <div className="rounded-lg border border-border bg-card p-10 text-center">
+          <Mail className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground font-medium">Noch kein Postfach konfiguriert.</p>
+          <p className="text-sm text-muted-foreground mt-1">
             Füge ein IMAP-Postfach hinzu, damit Alice deine Mails indexiert.
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-gray-700 overflow-hidden">
+        <div className="rounded-lg border border-border overflow-hidden">
           <Table>
-            <TableHeader className="bg-gray-800">
-              <TableRow className="border-gray-700 hover:bg-transparent">
-                <TableHead className="text-gray-400">Anzeigename</TableHead>
-                <TableHead className="text-gray-400">Host</TableHead>
-                {isAdmin && <TableHead className="text-gray-400">Besitzer</TableHead>}
-                <TableHead className="text-gray-400">Status</TableHead>
-                <TableHead className="text-gray-400 text-right">Mails</TableHead>
-                <TableHead className="text-gray-400">Zugriff</TableHead>
-                <TableHead className="text-gray-400 text-right">Aktionen</TableHead>
+            <TableHeader className="bg-card">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-muted-foreground">Anzeigename</TableHead>
+                <TableHead className="text-muted-foreground">Host</TableHead>
+                {isAdmin && <TableHead className="text-muted-foreground">Besitzer</TableHead>}
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-muted-foreground text-right">Mails</TableHead>
+                <TableHead className="text-muted-foreground">Zugriff</TableHead>
+                <TableHead className="text-muted-foreground text-right">Aktionen</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -147,13 +147,13 @@ export function MailboxSection() {
                 const isOwner = mb.owner_id === user?.id;
                 const canManage = isOwner || isAdmin;
                 return (
-                  <TableRow key={mb.id} className="border-gray-700 hover:bg-gray-800/50">
-                    <TableCell className="text-gray-100 font-medium">{mb.display_name}</TableCell>
-                    <TableCell className="text-gray-400 text-sm font-mono">
+                  <TableRow key={mb.id} className="border-border hover:bg-accent/50">
+                    <TableCell className="text-foreground font-medium">{mb.display_name}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm font-mono">
                       {canManage ? `${mb.imap_host}:${mb.imap_port}` : "••••••••"}
                     </TableCell>
                     {isAdmin && (
-                      <TableCell className="text-gray-400 text-sm">{mb.owner_name ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{mb.owner_name ?? "—"}</TableCell>
                     )}
                     <TableCell>
                       <div className="space-y-1">
@@ -165,8 +165,8 @@ export function MailboxSection() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm text-right">{mb.mails_indexed}</TableCell>
-                    <TableCell className="text-gray-500 text-sm">
+                    <TableCell className="text-muted-foreground text-sm text-right">{mb.mails_indexed}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       {(mb.access_users ?? []).length === 0
                         ? "nur Eigentümer"
                         : (mb.access_users ?? []).map((u) => u.display_name).join(", ")}
@@ -175,19 +175,19 @@ export function MailboxSection() {
                       <div className="flex items-center justify-end gap-1">
                         {isOwner && (
                           <Button variant="ghost" size="icon" onClick={() => setAccessTarget(mb)}
-                            className="h-8 w-8 text-gray-400 hover:text-gray-100" title="Zugriffsrechte">
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Zugriffsrechte">
                             <Users className="h-4 w-4" />
                           </Button>
                         )}
                         {isOwner && (
                           <Button variant="ghost" size="icon" onClick={() => setEditTarget(mb)}
-                            className="h-8 w-8 text-gray-400 hover:text-gray-100" title="Bearbeiten">
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Bearbeiten">
                             <Pencil className="h-4 w-4" />
                           </Button>
                         )}
                         {canManage && (
                           <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(mb)}
-                            className="h-8 w-8 text-gray-400 hover:text-red-400" title="Löschen">
+                            className="h-8 w-8 text-muted-foreground hover:text-red-400" title="Löschen">
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         )}

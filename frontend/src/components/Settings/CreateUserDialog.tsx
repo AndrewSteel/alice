@@ -109,10 +109,10 @@ export function CreateUserDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Neuer Nutzer</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Ein Einmal-Passwort wird generiert und per E-Mail an den neuen
             Nutzer gesendet.
           </DialogDescription>
@@ -122,7 +122,7 @@ export function CreateUserDialog({
           {/* --- Basis-Daten --- */}
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="create-username" className="text-gray-300">
+              <Label htmlFor="create-username" className="text-foreground">
                 Benutzername <span className="text-red-400">*</span>
               </Label>
               <Input
@@ -130,7 +130,7 @@ export function CreateUserDialog({
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={isSubmitting}
-                className="bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500"
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
                 placeholder="z.B. maria"
                 autoComplete="off"
                 required
@@ -138,7 +138,7 @@ export function CreateUserDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="create-email" className="text-gray-300">
+              <Label htmlFor="create-email" className="text-foreground">
                 E-Mail-Adresse <span className="text-red-400">*</span>
               </Label>
               <Input
@@ -147,7 +147,7 @@ export function CreateUserDialog({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isSubmitting}
-                className={`bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500 ${
+                className={`bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 ${
                   email.trim() && !isEmailValid ? "border-red-500" : ""
                 }`}
                 placeholder="nutzer@example.com"
@@ -162,22 +162,22 @@ export function CreateUserDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="create-role" className="text-gray-300">
+              <Label htmlFor="create-role" className="text-foreground">
                 Systemrolle <span className="text-red-400">*</span>
               </Label>
               <Select value={role} onValueChange={setRole} disabled={isSubmitting}>
                 <SelectTrigger
                   id="create-role"
-                  className="bg-gray-700 border-gray-600 text-gray-100"
+                  className="bg-muted border-border text-foreground"
                 >
                   <SelectValue placeholder="Rolle waehlen" />
                 </SelectTrigger>
-                <SelectContent className="bg-gray-800 border-gray-700 text-gray-100">
+                <SelectContent className="bg-card border-border text-foreground">
                   {ROLES.map((r) => (
                     <SelectItem
                       key={r}
                       value={r}
-                      className="focus:bg-gray-700 focus:text-gray-100"
+                      className="focus:bg-accent focus:text-foreground"
                     >
                       {r}
                     </SelectItem>
@@ -187,17 +187,17 @@ export function CreateUserDialog({
             </div>
           </div>
 
-          <Separator className="bg-gray-700" />
+          <Separator className="bg-muted" />
 
           {/* --- Profil-Daten (optional) --- */}
           <div className="space-y-3">
-            <p className="text-sm font-medium text-gray-300">
+            <p className="text-sm font-medium text-foreground">
               Profil (optional)
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="create-name" className="text-gray-400 text-sm">
+                <Label htmlFor="create-name" className="text-muted-foreground text-sm">
                   Name
                 </Label>
                 <Input
@@ -205,7 +205,7 @@ export function CreateUserDialog({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={isSubmitting}
-                  className="bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500"
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
                   placeholder="z.B. Maria"
                   autoComplete="off"
                 />
@@ -214,7 +214,7 @@ export function CreateUserDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="create-rolle"
-                  className="text-gray-400 text-sm"
+                  className="text-muted-foreground text-sm"
                 >
                   Rolle (Beschreibung)
                 </Label>
@@ -223,7 +223,7 @@ export function CreateUserDialog({
                   value={rolle}
                   onChange={(e) => setRolle(e.target.value)}
                   disabled={isSubmitting}
-                  className="bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500"
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
                   placeholder="z.B. Mutter"
                   autoComplete="off"
                 />
@@ -234,7 +234,7 @@ export function CreateUserDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="create-anrede"
-                  className="text-gray-400 text-sm"
+                  className="text-muted-foreground text-sm"
                 >
                   Anrede
                 </Label>
@@ -245,16 +245,16 @@ export function CreateUserDialog({
                 >
                   <SelectTrigger
                     id="create-anrede"
-                    className="bg-gray-700 border-gray-600 text-gray-100"
+                    className="bg-muted border-border text-foreground"
                   >
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-700 text-gray-100">
+                  <SelectContent className="bg-card border-border text-foreground">
                     {ANREDE_OPTIONS.map((a) => (
                       <SelectItem
                         key={a}
                         value={a}
-                        className="focus:bg-gray-700 focus:text-gray-100"
+                        className="focus:bg-accent focus:text-foreground"
                       >
                         {a}
                       </SelectItem>
@@ -266,7 +266,7 @@ export function CreateUserDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="create-sprache"
-                  className="text-gray-400 text-sm"
+                  className="text-muted-foreground text-sm"
                 >
                   Sprache
                 </Label>
@@ -277,16 +277,16 @@ export function CreateUserDialog({
                 >
                   <SelectTrigger
                     id="create-sprache"
-                    className="bg-gray-700 border-gray-600 text-gray-100"
+                    className="bg-muted border-border text-foreground"
                   >
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-700 text-gray-100">
+                  <SelectContent className="bg-card border-border text-foreground">
                     {SPRACHE_OPTIONS.map((s) => (
                       <SelectItem
                         key={s}
                         value={s}
-                        className="focus:bg-gray-700 focus:text-gray-100"
+                        className="focus:bg-accent focus:text-foreground"
                       >
                         {s}
                       </SelectItem>
@@ -298,7 +298,7 @@ export function CreateUserDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="create-detailgrad"
-                  className="text-gray-400 text-sm"
+                  className="text-muted-foreground text-sm"
                 >
                   Detailgrad
                 </Label>
@@ -309,16 +309,16 @@ export function CreateUserDialog({
                 >
                   <SelectTrigger
                     id="create-detailgrad"
-                    className="bg-gray-700 border-gray-600 text-gray-100"
+                    className="bg-muted border-border text-foreground"
                   >
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-700 text-gray-100">
+                  <SelectContent className="bg-card border-border text-foreground">
                     {DETAILGRAD_OPTIONS.map((d) => (
                       <SelectItem
                         key={d}
                         value={d}
-                        className="focus:bg-gray-700 focus:text-gray-100"
+                        className="focus:bg-accent focus:text-foreground"
                       >
                         {d}
                       </SelectItem>
@@ -341,7 +341,7 @@ export function CreateUserDialog({
               variant="ghost"
               onClick={() => handleOpenChange(false)}
               disabled={isSubmitting}
-              className="text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+              className="text-foreground hover:bg-accent hover:text-foreground"
             >
               Abbrechen
             </Button>

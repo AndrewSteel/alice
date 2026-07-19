@@ -106,12 +106,12 @@ export function DmsSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Skeleton className="h-7 w-32 bg-gray-700" />
-          <Skeleton className="h-9 w-40 bg-gray-700" />
+          <Skeleton className="h-7 w-32 bg-muted" />
+          <Skeleton className="h-9 w-40 bg-muted" />
         </div>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full bg-gray-700" />
+            <Skeleton key={i} className="h-12 w-full bg-muted" />
           ))}
         </div>
       </div>
@@ -150,7 +150,7 @@ export function DmsSection() {
 
       {/* Section header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">DMS Ordner</h2>
+        <h2 className="text-lg font-semibold text-foreground">DMS Ordner</h2>
         <Button
           onClick={() => {
             setActionError(null);
@@ -166,9 +166,9 @@ export function DmsSection() {
 
       {/* Table or empty state */}
       {folders.length === 0 ? (
-        <div className="rounded-lg border border-gray-700 bg-gray-800 p-8 text-center">
-          <p className="text-gray-400">Noch keine Ordner konfiguriert.</p>
-          <p className="text-sm text-gray-500 mt-1">
+        <div className="rounded-lg border border-border bg-card p-8 text-center">
+          <p className="text-muted-foreground">Noch keine Ordner konfiguriert.</p>
+          <p className="text-sm text-muted-foreground mt-1">
             Füge einen NAS-Ordner hinzu, um das DMS zu starten.
           </p>
         </div>

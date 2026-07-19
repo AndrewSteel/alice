@@ -86,45 +86,45 @@ export function EditFolderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-md">
+      <DialogContent className="bg-card border-border text-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Ordner bearbeiten</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Aendere die Einstellungen fuer diesen Ordner.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-path" className="text-gray-300">
+            <Label htmlFor="edit-path" className="text-foreground">
               Pfad <span className="text-red-400">*</span>
             </Label>
             <Input
               id="edit-path"
               value={path}
               onChange={(e) => setPath(e.target.value)}
-              className="bg-gray-900 border-gray-600 text-gray-100 font-mono text-sm"
+              className="bg-background border-border text-foreground font-mono text-sm"
               maxLength={500}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-type" className="text-gray-300">
+            <Label htmlFor="edit-type" className="text-foreground">
               Dokumenttyp-Hint
             </Label>
             <Select value={suggestedType} onValueChange={setSuggestedType}>
               <SelectTrigger
                 id="edit-type"
-                className="bg-gray-900 border-gray-600 text-gray-100"
+                className="bg-background border-border text-foreground"
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-700">
-                <SelectItem value={AUTO_VALUE} className="text-gray-300 focus:bg-gray-700 focus:text-gray-100">
+              <SelectContent className="bg-card border-border">
+                <SelectItem value={AUTO_VALUE} className="text-foreground focus:bg-accent focus:text-foreground">
                   Automatisch (LLM)
                 </SelectItem>
                 {SUGGESTED_TYPES.map((t) => (
-                  <SelectItem key={t} value={t} className="text-gray-300 focus:bg-gray-700 focus:text-gray-100">
+                  <SelectItem key={t} value={t} className="text-foreground focus:bg-accent focus:text-foreground">
                     {t}
                   </SelectItem>
                 ))}
@@ -133,7 +133,7 @@ export function EditFolderDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-desc" className="text-gray-300">
+            <Label htmlFor="edit-desc" className="text-foreground">
               Beschreibung
             </Label>
             <Input
@@ -141,7 +141,7 @@ export function EditFolderDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="z.B. Rechnungen 2026"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500"
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
 
@@ -155,7 +155,7 @@ export function EditFolderDialog({
               variant="ghost"
               onClick={() => onOpenChange(false)}
               disabled={submitting}
-              className="text-gray-400 hover:text-gray-100"
+              className="text-muted-foreground hover:text-foreground"
             >
               Abbrechen
             </Button>

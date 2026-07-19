@@ -130,7 +130,7 @@ export function InputArea({
 
   return (
     <>
-      <div className="bg-gray-800 px-4 pb-4 pt-2">
+      <div className="bg-card px-4 pb-4 pt-2">
         <div className="mx-auto flex w-full max-w-[760px] items-end gap-2">
           <Textarea
             ref={textareaRef}
@@ -143,7 +143,7 @@ export function InputArea({
             disabled={disabled || isStreaming}
             rows={1}
             style={{ maxHeight: MAX_TEXTAREA_HEIGHT_PX }}
-            className="flex-1 resize-none bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-400 focus-visible:ring-gray-500 min-h-[44px] overflow-y-auto"
+            className="flex-1 resize-none bg-muted border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring min-h-[44px] overflow-y-auto"
             aria-label="Nachricht eingeben"
           />
 
@@ -157,7 +157,7 @@ export function InputArea({
             className={
               voice1.isRecording
                 ? "h-[44px] w-[44px] shrink-0 bg-red-600 text-white hover:bg-red-700 relative animate-pulse"
-                : "h-[44px] w-[44px] shrink-0 bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:bg-gray-700 disabled:text-gray-500"
+                : "h-[44px] w-[44px] shrink-0 bg-muted text-foreground hover:bg-accent disabled:bg-muted disabled:text-muted-foreground"
             }
             aria-label={
               voice1.isRecording
@@ -182,7 +182,7 @@ export function InputArea({
             disabled={voiceDisabled}
             size="icon"
             variant="ghost"
-            className="h-[44px] w-[44px] shrink-0 bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:bg-gray-700 disabled:text-gray-500"
+            className="h-[44px] w-[44px] shrink-0 bg-muted text-foreground hover:bg-accent disabled:bg-muted disabled:text-muted-foreground"
             aria-label="Sprachgespräch starten"
           >
             <AudioLines className="h-4 w-4" />
@@ -206,7 +206,7 @@ export function InputArea({
               onClick={handleSend}
               disabled={!canSend}
               size="icon"
-              className="h-[44px] w-[44px] shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:text-gray-400"
+              className="h-[44px] w-[44px] shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-muted disabled:text-muted-foreground"
               aria-label="Nachricht senden"
             >
               <Send className="h-4 w-4" />

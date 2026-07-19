@@ -51,18 +51,18 @@ export function ChangePasswordForm({
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-900 px-4">
+    <div className="flex items-center justify-center min-h-screen bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center">
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
             <Bot className="h-8 w-8 text-blue-500" aria-hidden />
-            <span className="text-2xl font-bold text-gray-100">Alice</span>
+            <span className="text-2xl font-bold text-foreground">Alice</span>
           </div>
 
           <div className="flex items-center gap-2 mb-6">
             <Lock className="h-5 w-5 text-amber-400" aria-hidden />
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Bitte aendere dein Passwort, um fortzufahren.
             </p>
           </div>
@@ -74,7 +74,7 @@ export function ChangePasswordForm({
             noValidate
           >
             <div className="space-y-1.5">
-              <Label htmlFor="new-password" className="text-gray-300">
+              <Label htmlFor="new-password" className="text-foreground">
                 Neues Passwort
               </Label>
               <div className="relative">
@@ -85,7 +85,7 @@ export function ChangePasswordForm({
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   disabled={isSubmitting}
-                  className={`bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500 pr-10 ${
+                  className={`bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 pr-10 ${
                     isTooShort ? "border-red-500" : ""
                   }`}
                   placeholder="Mindestens 8 Zeichen"
@@ -95,7 +95,7 @@ export function ChangePasswordForm({
                 <button
                   type="button"
                   onClick={() => setShowNew((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label={
                     showNew ? "Passwort verbergen" : "Passwort anzeigen"
                   }
@@ -115,7 +115,7 @@ export function ChangePasswordForm({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="confirm-password" className="text-gray-300">
+              <Label htmlFor="confirm-password" className="text-foreground">
                 Passwort wiederholen
               </Label>
               <div className="relative">
@@ -126,7 +126,7 @@ export function ChangePasswordForm({
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={isSubmitting}
-                  className={`bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-blue-500 pr-10 ${
+                  className={`bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 pr-10 ${
                     !passwordsMatch ? "border-red-500" : ""
                   }`}
                   placeholder="Passwort wiederholen"
@@ -135,7 +135,7 @@ export function ChangePasswordForm({
                 <button
                   type="button"
                   onClick={() => setShowConfirm((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label={
                     showConfirm ? "Passwort verbergen" : "Passwort anzeigen"
                   }
