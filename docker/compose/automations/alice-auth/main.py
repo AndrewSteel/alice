@@ -13,6 +13,7 @@ Endpoints:
   POST /auth/hash-password                 - Utility: hash a plaintext password (admin use only)
   POST /auth/change-password               - Change password (required when must_change_password=TRUE)
 
+  GET   /auth/permissions                  - Read own effective system permissions (any authenticated user)
   GET   /auth/profile                      - Read own profile (any authenticated user)
   PATCH /auth/profile                      - Update own facts + preferences (any authenticated user)
   PATCH /auth/email                        - Update own email address (any authenticated user)
@@ -717,6 +718,66 @@ async def change_password(
         raise
     except Exception as exc:
         logger.error("Change-password error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Effective system permissions (self-service, any authenticated user)
+# ---------------------------------------------------------------------------
+# All boolean flags on alice.permissions_system, in schema order. The endpoint
+# returns exactly these keys; missing/absent rows fall back to all-false.
+_SYSTEM_PERMISSION_FLAGS: tuple[str, ...] = (
+    "can_manage_users",
+    "can_manage_devices",
+    "can_view_logs",
+    "can_manage_workflows",
+    "can_access_api_docs",
+    "can_manage_memory",
+    "can_delete_memory",
+    "can_manage_dms_folders",
+    "can_view_chat_archive",
+    "can_manage_mailboxes",
+)
+
+
+@app.get("/auth/permissions")
+async def get_permissions(authorization: str | None = Header(default=None)):
+    """
+    Return the effective alice.permissions_system flags for the authenticated
+    user as JSON (all 10 boolean flags). Requires a valid Bearer JWT.
+    If no permission row exists (should not happen — init_user_permissions runs
+    on login/creation — but handled as a fallback), all flags default to false.
+    """
+    payload = _require_auth(authorization)
+    user_id = payload["user_id"]
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(_SYSTEM_PERMISSION_FLAGS)}
+                FROM alice.permissions_system
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+
+        # Fallback: no row → all flags false rather than erroring.
+        return {flag: bool(row[flag]) if row else False for flag in _SYSTEM_PERMISSION_FLAGS}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("get_permissions error: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
