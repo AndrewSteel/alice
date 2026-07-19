@@ -122,6 +122,8 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 Chat sessions are stored for 30 days with auto-generated titles. Admins can browse all user sessions via the Settings → Chat Archive tab.
 
+The system prompt (`memory.build_system_prompt`) always includes the current date, weekday, and time (Europe/Berlin), so the LLM doesn't have to guess it for time-based queries.
+
 ---
 
 ## n8n Workflows

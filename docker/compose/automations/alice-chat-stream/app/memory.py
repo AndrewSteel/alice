@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import asyncpg
 import httpx
@@ -28,6 +30,16 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
 
 WORKING_MEMORY_LIMIT = 20
 LONG_TERM_MEMORY_LIMIT = 5
+
+LOCAL_TZ = ZoneInfo("Europe/Berlin")
+_WEEKDAYS_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
+
+def _current_datetime_line() -> str:
+    """Render the current local date/time so the LLM doesn't have to guess it."""
+    now = datetime.now(LOCAL_TZ)
+    weekday = _WEEKDAYS_DE[now.weekday()]
+    return f"Aktuelles Datum und Uhrzeit: {weekday}, {now.strftime('%d.%m.%Y %H:%M')} Uhr."
 
 _pool: asyncpg.Pool | None = None
 
@@ -150,6 +162,7 @@ def build_system_prompt(
         "- remember: Speichert dauerhafte Fakten oder Präferenzen über den Nutzer.",
         "- recall: Sucht semantisch in vergangenen Gesprächen.",
         "",
+        _current_datetime_line(),
     ]
 
     if name:
