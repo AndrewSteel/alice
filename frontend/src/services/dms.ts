@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "./auth";
+import { fetchWithAuth } from "./fetchWithAuth";
 
 const DMS_FOLDERS_ENDPOINT = "/api/webhook/dms/folders";
 
@@ -33,28 +33,6 @@ export interface UpdateFolderInput {
   enabled?: boolean;
 }
 
-// ---------- Helpers ----------
-
-function authHeaders(): HeadersInit {
-  const token = getToken();
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-function handleAuthError(res: Response): void {
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
-  }
-}
-
 // ---------- API Functions ----------
 
 /**
@@ -63,15 +41,12 @@ function handleAuthError(res: Response): void {
 export async function getFolders(): Promise<DmsFolder[]> {
   let res: Response;
   try {
-    res = await fetch(DMS_FOLDERS_ENDPOINT, {
+    res = await fetchWithAuth(DMS_FOLDERS_ENDPOINT, {
       method: "GET",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Ordner konnten nicht geladen werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -107,16 +82,13 @@ export async function getFolders(): Promise<DmsFolder[]> {
 export async function createFolder(data: CreateFolderInput): Promise<DmsFolder> {
   let res: Response;
   try {
-    res = await fetch(DMS_FOLDERS_ENDPOINT, {
+    res = await fetchWithAuth(DMS_FOLDERS_ENDPOINT, {
       method: "POST",
-      headers: authHeaders(),
       body: JSON.stringify(data),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Ordner konnte nicht erstellt werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -147,16 +119,13 @@ export async function updateFolder(
 ): Promise<DmsFolder> {
   let res: Response;
   try {
-    res = await fetch(DMS_FOLDERS_ENDPOINT, {
+    res = await fetchWithAuth(DMS_FOLDERS_ENDPOINT, {
       method: "PUT",
-      headers: authHeaders(),
       body: JSON.stringify({ id, ...data }),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Ordner konnte nicht aktualisiert werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -188,16 +157,13 @@ export async function updateFolder(
 export async function reorderFolders(order: ReorderEntry[]): Promise<DmsFolder[]> {
   let res: Response;
   try {
-    res = await fetch(`${DMS_FOLDERS_ENDPOINT}/reorder`, {
+    res = await fetchWithAuth(`${DMS_FOLDERS_ENDPOINT}/reorder`, {
       method: "PATCH",
-      headers: authHeaders(),
       body: JSON.stringify({ order }),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Reihenfolge konnte nicht gespeichert werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -233,15 +199,12 @@ export async function reorderFolders(order: ReorderEntry[]): Promise<DmsFolder[]
 export async function deleteFolder(id: number): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${DMS_FOLDERS_ENDPOINT}?id=${encodeURIComponent(id)}`, {
+    res = await fetchWithAuth(`${DMS_FOLDERS_ENDPOINT}?id=${encodeURIComponent(id)}`, {
       method: "DELETE",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Ordner konnte nicht geloescht werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
