@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "./auth";
+import { fetchWithAuth } from "./fetchWithAuth";
 
 const ADMIN_BASE = "/api/auth/admin";
 
@@ -31,28 +31,6 @@ export interface CreateUserInput {
   detailgrad?: string;
 }
 
-// ---------- Helpers ----------
-
-function authHeaders(): HeadersInit {
-  const token = getToken();
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-function handleAuthError(res: Response): void {
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
-  }
-}
-
 // ---------- API Functions ----------
 
 /**
@@ -61,15 +39,12 @@ function handleAuthError(res: Response): void {
 export async function getUsers(): Promise<AdminUser[]> {
   let res: Response;
   try {
-    res = await fetch(`${ADMIN_BASE}/users`, {
+    res = await fetchWithAuth(`${ADMIN_BASE}/users`, {
       method: "GET",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Nutzer konnten nicht geladen werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -89,16 +64,13 @@ export async function getUsers(): Promise<AdminUser[]> {
 export async function createUser(input: CreateUserInput): Promise<AdminUser> {
   let res: Response;
   try {
-    res = await fetch(`${ADMIN_BASE}/users`, {
+    res = await fetchWithAuth(`${ADMIN_BASE}/users`, {
       method: "POST",
-      headers: authHeaders(),
       body: JSON.stringify(input),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Nutzer konnte nicht angelegt werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -135,15 +107,12 @@ export async function createUser(input: CreateUserInput): Promise<AdminUser> {
 export async function resetOtp(userId: string): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${ADMIN_BASE}/users/${userId}/reset-otp`, {
+    res = await fetchWithAuth(`${ADMIN_BASE}/users/${userId}/reset-otp`, {
       method: "POST",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- OTP konnte nicht zurueckgesetzt werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -176,9 +145,8 @@ export async function updateUserStatus(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${ADMIN_BASE}/users/${userId}/status`, {
+    res = await fetchWithAuth(`${ADMIN_BASE}/users/${userId}/status`, {
       method: "PATCH",
-      headers: authHeaders(),
       body: JSON.stringify({ is_active: isActive }),
     });
   } catch {
@@ -186,8 +154,6 @@ export async function updateUserStatus(
       "Netzwerkfehler -- Status konnte nicht geaendert werden."
     );
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -210,15 +176,12 @@ export async function updateUserStatus(
 export async function deleteUser(userId: string): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${ADMIN_BASE}/users/${userId}`, {
+    res = await fetchWithAuth(`${ADMIN_BASE}/users/${userId}`, {
       method: "DELETE",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Nutzer konnte nicht geloescht werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -241,16 +204,13 @@ export async function deleteUser(userId: string): Promise<void> {
 export async function setCredentials(userId: string, email: string): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${ADMIN_BASE}/users/${userId}/set-credentials`, {
+    res = await fetchWithAuth(`${ADMIN_BASE}/users/${userId}/set-credentials`, {
       method: "PATCH",
-      headers: authHeaders(),
       body: JSON.stringify({ email }),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Zugangsdaten konnten nicht gesetzt werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -281,30 +241,14 @@ export async function setCredentials(userId: string, email: string): Promise<voi
 export async function changePassword(
   newPassword: string
 ): Promise<void> {
-  const token = getToken();
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-
   let res: Response;
   try {
-    res = await fetch("/api/auth/change-password", {
+    res = await fetchWithAuth("/api/auth/change-password", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
       body: JSON.stringify({ new_password: newPassword }),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Passwort konnte nicht geaendert werden.");
-  }
-
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
   }
 
   if (res.status === 400) {

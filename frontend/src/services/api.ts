@@ -1,4 +1,5 @@
 import { clearToken, getToken } from "./auth";
+import { fetchWithAuth } from "./fetchWithAuth";
 
 const CHAT_ENDPOINT = "/api/webhook/v1/chat/completions";
 const SESSIONS_ENDPOINT = "/api/webhook/alice/sessions";
@@ -29,28 +30,6 @@ export interface MessageResponse {
   msg_type?: string;
 }
 
-// ---------- Helper ----------
-
-function authHeaders(): HeadersInit {
-  const token = getToken();
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-function handleAuthError(res: Response): void {
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
-  }
-}
-
 // ---------- Session API ----------
 
 /**
@@ -59,15 +38,12 @@ function handleAuthError(res: Response): void {
 export async function fetchSessions(): Promise<SessionResponse[]> {
   let res: Response;
   try {
-    res = await fetch(SESSIONS_ENDPOINT, {
+    res = await fetchWithAuth(SESSIONS_ENDPOINT, {
       method: "GET",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Sessions konnten nicht geladen werden.");
   }
-
-  handleAuthError(res);
 
   if (!res.ok) {
     throw new Error(`Serverfehler (${res.status}) beim Laden der Sessions.`);
@@ -94,15 +70,12 @@ export async function fetchSessionMessages(
 ): Promise<MessageResponse[]> {
   let res: Response;
   try {
-    res = await fetch(`${SESSIONS_ENDPOINT}/messages?session_id=${encodeURIComponent(sessionId)}`, {
+    res = await fetchWithAuth(`${SESSIONS_ENDPOINT}/messages?session_id=${encodeURIComponent(sessionId)}`, {
       method: "GET",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Nachrichten konnten nicht geladen werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Kein Zugriff auf diese Session.");
@@ -134,16 +107,13 @@ export async function renameSessionApi(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(SESSIONS_ENDPOINT, {
+    res = await fetchWithAuth(SESSIONS_ENDPOINT, {
       method: "PATCH",
-      headers: authHeaders(),
       body: JSON.stringify({ session_id: sessionId, title }),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Umbenennen fehlgeschlagen.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Kein Zugriff auf diese Session.");
@@ -160,15 +130,12 @@ export async function renameSessionApi(
 export async function deleteSessionApi(sessionId: string): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${SESSIONS_ENDPOINT}?session_id=${encodeURIComponent(sessionId)}`, {
+    res = await fetchWithAuth(`${SESSIONS_ENDPOINT}?session_id=${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Loeschen fehlgeschlagen.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Kein Zugriff auf diese Session.");
@@ -214,14 +181,13 @@ export async function fetchAdminSessions(
   if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
   let res: Response;
   try {
-    res = await fetch(
+    res = await fetchWithAuth(
       `${STREAM_API_URL}/admin/sessions?page=${page}&limit=${limit}`,
-      { method: "GET", headers: authHeaders() }
+      { method: "GET" }
     );
   } catch {
     throw new Error("Netzwerkfehler beim Laden des Archivs.");
   }
-  handleAuthError(res);
   if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
   return res.json();
 }
@@ -232,14 +198,13 @@ export async function fetchAdminSessionMessages(
   if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
   let res: Response;
   try {
-    res = await fetch(
+    res = await fetchWithAuth(
       `${STREAM_API_URL}/admin/sessions/${encodeURIComponent(sessionId)}`,
-      { method: "GET", headers: authHeaders() }
+      { method: "GET" }
     );
   } catch {
     throw new Error("Netzwerkfehler beim Laden der Session.");
   }
-  handleAuthError(res);
   if (res.status === 404) throw new Error("404: Session nicht gefunden");
   if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
   return res.json();
@@ -249,14 +214,13 @@ export async function deleteAdminSession(sessionId: string): Promise<void> {
   if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
   let res: Response;
   try {
-    res = await fetch(
+    res = await fetchWithAuth(
       `${STREAM_API_URL}/admin/sessions/${encodeURIComponent(sessionId)}`,
-      { method: "DELETE", headers: authHeaders() }
+      { method: "DELETE" }
     );
   } catch {
     throw new Error("Netzwerkfehler beim Löschen.");
   }
-  handleAuthError(res);
   if (res.status === 404) throw new Error("404: Session nicht gefunden");
   if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
 }
@@ -287,21 +251,10 @@ export async function sendMessage(
   messages: ChatMessage[],
   sessionId: string
 ): Promise<string> {
-  const token = getToken();
-
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-
   let res: Response;
   try {
-    res = await fetch(CHAT_ENDPOINT, {
+    res = await fetchWithAuth(CHAT_ENDPOINT, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
       body: JSON.stringify({
         messages,
         session_id: sessionId,
@@ -311,12 +264,6 @@ export async function sendMessage(
     throw new Error(
       "Netzwerkfehler -- bitte pruefe deine Verbindung und versuche es erneut."
     );
-  }
-
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
   }
 
   if (res.status === 429) {
@@ -429,16 +376,18 @@ export function streamChat(
   (async () => {
     let res: Response;
     try {
-      res = await fetch(`${STREAM_API_URL}/stream/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          Accept: "text/event-stream",
+      // Wrapper builds the auth headers; the stream keeps its own 401/429
+      // handling below (suppressAuthRedirect) since it uses callbacks, not throws.
+      res = await fetchWithAuth(
+        `${STREAM_API_URL}/stream/chat`,
+        {
+          method: "POST",
+          headers: { Accept: "text/event-stream" },
+          body: JSON.stringify({ session_id: sessionId, content, ...(source ? { source } : {}) }),
+          signal: controller.signal,
         },
-        body: JSON.stringify({ session_id: sessionId, content, ...(source ? { source } : {}) }),
-        signal: controller.signal,
-      });
+        { suppressAuthRedirect: true }
+      );
     } catch (err) {
       if (aborted || (err as Error)?.name === "AbortError") return;
       callbacks.onError(

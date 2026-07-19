@@ -1,4 +1,5 @@
-import { clearToken, getToken } from "./auth";
+import { clearToken } from "./auth";
+import { fetchWithAuth } from "./fetchWithAuth";
 
 const AUTH_BASE = "/api/auth";
 
@@ -36,28 +37,6 @@ export interface VoluntaryPasswordChangeInput {
   new_password: string;
 }
 
-// ---------- Helpers ----------
-
-function authHeaders(): HeadersInit {
-  const token = getToken();
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-function handleAuthError(res: Response): void {
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
-  }
-}
-
 // ---------- API Functions ----------
 
 /**
@@ -66,15 +45,12 @@ function handleAuthError(res: Response): void {
 export async function getProfile(): Promise<ProfileData> {
   let res: Response;
   try {
-    res = await fetch(`${AUTH_BASE}/profile`, {
+    res = await fetchWithAuth(`${AUTH_BASE}/profile`, {
       method: "GET",
-      headers: authHeaders(),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Profil konnte nicht geladen werden.");
   }
-
-  handleAuthError(res);
 
   if (!res.ok) {
     throw new Error(`Serverfehler (${res.status}) beim Laden des Profils.`);
@@ -89,16 +65,13 @@ export async function getProfile(): Promise<ProfileData> {
 export async function updateProfile(input: ProfileUpdateInput): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${AUTH_BASE}/profile`, {
+    res = await fetchWithAuth(`${AUTH_BASE}/profile`, {
       method: "PATCH",
-      headers: authHeaders(),
       body: JSON.stringify(input),
     });
   } catch {
     throw new Error("Fehler beim Speichern. Bitte erneut versuchen.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 422) {
     const body = await res.json().catch(() => ({}));
@@ -116,16 +89,13 @@ export async function updateProfile(input: ProfileUpdateInput): Promise<void> {
 export async function updateEmail(input: EmailUpdateInput): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${AUTH_BASE}/email`, {
+    res = await fetchWithAuth(`${AUTH_BASE}/email`, {
       method: "PATCH",
-      headers: authHeaders(),
       body: JSON.stringify(input),
     });
   } catch {
     throw new Error("Fehler beim Speichern. Bitte erneut versuchen.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 409) {
     throw new Error("E-Mail-Adresse wird bereits verwendet");
@@ -155,11 +125,14 @@ export async function changePasswordVoluntary(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${AUTH_BASE}/change-password-voluntary`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify(input),
-    });
+    res = await fetchWithAuth(
+      `${AUTH_BASE}/change-password-voluntary`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+      { suppressAuthRedirect: true }
+    );
   } catch {
     throw new Error("Fehler beim Speichern. Bitte erneut versuchen.");
   }
