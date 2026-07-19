@@ -55,14 +55,14 @@ export function ThumbnailImage({ uuid, alt, className = "" }: ThumbnailImageProp
 
   if (error) {
     return (
-      <div className={`flex items-center justify-center bg-gray-700 ${className}`}>
-        <FileText className="w-12 h-12 text-gray-500" />
+      <div className={`flex items-center justify-center bg-muted ${className}`}>
+        <FileText className="w-12 h-12 text-muted-foreground" />
       </div>
     );
   }
 
   if (!src) {
-    return <Skeleton className={`bg-gray-700 ${className}`} />;
+    return <Skeleton className={`bg-muted ${className}`} />;
   }
 
   return (

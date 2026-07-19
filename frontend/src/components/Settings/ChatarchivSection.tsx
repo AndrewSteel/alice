@@ -93,7 +93,7 @@ interface DeleteDialogProps {
 function DeleteDialog({ open, onConfirm, onCancel }: DeleteDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700">
+      <AlertDialogContent className="bg-card border-border">
         <AlertDialogHeader>
           <AlertDialogTitle>Chat wirklich löschen?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -102,7 +102,7 @@ function DeleteDialog({ open, onConfirm, onCancel }: DeleteDialogProps) {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="border-gray-600" onClick={onCancel}>
+          <AlertDialogCancel className="border-border" onClick={onCancel}>
             Abbrechen
           </AlertDialogCancel>
           <AlertDialogAction
@@ -166,32 +166,32 @@ function ListView({ onSelectSession }: ListViewProps) {
 
   return (
     <div>
-      <h2 className="text-base font-semibold mb-4 text-gray-100">
+      <h2 className="text-base font-semibold mb-4 text-foreground">
         Alle Chats (letzte 30 Tage)
       </h2>
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : sessions.length === 0 ? (
-        <p className="text-sm text-gray-400 py-8 text-center">
+        <p className="text-sm text-muted-foreground py-8 text-center">
           Keine Chats gefunden.
         </p>
       ) : (
         <>
-          <div className="rounded-md border border-gray-700 overflow-hidden">
+          <div className="rounded-md border border-border overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="border-gray-700 hover:bg-transparent">
-                  <TableHead className="text-gray-400">Nutzer</TableHead>
-                  <TableHead className="text-gray-400">Datum</TableHead>
-                  <TableHead className="text-gray-400">Typ</TableHead>
-                  <TableHead className="text-gray-400">Titel</TableHead>
-                  <TableHead className="text-gray-400 text-right">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">Nutzer</TableHead>
+                  <TableHead className="text-muted-foreground">Datum</TableHead>
+                  <TableHead className="text-muted-foreground">Typ</TableHead>
+                  <TableHead className="text-muted-foreground">Titel</TableHead>
+                  <TableHead className="text-muted-foreground text-right">
                     Nachr.
                   </TableHead>
-                  <TableHead className="text-gray-400">Quelle</TableHead>
+                  <TableHead className="text-muted-foreground">Quelle</TableHead>
                   <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
@@ -199,13 +199,13 @@ function ListView({ onSelectSession }: ListViewProps) {
                 {sessions.map((s) => (
                   <TableRow
                     key={s.session_id}
-                    className="border-gray-700 hover:bg-gray-800/50 cursor-pointer"
+                    className="border-border hover:bg-accent/50 cursor-pointer"
                     onClick={() => onSelectSession(s.session_id)}
                   >
-                    <TableCell className="font-medium text-gray-100">
+                    <TableCell className="font-medium text-foreground">
                       {s.username}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm whitespace-nowrap">
+                    <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
                       {new Date(s.started_at).toLocaleString("de-DE", {
                         day: "2-digit",
                         month: "2-digit",
@@ -224,20 +224,20 @@ function ListView({ onSelectSession }: ListViewProps) {
                         {typeLabel(s.session_type)}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-gray-300 text-sm max-w-[200px] truncate">
+                    <TableCell className="text-foreground text-sm max-w-[200px] truncate">
                       {s.title ?? "—"}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm text-right">
+                    <TableCell className="text-muted-foreground text-sm text-right">
                       {s.message_count}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm">
+                    <TableCell className="text-muted-foreground text-sm">
                       {sourceLabel(s.source)}
                     </TableCell>
                     <TableCell>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-gray-500 hover:text-red-400"
+                        className="h-7 w-7 text-muted-foreground hover:text-red-400"
                         aria-label="Session löschen"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -268,7 +268,7 @@ function ListView({ onSelectSession }: ListViewProps) {
                     />
                   </PaginationItem>
                   <PaginationItem>
-                    <span className="px-4 py-2 text-sm text-gray-400">
+                    <span className="px-4 py-2 text-sm text-muted-foreground">
                       Seite {page} / {totalPages}
                     </span>
                   </PaginationItem>
@@ -339,7 +339,7 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -351,12 +351,12 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
           variant="ghost"
           size="sm"
           onClick={onBack}
-          className="mb-4 text-gray-400"
+          className="mb-4 text-muted-foreground"
         >
           <ChevronLeft className="h-4 w-4 mr-1" />
           Zurück
         </Button>
-        <p className="text-sm text-gray-400">Session nicht mehr vorhanden.</p>
+        <p className="text-sm text-muted-foreground">Session nicht mehr vorhanden.</p>
       </div>
     );
   }
@@ -374,7 +374,7 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
           variant="ghost"
           size="sm"
           onClick={onBack}
-          className="text-gray-400"
+          className="text-muted-foreground"
         >
           <ChevronLeft className="h-4 w-4 mr-1" />
           Zurück
@@ -382,7 +382,7 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
         <Button
           variant="ghost"
           size="icon"
-          className="text-gray-500 hover:text-red-400"
+          className="text-muted-foreground hover:text-red-400"
           onClick={() => setShowDelete(true)}
           aria-label="Session löschen"
         >
@@ -391,37 +391,37 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
       </div>
 
       {/* Metadata */}
-      <div className="rounded-md border border-gray-700 bg-gray-800/50 p-4 mb-4 text-sm space-y-1">
+      <div className="rounded-md border border-border bg-card/50 p-4 mb-4 text-sm space-y-1">
         <div className="flex gap-4 flex-wrap">
-          <span className="text-gray-400">
+          <span className="text-muted-foreground">
             Nutzer:{" "}
-            <span className="text-gray-200">{session.username}</span>
+            <span className="text-foreground">{session.username}</span>
           </span>
-          <span className="text-gray-400">
+          <span className="text-muted-foreground">
             Quelle:{" "}
-            <span className="text-gray-200">{sourceLabel(session.source)}</span>
+            <span className="text-foreground">{sourceLabel(session.source)}</span>
           </span>
-          <span className="text-gray-400">
+          <span className="text-muted-foreground">
             Typ:{" "}
-            <span className="text-gray-200">
+            <span className="text-foreground">
               {typeLabel(session.session_type)}
             </span>
           </span>
         </div>
-        <div className="text-gray-400">
+        <div className="text-muted-foreground">
           Start:{" "}
-          <span className="text-gray-200">
+          <span className="text-foreground">
             {new Date(session.started_at).toLocaleString("de-DE")}
           </span>
         </div>
-        <div className="text-gray-500 text-xs">
+        <div className="text-muted-foreground text-xs">
           ID: {session.session_id}
         </div>
       </div>
 
       {/* Messages */}
       {mappedMessages.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-8">
+        <p className="text-sm text-muted-foreground text-center py-8">
           Keine Nachrichten gespeichert.
         </p>
       ) : (

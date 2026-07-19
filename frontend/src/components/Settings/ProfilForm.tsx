@@ -81,15 +81,15 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
   }
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">Profildaten</CardTitle>
+        <CardTitle className="text-foreground">Profildaten</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Name */}
           <div className="space-y-2">
-            <Label htmlFor="profile-name" className="text-gray-300">
+            <Label htmlFor="profile-name" className="text-foreground">
               Name
             </Label>
             <Input
@@ -101,7 +101,7 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
               }}
               maxLength={100}
               placeholder="Dein Anzeigename"
-              className="bg-gray-800 border-gray-600 text-gray-100 placeholder:text-gray-500"
+              className="bg-card border-border text-foreground placeholder:text-muted-foreground"
             />
             {nameError && (
               <p className="text-sm text-red-400">{nameError}</p>
@@ -110,23 +110,23 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
 
           {/* Interessen */}
           <div className="space-y-2">
-            <Label className="text-gray-300">Interessen</Label>
+            <Label className="text-foreground">Interessen</Label>
             <InteressenTagInput tags={interessen} onChange={setInteressen} />
           </div>
 
           {/* Anrede */}
           <div className="space-y-2">
-            <Label htmlFor="profile-anrede" className="text-gray-300">
+            <Label htmlFor="profile-anrede" className="text-foreground">
               Anrede
             </Label>
             <Select value={anrede} onValueChange={(v) => setAnrede(v as "du" | "sie")}>
               <SelectTrigger
                 id="profile-anrede"
-                className="bg-gray-800 border-gray-600 text-gray-100"
+                className="bg-card border-border text-foreground"
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-600">
+              <SelectContent className="bg-card border-border">
                 <SelectItem value="du">Du</SelectItem>
                 <SelectItem value="sie">Sie</SelectItem>
               </SelectContent>
@@ -135,17 +135,17 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
 
           {/* Sprache */}
           <div className="space-y-2">
-            <Label htmlFor="profile-sprache" className="text-gray-300">
+            <Label htmlFor="profile-sprache" className="text-foreground">
               Sprache
             </Label>
             <Select value={sprache} onValueChange={(v) => setSprache(v as "deutsch" | "englisch")}>
               <SelectTrigger
                 id="profile-sprache"
-                className="bg-gray-800 border-gray-600 text-gray-100"
+                className="bg-card border-border text-foreground"
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-600">
+              <SelectContent className="bg-card border-border">
                 <SelectItem value="deutsch">Deutsch</SelectItem>
                 <SelectItem value="englisch">Englisch</SelectItem>
               </SelectContent>
@@ -154,28 +154,28 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
 
           {/* Read-only: Rolle */}
           <div className="space-y-1">
-            <Label className="text-gray-300 flex items-center gap-1.5">
+            <Label className="text-foreground flex items-center gap-1.5">
               Rolle
-              <span className="inline-flex items-center gap-1 text-xs text-gray-500 font-normal">
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-normal">
                 <Info className="h-3 w-3" />
                 Wird vom Admin verwaltet
               </span>
             </Label>
-            <p className="text-gray-400 text-sm py-2 px-3 rounded-md bg-gray-900 border border-gray-700">
+            <p className="text-muted-foreground text-sm py-2 px-3 rounded-md bg-background border border-border">
               {profile.facts.rolle ?? "Nicht gesetzt"}
             </p>
           </div>
 
           {/* Read-only: Detailgrad */}
           <div className="space-y-1">
-            <Label className="text-gray-300 flex items-center gap-1.5">
+            <Label className="text-foreground flex items-center gap-1.5">
               Detailgrad
-              <span className="inline-flex items-center gap-1 text-xs text-gray-500 font-normal">
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-normal">
                 <Info className="h-3 w-3" />
                 Wird vom Admin verwaltet
               </span>
             </Label>
-            <p className="text-gray-400 text-sm py-2 px-3 rounded-md bg-gray-900 border border-gray-700">
+            <p className="text-muted-foreground text-sm py-2 px-3 rounded-md bg-background border border-border">
               {profile.preferences.detailgrad ?? "Nicht gesetzt"}
             </p>
           </div>

@@ -145,12 +145,12 @@ export function NutzerVerwaltungSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Skeleton className="h-7 w-48 bg-gray-700" />
-          <Skeleton className="h-9 w-32 bg-gray-700" />
+          <Skeleton className="h-7 w-48 bg-muted" />
+          <Skeleton className="h-9 w-32 bg-muted" />
         </div>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full bg-gray-700" />
+            <Skeleton key={i} className="h-12 w-full bg-muted" />
           ))}
         </div>
       </div>
@@ -162,7 +162,7 @@ export function NutzerVerwaltungSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-100">
+          <h2 className="text-lg font-semibold text-foreground">
             Nutzerverwaltung
           </h2>
         </div>
@@ -187,7 +187,7 @@ export function NutzerVerwaltungSection() {
     <div className="space-y-4">
       {/* Header with actions */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">
+        <h2 className="text-lg font-semibold text-foreground">
           Nutzerverwaltung
         </h2>
         <div className="flex items-center gap-2">
@@ -195,7 +195,7 @@ export function NutzerVerwaltungSection() {
             variant="ghost"
             size="icon"
             onClick={reload}
-            className="h-9 w-9 text-gray-400 hover:text-gray-100"
+            className="h-9 w-9 text-muted-foreground hover:text-foreground"
             aria-label="Liste aktualisieren"
           >
             <RefreshCw className="h-4 w-4" />
@@ -212,8 +212,8 @@ export function NutzerVerwaltungSection() {
 
       {/* Empty State */}
       {users.length === 0 ? (
-        <div className="rounded-lg border border-gray-700 p-8 text-center">
-          <p className="text-gray-400">Keine Nutzer vorhanden.</p>
+        <div className="rounded-lg border border-border p-8 text-center">
+          <p className="text-muted-foreground">Keine Nutzer vorhanden.</p>
           <Button
             variant="link"
             onClick={() => setCreateOpen(true)}

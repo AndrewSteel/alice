@@ -12,7 +12,7 @@ export function NewChatButton({ onClick }: NewChatButtonProps) {
     <Button
       variant="ghost"
       onClick={onClick}
-      className="w-full justify-start gap-2 px-3 text-gray-300 hover:text-gray-100 hover:bg-gray-700"
+      className="w-full justify-start gap-2 px-3 text-foreground hover:text-foreground hover:bg-accent"
     >
       <Plus className="h-4 w-4" aria-hidden />
       Neuer Chat

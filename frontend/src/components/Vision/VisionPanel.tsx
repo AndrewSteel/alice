@@ -20,20 +20,20 @@ export function VisionPanel({
   onHideTextPanel,
 }: VisionPanelProps) {
   return (
-    <div className="flex flex-col h-full bg-gray-900 border-r border-gray-700 overflow-hidden">
+    <div className="flex flex-col h-full bg-background border-r border-border overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700 bg-gray-900 shrink-0">
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background shrink-0">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Ergebnisse
           {results.length > 0 && (
-            <span className="ml-1.5 text-gray-500">({results.length})</span>
+            <span className="ml-1.5 text-muted-foreground">({results.length})</span>
           )}
         </span>
         {/* Toggle text chat button */}
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 text-gray-400 hover:text-gray-100"
+          className="h-6 w-6 text-muted-foreground hover:text-foreground"
           title={textPanelVisible ? "Chat ausblenden" : "Chat einblenden"}
           onClick={textPanelVisible ? onHideTextPanel : onShowTextPanel}
         >

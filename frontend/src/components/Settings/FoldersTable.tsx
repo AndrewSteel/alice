@@ -89,17 +89,17 @@ function SortableDesktopRow({
     <TableRow
       ref={setNodeRef}
       style={style}
-      className={`border-gray-700 hover:bg-gray-800/50 ${
-        isDragging ? "bg-gray-800 opacity-80 shadow-lg z-50 relative" : ""
+      className={`border-border hover:bg-accent/50 ${
+        isDragging ? "bg-card opacity-80 shadow-lg z-50 relative" : ""
       }`}
     >
-      <TableCell className="text-gray-100 font-mono text-sm max-w-[300px] truncate">
+      <TableCell className="text-foreground font-mono text-sm max-w-[300px] truncate">
         {folder.path}
       </TableCell>
       <TableCell>
         <TypeBadge type={folder.suggested_type} />
       </TableCell>
-      <TableCell className="text-gray-300 text-sm max-w-[200px]">
+      <TableCell className="text-foreground text-sm max-w-[200px]">
         {truncate(folder.description, 60)}
       </TableCell>
       <TableCell className="text-center">
@@ -117,7 +117,7 @@ function SortableDesktopRow({
                 variant="ghost"
                 size="icon"
                 onClick={() => onEdit(folder)}
-                className="h-8 w-8 text-gray-400 hover:text-gray-100"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
                 aria-label={`Ordner ${folder.path} bearbeiten`}
               >
                 <Pencil className="h-4 w-4" />
@@ -131,7 +131,7 @@ function SortableDesktopRow({
                 variant="ghost"
                 size="icon"
                 onClick={() => onDelete(folder)}
-                className="h-8 w-8 text-gray-400 hover:text-red-400"
+                className="h-8 w-8 text-muted-foreground hover:text-red-400"
                 aria-label={`Ordner ${folder.path} loeschen`}
               >
                 <Trash2 className="h-4 w-4" />
@@ -144,7 +144,7 @@ function SortableDesktopRow({
               <button
                 {...attributes}
                 {...listeners}
-                className="h-8 w-8 flex items-center justify-center text-gray-400 hover:text-gray-100 cursor-grab active:cursor-grabbing rounded-md hover:bg-gray-700/50 transition-colors touch-none"
+                className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing rounded-md hover:bg-accent/50 transition-colors touch-none"
                 aria-label={`Ordner ${folder.path} verschieben`}
               >
                 {isReordering ? (
@@ -198,7 +198,7 @@ function SortableMobileRow({
       ref={setNodeRef}
       style={style}
       className={`p-4 space-y-3 ${
-        isDragging ? "bg-gray-800 opacity-80 shadow-lg z-50 relative" : ""
+        isDragging ? "bg-card opacity-80 shadow-lg z-50 relative" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -206,7 +206,7 @@ function SortableMobileRow({
           <button
             {...attributes}
             {...listeners}
-            className="shrink-0 h-8 w-8 flex items-center justify-center text-gray-400 hover:text-gray-100 cursor-grab active:cursor-grabbing rounded-md touch-none"
+            className="shrink-0 h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing rounded-md touch-none"
             aria-label={`Ordner ${folder.path} verschieben`}
           >
             {isReordering ? (
@@ -215,7 +215,7 @@ function SortableMobileRow({
               <GripVertical className="h-4 w-4" />
             )}
           </button>
-          <p className="text-sm font-mono text-gray-100 break-all">{folder.path}</p>
+          <p className="text-sm font-mono text-foreground break-all">{folder.path}</p>
         </div>
         <Switch
           checked={folder.enabled}
@@ -227,7 +227,7 @@ function SortableMobileRow({
       <div className="flex items-center gap-2 pl-10">
         <TypeBadge type={folder.suggested_type} />
         {folder.description && (
-          <span className="text-xs text-gray-400 truncate">
+          <span className="text-xs text-muted-foreground truncate">
             {truncate(folder.description, 40)}
           </span>
         )}
@@ -237,7 +237,7 @@ function SortableMobileRow({
           variant="ghost"
           size="sm"
           onClick={() => onEdit(folder)}
-          className="h-7 gap-1 text-gray-400 hover:text-gray-100 px-2"
+          className="h-7 gap-1 text-muted-foreground hover:text-foreground px-2"
         >
           <Pencil className="h-3.5 w-3.5" />
           Bearbeiten
@@ -246,7 +246,7 @@ function SortableMobileRow({
           variant="ghost"
           size="sm"
           onClick={() => onDelete(folder)}
-          className="h-7 gap-1 text-gray-400 hover:text-red-400 px-2"
+          className="h-7 gap-1 text-muted-foreground hover:text-red-400 px-2"
         >
           <Trash2 className="h-3.5 w-3.5" />
           Loeschen
@@ -303,17 +303,17 @@ export function FoldersTable({
         modifiers={[restrictToVerticalAxis]}
       >
         <SortableContext items={folderIds} strategy={verticalListSortingStrategy}>
-          <div className="rounded-lg border border-gray-700 overflow-hidden">
+          <div className="rounded-lg border border-border overflow-hidden">
             {/* Desktop table */}
             <div className="hidden md:block">
               <Table>
                 <TableHeader>
-                  <TableRow className="border-gray-700 hover:bg-transparent">
-                    <TableHead className="text-gray-400">Pfad</TableHead>
-                    <TableHead className="text-gray-400">Typ</TableHead>
-                    <TableHead className="text-gray-400">Beschreibung</TableHead>
-                    <TableHead className="text-gray-400 text-center">Status</TableHead>
-                    <TableHead className="text-gray-400 text-right">Aktionen</TableHead>
+                  <TableRow className="border-border hover:bg-transparent">
+                    <TableHead className="text-muted-foreground">Pfad</TableHead>
+                    <TableHead className="text-muted-foreground">Typ</TableHead>
+                    <TableHead className="text-muted-foreground">Beschreibung</TableHead>
+                    <TableHead className="text-muted-foreground text-center">Status</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Aktionen</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -332,7 +332,7 @@ export function FoldersTable({
             </div>
 
             {/* Mobile card list */}
-            <div className="md:hidden divide-y divide-gray-700">
+            <div className="md:hidden divide-y divide-border">
               {folders.map((folder) => (
                 <SortableMobileRow
                   key={folder.id}
@@ -354,7 +354,7 @@ export function FoldersTable({
 function TypeBadge({ type }: { type: string | null }) {
   if (!type) {
     return (
-      <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
+      <Badge variant="outline" className="border-border text-muted-foreground text-xs">
         auto
       </Badge>
     );

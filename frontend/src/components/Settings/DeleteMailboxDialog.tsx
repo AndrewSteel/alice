@@ -33,11 +33,11 @@ export function DeleteMailboxDialog({ mailbox, open, onOpenChange, onConfirm }: 
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700 text-gray-100">
+      <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
           <AlertDialogTitle>Postfach löschen?</AlertDialogTitle>
-          <AlertDialogDescription className="text-gray-400">
-            <strong className="text-gray-200">{mailbox.display_name}</strong> ({mailbox.imap_host}) wird dauerhaft gelöscht.
+          <AlertDialogDescription className="text-muted-foreground">
+            <strong className="text-foreground">{mailbox.display_name}</strong> ({mailbox.imap_host}) wird dauerhaft gelöscht.
             Alle {mailbox.mails_indexed} indexierten Mails werden aus der Suche entfernt.
             Diese Aktion kann nicht rückgängig gemacht werden.
           </AlertDialogDescription>
@@ -45,7 +45,7 @@ export function DeleteMailboxDialog({ mailbox, open, onOpenChange, onConfirm }: 
         {error && <p className="text-sm text-red-400 px-1">{error}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel
-            className="bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600"
+            className="bg-muted border-border text-foreground hover:bg-accent"
             disabled={deleting}
           >
             Abbrechen

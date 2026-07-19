@@ -59,21 +59,21 @@ export function DeleteUserDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 max-w-md">
+      <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
           <DialogTitle className="text-red-400">
             Nutzer dauerhaft loeschen
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Diese Aktion kann nicht rueckgaengig gemacht werden. Der Nutzer{" "}
-            <span className="font-medium text-gray-300">{user.username}</span>{" "}
+            <span className="font-medium text-foreground">{user.username}</span>{" "}
             und alle zugehoerigen Daten werden dauerhaft geloescht.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="delete-confirm" className="text-gray-300 text-sm">
+            <Label htmlFor="delete-confirm" className="text-foreground text-sm">
               Benutzername zur Bestaetigung eingeben:
             </Label>
             <Input
@@ -81,7 +81,7 @@ export function DeleteUserDialog({
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               disabled={isSubmitting}
-              className="bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500 focus:border-red-500"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-red-500"
               placeholder={user.username}
               autoComplete="off"
               autoFocus
@@ -101,7 +101,7 @@ export function DeleteUserDialog({
             variant="ghost"
             onClick={() => handleOpenChange(false)}
             disabled={isSubmitting}
-            className="text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+            className="text-foreground hover:bg-accent hover:text-foreground"
           >
             Abbrechen
           </Button>

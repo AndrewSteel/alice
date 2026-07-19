@@ -24,7 +24,7 @@ export function ToolCallMessage({ message }: ToolCallMessageProps) {
     <div className="px-4 py-1.5">
       <div
         className={cn(
-          "flex items-center gap-2 text-[14px] text-gray-400",
+          "flex items-center gap-2 text-[14px] text-muted-foreground",
           effectiveStatus === "error" && "text-red-300"
         )}
         aria-live="polite"
@@ -33,7 +33,7 @@ export function ToolCallMessage({ message }: ToolCallMessageProps) {
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
         )}
         {effectiveStatus === "done" && (
-          <Check className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden="true" />
+          <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
         {effectiveStatus === "error" && (
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-300" aria-hidden="true" />

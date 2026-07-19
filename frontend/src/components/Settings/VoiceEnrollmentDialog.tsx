@@ -89,10 +89,10 @@ export function VoiceEnrollmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 max-w-md">
+      <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
           <DialogTitle>Stimmregistrierung</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Nimm {REQUIRED_SAMPLES} kurze Sprachproben auf (je ca. 3 Sekunden).
             Sprich jeweils einen normalen Satz, damit Alice deine Stimme sicher
             erkennt.
@@ -104,7 +104,7 @@ export function VoiceEnrollmentDialog({
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-900/40">
               <Check className="h-6 w-6 text-emerald-400" />
             </div>
-            <p className="text-sm text-gray-200">
+            <p className="text-sm text-foreground">
               Stimmregistrierung abgeschlossen. Alice erkennt dich jetzt an
               deiner Stimme.
             </p>
@@ -114,21 +114,21 @@ export function VoiceEnrollmentDialog({
             {/* Progress */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-400">Aufgenommene Proben</span>
-                <span className="text-gray-200 tabular-nums">
+                <span className="text-muted-foreground">Aufgenommene Proben</span>
+                <span className="text-foreground tabular-nums">
                   {collected}/{REQUIRED_SAMPLES}
                 </span>
               </div>
               <Progress
                 value={(Math.min(collected, REQUIRED_SAMPLES) / REQUIRED_SAMPLES) * 100}
-                className="h-2 bg-gray-700"
+                className="h-2 bg-muted"
               />
               <div className="flex gap-1.5">
                 {Array.from({ length: REQUIRED_SAMPLES }).map((_, i) => (
                   <div
                     key={i}
                     className={`h-1.5 flex-1 rounded-full ${
-                      i < collected ? "bg-blue-500" : "bg-gray-700"
+                      i < collected ? "bg-blue-500" : "bg-muted"
                     }`}
                   />
                 ))}
@@ -155,7 +155,7 @@ export function VoiceEnrollmentDialog({
                     <Mic className="h-6 w-6" />
                   )}
                 </Button>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-muted-foreground">
                   {isRecording
                     ? "Sprich jetzt … zum Beenden tippen"
                     : `Probe ${collected + 1} aufnehmen`}
@@ -195,7 +195,7 @@ export function VoiceEnrollmentDialog({
                   variant="ghost"
                   onClick={handleRedo}
                   disabled={isRecording || isUploading}
-                  className="text-gray-300 hover:bg-gray-700 hover:text-gray-100 gap-2"
+                  className="text-foreground hover:bg-accent hover:text-foreground gap-2"
                 >
                   <RotateCcw className="h-4 w-4" />
                   Neu beginnen

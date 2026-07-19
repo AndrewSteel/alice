@@ -41,22 +41,22 @@ export function DeactivateUserDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700 text-gray-100">
+      <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
           <AlertDialogTitle>
             Nutzer {willActivate ? "aktivieren" : "deaktivieren"}?
           </AlertDialogTitle>
-          <AlertDialogDescription className="text-gray-400">
+          <AlertDialogDescription className="text-muted-foreground">
             {willActivate ? (
               <>
-                <span className="font-medium text-gray-300">
+                <span className="font-medium text-foreground">
                   {user.username}
                 </span>{" "}
                 wird wieder aktiviert und kann sich erneut einloggen.
               </>
             ) : (
               <>
-                <span className="font-medium text-gray-300">
+                <span className="font-medium text-foreground">
                   {user.username}
                 </span>{" "}
                 wird deaktiviert und kann sich danach nicht mehr einloggen.
@@ -68,7 +68,7 @@ export function DeactivateUserDialog({
         <AlertDialogFooter>
           <AlertDialogCancel
             disabled={isSubmitting}
-            className="bg-transparent border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+            className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
           >
             Abbrechen
           </AlertDialogCancel>

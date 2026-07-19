@@ -44,11 +44,11 @@ function ChatListSkeleton() {
   return (
     <div className="space-y-4 px-2" aria-label="Sessions werden geladen">
       <div>
-        <Skeleton className="h-3 w-16 mb-2 bg-gray-700" />
+        <Skeleton className="h-3 w-16 mb-2 bg-muted" />
         <div className="space-y-1">
-          <Skeleton className="h-9 w-full rounded-md bg-gray-700/60" />
-          <Skeleton className="h-9 w-full rounded-md bg-gray-700/60" />
-          <Skeleton className="h-9 w-3/4 rounded-md bg-gray-700/60" />
+          <Skeleton className="h-9 w-full rounded-md bg-muted/60" />
+          <Skeleton className="h-9 w-full rounded-md bg-muted/60" />
+          <Skeleton className="h-9 w-3/4 rounded-md bg-muted/60" />
         </div>
       </div>
     </div>
@@ -71,7 +71,7 @@ export function ChatList({ sessions, activeId, searchQuery, onSelect, onRename, 
 
   if (filtered.length === 0) {
     return (
-      <p className="px-3 py-4 text-sm text-gray-500 text-center">
+      <p className="px-3 py-4 text-sm text-muted-foreground text-center">
         {searchQuery ? "Keine Ergebnisse" : "Noch keine Chats"}
       </p>
     );
@@ -81,7 +81,7 @@ export function ChatList({ sessions, activeId, searchQuery, onSelect, onRename, 
     <nav aria-label="Chat-Verlauf" className="space-y-4 px-2">
       {groups.map(({ label, items }) => (
         <div key={label}>
-          <p className="px-1 mb-1 text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <p className="px-1 mb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
             {label}
           </p>
           <div className="space-y-0.5">

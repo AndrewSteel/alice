@@ -56,14 +56,14 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
   }
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">E-Mail-Adresse</CardTitle>
+        <CardTitle className="text-foreground">E-Mail-Adresse</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="profile-email" className="text-gray-300">
+            <Label htmlFor="profile-email" className="text-foreground">
               E-Mail
             </Label>
             <Input
@@ -75,7 +75,7 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
                 setError(null);
               }}
               placeholder="deine@email.de"
-              className="bg-gray-800 border-gray-600 text-gray-100 placeholder:text-gray-500"
+              className="bg-card border-border text-foreground placeholder:text-muted-foreground"
             />
             {error && (
               <p className="text-sm text-red-400">{error}</p>

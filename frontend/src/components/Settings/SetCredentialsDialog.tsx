@@ -57,12 +57,12 @@ export function SetCredentialsDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 max-w-md">
+      <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
           <DialogTitle>WebApp-Zugang einrichten</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             E-Mail-Adresse fuer{" "}
-            <span className="font-medium text-gray-300">
+            <span className="font-medium text-foreground">
               {user.display_name || user.username}
             </span>{" "}
             setzen. Ein Einmal-Passwort wird per E-Mail gesendet; der Nutzer
@@ -72,7 +72,7 @@ export function SetCredentialsDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4 py-1">
           <div className="space-y-2">
-            <Label htmlFor="sc-email" className="text-gray-300">
+            <Label htmlFor="sc-email" className="text-foreground">
               E-Mail-Adresse
             </Label>
             <Input
@@ -84,7 +84,7 @@ export function SetCredentialsDialog({
               disabled={isSubmitting}
               required
               autoComplete="email"
-              className="bg-gray-700 border-gray-600 text-gray-100 placeholder-gray-500 focus:border-blue-500"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
             />
           </div>
 
@@ -100,7 +100,7 @@ export function SetCredentialsDialog({
               variant="ghost"
               onClick={() => handleClose(false)}
               disabled={isSubmitting}
-              className="text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+              className="text-foreground hover:bg-accent hover:text-foreground"
             >
               Abbrechen
             </Button>

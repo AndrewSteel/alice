@@ -64,14 +64,14 @@ export function InteressenTagInput({ tags, onChange }: InteressenTagInputProps) 
             <Badge
               key={`${tag}-${index}`}
               variant="secondary"
-              className="bg-gray-700 text-gray-200 border-gray-600 gap-1 pr-1"
+              className="bg-muted text-foreground border-border gap-1 pr-1"
               role="listitem"
             >
               {tag}
               <button
                 type="button"
                 onClick={() => removeTag(index)}
-                className="ml-1 rounded-full p-0.5 hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                className="ml-1 rounded-full p-0.5 hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring"
                 aria-label={`${tag} entfernen`}
               >
                 <X className="h-3 w-3" />
@@ -91,7 +91,7 @@ export function InteressenTagInput({ tags, onChange }: InteressenTagInputProps) 
           placeholder={isAtLimit ? "Maximum erreicht (20 Tags)" : "Interesse eingeben + Enter"}
           maxLength={MAX_TAG_LENGTH}
           disabled={isAtLimit}
-          className="bg-gray-800 border-gray-600 text-gray-100 placeholder:text-gray-500"
+          className="bg-card border-border text-foreground placeholder:text-muted-foreground"
           aria-label="Neues Interesse eingeben"
         />
       </div>

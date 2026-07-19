@@ -39,19 +39,19 @@ export function DeleteFolderDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700 text-gray-100">
+      <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
           <AlertDialogTitle>Ordner loeschen?</AlertDialogTitle>
-          <AlertDialogDescription className="text-gray-400">
+          <AlertDialogDescription className="text-muted-foreground">
             Der Ordner{" "}
-            <span className="font-mono text-gray-300">{folder.path}</span>{" "}
+            <span className="font-mono text-foreground">{folder.path}</span>{" "}
             wird dauerhaft entfernt. Bereits gescannte Dokumente bleiben erhalten.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel
             disabled={deleting}
-            className="bg-transparent border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+            className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
           >
             Abbrechen
           </AlertDialogCancel>

@@ -23,12 +23,12 @@ const STATUS_LABEL: Record<VoiceMode2Status, string> = {
 };
 
 const RING_COLOR: Record<VoiceMode2Status, string> = {
-  idle: "bg-gray-500",
-  connecting: "bg-gray-400",
+  idle: "bg-muted-foreground",
+  connecting: "bg-muted-foreground",
   listening: "bg-emerald-500",
   processing: "bg-amber-500",
   speaking: "bg-blue-500",
-  ended: "bg-gray-500",
+  ended: "bg-muted-foreground",
 };
 
 /**
@@ -48,7 +48,7 @@ export function VoiceOverlay({ open, status, onStop }: VoiceOverlayProps) {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-w-sm border-gray-700 bg-gray-900 text-gray-100 sm:max-w-md"
+        className="max-w-sm border-border bg-background text-foreground sm:max-w-md"
         aria-describedby={undefined}
       >
         <DialogTitle className="sr-only">Sprachgespräch mit Alice</DialogTitle>

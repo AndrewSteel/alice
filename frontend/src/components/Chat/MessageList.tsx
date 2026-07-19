@@ -64,8 +64,8 @@ export function MessageList({
     return (
       <div className="flex flex-1 items-center justify-center h-full">
         <div className="text-center space-y-3">
-          <Loader2 className="h-8 w-8 text-gray-500 mx-auto animate-spin" />
-          <p className="text-gray-400 text-sm">Nachrichten werden geladen...</p>
+          <Loader2 className="h-8 w-8 text-muted-foreground mx-auto animate-spin" />
+          <p className="text-muted-foreground text-sm">Nachrichten werden geladen...</p>
         </div>
       </div>
     );
@@ -75,8 +75,8 @@ export function MessageList({
     return (
       <div className="flex flex-1 items-center justify-center h-full">
         <div className="text-center space-y-3">
-          <MessageSquare className="h-10 w-10 text-gray-500 mx-auto" />
-          <p className="text-gray-400 text-base">Wie kann ich helfen?</p>
+          <MessageSquare className="h-10 w-10 text-muted-foreground mx-auto" />
+          <p className="text-muted-foreground text-base">Wie kann ich helfen?</p>
         </div>
       </div>
     );

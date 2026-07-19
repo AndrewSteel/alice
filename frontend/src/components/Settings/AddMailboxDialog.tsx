@@ -94,63 +94,63 @@ export function AddMailboxDialog({ open, onOpenChange, onSubmit }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-card border-border text-foreground sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Postfach hinzufügen</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             IMAP-Zugangsdaten konfigurieren. Das Passwort wird verschlüsselt gespeichert.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="mb-name" className="text-gray-300">Anzeigename <span className="text-red-400">*</span></Label>
+            <Label htmlFor="mb-name" className="text-foreground">Anzeigename <span className="text-red-400">*</span></Label>
             <Input id="mb-name" value={form.display_name} onChange={(e) => set("display_name", e.target.value)}
-              placeholder="Mein Gmail-Postfach" className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500" autoFocus />
+              placeholder="Mein Gmail-Postfach" className="bg-background border-border text-foreground placeholder:text-muted-foreground" autoFocus />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2 space-y-2">
-              <Label htmlFor="mb-host" className="text-gray-300">IMAP-Host <span className="text-red-400">*</span></Label>
+              <Label htmlFor="mb-host" className="text-foreground">IMAP-Host <span className="text-red-400">*</span></Label>
               <Input id="mb-host" value={form.imap_host} onChange={(e) => set("imap_host", e.target.value)}
-                placeholder="imap.gmail.com" className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500 font-mono text-sm" />
+                placeholder="imap.gmail.com" className="bg-background border-border text-foreground placeholder:text-muted-foreground font-mono text-sm" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="mb-port" className="text-gray-300">Port <span className="text-red-400">*</span></Label>
+              <Label htmlFor="mb-port" className="text-foreground">Port <span className="text-red-400">*</span></Label>
               <Input id="mb-port" value={form.imap_port} onChange={(e) => set("imap_port", e.target.value)}
-                type="number" min={1} max={65535} className="bg-gray-900 border-gray-600 text-gray-100" />
+                type="number" min={1} max={65535} className="bg-background border-border text-foreground" />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="mb-user" className="text-gray-300">Benutzername <span className="text-red-400">*</span></Label>
+            <Label htmlFor="mb-user" className="text-foreground">Benutzername <span className="text-red-400">*</span></Label>
             <Input id="mb-user" value={form.imap_username} onChange={(e) => set("imap_username", e.target.value)}
               placeholder="nutzer@example.com" autoComplete="username"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500" />
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground" />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="mb-pass" className="text-gray-300">Passwort <span className="text-red-400">*</span></Label>
+            <Label htmlFor="mb-pass" className="text-foreground">Passwort <span className="text-red-400">*</span></Label>
             <Input id="mb-pass" type="password" value={form.password} onChange={(e) => set("password", e.target.value)}
               autoComplete="new-password"
-              className="bg-gray-900 border-gray-600 text-gray-100" />
+              className="bg-background border-border text-foreground" />
           </div>
 
           <div className="flex items-center gap-3">
             <Switch id="mb-ssl" checked={form.ssl_enabled} onCheckedChange={(v) => set("ssl_enabled", v)} />
-            <Label htmlFor="mb-ssl" className="text-gray-300 cursor-pointer">SSL/TLS aktivieren</Label>
+            <Label htmlFor="mb-ssl" className="text-foreground cursor-pointer">SSL/TLS aktivieren</Label>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="mb-interval" className="text-gray-300">Sync-Intervall (Minuten) <span className="text-red-400">*</span></Label>
+              <Label htmlFor="mb-interval" className="text-foreground">Sync-Intervall (Minuten) <span className="text-red-400">*</span></Label>
               <Input id="mb-interval" value={form.sync_interval} onChange={(e) => set("sync_interval", e.target.value)}
-                type="number" min={1} max={1440} className="bg-gray-900 border-gray-600 text-gray-100" />
+                type="number" min={1} max={1440} className="bg-background border-border text-foreground" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="mb-date" className="text-gray-300">Startdatum (optional)</Label>
+              <Label htmlFor="mb-date" className="text-foreground">Startdatum (optional)</Label>
               <Input id="mb-date" type="date" value={form.start_date} onChange={(e) => set("start_date", e.target.value)}
-                className="bg-gray-900 border-gray-600 text-gray-100" />
+                className="bg-background border-border text-foreground" />
             </div>
           </div>
 
@@ -176,7 +176,7 @@ export function AddMailboxDialog({ open, onOpenChange, onSubmit }: Props) {
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => handleOpenChange(false)} disabled={submitting}
-              className="text-gray-400 hover:text-gray-100">
+              className="text-muted-foreground hover:text-foreground">
               Abbrechen
             </Button>
             <Button type="submit" disabled={submitting} className="bg-blue-600 hover:bg-blue-700 text-white">
