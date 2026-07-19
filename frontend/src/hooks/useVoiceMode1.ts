@@ -26,14 +26,15 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/services/auth";
 
 import { useAudioPermission } from "./useAudioPermission";
-import { SILENCE_THRESHOLD, useSilenceDetector } from "./useSilenceDetector";
+import { useSilenceDetector } from "./useSilenceDetector";
 
 const WS_URL_BASE = "/api/speech/ws/stt";
 
 // Stream ~every 250 ms so the gateway can build interim transcripts.
 const RECORD_TIMESLICE_MS = 250;
-// Client-side silence detection (SILENCE_THRESHOLD is defined in the shared
-// useSilenceDetector hook). Two hang thresholds:
+// Client-side silence detection (the effective threshold is calibrated per
+// recording and delivered to each sample by the shared useSilenceDetector
+// hook — PROJ-70). Two hang thresholds:
 //   SILENCE_HANG_AFTER_SPEECH_MS — after speech was heard, 900 ms trailing
 //     silence triggers auto-stop (original responsive behaviour).
 //   SILENCE_HANG_NO_SPEECH_MS   — if no speech is ever detected (mic gain
@@ -111,22 +112,26 @@ export function useVoiceMode1({
   // ----- silence detector -----
 
   // Per-tick decision (mode-specific): auto-stop after the appropriate hang.
-  const handleSilenceSample = useCallback((rms: number, now: number) => {
-    if (rms > SILENCE_THRESHOLD) {
-      lastVoiceAtRef.current = now;
-      speechDetectedRef.current = true;
-    }
+  // `threshold` is the per-recording calibrated speech threshold (PROJ-70).
+  const handleSilenceSample = useCallback(
+    (rms: number, now: number, threshold: number) => {
+      if (rms > threshold) {
+        lastVoiceAtRef.current = now;
+        speechDetectedRef.current = true;
+      }
 
-    // Auto-stop: use the shorter post-speech hang when speech has been
-    // heard, otherwise fall back to the longer no-speech hang so the
-    // button can't get permanently stuck on low-gain devices.
-    const hang = speechDetectedRef.current
-      ? SILENCE_HANG_AFTER_SPEECH_MS
-      : SILENCE_HANG_NO_SPEECH_MS;
-    if (now - lastVoiceAtRef.current > hang) {
-      finalizeRef.current();
-    }
-  }, []);
+      // Auto-stop: use the shorter post-speech hang when speech has been
+      // heard, otherwise fall back to the longer no-speech hang so the
+      // button can't get permanently stuck on low-gain devices.
+      const hang = speechDetectedRef.current
+        ? SILENCE_HANG_AFTER_SPEECH_MS
+        : SILENCE_HANG_NO_SPEECH_MS;
+      if (now - lastVoiceAtRef.current > hang) {
+        finalizeRef.current();
+      }
+    },
+    [],
+  );
 
   const { start: startSilenceDetectorRaw, stop: stopSilenceDetector } =
     useSilenceDetector({

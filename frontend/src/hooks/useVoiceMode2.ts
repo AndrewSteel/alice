@@ -34,7 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/services/auth";
 
 import { useAudioPermission } from "./useAudioPermission";
-import { SILENCE_THRESHOLD, useSilenceDetector } from "./useSilenceDetector";
+import { useSilenceDetector } from "./useSilenceDetector";
 
 export type VoiceMode2Status =
   | "idle"
@@ -53,8 +53,9 @@ const TTS_SAMPLE_RATE = 22050;
 // fast to silence/utterance-end.
 const RECORD_TIMESLICE_MS = 250;
 // Local silence detector: we tell the gateway "end of utterance" after
-// this much continuous silence while in `listening` (SILENCE_THRESHOLD is
-// defined in the shared useSilenceDetector hook).
+// this much continuous silence while in `listening` (the effective threshold
+// is calibrated per turn and delivered with each sample by the shared
+// useSilenceDetector hook — PROJ-70).
 const SILENCE_HANG_MS = 900;
 const SILENCE_CHECK_INTERVAL_MS = 100;
 // If no speech at all is detected for this long while in `listening`, end the
@@ -189,49 +190,53 @@ export function useVoiceMode2(): UseVoiceMode2Result {
   // ----- silence detector -----
 
   // Per-tick decision (mode-specific): flush the utterance after the hang,
-  // or end the session after prolonged no-speech.
-  const handleSilenceSample = useCallback((rms: number, now: number) => {
-    if (rms > SILENCE_THRESHOLD) {
-      lastVoiceAtRef.current = now;
-      utteranceHasVoiceRef.current = true;
-    }
-
-    // Only flush utterances when we're actually capturing (listening).
-    // Capturing during `speaking` is barge-in territory — the gateway
-    // owns interrupt detection in that case.
-    if (
-      statusRef.current === "listening" &&
-      utteranceHasVoiceRef.current &&
-      now - lastVoiceAtRef.current > SILENCE_HANG_MS
-    ) {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "end_of_utterance" }));
+  // or end the session after prolonged no-speech. `threshold` is the
+  // per-turn calibrated speech threshold (PROJ-70).
+  const handleSilenceSample = useCallback(
+    (rms: number, now: number, threshold: number) => {
+      if (rms > threshold) {
+        lastVoiceAtRef.current = now;
+        utteranceHasVoiceRef.current = true;
       }
-      utteranceHasVoiceRef.current = false;
-      utteranceInFlightRef.current = true; // block no-speech close until gateway acks
-      // lastVoiceAtRef intentionally NOT reset here — the no-speech timer
-      // restarts only when the gateway sends `listening` (after TTS).
-      return;
-    }
 
-    // No speech at all for NO_SPEECH_SESSION_END_MS → end the session.
-    // Handles: (1) CC opened but user never speaks, (2) post-TTS silence.
-    // Guards:
-    //   utteranceInFlight — blocked while gateway processes the utterance
-    //   playbackQueue empty — blocked while browser is still playing audio
-    //     (gateway sends `listening` before playback finishes; lastVoiceAtRef
-    //     is reset in node.onended when the last chunk plays out)
-    if (
-      statusRef.current === "listening" &&
-      !utteranceHasVoiceRef.current &&
-      !utteranceInFlightRef.current &&
-      playbackQueueRef.current.length === 0 &&
-      now - lastVoiceAtRef.current > NO_SPEECH_SESSION_END_MS
-    ) {
-      stopRef.current();
-    }
-  }, []);
+      // Only flush utterances when we're actually capturing (listening).
+      // Capturing during `speaking` is barge-in territory — the gateway
+      // owns interrupt detection in that case.
+      if (
+        statusRef.current === "listening" &&
+        utteranceHasVoiceRef.current &&
+        now - lastVoiceAtRef.current > SILENCE_HANG_MS
+      ) {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "end_of_utterance" }));
+        }
+        utteranceHasVoiceRef.current = false;
+        utteranceInFlightRef.current = true; // block no-speech close until gateway acks
+        // lastVoiceAtRef intentionally NOT reset here — the no-speech timer
+        // restarts only when the gateway sends `listening` (after TTS).
+        return;
+      }
+
+      // No speech at all for NO_SPEECH_SESSION_END_MS → end the session.
+      // Handles: (1) CC opened but user never speaks, (2) post-TTS silence.
+      // Guards:
+      //   utteranceInFlight — blocked while gateway processes the utterance
+      //   playbackQueue empty — blocked while browser is still playing audio
+      //     (gateway sends `listening` before playback finishes; lastVoiceAtRef
+      //     is reset in node.onended when the last chunk plays out)
+      if (
+        statusRef.current === "listening" &&
+        !utteranceHasVoiceRef.current &&
+        !utteranceInFlightRef.current &&
+        playbackQueueRef.current.length === 0 &&
+        now - lastVoiceAtRef.current > NO_SPEECH_SESSION_END_MS
+      ) {
+        stopRef.current();
+      }
+    },
+    [],
+  );
 
   const { start: startSilenceDetectorRaw, stop: stopSilenceDetector } =
     useSilenceDetector({
