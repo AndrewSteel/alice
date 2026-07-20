@@ -30,10 +30,18 @@ function StatusBadge({ status }: { status: Mailbox["status"] }) {
   return <Badge variant="outline" className={`text-xs ${className}`}>{t(labelKey)}</Badge>;
 }
 
-export function MailboxSection() {
+interface MailboxSectionProps {
+  /**
+   * PROJ-66: whether the current user may see all mailboxes, the owner column
+   * and manage other users' mailboxes. Resolved by SettingsPage (with fail-open
+   * to `role === "admin"`) so permissions are fetched once per Settings session.
+   */
+  canManageMailboxes: boolean;
+}
+
+export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
   const { mailboxes, isLoading, error, addMailbox, editMailbox, removeMailbox, reload } = useMailboxes();
 
   const [addOpen, setAddOpen] = useState(false);
@@ -108,7 +116,7 @@ export function MailboxSection() {
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-foreground">
-          {isAdmin ? t("settings.mail.adminTitle") : t("settings.mail.userTitle")}
+          {canManageMailboxes ? t("settings.mail.adminTitle") : t("settings.mail.userTitle")}
         </h2>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => reload()} className="text-muted-foreground hover:text-foreground"
@@ -138,7 +146,7 @@ export function MailboxSection() {
               <TableRow className="border-border hover:bg-transparent">
                 <TableHead className="text-muted-foreground">{t("settings.mail.table.displayName")}</TableHead>
                 <TableHead className="text-muted-foreground">{t("settings.mail.table.host")}</TableHead>
-                {isAdmin && <TableHead className="text-muted-foreground">{t("settings.mail.table.owner")}</TableHead>}
+                {canManageMailboxes && <TableHead className="text-muted-foreground">{t("settings.mail.table.owner")}</TableHead>}
                 <TableHead className="text-muted-foreground">{t("settings.mail.table.status")}</TableHead>
                 <TableHead className="text-muted-foreground text-right">{t("settings.mail.table.mails")}</TableHead>
                 <TableHead className="text-muted-foreground">{t("settings.mail.table.access")}</TableHead>
@@ -148,14 +156,14 @@ export function MailboxSection() {
             <TableBody>
               {mailboxes.map((mb) => {
                 const isOwner = mb.owner_id === user?.id;
-                const canManage = isOwner || isAdmin;
+                const canManage = isOwner || canManageMailboxes;
                 return (
                   <TableRow key={mb.id} className="border-border hover:bg-accent/50">
                     <TableCell className="text-foreground font-medium">{mb.display_name}</TableCell>
                     <TableCell className="text-muted-foreground text-sm font-mono">
                       {canManage ? `${mb.imap_host}:${mb.imap_port}` : "••••••••"}
                     </TableCell>
-                    {isAdmin && (
+                    {canManageMailboxes && (
                       <TableCell className="text-muted-foreground text-sm">{mb.owner_name ?? "—"}</TableCell>
                     )}
                     <TableCell>
