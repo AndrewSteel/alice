@@ -7,7 +7,7 @@
 ## Implementation Notes
 - 3 new `BOOLEAN DEFAULT FALSE` columns on `alice.permissions_system` (`can_manage_dms_folders`, `can_view_chat_archive`, `can_manage_mailboxes`), threaded through `role_templates` (admin=true, others=false) and `init_user_permissions()`.
 - New JWT-protected `GET /api/auth/permissions` in `alice-auth`, reuses existing `_require_auth`, returns all 10 flags, falls back to all-false if no permission row exists.
-- Migration script `scripts/proj65-add-permission-flags.sh` written but NOT yet run against the live DB.
+- Migration `sql/migrations/065-permission-flags.sql` written but NOT yet applied to the live DB — corrected from an earlier `docker exec`-based shell script to match this project's actual deploy pattern (raw `.sql` file, applied from the dev PC via `psql -h database.lan -p 5432 -U alice_user -d alice -f sql/migrations/065-permission-flags.sql`, see e.g. `014-chat-storage.sql`/`046-imap-mailboxes.sql`).
 - QA: READY. 1 Low/cosmetic bug (migration script's summary count may include psql command-tag noise, same class of issue as PROJ-63's script) — non-blocking.
 
 ## Dependencies

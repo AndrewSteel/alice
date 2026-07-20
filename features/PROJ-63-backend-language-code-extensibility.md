@@ -8,7 +8,7 @@
 - Language config `{code, displayName_de, displayName_en, llm_instruction}` duplicated in `alice-auth/main.py` and `alice-chat-stream/app/memory.py`, seeded with exactly `de`+`en` (behavior-identical to pre-change).
 - `alice-auth`: `PATCH /auth/profile` (line 778) and `POST /auth/admin/users` (line 1084) validate against the config, accept legacy `"deutsch"`/`"englisch"` as aliases, 422 on unknown codes. New public `GET /auth/languages` (`/api/auth/languages` externally via nginx rewrite).
 - `alice-chat-stream`: binary `if sprache == "englisch"` branch replaced by config lookup, unknown/missing code falls back to `de`.
-- Migration script `scripts/proj63-migrate-sprache-codes.sh` written but NOT yet run against the live DB — needs to be run manually before old word-form values can be considered migrated.
+- Migration `sql/migrations/063-backend-language-codes.sql` written but NOT yet applied to the live DB — corrected from an earlier `docker exec`-based shell script to match this project's actual deploy pattern (raw `.sql` file, applied from the dev PC via `psql -h database.lan -p 5432 -U alice_user -d alice -f sql/migrations/063-backend-language-codes.sql`, see e.g. `014-chat-storage.sql`/`046-imap-mailboxes.sql`). Needs to be run manually before old word-form values can be considered migrated.
 - QA: READY. 2 Low bugs, non-blocking: migration script's summary count line captures psql command-tag noise (cosmetic); spec's line-number references (744/1029) had drifted to actual 778/1084 (docs only).
 
 ## Dependencies
