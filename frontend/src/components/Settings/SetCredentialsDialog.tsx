@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +28,7 @@ export function SetCredentialsDialog({
   onOpenChange,
   onConfirm,
 }: SetCredentialsDialogProps) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export function SetCredentialsDialog({
       await onConfirm(user.id, email.trim());
       handleClose(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(err instanceof Error ? err.message : t("common.unknownError"));
     } finally {
       setIsSubmitting(false);
     }
@@ -59,28 +61,25 @@ export function SetCredentialsDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
-          <DialogTitle>WebApp-Zugang einrichten</DialogTitle>
+          <DialogTitle>{t("settings.users.setCredentialsDialog.title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            E-Mail-Adresse fuer{" "}
-            <span className="font-medium text-foreground">
-              {user.display_name || user.username}
-            </span>{" "}
-            setzen. Ein Einmal-Passwort wird per E-Mail gesendet; der Nutzer
-            muss es beim ersten Login aendern.
+            {t("settings.users.setCredentialsDialog.desc", {
+              name: user.display_name || user.username,
+            })}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-1">
           <div className="space-y-2">
             <Label htmlFor="sc-email" className="text-foreground">
-              E-Mail-Adresse
+              {t("settings.users.setCredentialsDialog.emailLabel")}
             </Label>
             <Input
               id="sc-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="nutzer@beispiel.de"
+              placeholder={t("settings.users.setCredentialsDialog.emailPlaceholder")}
               disabled={isSubmitting}
               required
               autoComplete="email"
@@ -102,14 +101,14 @@ export function SetCredentialsDialog({
               disabled={isSubmitting}
               className="text-foreground hover:bg-accent hover:text-foreground"
             >
-              Abbrechen
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={!email.trim() || isSubmitting}
               className="bg-blue-600 hover:bg-blue-500 text-white"
             >
-              {isSubmitting ? "Wird gespeichert..." : "Zugang einrichten"}
+              {isSubmitting ? t("common.saving") : t("settings.users.setCredentialsDialog.setup")}
             </Button>
           </DialogFooter>
         </form>

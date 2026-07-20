@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Loader2, Info } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import i18n, { spracheToLocale, UI_LOCALE_STORAGE_KEY } from "@/i18n/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +24,7 @@ interface ProfilFormProps {
 }
 
 export function ProfilForm({ profile, onSave }: ProfilFormProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(profile.facts.name ?? "");
   const [interessen, setInteressen] = useState<string[]>(
     profile.facts.interessen ?? []
@@ -29,8 +32,8 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
   const [anrede, setAnrede] = useState<"du" | "sie">(
     profile.preferences.anrede ?? "du"
   );
-  const [sprache, setSprache] = useState<"deutsch" | "englisch">(
-    profile.preferences.sprache ?? "deutsch"
+  const [sprache, setSprache] = useState<"de" | "en">(
+    spracheToLocale(profile.preferences.sprache)
   );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,12 +44,12 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
     setName(profile.facts.name ?? "");
     setInteressen(profile.facts.interessen ?? []);
     setAnrede(profile.preferences.anrede ?? "du");
-    setSprache(profile.preferences.sprache ?? "deutsch");
+    setSprache(spracheToLocale(profile.preferences.sprache));
   }, [profile]);
 
   function validateName(value: string): boolean {
     if (value.length > 100) {
-      setNameError("Maximal 100 Zeichen");
+      setNameError(t("settings.profilForm.nameMaxError"));
       return false;
     }
     setNameError(null);
@@ -69,11 +72,19 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
     setIsSaving(true);
     try {
       await onSave(input);
+      // PROJ-62: the saved `sprache` value also drives the UI language.
+      const locale = spracheToLocale(sprache);
+      if (i18n.language !== locale) i18n.changeLanguage(locale);
+      try {
+        localStorage.setItem(UI_LOCALE_STORAGE_KEY, locale);
+      } catch {
+        // ignore storage errors
+      }
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Fehler beim Speichern. Bitte erneut versuchen."
+          : t("settings.profilForm.saveError")
       );
     } finally {
       setIsSaving(false);
@@ -83,14 +94,14 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
   return (
     <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-foreground">Profildaten</CardTitle>
+        <CardTitle className="text-foreground">{t("settings.profilForm.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Name */}
           <div className="space-y-2">
             <Label htmlFor="profile-name" className="text-foreground">
-              Name
+              {t("settings.profilForm.name")}
             </Label>
             <Input
               id="profile-name"
@@ -100,7 +111,7 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
                 validateName(e.target.value);
               }}
               maxLength={100}
-              placeholder="Dein Anzeigename"
+              placeholder={t("settings.profilForm.namePlaceholder")}
               className="bg-card border-border text-foreground placeholder:text-muted-foreground"
             />
             {nameError && (
@@ -110,14 +121,14 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
 
           {/* Interessen */}
           <div className="space-y-2">
-            <Label className="text-foreground">Interessen</Label>
+            <Label className="text-foreground">{t("settings.profilForm.interests")}</Label>
             <InteressenTagInput tags={interessen} onChange={setInteressen} />
           </div>
 
           {/* Anrede */}
           <div className="space-y-2">
             <Label htmlFor="profile-anrede" className="text-foreground">
-              Anrede
+              {t("settings.profilForm.anrede")}
             </Label>
             <Select value={anrede} onValueChange={(v) => setAnrede(v as "du" | "sie")}>
               <SelectTrigger
@@ -127,8 +138,8 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-card border-border">
-                <SelectItem value="du">Du</SelectItem>
-                <SelectItem value="sie">Sie</SelectItem>
+                <SelectItem value="du">{t("settings.profilForm.anredeDu")}</SelectItem>
+                <SelectItem value="sie">{t("settings.profilForm.anredeSie")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -136,9 +147,9 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
           {/* Sprache */}
           <div className="space-y-2">
             <Label htmlFor="profile-sprache" className="text-foreground">
-              Sprache
+              {t("settings.profilForm.language")}
             </Label>
-            <Select value={sprache} onValueChange={(v) => setSprache(v as "deutsch" | "englisch")}>
+            <Select value={sprache} onValueChange={(v) => setSprache(v as "de" | "en")}>
               <SelectTrigger
                 id="profile-sprache"
                 className="bg-card border-border text-foreground"
@@ -146,8 +157,8 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-card border-border">
-                <SelectItem value="deutsch">Deutsch</SelectItem>
-                <SelectItem value="englisch">Englisch</SelectItem>
+                <SelectItem value="de">{t("settings.profilForm.langDe")}</SelectItem>
+                <SelectItem value="en">{t("settings.profilForm.langEn")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -155,28 +166,28 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
           {/* Read-only: Rolle */}
           <div className="space-y-1">
             <Label className="text-foreground flex items-center gap-1.5">
-              Rolle
+              {t("settings.profilForm.role")}
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-normal">
                 <Info className="h-3 w-3" />
-                Wird vom Admin verwaltet
+                {t("settings.profilForm.managedByAdmin")}
               </span>
             </Label>
             <p className="text-muted-foreground text-sm py-2 px-3 rounded-md bg-background border border-border">
-              {profile.facts.rolle ?? "Nicht gesetzt"}
+              {profile.facts.rolle ?? t("common.notSet")}
             </p>
           </div>
 
           {/* Read-only: Detailgrad */}
           <div className="space-y-1">
             <Label className="text-foreground flex items-center gap-1.5">
-              Detailgrad
+              {t("settings.profilForm.detailLevel")}
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-normal">
                 <Info className="h-3 w-3" />
-                Wird vom Admin verwaltet
+                {t("settings.profilForm.managedByAdmin")}
               </span>
             </Label>
             <p className="text-muted-foreground text-sm py-2 px-3 rounded-md bg-background border border-border">
-              {profile.preferences.detailgrad ?? "Nicht gesetzt"}
+              {profile.preferences.detailgrad ?? t("common.notSet")}
             </p>
           </div>
 
@@ -192,7 +203,7 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Profil speichern
+            {t("settings.profilForm.submit")}
           </Button>
         </form>
       </CardContent>

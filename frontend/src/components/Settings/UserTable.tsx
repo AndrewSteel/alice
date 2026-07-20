@@ -1,6 +1,8 @@
 "use client";
 
 import { MoreVertical, KeyRound, UserX, UserCheck, Trash2, Mic, LogIn } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { formatDate } from "@/i18n/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -37,18 +39,6 @@ interface UserTableProps {
   onDelete: (user: AdminUser) => void;
 }
 
-function formatDate(dateStr: string): string {
-  try {
-    return new Intl.DateTimeFormat("de-DE", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(dateStr));
-  } catch {
-    return dateStr;
-  }
-}
-
 function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
     admin: "bg-purple-900/40 text-purple-300 border-purple-800",
@@ -68,13 +58,14 @@ function RoleBadge({ role }: { role: string }) {
 }
 
 function StatusBadge({ isActive }: { isActive: boolean }) {
+  const { t } = useTranslation();
   if (isActive) {
     return (
       <Badge
         variant="secondary"
         className="text-xs bg-emerald-900/40 text-emerald-300 border-emerald-800"
       >
-        Aktiv
+        {t("settings.users.table.active")}
       </Badge>
     );
   }
@@ -83,7 +74,7 @@ function StatusBadge({ isActive }: { isActive: boolean }) {
       variant="secondary"
       className="text-xs bg-red-900/40 text-red-300 border-red-800"
     >
-      Inaktiv
+      {t("settings.users.table.inactive")}
     </Badge>
   );
 }
@@ -95,6 +86,7 @@ function VoiceCell({
   user: AdminUser;
   onToggleVoice: (user: AdminUser, allow: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const enrolled = user.speaker_enrollment_complete;
 
   // Admins may always self-enroll (bootstrap) — the per-user flag is moot.
@@ -105,9 +97,9 @@ function VoiceCell({
           variant="secondary"
           className="text-xs bg-muted/40 text-foreground border-border"
         >
-          Immer
+          {t("settings.users.table.always")}
         </Badge>
-        {enrolled && <Mic className="h-3.5 w-3.5 text-emerald-400" aria-label="Stimme registriert" />}
+        {enrolled && <Mic className="h-3.5 w-3.5 text-emerald-400" aria-label={t("settings.users.table.voiceRegistered")} />}
       </div>
     );
   }
@@ -117,11 +109,13 @@ function VoiceCell({
       <Switch
         checked={user.allow_voice_enrollment}
         onCheckedChange={(checked) => onToggleVoice(user, checked)}
-        aria-label={`Stimmregistrierung fuer ${user.username} ${
-          user.allow_voice_enrollment ? "deaktivieren" : "aktivieren"
-        }`}
+        aria-label={
+          user.allow_voice_enrollment
+            ? t("settings.users.table.voiceToggleDisableAria", { name: user.username })
+            : t("settings.users.table.voiceToggleEnableAria", { name: user.username })
+        }
       />
-      {enrolled && <Mic className="h-3.5 w-3.5 text-emerald-400" aria-label="Stimme registriert" />}
+      {enrolled && <Mic className="h-3.5 w-3.5 text-emerald-400" aria-label={t("settings.users.table.voiceRegistered")} />}
     </div>
   );
 }
@@ -141,6 +135,7 @@ function UserActionMenu({
   onToggleStatus: (user: AdminUser) => void;
   onDelete: (user: AdminUser) => void;
 }) {
+  const { t } = useTranslation();
   const hasEmail = !!user.email;
 
   return (
@@ -150,7 +145,7 @@ function UserActionMenu({
           variant="ghost"
           size="icon"
           className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          aria-label={`Aktionen fuer ${user.username}`}
+          aria-label={t("settings.users.table.actionsFor", { name: user.username })}
         >
           <MoreVertical className="h-4 w-4" />
         </Button>
@@ -165,7 +160,7 @@ function UserActionMenu({
             className="gap-2 focus:bg-accent focus:text-foreground"
           >
             <KeyRound className="h-4 w-4" />
-            OTP zuruecksetzen
+            {t("settings.users.table.resetOtp")}
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
@@ -173,7 +168,7 @@ function UserActionMenu({
             className="gap-2 focus:bg-accent focus:text-foreground"
           >
             <LogIn className="h-4 w-4" />
-            Zugang einrichten
+            {t("settings.users.table.setupAccess")}
           </DropdownMenuItem>
         )}
 
@@ -189,11 +184,11 @@ function UserActionMenu({
                   ) : (
                     <UserCheck className="h-4 w-4" />
                   )}
-                  {user.is_active ? "Deaktivieren" : "Aktivieren"}
+                  {user.is_active ? t("settings.users.table.deactivate") : t("settings.users.table.activate")}
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                Eigenen Account kann man nicht deaktivieren
+                {t("settings.users.table.cannotDeactivateSelf")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -205,12 +200,12 @@ function UserActionMenu({
             {user.is_active ? (
               <>
                 <UserX className="h-4 w-4" />
-                Deaktivieren
+                {t("settings.users.table.deactivate")}
               </>
             ) : (
               <>
                 <UserCheck className="h-4 w-4" />
-                Aktivieren
+                {t("settings.users.table.activate")}
               </>
             )}
           </DropdownMenuItem>
@@ -224,11 +219,11 @@ function UserActionMenu({
               <TooltipTrigger asChild>
                 <div className="px-2 py-1.5 text-sm text-muted-foreground flex items-center gap-2 cursor-not-allowed">
                   <Trash2 className="h-4 w-4" />
-                  Loeschen
+                  {t("settings.users.table.delete")}
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                Eigenen Account kann man nicht loeschen
+                {t("settings.users.table.cannotDeleteSelf")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -238,7 +233,7 @@ function UserActionMenu({
             className="gap-2 text-red-400 focus:bg-accent focus:text-red-400"
           >
             <Trash2 className="h-4 w-4" />
-            Loeschen
+            {t("settings.users.table.delete")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -255,6 +250,7 @@ export function UserTable({
   onToggleVoice,
   onDelete,
 }: UserTableProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-lg border border-border overflow-hidden">
       {/* Desktop table */}
@@ -262,14 +258,14 @@ export function UserTable({
         <Table>
           <TableHeader>
             <TableRow className="border-border hover:bg-transparent">
-              <TableHead className="text-muted-foreground">Nutzer</TableHead>
-              <TableHead className="text-muted-foreground max-w-[180px]">E-Mail</TableHead>
-              <TableHead className="text-muted-foreground">Rolle</TableHead>
-              <TableHead className="text-muted-foreground">Status</TableHead>
-              <TableHead className="text-muted-foreground">Stimme</TableHead>
-              <TableHead className="text-muted-foreground hidden lg:table-cell">Erstellt</TableHead>
+              <TableHead className="text-muted-foreground">{t("settings.users.table.user")}</TableHead>
+              <TableHead className="text-muted-foreground max-w-[180px]">{t("settings.users.table.email")}</TableHead>
+              <TableHead className="text-muted-foreground">{t("settings.users.table.role")}</TableHead>
+              <TableHead className="text-muted-foreground">{t("settings.users.table.status")}</TableHead>
+              <TableHead className="text-muted-foreground">{t("settings.users.table.voice")}</TableHead>
+              <TableHead className="text-muted-foreground hidden lg:table-cell">{t("settings.users.table.created")}</TableHead>
               <TableHead className="text-muted-foreground text-right w-10">
-                Aktionen
+                {t("settings.users.table.actions")}
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -360,11 +356,11 @@ export function UserTable({
                 <p className="text-xs text-muted-foreground truncate">{user.email}</p>
               )}
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">Stimme</span>
+                <span className="text-xs text-muted-foreground">{t("settings.users.table.voice")}</span>
                 <VoiceCell user={user} onToggleVoice={onToggleVoice} />
               </div>
               <p className="text-xs text-muted-foreground">
-                Erstellt: {formatDate(user.created_at)}
+                {t("settings.users.table.createdMobile", { date: formatDate(user.created_at) })}
               </p>
             </div>
           );

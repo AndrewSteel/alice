@@ -5,6 +5,7 @@ import { Eye, EyeOff, Bot, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslation } from "react-i18next";
 import { changePassword } from "@/services/adminApi";
 
 interface ChangePasswordFormProps {
@@ -14,6 +15,7 @@ interface ChangePasswordFormProps {
 export function ChangePasswordForm({
   onPasswordChanged,
 }: ChangePasswordFormProps) {
+  const { t } = useTranslation();
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showNew, setShowNew] = useState(false);
@@ -43,7 +45,7 @@ export function ChangePasswordForm({
       setError(
         err instanceof Error
           ? err.message
-          : "Passwort konnte nicht geaendert werden."
+          : t("auth.changePassword.genericError")
       );
     } finally {
       setIsSubmitting(false);
@@ -63,19 +65,19 @@ export function ChangePasswordForm({
           <div className="flex items-center gap-2 mb-6">
             <Lock className="h-5 w-5 text-amber-400" aria-hidden />
             <p className="text-sm text-muted-foreground">
-              Bitte aendere dein Passwort, um fortzufahren.
+              {t("auth.changePassword.hint")}
             </p>
           </div>
 
           <form
             onSubmit={handleSubmit}
             className="w-full space-y-4"
-            aria-label="Passwort aendern"
+            aria-label={t("auth.changePassword.formLabel")}
             noValidate
           >
             <div className="space-y-1.5">
               <Label htmlFor="new-password" className="text-foreground">
-                Neues Passwort
+                {t("auth.changePassword.newPassword")}
               </Label>
               <div className="relative">
                 <Input
@@ -88,7 +90,7 @@ export function ChangePasswordForm({
                   className={`bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 pr-10 ${
                     isTooShort ? "border-red-500" : ""
                   }`}
-                  placeholder="Mindestens 8 Zeichen"
+                  placeholder={t("auth.changePassword.newPasswordPlaceholder")}
                   required
                   autoFocus
                 />
@@ -97,7 +99,7 @@ export function ChangePasswordForm({
                   onClick={() => setShowNew((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label={
-                    showNew ? "Passwort verbergen" : "Passwort anzeigen"
+                    showNew ? t("auth.changePassword.hidePassword") : t("auth.changePassword.showPassword")
                   }
                 >
                   {showNew ? (
@@ -109,14 +111,14 @@ export function ChangePasswordForm({
               </div>
               {isTooShort && (
                 <p className="text-xs text-red-400">
-                  Mindestens 8 Zeichen erforderlich.
+                  {t("auth.changePassword.tooShort")}
                 </p>
               )}
             </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="confirm-password" className="text-foreground">
-                Passwort wiederholen
+                {t("auth.changePassword.repeatPassword")}
               </Label>
               <div className="relative">
                 <Input
@@ -129,7 +131,7 @@ export function ChangePasswordForm({
                   className={`bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 pr-10 ${
                     !passwordsMatch ? "border-red-500" : ""
                   }`}
-                  placeholder="Passwort wiederholen"
+                  placeholder={t("auth.changePassword.repeatPlaceholder")}
                   required
                 />
                 <button
@@ -137,7 +139,7 @@ export function ChangePasswordForm({
                   onClick={() => setShowConfirm((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label={
-                    showConfirm ? "Passwort verbergen" : "Passwort anzeigen"
+                    showConfirm ? t("auth.changePassword.hidePassword") : t("auth.changePassword.showPassword")
                   }
                 >
                   {showConfirm ? (
@@ -149,7 +151,7 @@ export function ChangePasswordForm({
               </div>
               {!passwordsMatch && (
                 <p className="text-xs text-red-400">
-                  Passwoerter stimmen nicht ueberein.
+                  {t("auth.changePassword.mismatch")}
                 </p>
               )}
             </div>
@@ -165,7 +167,7 @@ export function ChangePasswordForm({
               disabled={!canSubmit}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
             >
-              {isSubmitting ? "Wird gespeichert..." : "Passwort aendern"}
+              {isSubmitting ? t("auth.changePassword.submitting") : t("auth.changePassword.submit")}
             </Button>
           </form>
         </div>

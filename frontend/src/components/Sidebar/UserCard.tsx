@@ -1,6 +1,7 @@
 "use client";
 
 import { LogOut, Settings } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 
 export function UserCard() {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   if (!user) return null;
 
@@ -39,7 +41,7 @@ export function UserCard() {
             className="gap-2 text-foreground focus:text-foreground focus:bg-accent cursor-pointer"
           >
             <Settings className="h-4 w-4" aria-hidden />
-            Einstellungen
+            {t("sidebar.userCard.settings")}
           </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-muted" />
           <DropdownMenuItem
@@ -47,7 +49,7 @@ export function UserCard() {
             className="gap-2 text-red-400 focus:text-red-300 focus:bg-accent cursor-pointer"
           >
             <LogOut className="h-4 w-4" aria-hidden />
-            Abmelden
+            {t("sidebar.userCard.logout")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { RefreshCw, Trash2, Mic } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { formatDate } from "@/i18n/format";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,20 +29,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useVoiceProfiles } from "@/hooks/useVoiceProfiles";
 import type { VoiceProfile } from "@/services/voiceApi";
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "--";
-  try {
-    return new Intl.DateTimeFormat("de-DE", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(dateStr));
-  } catch {
-    return dateStr;
-  }
-}
-
 export function VoiceProfilesSection() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { profiles, isLoading, error, reload, removeProfile } = useVoiceProfiles();
   const [deleteTarget, setDeleteTarget] = useState<VoiceProfile | null>(null);
@@ -52,17 +42,17 @@ export function VoiceProfilesSection() {
     try {
       await removeProfile(deleteTarget.user_id);
       toast({
-        title: "Stimmprofil geloescht",
-        description: `Das Stimmprofil von ${deleteTarget.username} wurde entfernt.`,
+        title: t("settings.voiceProfiles.deleted"),
+        description: t("settings.voiceProfiles.deletedDesc", { name: deleteTarget.username }),
       });
       setDeleteTarget(null);
     } catch (err) {
       toast({
-        title: "Fehler",
+        title: t("common.error"),
         description:
           err instanceof Error
             ? err.message
-            : "Stimmprofil konnte nicht geloescht werden.",
+            : t("settings.voiceProfiles.deleteError"),
         variant: "destructive",
       });
     } finally {
@@ -88,7 +78,7 @@ export function VoiceProfilesSection() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-foreground">Stimmprofile</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.voiceProfiles.heading")}</h2>
         <div className="rounded-lg border border-red-800 bg-red-900/20 p-4">
           <p className="text-sm text-red-400">{error}</p>
           <Button
@@ -98,7 +88,7 @@ export function VoiceProfilesSection() {
             className="mt-2 text-red-400 hover:text-red-300"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Erneut versuchen
+            {t("common.retry")}
           </Button>
         </div>
       </div>
@@ -109,28 +99,27 @@ export function VoiceProfilesSection() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-foreground">Stimmprofile</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.voiceProfiles.heading")}</h2>
         <Button
           variant="ghost"
           size="icon"
           onClick={reload}
           className="h-9 w-9 text-muted-foreground hover:text-foreground"
-          aria-label="Liste aktualisieren"
+          aria-label={t("settings.voiceProfiles.refresh")}
         >
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Nutzer, deren Stimme registriert ist. Beim Loeschen werden alle
-        Stimmproben entfernt; der Nutzer selbst bleibt erhalten.
+        {t("settings.voiceProfiles.desc")}
       </p>
 
       {profiles.length === 0 ? (
         <div className="rounded-lg border border-border p-8 text-center">
           <Mic className="mx-auto h-6 w-6 text-muted-foreground" />
           <p className="mt-2 text-muted-foreground">
-            Noch keine Stimmprofile registriert.
+            {t("settings.voiceProfiles.emptyTitle")}
           </p>
         </div>
       ) : (
@@ -140,14 +129,14 @@ export function VoiceProfilesSection() {
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">Nutzer</TableHead>
-                  <TableHead className="text-muted-foreground">Rolle</TableHead>
-                  <TableHead className="text-muted-foreground">Proben</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.voiceProfiles.table.user")}</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.voiceProfiles.table.role")}</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.voiceProfiles.table.samples")}</TableHead>
                   <TableHead className="text-muted-foreground hidden lg:table-cell">
-                    Registriert
+                    {t("settings.voiceProfiles.table.registered")}
                   </TableHead>
                   <TableHead className="text-muted-foreground text-right w-10">
-                    Aktion
+                    {t("settings.voiceProfiles.table.action")}
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -185,7 +174,7 @@ export function VoiceProfilesSection() {
                         size="icon"
                         onClick={() => setDeleteTarget(p)}
                         className="h-8 w-8 text-muted-foreground hover:text-red-400"
-                        aria-label={`Stimmprofil von ${p.username} loeschen`}
+                        aria-label={t("settings.voiceProfiles.table.deleteAria", { name: p.username })}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -215,11 +204,11 @@ export function VoiceProfilesSection() {
                       {p.role}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
-                      {p.sample_count} Proben
+                      {t("settings.voiceProfiles.samplesCount", { count: p.sample_count })}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Registriert: {formatDate(p.created_at)}
+                    {t("settings.voiceProfiles.table.registeredMobile", { date: formatDate(p.created_at) })}
                   </p>
                 </div>
                 <Button
@@ -227,7 +216,7 @@ export function VoiceProfilesSection() {
                   size="icon"
                   onClick={() => setDeleteTarget(p)}
                   className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-400"
-                  aria-label={`Stimmprofil von ${p.username} loeschen`}
+                  aria-label={t("settings.voiceProfiles.table.deleteAria", { name: p.username })}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -244,15 +233,10 @@ export function VoiceProfilesSection() {
         <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-red-400">
-              Stimmprofil loeschen
+              {t("settings.voiceProfiles.deleteTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              Das Stimmprofil von{" "}
-              <span className="font-medium text-foreground">
-                {deleteTarget?.username}
-              </span>{" "}
-              wird dauerhaft entfernt. Der Nutzer wird an Sprachgeraeten nicht
-              mehr automatisch erkannt, bis die Stimme neu registriert wird.
+              {t("settings.voiceProfiles.deleteDesc", { name: deleteTarget?.username ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -260,7 +244,7 @@ export function VoiceProfilesSection() {
               disabled={isDeleting}
               className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
             >
-              Abbrechen
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
@@ -270,7 +254,7 @@ export function VoiceProfilesSection() {
               disabled={isDeleting}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {isDeleting ? "Wird geloescht..." : "Loeschen"}
+              {isDeleting ? t("common.deleting") : t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

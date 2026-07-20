@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Check, AlertTriangle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Message } from "../types";
 
@@ -14,8 +15,9 @@ interface ToolCallMessageProps {
  * Fallback ist der `toolName`. Status-Icon: Spinner / Haken / Warnung.
  */
 export function ToolCallMessage({ message }: ToolCallMessageProps) {
+  const { t } = useTranslation();
   const { content, toolName, toolStatus } = message;
-  const label = content || toolName || "Tool wird ausgeführt…";
+  const label = content || toolName || t("chat.tool.runningFallback");
   // Default to a running spinner if status is missing (defensive: e.g. malformed
   // SSE payload or a future session-restore path that omits the field).
   const effectiveStatus = toolStatus ?? "running";

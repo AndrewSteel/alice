@@ -1,6 +1,7 @@
 "use client";
 
 import { Square } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -13,13 +14,13 @@ interface VoiceOverlayProps {
   onStop: () => void;
 }
 
-const STATUS_LABEL: Record<VoiceMode2Status, string> = {
-  idle: "",
-  connecting: "Verbinde…",
-  listening: "Höre zu…",
-  processing: "Alice denkt…",
-  speaking: "Alice spricht…",
-  ended: "Gespräch beendet",
+const STATUS_LABEL_KEY: Record<VoiceMode2Status, string | null> = {
+  idle: null,
+  connecting: "chat.voiceOverlay.connecting",
+  listening: "chat.voiceOverlay.listening",
+  processing: "chat.voiceOverlay.processing",
+  speaking: "chat.voiceOverlay.speaking",
+  ended: "chat.voiceOverlay.ended",
 };
 
 const RING_COLOR: Record<VoiceMode2Status, string> = {
@@ -38,6 +39,8 @@ const RING_COLOR: Record<VoiceMode2Status, string> = {
  * `session_ended` (handled in the hook).
  */
 export function VoiceOverlay({ open, status, onStop }: VoiceOverlayProps) {
+  const { t } = useTranslation();
+  const statusKey = STATUS_LABEL_KEY[status];
   // The Dialog reports an onOpenChange when the user presses Escape or
   // clicks the X — route both to the stop handler so the session is torn
   // down cleanly.
@@ -51,7 +54,7 @@ export function VoiceOverlay({ open, status, onStop }: VoiceOverlayProps) {
         className="max-w-sm border-border bg-background text-foreground sm:max-w-md"
         aria-describedby={undefined}
       >
-        <DialogTitle className="sr-only">Sprachgespräch mit Alice</DialogTitle>
+        <DialogTitle className="sr-only">{t("chat.voiceOverlay.title")}</DialogTitle>
         <div className="flex flex-col items-center gap-8 py-6">
           {/* Animated state ring */}
           <div className="relative flex h-32 w-32 items-center justify-center">
@@ -66,7 +69,7 @@ export function VoiceOverlay({ open, status, onStop }: VoiceOverlayProps) {
           </div>
 
           <p className="text-xl font-medium" aria-live="polite" role="status">
-            {STATUS_LABEL[status]}
+            {statusKey ? t(statusKey) : ""}
           </p>
 
           <Button
@@ -74,10 +77,10 @@ export function VoiceOverlay({ open, status, onStop }: VoiceOverlayProps) {
             onClick={onStop}
             variant="destructive"
             className="gap-2"
-            aria-label="Sprachgespräch beenden"
+            aria-label={t("chat.voiceOverlay.stopAria")}
           >
             <Square className="h-4 w-4" fill="currentColor" />
-            Beenden
+            {t("chat.voiceOverlay.stop")}
           </Button>
         </div>
       </DialogContent>

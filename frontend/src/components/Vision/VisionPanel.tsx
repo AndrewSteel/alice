@@ -1,6 +1,7 @@
 "use client";
 
 import type { VisionResult } from "@/services/api";
+import { useTranslation } from "react-i18next";
 import { FlipCardGrid } from "./FlipCardGrid";
 import { VisionEmptyState } from "./VisionEmptyState";
 import { Button } from "@/components/ui/button";
@@ -19,12 +20,13 @@ export function VisionPanel({
   onShowTextPanel,
   onHideTextPanel,
 }: VisionPanelProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col h-full bg-background border-r border-border overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background shrink-0">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Ergebnisse
+          {t("vision.results")}
           {results.length > 0 && (
             <span className="ml-1.5 text-muted-foreground">({results.length})</span>
           )}
@@ -34,7 +36,7 @@ export function VisionPanel({
           variant="ghost"
           size="icon"
           className="h-6 w-6 text-muted-foreground hover:text-foreground"
-          title={textPanelVisible ? "Chat ausblenden" : "Chat einblenden"}
+          title={textPanelVisible ? t("vision.hideChat") : t("vision.showChat")}
           onClick={textPanelVisible ? onHideTextPanel : onShowTextPanel}
         >
           {textPanelVisible ? (

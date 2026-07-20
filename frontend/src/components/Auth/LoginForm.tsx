@@ -5,10 +5,12 @@ import { Eye, EyeOff, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTranslation } from "react-i18next";
 import { login as loginService } from "@/services/auth";
 import { useAuth } from "@/hooks/useAuth";
 
 export function LoginForm() {
+  const { t } = useTranslation();
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -28,11 +30,11 @@ export function LoginForm() {
       window.location.href = "/";
     } catch (err) {
       if (err instanceof Error && err.message === "NETWORK_ERROR") {
-        setError("Verbindungsfehler — bitte erneut versuchen");
+        setError(t("auth.login.errorNetwork"));
       } else if (err instanceof Error && err.message === "RATE_LIMITED") {
-        setError("Zu viele Anmeldeversuche — bitte eine Minute warten.");
+        setError(t("auth.login.errorRateLimited"));
       } else {
-        setError("Ungültige Anmeldedaten");
+        setError(t("auth.login.errorInvalid"));
       }
     } finally {
       setIsLoading(false);
@@ -50,12 +52,12 @@ export function LoginForm() {
       <form
         onSubmit={handleSubmit}
         className="w-full space-y-4"
-        aria-label="Anmeldung"
+        aria-label={t("auth.login.formLabel")}
         noValidate
       >
         <div className="space-y-1.5">
           <Label htmlFor="username" className="text-foreground">
-            Benutzername
+            {t("auth.login.username")}
           </Label>
           <Input
             id="username"
@@ -65,14 +67,14 @@ export function LoginForm() {
             onChange={(e) => setUsername(e.target.value)}
             disabled={isLoading}
             className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
-            placeholder="Benutzername"
+            placeholder={t("auth.login.username")}
             required
           />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="password" className="text-foreground">
-            Passwort
+            {t("auth.login.password")}
           </Label>
           <div className="relative">
             <Input
@@ -83,14 +85,14 @@ export function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               disabled={isLoading}
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500 pr-10"
-              placeholder="Passwort"
+              placeholder={t("auth.login.password")}
               required
             />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label={showPassword ? "Passwort verbergen" : "Passwort anzeigen"}
+              aria-label={showPassword ? t("auth.login.hidePassword") : t("auth.login.showPassword")}
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
@@ -108,7 +110,7 @@ export function LoginForm() {
           disabled={isDisabled}
           className="w-full bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
         >
-          {isLoading ? "Wird angemeldet…" : "Anmelden"}
+          {isLoading ? t("auth.login.submitting") : t("auth.login.submit")}
         </Button>
       </form>
     </div>

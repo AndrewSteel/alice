@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, AlertCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +19,7 @@ import type {
 } from "@/services/dms";
 
 export function DmsSection() {
+  const { t } = useTranslation();
   const {
     folders,
     isLoading,
@@ -44,7 +46,7 @@ export function DmsSection() {
       setAddOpen(false);
     } catch (err) {
       setActionError(
-        err instanceof Error ? err.message : "Fehler beim Erstellen.",
+        err instanceof Error ? err.message : t("settings.dms.createError"),
       );
       throw err; // Let dialog know it failed
     }
@@ -57,7 +59,7 @@ export function DmsSection() {
       setEditTarget(null);
     } catch (err) {
       setActionError(
-        err instanceof Error ? err.message : "Fehler beim Aktualisieren.",
+        err instanceof Error ? err.message : t("settings.dms.updateError"),
       );
       throw err;
     }
@@ -70,7 +72,7 @@ export function DmsSection() {
       setDeleteTarget(null);
     } catch (err) {
       setActionError(
-        err instanceof Error ? err.message : "Fehler beim Loeschen.",
+        err instanceof Error ? err.message : t("settings.dms.deleteError"),
       );
     }
   }
@@ -81,7 +83,7 @@ export function DmsSection() {
       await toggleFolder(folder.id, !folder.enabled);
     } catch (err) {
       setActionError(
-        err instanceof Error ? err.message : "Fehler beim Umschalten.",
+        err instanceof Error ? err.message : t("settings.dms.toggleError"),
       );
     }
   }
@@ -91,11 +93,11 @@ export function DmsSection() {
       await reorderFolders(reorderedFolders);
     } catch (err) {
       toast({
-        title: "Fehler",
+        title: t("common.error"),
         description:
           err instanceof Error
             ? err.message
-            : "Reihenfolge konnte nicht gespeichert werden.",
+            : t("settings.dms.reorderError"),
         variant: "destructive",
       });
     }
@@ -142,7 +144,7 @@ export function DmsSection() {
               onClick={() => setActionError(null)}
               className="text-red-300 hover:text-red-100 h-auto py-0 px-2"
             >
-              Schliessen
+              {t("common.close")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -150,7 +152,7 @@ export function DmsSection() {
 
       {/* Section header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-foreground">DMS Ordner</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.dms.title")}</h2>
         <Button
           onClick={() => {
             setActionError(null);
@@ -160,16 +162,16 @@ export function DmsSection() {
           className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
         >
           <Plus className="h-4 w-4" />
-          Ordner hinzufügen
+          {t("settings.dms.addFolder")}
         </Button>
       </div>
 
       {/* Table or empty state */}
       {folders.length === 0 ? (
         <div className="rounded-lg border border-border bg-card p-8 text-center">
-          <p className="text-muted-foreground">Noch keine Ordner konfiguriert.</p>
+          <p className="text-muted-foreground">{t("settings.dms.emptyTitle")}</p>
           <p className="text-sm text-muted-foreground mt-1">
-            Füge einen NAS-Ordner hinzu, um das DMS zu starten.
+            {t("settings.dms.emptyDesc")}
           </p>
         </div>
       ) : (

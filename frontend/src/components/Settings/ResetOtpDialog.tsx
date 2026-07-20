@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ export function ResetOtpDialog({
   onOpenChange,
   onConfirm,
 }: ResetOtpDialogProps) {
+  const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleConfirm() {
@@ -42,13 +44,9 @@ export function ResetOtpDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
-          <AlertDialogTitle>OTP zuruecksetzen?</AlertDialogTitle>
+          <AlertDialogTitle>{t("settings.users.resetOtpDialog.title")}</AlertDialogTitle>
           <AlertDialogDescription className="text-muted-foreground">
-            Ein neues Einmal-Passwort wird generiert und per E-Mail an{" "}
-            <span className="font-medium text-foreground">
-              {user.email || user.username}
-            </span>{" "}
-            gesendet. Der Nutzer muss das Passwort beim naechsten Login aendern.
+            {t("settings.users.resetOtpDialog.desc", { recipient: user.email || user.username })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -56,14 +54,14 @@ export function ResetOtpDialog({
             disabled={isSubmitting}
             className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
           >
-            Abbrechen
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
             disabled={isSubmitting}
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
-            {isSubmitting ? "Wird gesendet..." : "OTP senden"}
+            {isSubmitting ? t("settings.users.resetOtpDialog.sending") : t("settings.users.resetOtpDialog.sendOtp")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
