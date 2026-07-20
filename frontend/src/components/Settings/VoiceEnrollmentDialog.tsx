@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Mic, Square, Check, RotateCcw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,6 +30,7 @@ export function VoiceEnrollmentDialog({
   onOpenChange,
   onEnrolled,
 }: VoiceEnrollmentDialogProps) {
+  const { t } = useTranslation();
   const { isRecording, permissionDenied, start, stop, cancel } = useWavRecorder();
   const [samples, setSamples] = useState<Blob[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -59,11 +61,11 @@ export function VoiceEnrollmentDialog({
       if (blob) {
         setSamples((prev) => [...prev, blob]);
       } else {
-        setError("Aufnahme war zu kurz oder leer. Bitte erneut versuchen.");
+        setError(t("settings.voiceEnroll.tooShort"));
       }
     } else {
       const ok = await start();
-      if (!ok) setError("Mikrofon konnte nicht gestartet werden.");
+      if (!ok) setError(t("settings.voiceEnroll.micError"));
     }
   }
 
@@ -81,7 +83,7 @@ export function VoiceEnrollmentDialog({
       setDone(true);
       onEnrolled?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(err instanceof Error ? err.message : t("common.unknownError"));
     } finally {
       setIsUploading(false);
     }
@@ -91,11 +93,9 @@ export function VoiceEnrollmentDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
-          <DialogTitle>Stimmregistrierung</DialogTitle>
+          <DialogTitle>{t("settings.voiceEnroll.title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Nimm {REQUIRED_SAMPLES} kurze Sprachproben auf (je ca. 3 Sekunden).
-            Sprich jeweils einen normalen Satz, damit Alice deine Stimme sicher
-            erkennt.
+            {t("settings.voiceEnroll.desc", { count: REQUIRED_SAMPLES })}
           </DialogDescription>
         </DialogHeader>
 
@@ -105,8 +105,7 @@ export function VoiceEnrollmentDialog({
               <Check className="h-6 w-6 text-emerald-400" />
             </div>
             <p className="text-sm text-foreground">
-              Stimmregistrierung abgeschlossen. Alice erkennt dich jetzt an
-              deiner Stimme.
+              {t("settings.voiceEnroll.doneMsg")}
             </p>
           </div>
         ) : (
@@ -114,7 +113,7 @@ export function VoiceEnrollmentDialog({
             {/* Progress */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Aufgenommene Proben</span>
+                <span className="text-muted-foreground">{t("settings.voiceEnroll.recordedSamples")}</span>
                 <span className="text-foreground tabular-nums">
                   {collected}/{REQUIRED_SAMPLES}
                 </span>
@@ -147,7 +146,7 @@ export function VoiceEnrollmentDialog({
                       ? "bg-red-600 hover:bg-red-700 animate-pulse"
                       : "bg-blue-600 hover:bg-blue-500"
                   } text-white disabled:opacity-50`}
-                  aria-label={isRecording ? "Aufnahme stoppen" : "Aufnahme starten"}
+                  aria-label={isRecording ? t("settings.voiceEnroll.recordStop") : t("settings.voiceEnroll.recordStart")}
                 >
                   {isRecording ? (
                     <Square className="h-5 w-5" />
@@ -157,16 +156,15 @@ export function VoiceEnrollmentDialog({
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   {isRecording
-                    ? "Sprich jetzt … zum Beenden tippen"
-                    : `Probe ${collected + 1} aufnehmen`}
+                    ? t("settings.voiceEnroll.speakNow")
+                    : t("settings.voiceEnroll.recordSample", { n: collected + 1 })}
                 </p>
               </div>
             )}
 
             {permissionDenied && (
               <p className="text-xs text-red-400 text-center">
-                Mikrofonzugriff verweigert. Bitte im Browser erlauben und die
-                Seite neu laden.
+                {t("settings.voiceEnroll.permissionDenied")}
               </p>
             )}
 
@@ -185,7 +183,7 @@ export function VoiceEnrollmentDialog({
               onClick={() => handleOpenChange(false)}
               className="bg-blue-600 hover:bg-blue-500 text-white"
             >
-              Fertig
+              {t("settings.voiceEnroll.done")}
             </Button>
           ) : (
             <>
@@ -198,7 +196,7 @@ export function VoiceEnrollmentDialog({
                   className="text-foreground hover:bg-accent hover:text-foreground gap-2"
                 >
                   <RotateCcw className="h-4 w-4" />
-                  Neu beginnen
+                  {t("settings.voiceEnroll.restart")}
                 </Button>
               )}
               <Button
@@ -207,7 +205,7 @@ export function VoiceEnrollmentDialog({
                 disabled={!complete || isRecording || isUploading}
                 className="bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
               >
-                {isUploading ? "Wird hochgeladen..." : "Speichern"}
+                {isUploading ? t("settings.voiceEnroll.uploading") : t("common.save")}
               </Button>
             </>
           )}

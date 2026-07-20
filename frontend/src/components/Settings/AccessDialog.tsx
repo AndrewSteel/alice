@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getMailboxAccess, updateMailboxAccess } from "@/services/mailApi";
 import type { Mailbox, AccessListUser } from "@/services/mailApi";
 
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<AccessListUser[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -36,7 +38,7 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
         setUsers(data);
         setSelected(new Set(data.filter((u) => u.has_access).map((u) => u.user_id)));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Fehler beim Laden."))
+      .catch((err) => setError(err instanceof Error ? err.message : t("settings.mail.accessDialog.loadError")))
       .finally(() => setLoading(false));
   }, [open, mailbox.id]);
 
@@ -57,7 +59,7 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
       onSaved();
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Speichern.");
+      setError(err instanceof Error ? err.message : t("settings.profilForm.saveError"));
     } finally {
       setSaving(false);
     }
@@ -67,9 +69,9 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-card border-border text-foreground sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Zugriffsrechte — {mailbox.display_name}</DialogTitle>
+          <DialogTitle>{t("settings.mail.accessDialog.title", { name: mailbox.display_name })}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Ausgewählte Nutzer können Mails dieses Postfachs abfragen und erhalten Benachrichtigungen.
+            {t("settings.mail.accessDialog.desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -85,7 +87,7 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
         ) : (
           <div className="space-y-2 py-1 max-h-64 overflow-y-auto">
             {users.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Keine Nutzer gefunden.</p>
+              <p className="text-sm text-muted-foreground py-4 text-center">{t("settings.mail.accessDialog.noUsers")}</p>
             ) : (
               users.map((u) => (
                 <div key={u.user_id} className="flex items-center gap-3 rounded-md p-2 hover:bg-accent/50 cursor-pointer"
@@ -108,10 +110,10 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}
-            className="text-muted-foreground hover:text-foreground">Abbrechen</Button>
+            className="text-muted-foreground hover:text-foreground">{t("common.cancel")}</Button>
           <Button onClick={handleSave} disabled={saving || loading}
             className="bg-blue-600 hover:bg-blue-700 text-white">
-            {saving ? "Wird gespeichert..." : "Speichern"}
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

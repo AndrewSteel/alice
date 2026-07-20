@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu, MessageSquare } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,6 +17,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 const SWIPE_THRESHOLD = 50;
 
 export function AppShell() {
+  const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
@@ -137,7 +139,7 @@ export function AppShell() {
         {/* Mobile Sidebar */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetContent side="left" className="w-[260px] p-0 bg-background border-border">
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <SheetTitle className="sr-only">{t("chat.shell.navigation")}</SheetTitle>
             <Sidebar {...sidebarProps} onCollapse={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
@@ -155,7 +157,7 @@ export function AppShell() {
               size="icon"
               onClick={() => setMobileOpen(true)}
               className="text-muted-foreground hover:text-foreground"
-              aria-label="Menü öffnen"
+              aria-label={t("chat.shell.openMenu")}
             >
               <Menu className="h-5 w-5" />
             </Button>
@@ -166,7 +168,7 @@ export function AppShell() {
                 variant="ghost"
                 size="icon"
                 className="ml-auto text-muted-foreground hover:text-foreground"
-                title={effectiveMode === "vision" ? "Chat anzeigen" : "Karten anzeigen"}
+                title={effectiveMode === "vision" ? t("chat.shell.showChat") : t("chat.shell.showCards")}
                 onClick={() =>
                   effectiveMode === "vision" ? onShowText() : onHideText()
                 }
@@ -184,7 +186,7 @@ export function AppShell() {
                 size="icon"
                 onClick={() => setDesktopCollapsed(false)}
                 className="text-muted-foreground hover:text-foreground"
-                aria-label="Sidebar einblenden"
+                aria-label={t("chat.shell.expandSidebar")}
               >
                 <Menu className="h-5 w-5" />
               </Button>
@@ -229,7 +231,7 @@ export function AppShell() {
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Starte einen neuen Chat.</p>
+                    <p>{t("chat.shell.startNewChat")}</p>
                   </div>
                 )}
               </div>

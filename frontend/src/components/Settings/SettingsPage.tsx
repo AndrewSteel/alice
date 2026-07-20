@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
@@ -13,6 +14,7 @@ import { ChatarchivSection } from "./ChatarchivSection";
 import { MailboxSection } from "./MailboxSection";
 
 export function SettingsPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
@@ -26,11 +28,11 @@ export function SettingsPage() {
             size="icon"
             onClick={() => { window.location.href = "/"; }}
             className="text-muted-foreground hover:text-foreground shrink-0"
-            aria-label="Zurueck zum Chat"
+            aria-label={t("settings.backToChat")}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <h1 className="text-lg font-semibold">Einstellungen</h1>
+          <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
         </div>
       </header>
 
@@ -44,21 +46,21 @@ export function SettingsPage() {
                 value="mein-profil"
                 className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
               >
-                <span className="md:hidden">Profil</span>
-                <span className="hidden md:inline">Mein Profil</span>
+                <span className="md:hidden">{t("settings.tabs.profileShort")}</span>
+                <span className="hidden md:inline">{t("settings.tabs.profile")}</span>
               </TabsTrigger>
               <TabsTrigger
                 value="allgemein"
                 className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
               >
-                Allgemein
+                {t("settings.tabs.allgemein")}
               </TabsTrigger>
               {isAdmin && (
                 <TabsTrigger
                   value="dms"
                   className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
-                  DMS
+                  {t("settings.tabs.dms")}
                 </TabsTrigger>
               )}
               {isAdmin && (
@@ -66,8 +68,8 @@ export function SettingsPage() {
                   value="nutzerverwaltung"
                   className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
-                  <span className="md:hidden">Nutzer</span>
-                  <span className="hidden md:inline">Nutzerverwaltung</span>
+                  <span className="md:hidden">{t("settings.tabs.usersShort")}</span>
+                  <span className="hidden md:inline">{t("settings.tabs.users")}</span>
                 </TabsTrigger>
               )}
               {isAdmin && (
@@ -75,7 +77,7 @@ export function SettingsPage() {
                   value="stimmprofile"
                   className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
-                  Stimmprofile
+                  {t("settings.tabs.voiceProfiles")}
                 </TabsTrigger>
               )}
               {isAdmin && (
@@ -83,14 +85,14 @@ export function SettingsPage() {
                   value="chatarchiv"
                   className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
                 >
-                  Chatarchiv
+                  {t("settings.tabs.chatArchive")}
                 </TabsTrigger>
               )}
               <TabsTrigger
                 value="email"
                 className="flex-1 md:flex-none md:w-full md:justify-start text-muted-foreground data-[state=active]:text-foreground data-[state=active]:bg-muted"
               >
-                E-Mail
+                {t("settings.tabs.email")}
               </TabsTrigger>
             </TabsList>
 

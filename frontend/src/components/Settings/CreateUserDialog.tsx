@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useTranslation } from "react-i18next";
 import type { CreateUserInput } from "@/services/adminApi";
 
 interface CreateUserDialogProps {
@@ -30,7 +31,7 @@ interface CreateUserDialogProps {
 
 const ROLES = ["admin", "user", "guest", "child"] as const;
 const ANREDE_OPTIONS = ["du", "sie"] as const;
-const SPRACHE_OPTIONS = ["deutsch", "englisch"] as const;
+const SPRACHE_OPTIONS = ["de", "en"] as const;
 const DETAILGRAD_OPTIONS = ["technisch", "normal", "einfach", "kindlich"] as const;
 
 export function CreateUserDialog({
@@ -38,13 +39,14 @@ export function CreateUserDialog({
   onOpenChange,
   onConfirm,
 }: CreateUserDialogProps) {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<string>("user");
   const [name, setName] = useState("");
   const [rolle, setRolle] = useState("");
   const [anrede, setAnrede] = useState<string>("du");
-  const [sprache, setSprache] = useState<string>("deutsch");
+  const [sprache, setSprache] = useState<string>("de");
   const [detailgrad, setDetailgrad] = useState<string>("normal");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,7 @@ export function CreateUserDialog({
     setName("");
     setRolle("");
     setAnrede("du");
-    setSprache("deutsch");
+    setSprache("de");
     setDetailgrad("normal");
     setError(null);
   }
@@ -101,7 +103,7 @@ export function CreateUserDialog({
       resetForm();
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(err instanceof Error ? err.message : t("common.unknownError"));
     } finally {
       setIsSubmitting(false);
     }
@@ -111,10 +113,9 @@ export function CreateUserDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Neuer Nutzer</DialogTitle>
+          <DialogTitle>{t("settings.users.createDialog.title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Ein Einmal-Passwort wird generiert und per E-Mail an den neuen
-            Nutzer gesendet.
+            {t("settings.users.createDialog.desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -123,7 +124,7 @@ export function CreateUserDialog({
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="create-username" className="text-foreground">
-                Benutzername <span className="text-red-400">*</span>
+                {t("settings.users.createDialog.username")} <span className="text-red-400">*</span>
               </Label>
               <Input
                 id="create-username"
@@ -131,7 +132,7 @@ export function CreateUserDialog({
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={isSubmitting}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
-                placeholder="z.B. maria"
+                placeholder={t("settings.users.createDialog.usernamePlaceholder")}
                 autoComplete="off"
                 required
               />
@@ -139,7 +140,7 @@ export function CreateUserDialog({
 
             <div className="space-y-1.5">
               <Label htmlFor="create-email" className="text-foreground">
-                E-Mail-Adresse <span className="text-red-400">*</span>
+                {t("settings.users.createDialog.email")} <span className="text-red-400">*</span>
               </Label>
               <Input
                 id="create-email"
@@ -156,21 +157,21 @@ export function CreateUserDialog({
               />
               {email.trim() && !isEmailValid && (
                 <p className="text-xs text-red-400">
-                  Bitte eine gueltige E-Mail-Adresse eingeben.
+                  {t("settings.users.createDialog.emailInvalid")}
                 </p>
               )}
             </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="create-role" className="text-foreground">
-                Systemrolle <span className="text-red-400">*</span>
+                {t("settings.users.createDialog.systemRole")} <span className="text-red-400">*</span>
               </Label>
               <Select value={role} onValueChange={setRole} disabled={isSubmitting}>
                 <SelectTrigger
                   id="create-role"
                   className="bg-muted border-border text-foreground"
                 >
-                  <SelectValue placeholder="Rolle waehlen" />
+                  <SelectValue placeholder={t("settings.users.createDialog.chooseRole")} />
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border text-foreground">
                   {ROLES.map((r) => (
@@ -192,13 +193,13 @@ export function CreateUserDialog({
           {/* --- Profil-Daten (optional) --- */}
           <div className="space-y-3">
             <p className="text-sm font-medium text-foreground">
-              Profil (optional)
+              {t("settings.users.createDialog.profileOptional")}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="create-name" className="text-muted-foreground text-sm">
-                  Name
+                  {t("settings.users.createDialog.name")}
                 </Label>
                 <Input
                   id="create-name"
@@ -206,7 +207,7 @@ export function CreateUserDialog({
                   onChange={(e) => setName(e.target.value)}
                   disabled={isSubmitting}
                   className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
-                  placeholder="z.B. Maria"
+                  placeholder={t("settings.users.createDialog.namePlaceholder")}
                   autoComplete="off"
                 />
               </div>
@@ -216,7 +217,7 @@ export function CreateUserDialog({
                   htmlFor="create-rolle"
                   className="text-muted-foreground text-sm"
                 >
-                  Rolle (Beschreibung)
+                  {t("settings.users.createDialog.roleDesc")}
                 </Label>
                 <Input
                   id="create-rolle"
@@ -224,7 +225,7 @@ export function CreateUserDialog({
                   onChange={(e) => setRolle(e.target.value)}
                   disabled={isSubmitting}
                   className="bg-muted border-border text-foreground placeholder:text-muted-foreground focus:border-blue-500"
-                  placeholder="z.B. Mutter"
+                  placeholder={t("settings.users.createDialog.roleDescPlaceholder")}
                   autoComplete="off"
                 />
               </div>
@@ -236,7 +237,7 @@ export function CreateUserDialog({
                   htmlFor="create-anrede"
                   className="text-muted-foreground text-sm"
                 >
-                  Anrede
+                  {t("settings.users.createDialog.anrede")}
                 </Label>
                 <Select
                   value={anrede}
@@ -268,7 +269,7 @@ export function CreateUserDialog({
                   htmlFor="create-sprache"
                   className="text-muted-foreground text-sm"
                 >
-                  Sprache
+                  {t("settings.users.createDialog.language")}
                 </Label>
                 <Select
                   value={sprache}
@@ -288,7 +289,11 @@ export function CreateUserDialog({
                         value={s}
                         className="focus:bg-accent focus:text-foreground"
                       >
-                        {s}
+                        {t(
+                          s === "de"
+                            ? "settings.profilForm.langDe"
+                            : "settings.profilForm.langEn"
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -300,7 +305,7 @@ export function CreateUserDialog({
                   htmlFor="create-detailgrad"
                   className="text-muted-foreground text-sm"
                 >
-                  Detailgrad
+                  {t("settings.users.createDialog.detailLevel")}
                 </Label>
                 <Select
                   value={detailgrad}
@@ -343,14 +348,14 @@ export function CreateUserDialog({
               disabled={isSubmitting}
               className="text-foreground hover:bg-accent hover:text-foreground"
             >
-              Abbrechen
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={!canSubmit}
               className="bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
             >
-              {isSubmitting ? "Wird angelegt..." : "Anlegen"}
+              {isSubmitting ? t("settings.users.createDialog.creating") : t("settings.users.createDialog.create")}
             </Button>
           </DialogFooter>
         </form>

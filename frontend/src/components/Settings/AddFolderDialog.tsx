@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTranslation } from "react-i18next";
 import { SUGGESTED_TYPES } from "./dms-constants";
 import type { CreateFolderInput } from "@/services/dms";
 
@@ -35,6 +36,7 @@ export function AddFolderDialog({
   onOpenChange,
   onSubmit,
 }: AddFolderDialogProps) {
+  const { t } = useTranslation();
   const [path, setPath] = useState("");
   const [suggestedType, setSuggestedType] = useState<string>(AUTO_VALUE);
   const [description, setDescription] = useState("");
@@ -59,11 +61,11 @@ export function AddFolderDialog({
 
     const trimmedPath = path.trim();
     if (!trimmedPath) {
-      setError("Pfad ist erforderlich.");
+      setError(t("settings.dms.dialog.pathRequired"));
       return;
     }
     if (trimmedPath.length > 500) {
-      setError("Pfad darf maximal 500 Zeichen lang sein.");
+      setError(t("settings.dms.dialog.pathTooLong"));
       return;
     }
 
@@ -76,7 +78,7 @@ export function AddFolderDialog({
       });
       resetForm();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Erstellen.");
+      setError(err instanceof Error ? err.message : t("settings.dms.createError"));
     } finally {
       setSubmitting(false);
     }
@@ -86,22 +88,22 @@ export function AddFolderDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="bg-card border-border text-foreground sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Ordner hinzufügen</DialogTitle>
+          <DialogTitle>{t("settings.dms.dialog.addTitle")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Füge einen NAS-Pfad zur DMS-Überwachung hinzu.
+            {t("settings.dms.dialog.addDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="add-path" className="text-foreground">
-              Pfad <span className="text-red-400">*</span>
+              {t("settings.dms.dialog.pathLabel")} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="add-path"
               value={path}
               onChange={(e) => setPath(e.target.value)}
-              placeholder="/mnt/nas/dokumente/rechnungen"
+              placeholder={t("settings.dms.dialog.pathPlaceholder")}
               className="bg-background border-border text-foreground placeholder:text-muted-foreground font-mono text-sm"
               maxLength={500}
               autoFocus
@@ -110,7 +112,7 @@ export function AddFolderDialog({
 
           <div className="space-y-2">
             <Label htmlFor="add-type" className="text-foreground">
-              Dokumenttyp-Hint
+              {t("settings.dms.dialog.typeLabel")}
             </Label>
             <Select value={suggestedType} onValueChange={setSuggestedType}>
               <SelectTrigger
@@ -124,7 +126,7 @@ export function AddFolderDialog({
                   value={AUTO_VALUE}
                   className="text-foreground focus:bg-accent focus:text-foreground"
                 >
-                  Automatisch (LLM)
+                  {t("settings.dms.dialog.autoLlm")}
                 </SelectItem>
                 {SUGGESTED_TYPES.map((t) => (
                   <SelectItem
@@ -141,13 +143,13 @@ export function AddFolderDialog({
 
           <div className="space-y-2">
             <Label htmlFor="add-desc" className="text-foreground">
-              Beschreibung
+              {t("settings.dms.dialog.descLabel")}
             </Label>
             <Input
               id="add-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="z.B. Rechnungen 2026"
+              placeholder={t("settings.dms.dialog.descPlaceholder")}
               className="bg-background border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
@@ -162,14 +164,14 @@ export function AddFolderDialog({
               disabled={submitting}
               className="text-muted-foreground hover:text-foreground"
             >
-              Abbrechen
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={submitting}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
-              {submitting ? "Wird erstellt..." : "Hinzufügen"}
+              {submitting ? t("settings.dms.dialog.creating") : t("settings.dms.dialog.add")}
             </Button>
           </DialogFooter>
         </form>

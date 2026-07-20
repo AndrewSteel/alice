@@ -13,6 +13,7 @@ import {
   Server,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface ServiceLink {
   label: string;
@@ -89,12 +90,13 @@ interface ServiceLinksProps {
 }
 
 export function ServiceLinks({ onLinkClick }: ServiceLinksProps) {
+  const { t } = useTranslation();
   return (
     <div className="border-t border-border px-3 py-3">
       <p className="px-1 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-        Services
+        {t("sidebar.services.title")}
       </p>
-      <nav aria-label="Externe Services" className="space-y-0.5">
+      <nav aria-label={t("sidebar.services.ariaLabel")} className="space-y-0.5">
         {SERVICES.map((service) => {
           const Icon = service.icon;
           return (

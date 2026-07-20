@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,7 @@ interface ChatListItemProps {
 }
 
 export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }: ChatListItemProps) {
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [supportsHover, setSupportsHover] = useState(false);
@@ -114,7 +116,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
               if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
             }}
             onClick={(e) => e.stopPropagation()}
-            aria-label="Chat umbenennen"
+            aria-label={t("sidebar.item.renameAria")}
             maxLength={60}
             className="h-6 py-0 px-1 text-sm bg-muted border-input text-foreground focus-visible:ring-1 focus-visible:ring-ring"
           />
@@ -144,7 +146,7 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
                       size="icon"
                       className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground hover:bg-accent"
                       onClick={(e) => e.stopPropagation()}
-                      aria-label="Optionen"
+                      aria-label={t("sidebar.item.options")}
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
@@ -159,14 +161,14 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
                       className="text-foreground focus:bg-accent focus:text-foreground cursor-pointer"
                     >
                       <Pencil className="mr-2 h-4 w-4" />
-                      Umbenennen
+                      {t("sidebar.item.rename")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setShowDeleteDialog(true)}
                       className="text-red-400 focus:bg-accent focus:text-red-300 cursor-pointer"
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      Loeschen
+                      {t("sidebar.item.delete")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -180,21 +182,20 @@ export function ChatListItem({ session, isActive, onSelect, onRename, onDelete }
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent className="bg-card border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-foreground">Chat loeschen?</AlertDialogTitle>
+            <AlertDialogTitle className="text-foreground">{t("sidebar.item.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              Der Chat &quot;{session.title}&quot; wird unwiderruflich geloescht.
-              Diese Aktion kann nicht rueckgaengig gemacht werden.
+              {t("sidebar.item.deleteDesc", { title: session.title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="bg-muted text-foreground border-border hover:bg-accent hover:text-foreground">
-              Abbrechen
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteConfirm}
               className="bg-red-600 text-white hover:bg-red-700"
             >
-              Loeschen
+              {t("sidebar.item.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

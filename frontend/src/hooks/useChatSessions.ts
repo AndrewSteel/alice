@@ -13,6 +13,7 @@ import {
   VisionResult,
 } from "@/services/api";
 import { Message } from "@/components/Chat/types";
+import i18n from "@/i18n/config";
 
 // ---------- Types ----------
 
@@ -145,14 +146,14 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       const last = next[lastIdx];
       // Mark last assistant message as aborted; otherwise append a status message.
       if (last.role === "assistant") {
-        const suffix =
-          last.content.length > 0 ? "\n\n*[Abgebrochen]*" : "*[Abgebrochen]*";
+        const marker = i18n.t("chat.abortedMarker");
+        const suffix = last.content.length > 0 ? `\n\n${marker}` : marker;
         next[lastIdx] = { ...last, content: last.content + suffix, streaming: false };
       } else {
         next.push({
           id: newId(),
           role: "status",
-          content: "[Abgebrochen]",
+          content: i18n.t("chat.aborted"),
           createdAt: Date.now(),
         });
       }
@@ -630,7 +631,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           content:
             err instanceof Error
               ? err.message
-              : "Ein unbekannter Fehler ist aufgetreten.",
+              : i18n.t("chat.unknownError"),
           createdAt: Date.now(),
         };
 

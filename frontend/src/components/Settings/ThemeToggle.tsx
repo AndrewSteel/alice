@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { Sun, Moon, Monitor } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 const OPTIONS = [
-  { value: "light", label: "Hell", icon: Sun },
-  { value: "dark", label: "Dunkel", icon: Moon },
-  { value: "system", label: "System", icon: Monitor },
+  { value: "light", labelKey: "settings.theme.light", icon: Sun },
+  { value: "dark", labelKey: "settings.theme.dark", icon: Moon },
+  { value: "system", labelKey: "settings.theme.system", icon: Monitor },
 ] as const;
 
 /**
@@ -20,6 +21,7 @@ const OPTIONS = [
  * after mount to stay hydration-safe.
  */
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -30,11 +32,12 @@ export function ThemeToggle() {
   return (
     <div
       role="radiogroup"
-      aria-label="Farbschema"
+      aria-label={t("settings.theme.ariaLabel")}
       className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted p-1"
     >
-      {OPTIONS.map(({ value, label, icon: Icon }) => {
+      {OPTIONS.map(({ value, labelKey, icon: Icon }) => {
         const active = mounted && theme === value;
+        const label = t(labelKey);
         return (
           <button
             key={value}

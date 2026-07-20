@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ export function DeleteFolderDialog({
   onOpenChange,
   onConfirm,
 }: DeleteFolderDialogProps) {
+  const { t } = useTranslation();
   const [deleting, setDeleting] = useState(false);
 
   async function handleConfirm() {
@@ -41,11 +43,9 @@ export function DeleteFolderDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
-          <AlertDialogTitle>Ordner loeschen?</AlertDialogTitle>
+          <AlertDialogTitle>{t("settings.dms.deleteDialog.title")}</AlertDialogTitle>
           <AlertDialogDescription className="text-muted-foreground">
-            Der Ordner{" "}
-            <span className="font-mono text-foreground">{folder.path}</span>{" "}
-            wird dauerhaft entfernt. Bereits gescannte Dokumente bleiben erhalten.
+            {t("settings.dms.deleteDialog.desc", { path: folder.path })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -53,14 +53,14 @@ export function DeleteFolderDialog({
             disabled={deleting}
             className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
           >
-            Abbrechen
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
             disabled={deleting}
             className="bg-red-600 hover:bg-red-700 text-white"
           >
-            {deleting ? "Wird geloescht..." : "Loeschen"}
+            {deleting ? t("common.deleting") : t("common.delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

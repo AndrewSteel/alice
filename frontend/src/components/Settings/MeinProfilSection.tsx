@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Mic, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ import { VoiceEnrollmentDialog } from "./VoiceEnrollmentDialog";
 import type { ProfileUpdateInput, EmailUpdateInput, VoluntaryPasswordChangeInput } from "@/services/profileApi";
 
 export function MeinProfilSection() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { user } = useAuth();
   const { profile, isLoading, error, reload, saveProfile, saveEmail, savePassword } =
@@ -28,21 +30,21 @@ export function MeinProfilSection() {
   async function handleSaveProfile(input: ProfileUpdateInput) {
     await saveProfile(input);
     toast({
-      title: "Profil gespeichert",
+      title: t("settings.profile.saved"),
     });
   }
 
   async function handleSaveEmail(input: EmailUpdateInput) {
     await saveEmail(input);
     toast({
-      title: "E-Mail-Adresse geaendert",
+      title: t("settings.profile.emailChanged"),
     });
   }
 
   async function handleSavePassword(input: VoluntaryPasswordChangeInput) {
     await savePassword(input);
     toast({
-      title: "Passwort geaendert",
+      title: t("settings.profile.passwordChanged"),
     });
   }
 
@@ -62,10 +64,10 @@ export function MeinProfilSection() {
   if (error || !profile) {
     return (
       <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-foreground">Mein Profil</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.profile.heading")}</h2>
         <div className="rounded-lg border border-red-800 bg-red-900/20 p-4">
           <p className="text-sm text-red-400">
-            {error || "Profil konnte nicht geladen werden."}
+            {error || t("settings.profile.loadError")}
           </p>
           <Button
             variant="ghost"
@@ -74,7 +76,7 @@ export function MeinProfilSection() {
             className="mt-2 text-red-400 hover:text-red-300"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Erneut versuchen
+            {t("common.retry")}
           </Button>
         </div>
       </div>
@@ -89,9 +91,9 @@ export function MeinProfilSection() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-foreground">Mein Profil</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.profile.heading")}</h2>
         <p className="text-sm text-muted-foreground">
-          Angemeldet als <span className="text-foreground">{profile.username}</span>
+          {t("settings.profile.loggedInAs")} <span className="text-foreground">{profile.username}</span>
         </p>
       </div>
 
@@ -99,14 +101,13 @@ export function MeinProfilSection() {
 
       <Card className="bg-card border-border">
         <CardHeader>
-          <CardTitle className="text-foreground">Darstellung</CardTitle>
+          <CardTitle className="text-foreground">{t("settings.profile.appearanceTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <Label className="text-foreground">Farbschema</Label>
+          <Label className="text-foreground">{t("settings.profile.colorScheme")}</Label>
           <ThemeToggle />
           <p className="text-sm text-muted-foreground">
-            Waehle Hell oder Dunkel, oder folge mit &bdquo;System&ldquo;
-            automatisch der Einstellung deines Geraets.
+            {t("settings.profile.appearanceHint")}
           </p>
         </CardContent>
       </Card>
@@ -122,11 +123,10 @@ export function MeinProfilSection() {
             </div>
             <div className="min-w-0">
               <h3 className="text-sm font-medium text-foreground">
-                Stimmregistrierung
+                {t("settings.profile.voiceEnrollTitle")}
               </h3>
               <p className="text-sm text-muted-foreground">
-                Nimm deine Stimme auf, damit Alice dich an Sprachgeraeten
-                automatisch erkennt. Du kannst die Aufnahme jederzeit erneuern.
+                {t("settings.profile.voiceEnrollDesc")}
               </p>
             </div>
           </div>
@@ -135,7 +135,7 @@ export function MeinProfilSection() {
             className="bg-blue-600 hover:bg-blue-500 text-white gap-2"
           >
             <Mic className="h-4 w-4" />
-            Stimme aufnehmen
+            {t("settings.profile.voiceEnrollButton")}
           </Button>
         </div>
       )}
@@ -144,7 +144,7 @@ export function MeinProfilSection() {
         open={voiceDialogOpen}
         onOpenChange={setVoiceDialogOpen}
         onEnrolled={() =>
-          toast({ title: "Stimmregistrierung gespeichert" })
+          toast({ title: t("settings.profile.voiceEnrollSaved") })
         }
       />
     </div>

@@ -21,6 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { GripVertical, Loader2, Pencil, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -71,6 +72,7 @@ function SortableDesktopRow({
   onDelete,
   onToggle,
 }: SortableDesktopRowProps) {
+  const { t } = useTranslation();
   const {
     attributes,
     listeners,
@@ -106,7 +108,9 @@ function SortableDesktopRow({
         <Switch
           checked={folder.enabled}
           onCheckedChange={() => onToggle(folder)}
-          aria-label={`Ordner ${folder.path} ${folder.enabled ? "deaktivieren" : "aktivieren"}`}
+          aria-label={folder.enabled
+            ? t("settings.dms.table.disableAria", { path: folder.path })
+            : t("settings.dms.table.enableAria", { path: folder.path })}
         />
       </TableCell>
       <TableCell className="text-right">
@@ -118,12 +122,12 @@ function SortableDesktopRow({
                 size="icon"
                 onClick={() => onEdit(folder)}
                 className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                aria-label={`Ordner ${folder.path} bearbeiten`}
+                aria-label={t("settings.dms.table.editAria", { path: folder.path })}
               >
                 <Pencil className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Bearbeiten</TooltipContent>
+            <TooltipContent>{t("settings.dms.table.edit")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -132,12 +136,12 @@ function SortableDesktopRow({
                 size="icon"
                 onClick={() => onDelete(folder)}
                 className="h-8 w-8 text-muted-foreground hover:text-red-400"
-                aria-label={`Ordner ${folder.path} loeschen`}
+                aria-label={t("settings.dms.table.deleteAria", { path: folder.path })}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Loeschen</TooltipContent>
+            <TooltipContent>{t("settings.dms.table.delete")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -145,7 +149,7 @@ function SortableDesktopRow({
                 {...attributes}
                 {...listeners}
                 className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing rounded-md hover:bg-accent/50 transition-colors touch-none"
-                aria-label={`Ordner ${folder.path} verschieben`}
+                aria-label={t("settings.dms.table.moveAria", { path: folder.path })}
               >
                 {isReordering ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -154,7 +158,7 @@ function SortableDesktopRow({
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>Verschieben</TooltipContent>
+            <TooltipContent>{t("settings.dms.table.move")}</TooltipContent>
           </Tooltip>
         </div>
       </TableCell>
@@ -179,6 +183,7 @@ function SortableMobileRow({
   onDelete,
   onToggle,
 }: SortableMobileRowProps) {
+  const { t } = useTranslation();
   const {
     attributes,
     listeners,
@@ -207,7 +212,7 @@ function SortableMobileRow({
             {...attributes}
             {...listeners}
             className="shrink-0 h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing rounded-md touch-none"
-            aria-label={`Ordner ${folder.path} verschieben`}
+            aria-label={t("settings.dms.table.moveAria", { path: folder.path })}
           >
             {isReordering ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -220,7 +225,9 @@ function SortableMobileRow({
         <Switch
           checked={folder.enabled}
           onCheckedChange={() => onToggle(folder)}
-          aria-label={`Ordner ${folder.path} ${folder.enabled ? "deaktivieren" : "aktivieren"}`}
+          aria-label={folder.enabled
+            ? t("settings.dms.table.disableAria", { path: folder.path })
+            : t("settings.dms.table.enableAria", { path: folder.path })}
           className="shrink-0"
         />
       </div>
@@ -240,7 +247,7 @@ function SortableMobileRow({
           className="h-7 gap-1 text-muted-foreground hover:text-foreground px-2"
         >
           <Pencil className="h-3.5 w-3.5" />
-          Bearbeiten
+          {t("settings.dms.table.edit")}
         </Button>
         <Button
           variant="ghost"
@@ -249,7 +256,7 @@ function SortableMobileRow({
           className="h-7 gap-1 text-muted-foreground hover:text-red-400 px-2"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          Loeschen
+          {t("settings.dms.table.delete")}
         </Button>
       </div>
     </div>
@@ -266,6 +273,7 @@ export function FoldersTable({
   onToggle,
   onReorder,
 }: FoldersTableProps) {
+  const { t } = useTranslation();
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -309,11 +317,11 @@ export function FoldersTable({
               <Table>
                 <TableHeader>
                   <TableRow className="border-border hover:bg-transparent">
-                    <TableHead className="text-muted-foreground">Pfad</TableHead>
-                    <TableHead className="text-muted-foreground">Typ</TableHead>
-                    <TableHead className="text-muted-foreground">Beschreibung</TableHead>
-                    <TableHead className="text-muted-foreground text-center">Status</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Aktionen</TableHead>
+                    <TableHead className="text-muted-foreground">{t("settings.dms.table.path")}</TableHead>
+                    <TableHead className="text-muted-foreground">{t("settings.dms.table.type")}</TableHead>
+                    <TableHead className="text-muted-foreground">{t("settings.dms.table.description")}</TableHead>
+                    <TableHead className="text-muted-foreground text-center">{t("settings.dms.table.status")}</TableHead>
+                    <TableHead className="text-muted-foreground text-right">{t("settings.dms.table.actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -352,10 +360,11 @@ export function FoldersTable({
 }
 
 function TypeBadge({ type }: { type: string | null }) {
+  const { t } = useTranslation();
   if (!type) {
     return (
       <Badge variant="outline" className="border-border text-muted-foreground text-xs">
-        auto
+        {t("settings.dms.table.auto")}
       </Badge>
     );
   }

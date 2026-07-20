@@ -16,7 +16,7 @@ export interface ProfileData {
   };
   preferences: {
     anrede: "du" | "sie" | null;
-    sprache: "deutsch" | "englisch" | null;
+    sprache: string | null;
     detailgrad: string | null;
   };
 }
@@ -25,7 +25,7 @@ export interface ProfileUpdateInput {
   name: string | null;
   interessen: string[];
   anrede: "du" | "sie";
-  sprache: "deutsch" | "englisch";
+  sprache: string;
 }
 
 export interface EmailUpdateInput {

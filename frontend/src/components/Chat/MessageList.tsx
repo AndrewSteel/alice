@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { MessageRenderer } from "./MessageRenderer";
 import { TypingIndicator } from "./TypingIndicator";
 import { Message } from "./types";
@@ -21,6 +22,7 @@ export function MessageList({
   messagesLoading,
   isStreaming = false,
 }: MessageListProps) {
+  const { t } = useTranslation();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
 
@@ -65,7 +67,7 @@ export function MessageList({
       <div className="flex flex-1 items-center justify-center h-full">
         <div className="text-center space-y-3">
           <Loader2 className="h-8 w-8 text-muted-foreground mx-auto animate-spin" />
-          <p className="text-muted-foreground text-sm">Nachrichten werden geladen...</p>
+          <p className="text-muted-foreground text-sm">{t("chat.list.loading")}</p>
         </div>
       </div>
     );
@@ -76,7 +78,7 @@ export function MessageList({
       <div className="flex flex-1 items-center justify-center h-full">
         <div className="text-center space-y-3">
           <MessageSquare className="h-10 w-10 text-muted-foreground mx-auto" />
-          <p className="text-muted-foreground text-base">Wie kann ich helfen?</p>
+          <p className="text-muted-foreground text-base">{t("chat.list.empty")}</p>
         </div>
       </div>
     );
@@ -97,7 +99,7 @@ export function MessageList({
       ref={scrollContainerRef}
       className="flex-1 min-h-0 overflow-y-auto"
       role="log"
-      aria-label="Chatverlauf"
+      aria-label={t("chat.list.logLabel")}
     >
       <div className="mx-auto w-full max-w-[760px] py-4">
         {messages.map((msg) => {

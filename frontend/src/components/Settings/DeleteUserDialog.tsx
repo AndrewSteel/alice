@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +28,7 @@ export function DeleteUserDialog({
   onOpenChange,
   onConfirm,
 }: DeleteUserDialogProps) {
+  const { t } = useTranslation();
   const [confirmText, setConfirmText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +53,7 @@ export function DeleteUserDialog({
       setConfirmText("");
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(err instanceof Error ? err.message : t("common.unknownError"));
     } finally {
       setIsSubmitting(false);
     }
@@ -62,19 +64,17 @@ export function DeleteUserDialog({
       <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
           <DialogTitle className="text-red-400">
-            Nutzer dauerhaft loeschen
+            {t("settings.users.deleteDialog.title")}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Diese Aktion kann nicht rueckgaengig gemacht werden. Der Nutzer{" "}
-            <span className="font-medium text-foreground">{user.username}</span>{" "}
-            und alle zugehoerigen Daten werden dauerhaft geloescht.
+            {t("settings.users.deleteDialog.desc", { name: user.username })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <div className="space-y-1.5">
             <Label htmlFor="delete-confirm" className="text-foreground text-sm">
-              Benutzername zur Bestaetigung eingeben:
+              {t("settings.users.deleteDialog.confirmLabel")}
             </Label>
             <Input
               id="delete-confirm"
@@ -103,7 +103,7 @@ export function DeleteUserDialog({
             disabled={isSubmitting}
             className="text-foreground hover:bg-accent hover:text-foreground"
           >
-            Abbrechen
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -111,7 +111,7 @@ export function DeleteUserDialog({
             disabled={!isConfirmed || isSubmitting}
             className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
           >
-            {isSubmitting ? "Wird geloescht..." : "Endgueltig loeschen"}
+            {isSubmitting ? t("common.deleting") : t("settings.users.deleteDialog.confirmDelete")}
           </Button>
         </DialogFooter>
       </DialogContent>

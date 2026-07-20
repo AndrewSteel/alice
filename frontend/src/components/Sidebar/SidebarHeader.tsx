@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot, PanelLeftClose } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -9,6 +10,7 @@ interface SidebarHeaderProps {
 }
 
 export function SidebarHeader({ onCollapse }: SidebarHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between px-3 py-3 border-b border-border">
       <div className="flex items-center gap-2">
@@ -22,12 +24,12 @@ export function SidebarHeader({ onCollapse }: SidebarHeaderProps) {
             size="icon"
             onClick={onCollapse}
             className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent"
-            aria-label="Sidebar einklappen"
+            aria-label={t("sidebar.header.collapse")}
           >
             <PanelLeftClose className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="right">Sidebar einklappen</TooltipContent>
+        <TooltipContent side="right">{t("sidebar.header.collapse")}</TooltipContent>
       </Tooltip>
     </div>
   );

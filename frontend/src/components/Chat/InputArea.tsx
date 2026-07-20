@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioLines, Mic, Send, Square } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useVoiceMode1 } from "@/hooks/useVoiceMode1";
@@ -24,6 +25,7 @@ export function InputArea({
   isStreaming = false,
   onStop,
 }: InputAreaProps) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [stopping, setStopping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -138,13 +140,13 @@ export function InputArea({
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             placeholder={
-              isStreaming ? "Alice antwortet..." : "Nachricht eingeben..."
+              isStreaming ? t("chat.input.placeholderStreaming") : t("chat.input.placeholder")
             }
             disabled={disabled || isStreaming}
             rows={1}
             style={{ maxHeight: MAX_TEXTAREA_HEIGHT_PX }}
             className="flex-1 resize-none bg-muted border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring min-h-[44px] overflow-y-auto"
-            aria-label="Nachricht eingeben"
+            aria-label={t("chat.input.ariaLabel")}
           />
 
           {/* Mode 1 — Mikrofon */}
@@ -161,8 +163,8 @@ export function InputArea({
             }
             aria-label={
               voice1.isRecording
-                ? "Aufnahme beenden und transkribieren"
-                : "Spracheingabe starten"
+                ? t("chat.input.micStop")
+                : t("chat.input.micStart")
             }
             aria-pressed={voice1.isRecording}
           >
@@ -183,7 +185,7 @@ export function InputArea({
             size="icon"
             variant="ghost"
             className="h-[44px] w-[44px] shrink-0 bg-muted text-foreground hover:bg-accent disabled:bg-muted disabled:text-muted-foreground"
-            aria-label="Sprachgespräch starten"
+            aria-label={t("chat.input.voiceStart")}
           >
             <AudioLines className="h-4 w-4" />
           </Button>
@@ -197,7 +199,7 @@ export function InputArea({
               size="icon"
               variant="destructive"
               className="h-[44px] w-[44px] shrink-0 disabled:opacity-60"
-              aria-label="Antwort abbrechen"
+              aria-label={t("chat.input.stop")}
             >
               <Square className="h-4 w-4" fill="currentColor" />
             </Button>
@@ -207,7 +209,7 @@ export function InputArea({
               disabled={!canSend}
               size="icon"
               className="h-[44px] w-[44px] shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-muted disabled:text-muted-foreground"
-              aria-label="Nachricht senden"
+              aria-label={t("chat.input.send")}
             >
               <Send className="h-4 w-4" />
             </Button>

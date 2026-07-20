@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ export function DeactivateUserDialog({
   onOpenChange,
   onConfirm,
 }: DeactivateUserDialogProps) {
+  const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const willActivate = !user.is_active;
 
@@ -44,25 +46,14 @@ export function DeactivateUserDialog({
       <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
           <AlertDialogTitle>
-            Nutzer {willActivate ? "aktivieren" : "deaktivieren"}?
+            {willActivate
+              ? t("settings.users.deactivateDialog.activateTitle")
+              : t("settings.users.deactivateDialog.deactivateTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-muted-foreground">
-            {willActivate ? (
-              <>
-                <span className="font-medium text-foreground">
-                  {user.username}
-                </span>{" "}
-                wird wieder aktiviert und kann sich erneut einloggen.
-              </>
-            ) : (
-              <>
-                <span className="font-medium text-foreground">
-                  {user.username}
-                </span>{" "}
-                wird deaktiviert und kann sich danach nicht mehr einloggen.
-                Die Daten bleiben erhalten.
-              </>
-            )}
+            {willActivate
+              ? t("settings.users.deactivateDialog.activateDesc", { name: user.username })
+              : t("settings.users.deactivateDialog.deactivateDesc", { name: user.username })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -70,7 +61,7 @@ export function DeactivateUserDialog({
             disabled={isSubmitting}
             className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
           >
-            Abbrechen
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
@@ -82,10 +73,10 @@ export function DeactivateUserDialog({
             }
           >
             {isSubmitting
-              ? "Wird gespeichert..."
+              ? t("common.saving")
               : willActivate
-                ? "Aktivieren"
-                : "Deaktivieren"}
+                ? t("settings.users.deactivateDialog.activate")
+                : t("settings.users.deactivateDialog.deactivate")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
