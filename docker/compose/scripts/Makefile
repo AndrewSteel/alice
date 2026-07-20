@@ -24,11 +24,13 @@ STACKS ?= \
   automations/dms-extractor-office \
   automations/dms-extractor-image \
   automations/alice-dms-thumbnailer \
-  data/nominatim \
   ai/ollama \
   ai/openwebui \
   ai/piper \
   ai/jupyter
+
+# data/nominatim \
+# 	Sprengt das System und wurde abgeschaltet
 
 #  ai/whisper \
 #    Das Original-Whisper wurde herausgenommen und durch whisper in alice-speech-gateway ersetzt, da es dort besser integriert ist 
