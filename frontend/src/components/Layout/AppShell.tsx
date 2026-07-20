@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu, MessageSquare } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,6 +17,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 const SWIPE_THRESHOLD = 50;
 
 export function AppShell() {
+  const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
@@ -126,18 +128,18 @@ export function AppShell() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen bg-gray-800 overflow-hidden">
+      <div className="flex h-screen bg-card overflow-hidden">
         {/* Desktop Sidebar */}
         {!desktopCollapsed && (
-          <aside className="hidden md:flex flex-col w-[260px] shrink-0 border-r border-gray-700">
+          <aside className="hidden md:flex flex-col w-[260px] shrink-0 border-r border-border">
             <Sidebar {...sidebarProps} />
           </aside>
         )}
 
         {/* Mobile Sidebar */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent side="left" className="w-[260px] p-0 bg-gray-900 border-gray-700">
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <SheetContent side="left" className="w-[260px] p-0 bg-background border-border">
+            <SheetTitle className="sr-only">{t("chat.shell.navigation")}</SheetTitle>
             <Sidebar {...sidebarProps} onCollapse={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
@@ -149,24 +151,24 @@ export function AppShell() {
           onTouchEnd={isMobile ? handleTouchEnd : undefined}
         >
           {/* Mobile Header */}
-          <header className="md:hidden flex items-center gap-2 px-4 py-3 border-b border-gray-700 bg-gray-900 shrink-0">
+          <header className="md:hidden flex items-center gap-2 px-4 py-3 border-b border-border bg-background shrink-0">
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setMobileOpen(true)}
-              className="text-gray-400 hover:text-gray-100"
-              aria-label="Menü öffnen"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={t("chat.shell.openMenu")}
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <span className="font-semibold text-gray-100">Alice</span>
+            <span className="font-semibold text-foreground">Alice</span>
             {/* Mobile: toggle between vision and text when vision panel is active */}
             {vision.results.length > 0 && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="ml-auto text-gray-400 hover:text-gray-100"
-                title={effectiveMode === "vision" ? "Chat anzeigen" : "Karten anzeigen"}
+                className="ml-auto text-muted-foreground hover:text-foreground"
+                title={effectiveMode === "vision" ? t("chat.shell.showChat") : t("chat.shell.showCards")}
                 onClick={() =>
                   effectiveMode === "vision" ? onShowText() : onHideText()
                 }
@@ -178,13 +180,13 @@ export function AppShell() {
 
           {/* Desktop: collapsed sidebar toggle */}
           {desktopCollapsed && (
-            <div className="hidden md:flex items-center px-4 py-3 border-b border-gray-700 bg-gray-900 shrink-0">
+            <div className="hidden md:flex items-center px-4 py-3 border-b border-border bg-background shrink-0">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setDesktopCollapsed(false)}
-                className="text-gray-400 hover:text-gray-100"
-                aria-label="Sidebar einblenden"
+                className="text-muted-foreground hover:text-foreground"
+                aria-label={t("chat.shell.expandSidebar")}
               >
                 <Menu className="h-5 w-5" />
               </Button>
@@ -216,7 +218,7 @@ export function AppShell() {
               <div
                 className={
                   effectiveMode === "split"
-                    ? "flex-[1] min-w-0 border-l border-gray-700 overflow-hidden"
+                    ? "flex-[1] min-w-0 border-l border-border overflow-hidden"
                     : "flex-1 min-w-0 overflow-hidden"
                 }
               >
@@ -228,8 +230,8 @@ export function AppShell() {
                     isStreaming={isStreaming}
                   />
                 ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500">
-                    <p>Starte einen neuen Chat.</p>
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    <p>{t("chat.shell.startNewChat")}</p>
                   </div>
                 )}
               </div>
@@ -238,7 +240,7 @@ export function AppShell() {
 
           {/* Persistent footer — input + voice always reachable regardless of
               which panel(s) are visible (Vision-only, Text-only, or Split). */}
-          <footer className="shrink-0 border-t border-gray-700 bg-gray-800">
+          <footer className="shrink-0 border-t border-border bg-card">
             <InputArea
               onSend={sendMessage}
               disabled={isLoading || !!messagesLoading || !activeSessionId}

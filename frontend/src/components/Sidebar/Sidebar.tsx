@@ -36,7 +36,7 @@ export function Sidebar({
   const [search, setSearch] = useState("");
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 w-full">
+    <div className="flex flex-col h-full bg-background w-full">
       <SidebarHeader onCollapse={onCollapse} />
 
       <div className="px-2 py-2 space-y-1">

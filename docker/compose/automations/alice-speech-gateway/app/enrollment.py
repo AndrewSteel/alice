@@ -88,7 +88,7 @@ class EnrollmentSession:
     display_name: str = ""
     username: str = ""
     anrede: str = "du"
-    sprache: str = "deutsch"
+    sprache: str = "de"  # ISO 639-1 code (PROJ-64); persisted to preferences.sprache
 
     # Audio samples from the dialog turns (used for embedding)
     audio_samples: list[bytes] = field(default_factory=list)
@@ -164,10 +164,22 @@ class EnrollmentSession:
             return config.SPEECH_ENROLLMENT["ask_sprache"]
 
         if self._state == _State.ASKING_SPRACHE:
-            if "englisch" in text.lower() or "english" in text.lower():
-                self.sprache = "englisch"
+            # Match the German-fixed STT transcript against the displayName_de
+            # of every configured language (PROJ-64). No match (unintelligible,
+            # unconfigured language, STT misrecognition) → fall back to German
+            # rather than hanging in this state; user can change it later via
+            # Mein Profil (PROJ-62/63).
+            matched = config.match_language(text)
+            if matched is None:
+                logger.info(
+                    "Enrollment: no configured language matched in %r — "
+                    "falling back to %r",
+                    text,
+                    config.DEFAULT_LANGUAGE_CODE,
+                )
+                self.sprache = config.DEFAULT_LANGUAGE_CODE
             else:
-                self.sprache = "deutsch"
+                self.sprache = matched
             self._state = _State.DONE
             key = "done_guest" if self.role == "guest" else "done_user"
             return config.SPEECH_ENROLLMENT[key].format(name=self.display_name)

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Eye, EyeOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,7 @@ interface SettingsPasswordFormProps {
 }
 
 export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
+  const { t } = useTranslation();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -29,19 +31,19 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
     const errors: Record<string, string> = {};
 
     if (!currentPassword) {
-      errors.current = "Aktuelles Passwort ist erforderlich";
+      errors.current = t("settings.password.currentRequired");
     }
 
     if (!newPassword) {
-      errors.new = "Neues Passwort ist erforderlich";
+      errors.new = t("settings.password.newRequired");
     } else if (newPassword.length < 8) {
-      errors.new = "Passwort muss mindestens 8 Zeichen haben";
+      errors.new = t("settings.password.minLength");
     }
 
     if (!confirmPassword) {
-      errors.confirm = "Passwort-Wiederholung ist erforderlich";
+      errors.confirm = t("settings.password.repeatRequired");
     } else if (newPassword !== confirmPassword) {
-      errors.confirm = "Passwoerter stimmen nicht ueberein";
+      errors.confirm = t("settings.password.mismatch");
     }
 
     setFieldErrors(errors);
@@ -69,7 +71,7 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
       const message =
         err instanceof Error
           ? err.message
-          : "Fehler beim Speichern. Bitte erneut versuchen.";
+          : t("settings.profilForm.saveError");
 
       // Map specific backend errors to inline field errors
       if (message.includes("Aktuelles Passwort ist falsch")) {
@@ -87,16 +89,16 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
   }
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">Passwort aendern</CardTitle>
+        <CardTitle className="text-foreground">{t("settings.password.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Current password */}
           <div className="space-y-2">
-            <Label htmlFor="pw-current" className="text-gray-300">
-              Aktuelles Passwort
+            <Label htmlFor="pw-current" className="text-foreground">
+              {t("settings.password.current")}
             </Label>
             <div className="relative">
               <Input
@@ -111,14 +113,14 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
                     return next;
                   });
                 }}
-                className="bg-gray-800 border-gray-600 text-gray-100 pr-10"
+                className="bg-card border-border text-foreground pr-10"
                 autoComplete="current-password"
               />
               <button
                 type="button"
                 onClick={() => setShowCurrent(!showCurrent)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
-                aria-label={showCurrent ? "Passwort verbergen" : "Passwort anzeigen"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showCurrent ? t("auth.changePassword.hidePassword") : t("auth.changePassword.showPassword")}
               >
                 {showCurrent ? (
                   <EyeOff className="h-4 w-4" />
@@ -134,8 +136,8 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
 
           {/* New password */}
           <div className="space-y-2">
-            <Label htmlFor="pw-new" className="text-gray-300">
-              Neues Passwort
+            <Label htmlFor="pw-new" className="text-foreground">
+              {t("settings.password.new")}
             </Label>
             <div className="relative">
               <Input
@@ -150,14 +152,14 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
                     return next;
                   });
                 }}
-                className="bg-gray-800 border-gray-600 text-gray-100 pr-10"
+                className="bg-card border-border text-foreground pr-10"
                 autoComplete="new-password"
               />
               <button
                 type="button"
                 onClick={() => setShowNew(!showNew)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
-                aria-label={showNew ? "Passwort verbergen" : "Passwort anzeigen"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showNew ? t("auth.changePassword.hidePassword") : t("auth.changePassword.showPassword")}
               >
                 {showNew ? (
                   <EyeOff className="h-4 w-4" />
@@ -173,8 +175,8 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
 
           {/* Confirm password */}
           <div className="space-y-2">
-            <Label htmlFor="pw-confirm" className="text-gray-300">
-              Neues Passwort wiederholen
+            <Label htmlFor="pw-confirm" className="text-foreground">
+              {t("settings.password.repeat")}
             </Label>
             <div className="relative">
               <Input
@@ -189,14 +191,14 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
                     return next;
                   });
                 }}
-                className="bg-gray-800 border-gray-600 text-gray-100 pr-10"
+                className="bg-card border-border text-foreground pr-10"
                 autoComplete="new-password"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
-                aria-label={showConfirm ? "Passwort verbergen" : "Passwort anzeigen"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showConfirm ? t("auth.changePassword.hidePassword") : t("auth.changePassword.showPassword")}
               >
                 {showConfirm ? (
                   <EyeOff className="h-4 w-4" />
@@ -222,7 +224,7 @@ export function SettingsPasswordForm({ onSave }: SettingsPasswordFormProps) {
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Passwort aendern
+            {t("settings.password.submit")}
           </Button>
         </form>
       </CardContent>

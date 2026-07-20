@@ -18,9 +18,9 @@ export function ThinkingMessage({ message }: ThinkingMessageProps) {
     <div className="px-4 py-1.5">
       <div
         className={cn(
-          "text-[14px] text-gray-400 italic whitespace-pre-wrap break-words",
+          "text-[14px] text-muted-foreground italic whitespace-pre-wrap break-words",
           streaming &&
-            "after:content-[''] after:inline-block after:w-[2px] after:h-[1em] after:bg-gray-400 after:ml-0.5 after:align-text-bottom after:animate-pulse"
+            "after:content-[''] after:inline-block after:w-[2px] after:h-[1em] after:bg-muted-foreground after:ml-0.5 after:align-text-bottom after:animate-pulse"
         )}
       >
         {content}

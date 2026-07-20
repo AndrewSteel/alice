@@ -31,6 +31,46 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
 WORKING_MEMORY_LIMIT = 20
 LONG_TERM_MEMORY_LIMIT = 5
 
+# ---------------------------------------------------------------------------
+# Language configuration (PROJ-63)
+# ---------------------------------------------------------------------------
+# Static, duplicated per container (see alice-auth/main.py for the sibling
+# copy). To add a language: append an entry here AND in every other container's
+# copy, then redeploy. Only `code` + `llm_instruction` are used here.
+LANGUAGES: list[dict[str, str]] = [
+    {
+        "code": "de",
+        "displayName_de": "Deutsch",
+        "displayName_en": "German",
+        "llm_instruction": "Antworte immer auf Deutsch. Sei präzise und hilfreich.",
+    },
+    {
+        "code": "en",
+        "displayName_de": "Englisch",
+        "displayName_en": "English",
+        "llm_instruction": "Reply in English.",
+    },
+]
+
+# Legacy word-form aliases still tolerated in case the migration hasn't run yet.
+LANGUAGE_ALIASES: dict[str, str] = {
+    "deutsch": "de",
+    "englisch": "en",
+}
+
+_LLM_INSTRUCTION_BY_CODE = {lang["code"]: lang["llm_instruction"] for lang in LANGUAGES}
+_DEFAULT_LANGUAGE_CODE = "de"
+
+
+def _llm_instruction_for(sprache: str | None) -> str:
+    """
+    Resolve the LLM language instruction for a stored `sprache` value.
+    Accepts ISO codes and legacy word-form aliases; unknown/missing values
+    fall back to German (PRD constraint "Sprache: primär Deutsch").
+    """
+    code = sprache if sprache in _LLM_INSTRUCTION_BY_CODE else LANGUAGE_ALIASES.get(sprache or "")
+    return _LLM_INSTRUCTION_BY_CODE.get(code, _LLM_INSTRUCTION_BY_CODE[_DEFAULT_LANGUAGE_CODE])
+
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
 _WEEKDAYS_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
@@ -175,10 +215,7 @@ def build_system_prompt(
         lines.append("Interessen des Nutzers: " + ", ".join(interests) + ".")
     if detailgrad and detailgrad != "normal":
         lines.append(f"Detailgrad der Antworten: {detailgrad}.")
-    if sprache == "englisch":
-        lines.append("Reply in English.")
-    else:
-        lines.append("Antworte immer auf Deutsch. Sei präzise und hilfreich.")
+    lines.append(_llm_instruction_for(sprache))
 
     if long_term_memories:
         lines.append("")

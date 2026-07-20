@@ -1,4 +1,4 @@
-import { clearToken, getToken } from "./auth";
+import { fetchWithAuth } from "./fetchWithAuth";
 
 /**
  * Voice enrollment API (PROJ-43). Talks to the alice-speech-gateway REST
@@ -25,25 +25,6 @@ export interface VoiceProfile {
   created_at: string | null;
 }
 
-// ---------- Helpers ----------
-
-function bearer(): string {
-  const token = getToken();
-  if (!token) {
-    window.location.href = "/login";
-    throw new Error("No authentication token available");
-  }
-  return `Bearer ${token}`;
-}
-
-function handleAuthError(res: Response): void {
-  if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Session abgelaufen -- bitte erneut anmelden.");
-  }
-}
-
 // ---------- API Functions ----------
 
 /**
@@ -59,17 +40,15 @@ export async function enrollVoice(samples: Blob[]): Promise<{ samples: number }>
 
   let res: Response;
   try {
-    res = await fetch(SPEECH_BASE, {
+    // No Content-Type header — the wrapper skips it for FormData bodies so
+    // the browser sets the multipart boundary.
+    res = await fetchWithAuth(SPEECH_BASE, {
       method: "POST",
-      // No Content-Type header — the browser sets the multipart boundary.
-      headers: { Authorization: bearer() },
       body: form,
     });
   } catch {
     throw new Error("Netzwerkfehler -- Stimmproben konnten nicht hochgeladen werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Stimmregistrierung ist fuer diesen Nutzer nicht freigegeben.");
@@ -94,15 +73,12 @@ export async function enrollVoice(samples: Blob[]): Promise<{ samples: number }>
 export async function getVoiceProfiles(): Promise<VoiceProfile[]> {
   let res: Response;
   try {
-    res = await fetch(`${SPEECH_BASE}/profiles`, {
+    res = await fetchWithAuth(`${SPEECH_BASE}/profiles`, {
       method: "GET",
-      headers: { Authorization: bearer() },
     });
   } catch {
     throw new Error("Netzwerkfehler -- Stimmprofile konnten nicht geladen werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -123,15 +99,12 @@ export async function getVoiceProfiles(): Promise<VoiceProfile[]> {
 export async function deleteVoiceProfile(userId: string): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${SPEECH_BASE}/${userId}`, {
+    res = await fetchWithAuth(`${SPEECH_BASE}/${userId}`, {
       method: "DELETE",
-      headers: { Authorization: bearer() },
     });
   } catch {
     throw new Error("Netzwerkfehler -- Stimmprofil konnte nicht geloescht werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
@@ -153,19 +126,13 @@ export async function setVoiceEnrollmentAllowed(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${SPEECH_BASE}/${userId}/allow`, {
+    res = await fetchWithAuth(`${SPEECH_BASE}/${userId}/allow`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: bearer(),
-      },
       body: JSON.stringify({ allow }),
     });
   } catch {
     throw new Error("Netzwerkfehler -- Berechtigung konnte nicht geaendert werden.");
   }
-
-  handleAuthError(res);
 
   if (res.status === 403) {
     throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");

@@ -20,9 +20,9 @@ export function FlipCardGrid({ results }: FlipCardGridProps) {
     <div
       className={`
         grid gap-3 p-3
-        grid-cols-2
-        sm:grid-cols-4
-        md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]
+        grid-cols-1
+        sm:grid-cols-2
+        lg:grid-cols-[repeat(auto-fill,minmax(min(420px,100%),1fr))]
       `}
     >
       {results.map((result) => (

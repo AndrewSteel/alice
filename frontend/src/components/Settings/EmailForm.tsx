@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ interface EmailFormProps {
 }
 
 export function EmailForm({ profile, onSave }: EmailFormProps) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState(profile.email ?? "");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,12 +34,12 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
 
     const trimmed = email.trim();
     if (!trimmed) {
-      setError("E-Mail-Adresse darf nicht leer sein");
+      setError(t("settings.email.emptyError"));
       return;
     }
 
     if (!EMAIL_REGEX.test(trimmed)) {
-      setError("Ungueltige E-Mail-Adresse");
+      setError(t("settings.email.invalidError"));
       return;
     }
 
@@ -48,7 +50,7 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
       setError(
         err instanceof Error
           ? err.message
-          : "Fehler beim Speichern. Bitte erneut versuchen."
+          : t("settings.profilForm.saveError")
       );
     } finally {
       setIsSaving(false);
@@ -56,15 +58,15 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
   }
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">E-Mail-Adresse</CardTitle>
+        <CardTitle className="text-foreground">{t("settings.email.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="profile-email" className="text-gray-300">
-              E-Mail
+            <Label htmlFor="profile-email" className="text-foreground">
+              {t("settings.email.label")}
             </Label>
             <Input
               id="profile-email"
@@ -74,8 +76,8 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
                 setEmail(e.target.value);
                 setError(null);
               }}
-              placeholder="deine@email.de"
-              className="bg-gray-800 border-gray-600 text-gray-100 placeholder:text-gray-500"
+              placeholder={t("settings.email.placeholder")}
+              className="bg-card border-border text-foreground placeholder:text-muted-foreground"
             />
             {error && (
               <p className="text-sm text-red-400">{error}</p>
@@ -88,7 +90,7 @@ export function EmailForm({ profile, onSave }: EmailFormProps) {
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            E-Mail speichern
+            {t("settings.email.submit")}
           </Button>
         </form>
       </CardContent>

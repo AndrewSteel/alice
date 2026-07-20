@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getMailboxAccess, updateMailboxAccess } from "@/services/mailApi";
 import type { Mailbox, AccessListUser } from "@/services/mailApi";
 
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<AccessListUser[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -36,7 +38,7 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
         setUsers(data);
         setSelected(new Set(data.filter((u) => u.has_access).map((u) => u.user_id)));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Fehler beim Laden."))
+      .catch((err) => setError(err instanceof Error ? err.message : t("settings.mail.accessDialog.loadError")))
       .finally(() => setLoading(false));
   }, [open, mailbox.id]);
 
@@ -57,7 +59,7 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
       onSaved();
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Speichern.");
+      setError(err instanceof Error ? err.message : t("settings.profilForm.saveError"));
     } finally {
       setSaving(false);
     }
@@ -65,17 +67,17 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-md">
+      <DialogContent className="bg-card border-border text-foreground sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Zugriffsrechte — {mailbox.display_name}</DialogTitle>
-          <DialogDescription className="text-gray-400">
-            Ausgewählte Nutzer können Mails dieses Postfachs abfragen und erhalten Benachrichtigungen.
+          <DialogTitle>{t("settings.mail.accessDialog.title", { name: mailbox.display_name })}</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            {t("settings.mail.accessDialog.desc")}
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
           <div className="space-y-2 py-2">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-full bg-gray-700" />)}
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-full bg-muted" />)}
           </div>
         ) : error ? (
           <Alert variant="destructive" className="bg-red-900/30 border-red-800">
@@ -85,20 +87,20 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
         ) : (
           <div className="space-y-2 py-1 max-h-64 overflow-y-auto">
             {users.length === 0 ? (
-              <p className="text-sm text-gray-500 py-4 text-center">Keine Nutzer gefunden.</p>
+              <p className="text-sm text-muted-foreground py-4 text-center">{t("settings.mail.accessDialog.noUsers")}</p>
             ) : (
               users.map((u) => (
-                <div key={u.user_id} className="flex items-center gap-3 rounded-md p-2 hover:bg-gray-700/50 cursor-pointer"
+                <div key={u.user_id} className="flex items-center gap-3 rounded-md p-2 hover:bg-accent/50 cursor-pointer"
                   onClick={() => toggle(u.user_id)}>
                   <Checkbox
                     id={`access-${u.user_id}`}
                     checked={selected.has(u.user_id)}
                     onCheckedChange={() => toggle(u.user_id)}
-                    className="border-gray-500 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                    className="border-input data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                   />
-                  <Label htmlFor={`access-${u.user_id}`} className="cursor-pointer text-gray-200 flex-1">
+                  <Label htmlFor={`access-${u.user_id}`} className="cursor-pointer text-foreground flex-1">
                     {u.display_name}
-                    <span className="text-gray-500 text-xs ml-1">@{u.username}</span>
+                    <span className="text-muted-foreground text-xs ml-1">@{u.username}</span>
                   </Label>
                 </div>
               ))
@@ -108,10 +110,10 @@ export function AccessDialog({ mailbox, open, onOpenChange, onSaved }: Props) {
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}
-            className="text-gray-400 hover:text-gray-100">Abbrechen</Button>
+            className="text-muted-foreground hover:text-foreground">{t("common.cancel")}</Button>
           <Button onClick={handleSave} disabled={saving || loading}
             className="bg-blue-600 hover:bg-blue-700 text-white">
-            {saving ? "Wird gespeichert..." : "Speichern"}
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

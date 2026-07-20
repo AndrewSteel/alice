@@ -34,6 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/services/auth";
 
 import { useAudioPermission } from "./useAudioPermission";
+import { useSilenceDetector } from "./useSilenceDetector";
 
 export type VoiceMode2Status =
   | "idle"
@@ -52,8 +53,9 @@ const TTS_SAMPLE_RATE = 22050;
 // fast to silence/utterance-end.
 const RECORD_TIMESLICE_MS = 250;
 // Local silence detector: we tell the gateway "end of utterance" after
-// this much continuous silence while in `listening`.
-const SILENCE_THRESHOLD = 0.010;
+// this much continuous silence while in `listening` (the effective threshold
+// is calibrated per turn and delivered with each sample by the shared
+// useSilenceDetector hook — PROJ-70).
 const SILENCE_HANG_MS = 900;
 const SILENCE_CHECK_INTERVAL_MS = 100;
 // If no speech at all is detected for this long while in `listening`, end the
@@ -107,12 +109,8 @@ export function useVoiceMode2(): UseVoiceMode2Result {
   // without capturing a stale closure (stopRef itself is stable).
   const stopRef = useRef<() => void>(() => {});
 
-  // Silence detection
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const silenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
+  // Silence detection (mechanism lives in useSilenceDetector; these track the
+  // mode-specific utterance state used by the per-tick decision below).
   const lastVoiceAtRef = useRef<number>(0);
   const utteranceHasVoiceRef = useRef<boolean>(false);
   // True between sending end_of_utterance and receiving stt_complete/listening
@@ -191,60 +189,12 @@ export function useVoiceMode2(): UseVoiceMode2Result {
 
   // ----- silence detector -----
 
-  const stopSilenceDetector = useCallback(() => {
-    if (silenceIntervalRef.current) {
-      clearInterval(silenceIntervalRef.current);
-      silenceIntervalRef.current = null;
-    }
-    if (analyserSourceRef.current) {
-      try {
-        analyserSourceRef.current.disconnect();
-      } catch {
-        /* ignore */
-      }
-      analyserSourceRef.current = null;
-    }
-    analyserRef.current = null;
-  }, []);
-
-  const startSilenceDetector = useCallback((stream: MediaStream) => {
-    const ctx = audioCtxRef.current;
-    if (!ctx) return;
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    const source = ctx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    analyserSourceRef.current = source;
-
-    // Connect analyser into the processing graph so browsers that only
-    // analyse nodes connected to the destination actually deliver audio.
-    // Gain = 0 means the mic is never heard through the speakers.
-    const silentGain = ctx.createGain();
-    silentGain.gain.value = 0;
-    analyser.connect(silentGain);
-    silentGain.connect(ctx.destination);
-
-    const buf = new Float32Array(analyser.fftSize);
-    utteranceHasVoiceRef.current = false;
-    utteranceInFlightRef.current = false;
-    lastVoiceAtRef.current = performance.now();
-
-    silenceIntervalRef.current = setInterval(() => {
-      const silenceCtx = audioCtxRef.current;
-      if (!analyserRef.current || !silenceCtx) return;
-      // Resume if Chrome auto-suspended the context between turns.
-      if (silenceCtx.state === "suspended") {
-        silenceCtx.resume();
-        return;
-      }
-      analyserRef.current.getFloatTimeDomainData(buf);
-      let sumSq = 0;
-      for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
-      const rms = Math.sqrt(sumSq / buf.length);
-
-      const now = performance.now();
-      if (rms > SILENCE_THRESHOLD) {
+  // Per-tick decision (mode-specific): flush the utterance after the hang,
+  // or end the session after prolonged no-speech. `threshold` is the
+  // per-turn calibrated speech threshold (PROJ-70).
+  const handleSilenceSample = useCallback(
+    (rms: number, now: number, threshold: number) => {
+      if (rms > threshold) {
         lastVoiceAtRef.current = now;
         utteranceHasVoiceRef.current = true;
       }
@@ -284,8 +234,28 @@ export function useVoiceMode2(): UseVoiceMode2Result {
       ) {
         stopRef.current();
       }
-    }, SILENCE_CHECK_INTERVAL_MS);
-  }, []);
+    },
+    [],
+  );
+
+  const { start: startSilenceDetectorRaw, stop: stopSilenceDetector } =
+    useSilenceDetector({
+      checkIntervalMs: SILENCE_CHECK_INTERVAL_MS,
+      onSample: handleSilenceSample,
+      resumeOnSuspend: true,
+    });
+
+  const startSilenceDetector = useCallback(
+    (stream: MediaStream) => {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      utteranceHasVoiceRef.current = false;
+      utteranceInFlightRef.current = false;
+      lastVoiceAtRef.current = performance.now();
+      startSilenceDetectorRaw(stream, ctx);
+    },
+    [startSilenceDetectorRaw],
+  );
 
   // ----- session teardown -----
 

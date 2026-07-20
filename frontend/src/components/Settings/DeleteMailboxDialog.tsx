@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function DeleteMailboxDialog({ mailbox, open, onOpenChange, onConfirm }: Props) {
+  const { t } = useTranslation();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +27,7 @@ export function DeleteMailboxDialog({ mailbox, open, onOpenChange, onConfirm }: 
       await onConfirm(mailbox.id);
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Löschen.");
+      setError(err instanceof Error ? err.message : t("settings.mail.deleteError"));
     } finally {
       setDeleting(false);
     }
@@ -33,29 +35,31 @@ export function DeleteMailboxDialog({ mailbox, open, onOpenChange, onConfirm }: 
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700 text-gray-100">
+      <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
-          <AlertDialogTitle>Postfach löschen?</AlertDialogTitle>
-          <AlertDialogDescription className="text-gray-400">
-            <strong className="text-gray-200">{mailbox.display_name}</strong> ({mailbox.imap_host}) wird dauerhaft gelöscht.
-            Alle {mailbox.mails_indexed} indexierten Mails werden aus der Suche entfernt.
-            Diese Aktion kann nicht rückgängig gemacht werden.
+          <AlertDialogTitle>{t("settings.mail.deleteDialog.title")}</AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground">
+            {t("settings.mail.deleteDialog.desc", {
+              name: mailbox.display_name,
+              host: mailbox.imap_host,
+              count: mailbox.mails_indexed,
+            })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && <p className="text-sm text-red-400 px-1">{error}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel
-            className="bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600"
+            className="bg-muted border-border text-foreground hover:bg-accent"
             disabled={deleting}
           >
-            Abbrechen
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
             disabled={deleting}
             className="bg-red-600 hover:bg-red-700 text-white"
           >
-            {deleting ? "Wird gelöscht..." : "Endgültig löschen"}
+            {deleting ? t("common.deleting") : t("settings.mail.deleteDialog.confirmDelete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

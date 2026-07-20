@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Check, AlertTriangle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Message } from "../types";
 
@@ -14,8 +15,9 @@ interface ToolCallMessageProps {
  * Fallback ist der `toolName`. Status-Icon: Spinner / Haken / Warnung.
  */
 export function ToolCallMessage({ message }: ToolCallMessageProps) {
+  const { t } = useTranslation();
   const { content, toolName, toolStatus } = message;
-  const label = content || toolName || "Tool wird ausgeführt…";
+  const label = content || toolName || t("chat.tool.runningFallback");
   // Default to a running spinner if status is missing (defensive: e.g. malformed
   // SSE payload or a future session-restore path that omits the field).
   const effectiveStatus = toolStatus ?? "running";
@@ -24,8 +26,8 @@ export function ToolCallMessage({ message }: ToolCallMessageProps) {
     <div className="px-4 py-1.5">
       <div
         className={cn(
-          "flex items-center gap-2 text-[14px] text-gray-400",
-          effectiveStatus === "error" && "text-red-300"
+          "flex items-center gap-2 text-[14px] text-muted-foreground",
+          effectiveStatus === "error" && "text-destructive"
         )}
         aria-live="polite"
       >
@@ -33,10 +35,10 @@ export function ToolCallMessage({ message }: ToolCallMessageProps) {
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
         )}
         {effectiveStatus === "done" && (
-          <Check className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden="true" />
+          <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
         {effectiveStatus === "error" && (
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-300" aria-hidden="true" />
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
         )}
         <span className="break-words">{label}</span>
       </div>

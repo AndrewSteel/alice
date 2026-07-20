@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, Loader2, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
+import { formatDateTimeShort, formatDateTimeFull } from "@/i18n/format";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,15 +46,18 @@ import {
 
 function sourceLabel(source: string | null): string {
   if (!source) return "—";
-  if (source === "webapp_cc") return "WebApp CC";
-  if (source === "webapp_mic") return "WebApp Tastatur";
-  if (source === "esphome") return "ESPHome";
-  if (source.startsWith("esphome:")) return `ESPHome (${source.slice(8)})`;
+  if (source === "webapp_cc") return i18n.t("settings.chatArchive.sourceWebappCc");
+  if (source === "webapp_mic") return i18n.t("settings.chatArchive.sourceWebappMic");
+  if (source === "esphome") return i18n.t("settings.chatArchive.sourceEsphome");
+  if (source.startsWith("esphome:"))
+    return i18n.t("settings.chatArchive.sourceEsphomeSuffix", { name: source.slice(8) });
   return source;
 }
 
 function typeLabel(sessionType: string | null): string {
-  return sessionType === "ha_only" ? "HA-only" : "LLM";
+  return sessionType === "ha_only"
+    ? i18n.t("settings.chatArchive.typeHaOnly")
+    : i18n.t("settings.chatArchive.typeLlm");
 }
 
 function mapAdminMessage(m: AdminMessageItem): Message | null {
@@ -91,25 +97,25 @@ interface DeleteDialogProps {
 }
 
 function DeleteDialog({ open, onConfirm, onCancel }: DeleteDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700">
+      <AlertDialogContent className="bg-card border-border">
         <AlertDialogHeader>
-          <AlertDialogTitle>Chat wirklich löschen?</AlertDialogTitle>
+          <AlertDialogTitle>{t("settings.chatArchive.deleteTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            Diese Aktion kann nicht rückgängig gemacht werden. Alle Nachrichten
-            dieser Session werden unwiderruflich gelöscht.
+            {t("settings.chatArchive.deleteDesc")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="border-gray-600" onClick={onCancel}>
-            Abbrechen
+          <AlertDialogCancel className="border-border" onClick={onCancel}>
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className="bg-red-600 hover:bg-red-700"
           >
-            Löschen
+            {t("common.delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -124,6 +130,7 @@ interface ListViewProps {
 }
 
 function ListView({ onSelectSession }: ListViewProps) {
+  const { t } = useTranslation();
   const [sessions, setSessions] = useState<AdminSessionItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -166,32 +173,32 @@ function ListView({ onSelectSession }: ListViewProps) {
 
   return (
     <div>
-      <h2 className="text-base font-semibold mb-4 text-gray-100">
-        Alle Chats (letzte 30 Tage)
+      <h2 className="text-base font-semibold mb-4 text-foreground">
+        {t("settings.chatArchive.title")}
       </h2>
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : sessions.length === 0 ? (
-        <p className="text-sm text-gray-400 py-8 text-center">
-          Keine Chats gefunden.
+        <p className="text-sm text-muted-foreground py-8 text-center">
+          {t("settings.chatArchive.empty")}
         </p>
       ) : (
         <>
-          <div className="rounded-md border border-gray-700 overflow-hidden">
+          <div className="rounded-md border border-border overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="border-gray-700 hover:bg-transparent">
-                  <TableHead className="text-gray-400">Nutzer</TableHead>
-                  <TableHead className="text-gray-400">Datum</TableHead>
-                  <TableHead className="text-gray-400">Typ</TableHead>
-                  <TableHead className="text-gray-400">Titel</TableHead>
-                  <TableHead className="text-gray-400 text-right">
-                    Nachr.
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">{t("settings.chatArchive.table.user")}</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.chatArchive.table.date")}</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.chatArchive.table.type")}</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.chatArchive.table.title")}</TableHead>
+                  <TableHead className="text-muted-foreground text-right">
+                    {t("settings.chatArchive.table.messages")}
                   </TableHead>
-                  <TableHead className="text-gray-400">Quelle</TableHead>
+                  <TableHead className="text-muted-foreground">{t("settings.chatArchive.table.source")}</TableHead>
                   <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
@@ -199,20 +206,14 @@ function ListView({ onSelectSession }: ListViewProps) {
                 {sessions.map((s) => (
                   <TableRow
                     key={s.session_id}
-                    className="border-gray-700 hover:bg-gray-800/50 cursor-pointer"
+                    className="border-border hover:bg-accent/50 cursor-pointer"
                     onClick={() => onSelectSession(s.session_id)}
                   >
-                    <TableCell className="font-medium text-gray-100">
+                    <TableCell className="font-medium text-foreground">
                       {s.username}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm whitespace-nowrap">
-                      {new Date(s.started_at).toLocaleString("de-DE", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                    <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                      {formatDateTimeShort(s.started_at)}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -224,21 +225,21 @@ function ListView({ onSelectSession }: ListViewProps) {
                         {typeLabel(s.session_type)}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-gray-300 text-sm max-w-[200px] truncate">
+                    <TableCell className="text-foreground text-sm max-w-[200px] truncate">
                       {s.title ?? "—"}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm text-right">
+                    <TableCell className="text-muted-foreground text-sm text-right">
                       {s.message_count}
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm">
+                    <TableCell className="text-muted-foreground text-sm">
                       {sourceLabel(s.source)}
                     </TableCell>
                     <TableCell>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-gray-500 hover:text-red-400"
-                        aria-label="Session löschen"
+                        className="h-7 w-7 text-muted-foreground hover:text-red-400"
+                        aria-label={t("settings.chatArchive.deleteAria")}
                         onClick={(e) => {
                           e.stopPropagation();
                           setDeleteTarget(s.session_id);
@@ -268,8 +269,8 @@ function ListView({ onSelectSession }: ListViewProps) {
                     />
                   </PaginationItem>
                   <PaginationItem>
-                    <span className="px-4 py-2 text-sm text-gray-400">
-                      Seite {page} / {totalPages}
+                    <span className="px-4 py-2 text-sm text-muted-foreground">
+                      {t("settings.chatArchive.page", { page, total: totalPages })}
                     </span>
                   </PaginationItem>
                   <PaginationItem>
@@ -308,6 +309,7 @@ interface DetailViewProps {
 }
 
 function DetailView({ sessionId, onBack }: DetailViewProps) {
+  const { t } = useTranslation();
   const [data, setData] = useState<{
     session: AdminSessionItem;
     messages: AdminMessageItem[];
@@ -339,7 +341,7 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -351,12 +353,12 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
           variant="ghost"
           size="sm"
           onClick={onBack}
-          className="mb-4 text-gray-400"
+          className="mb-4 text-muted-foreground"
         >
           <ChevronLeft className="h-4 w-4 mr-1" />
-          Zurück
+          {t("settings.chatArchive.back")}
         </Button>
-        <p className="text-sm text-gray-400">Session nicht mehr vorhanden.</p>
+        <p className="text-sm text-muted-foreground">{t("settings.chatArchive.notFound")}</p>
       </div>
     );
   }
@@ -374,55 +376,55 @@ function DetailView({ sessionId, onBack }: DetailViewProps) {
           variant="ghost"
           size="sm"
           onClick={onBack}
-          className="text-gray-400"
+          className="text-muted-foreground"
         >
           <ChevronLeft className="h-4 w-4 mr-1" />
-          Zurück
+          {t("settings.chatArchive.back")}
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="text-gray-500 hover:text-red-400"
+          className="text-muted-foreground hover:text-red-400"
           onClick={() => setShowDelete(true)}
-          aria-label="Session löschen"
+          aria-label={t("settings.chatArchive.deleteAria")}
         >
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Metadata */}
-      <div className="rounded-md border border-gray-700 bg-gray-800/50 p-4 mb-4 text-sm space-y-1">
+      <div className="rounded-md border border-border bg-card/50 p-4 mb-4 text-sm space-y-1">
         <div className="flex gap-4 flex-wrap">
-          <span className="text-gray-400">
-            Nutzer:{" "}
-            <span className="text-gray-200">{session.username}</span>
+          <span className="text-muted-foreground">
+            {t("settings.chatArchive.metaUser")}:{" "}
+            <span className="text-foreground">{session.username}</span>
           </span>
-          <span className="text-gray-400">
-            Quelle:{" "}
-            <span className="text-gray-200">{sourceLabel(session.source)}</span>
+          <span className="text-muted-foreground">
+            {t("settings.chatArchive.metaSource")}:{" "}
+            <span className="text-foreground">{sourceLabel(session.source)}</span>
           </span>
-          <span className="text-gray-400">
-            Typ:{" "}
-            <span className="text-gray-200">
+          <span className="text-muted-foreground">
+            {t("settings.chatArchive.metaType")}:{" "}
+            <span className="text-foreground">
               {typeLabel(session.session_type)}
             </span>
           </span>
         </div>
-        <div className="text-gray-400">
-          Start:{" "}
-          <span className="text-gray-200">
-            {new Date(session.started_at).toLocaleString("de-DE")}
+        <div className="text-muted-foreground">
+          {t("settings.chatArchive.metaStart")}:{" "}
+          <span className="text-foreground">
+            {formatDateTimeFull(session.started_at)}
           </span>
         </div>
-        <div className="text-gray-500 text-xs">
-          ID: {session.session_id}
+        <div className="text-muted-foreground text-xs">
+          {t("settings.chatArchive.metaId")}: {session.session_id}
         </div>
       </div>
 
       {/* Messages */}
       {mappedMessages.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-8">
-          Keine Nachrichten gespeichert.
+        <p className="text-sm text-muted-foreground text-center py-8">
+          {t("settings.chatArchive.noMessages")}
         </p>
       ) : (
         <div className="space-y-2">

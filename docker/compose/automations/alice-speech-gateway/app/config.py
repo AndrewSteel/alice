@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 import yaml
 
@@ -103,6 +104,54 @@ SPEECH_ERRORS = {
     "enrollment_not_admin": "Enrollment kann nur von einem Administrator gestartet werden.",
 }
 
+# ---------------------------------------------------------------------------
+# Language configuration (PROJ-63 / PROJ-64)
+# ---------------------------------------------------------------------------
+# Static, duplicated per container (see alice-auth/main.py and
+# alice-chat-stream/app/memory.py for the sibling copies). To add a language:
+# append an entry here AND in every other container's copy, then redeploy.
+# Used by the voice enrollment dialog (PROJ-64) to match the spoken language
+# name against displayName_de; no network call during the live dialog.
+LANGUAGES: list[dict[str, str]] = [
+    {
+        "code": "de",
+        "displayName_de": "Deutsch",
+        "displayName_en": "German",
+        "llm_instruction": "Antworte immer auf Deutsch. Sei präzise und hilfreich.",
+    },
+    {
+        "code": "en",
+        "displayName_de": "Englisch",
+        "displayName_en": "English",
+        "llm_instruction": "Reply in English.",
+    },
+]
+
+# Language chosen when the spoken answer matches no configured language
+# (unintelligible answer, unconfigured language, STT misrecognition). Matches
+# the PRD constraint "Sprache: primär Deutsch".
+DEFAULT_LANGUAGE_CODE = "de"
+
+
+def match_language(transcript: str) -> Optional[str]:
+    """
+    Match an STT transcription against the German display names of all
+    configured languages (PROJ-64).
+
+    STT is German-fixed (SPEECH_LANGUAGE=de), so this is keyword matching
+    against a German-fixed transcript, not dynamic language detection. The
+    spoken language name is expected in German (e.g. "Französisch").
+
+    Returns the ISO 639-1 code of the first matching language, or None if no
+    configured language name appears in the transcript.
+    """
+    text = transcript.lower()
+    for lang in LANGUAGES:
+        if lang["displayName_de"].lower() in text:
+            return lang["code"]
+    return None
+
+
 # Enrollment dialog prompts (PROJ-43).
 SPEECH_ENROLLMENT = {
     "start_user":   "Ich starte die Einrollung eines neuen Nutzers. Wie lautet der Anzeigename?",
@@ -114,7 +163,7 @@ SPEECH_ENROLLMENT = {
     "retry_name":   "In Ordnung, bitte nenne den Anzeigenamen erneut.",
     "retry_username": "In Ordnung, bitte nenne den Benutzernamen erneut.",
     "ask_anrede":   "Welche Anrede bevorzugt die Person? Du oder Sie?",
-    "ask_sprache":  "Welche Sprache? Deutsch oder Englisch?",
+    "ask_sprache":  "Welche Sprache möchtest du verwenden?",
     "done_user":    "Einrollung abgeschlossen. {name} wurde als neuer Nutzer angelegt.",
     "done_guest":   "Einrollung abgeschlossen. {name} wurde als neuer Gast angelegt.",
     "save_failed":  "Die Einrollung konnte nicht gespeichert werden. Bitte versuche es erneut.",

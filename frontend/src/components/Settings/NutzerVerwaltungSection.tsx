@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +17,7 @@ import { DeactivateUserDialog } from "./DeactivateUserDialog";
 import { DeleteUserDialog } from "./DeleteUserDialog";
 
 export function NutzerVerwaltungSection() {
+  const { t } = useTranslation();
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
   const {
@@ -43,8 +45,8 @@ export function NutzerVerwaltungSection() {
   async function handleCreateUser(data: Parameters<typeof addUser>[0]) {
     await addUser(data);
     toast({
-      title: "Nutzer angelegt",
-      description: "Einmal-Passwort wurde per E-Mail versendet.",
+      title: t("settings.users.created"),
+      description: t("settings.users.createdDesc"),
     });
   }
 
@@ -52,14 +54,14 @@ export function NutzerVerwaltungSection() {
     try {
       await resetUserOtp(userId);
       toast({
-        title: "OTP zurueckgesetzt",
-        description: "Neues Einmal-Passwort per E-Mail versendet.",
+        title: t("settings.users.otpReset"),
+        description: t("settings.users.otpResetDesc"),
       });
     } catch (err) {
       toast({
-        title: "Fehler",
+        title: t("common.error"),
         description:
-          err instanceof Error ? err.message : "OTP konnte nicht gesendet werden.",
+          err instanceof Error ? err.message : t("settings.users.otpError"),
         variant: "destructive",
       });
       throw err;
@@ -70,18 +72,18 @@ export function NutzerVerwaltungSection() {
     try {
       await toggleUserStatus(userId, isActive);
       toast({
-        title: isActive ? "Nutzer aktiviert" : "Nutzer deaktiviert",
+        title: isActive ? t("settings.users.activated") : t("settings.users.deactivated"),
         description: isActive
-          ? "Der Nutzer kann sich wieder einloggen."
-          : "Der Nutzer kann sich nicht mehr einloggen.",
+          ? t("settings.users.activatedDesc")
+          : t("settings.users.deactivatedDesc"),
       });
     } catch (err) {
       toast({
-        title: "Fehler",
+        title: t("common.error"),
         description:
           err instanceof Error
             ? err.message
-            : "Status konnte nicht geaendert werden.",
+            : t("settings.users.statusError"),
         variant: "destructive",
       });
       throw err;
@@ -93,19 +95,19 @@ export function NutzerVerwaltungSection() {
       await toggleVoiceEnrollment(user.id, allow);
       toast({
         title: allow
-          ? "Stimmregistrierung freigegeben"
-          : "Stimmregistrierung gesperrt",
+          ? t("settings.users.voiceEnabled")
+          : t("settings.users.voiceDisabled"),
         description: allow
-          ? `${user.username} kann sich jetzt per WebApp einrollen.`
-          : `${user.username} kann sich nicht mehr per WebApp einrollen.`,
+          ? t("settings.users.voiceEnabledDesc", { name: user.username })
+          : t("settings.users.voiceDisabledDesc", { name: user.username }),
       });
     } catch (err) {
       toast({
-        title: "Fehler",
+        title: t("common.error"),
         description:
           err instanceof Error
             ? err.message
-            : "Berechtigung konnte nicht geaendert werden.",
+            : t("settings.users.permissionError"),
         variant: "destructive",
       });
     }
@@ -114,8 +116,8 @@ export function NutzerVerwaltungSection() {
   async function handleSetCredentials(userId: string, email: string) {
     await setUserCredentials(userId, email);
     toast({
-      title: "Zugang eingerichtet",
-      description: "Ein Einmal-Passwort wurde per E-Mail versendet.",
+      title: t("settings.users.accessSet"),
+      description: t("settings.users.accessSetDesc"),
     });
   }
 
@@ -124,16 +126,18 @@ export function NutzerVerwaltungSection() {
       const deletedUser = users.find((u) => u.id === userId);
       await removeUser(userId);
       toast({
-        title: "Nutzer geloescht",
-        description: `${deletedUser?.username ?? "Nutzer"} wurde dauerhaft geloescht.`,
+        title: t("settings.users.deleted"),
+        description: t("settings.users.deletedDesc", {
+          name: deletedUser?.username ?? t("settings.users.deletedFallback"),
+        }),
       });
     } catch (err) {
       toast({
-        title: "Fehler",
+        title: t("common.error"),
         description:
           err instanceof Error
             ? err.message
-            : "Nutzer konnte nicht geloescht werden.",
+            : t("settings.users.deleteError"),
         variant: "destructive",
       });
       throw err;
@@ -145,12 +149,12 @@ export function NutzerVerwaltungSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Skeleton className="h-7 w-48 bg-gray-700" />
-          <Skeleton className="h-9 w-32 bg-gray-700" />
+          <Skeleton className="h-7 w-48 bg-muted" />
+          <Skeleton className="h-9 w-32 bg-muted" />
         </div>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full bg-gray-700" />
+            <Skeleton key={i} className="h-12 w-full bg-muted" />
           ))}
         </div>
       </div>
@@ -162,8 +166,8 @@ export function NutzerVerwaltungSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-100">
-            Nutzerverwaltung
+          <h2 className="text-lg font-semibold text-foreground">
+            {t("settings.users.heading")}
           </h2>
         </div>
         <div className="rounded-lg border border-red-800 bg-red-900/20 p-4">
@@ -175,7 +179,7 @@ export function NutzerVerwaltungSection() {
             className="mt-2 text-red-400 hover:text-red-300"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Erneut versuchen
+            {t("common.retry")}
           </Button>
         </div>
       </div>
@@ -187,16 +191,16 @@ export function NutzerVerwaltungSection() {
     <div className="space-y-4">
       {/* Header with actions */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">
-          Nutzerverwaltung
+        <h2 className="text-lg font-semibold text-foreground">
+          {t("settings.users.heading")}
         </h2>
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="icon"
             onClick={reload}
-            className="h-9 w-9 text-gray-400 hover:text-gray-100"
-            aria-label="Liste aktualisieren"
+            className="h-9 w-9 text-muted-foreground hover:text-foreground"
+            aria-label={t("settings.users.refresh")}
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -205,21 +209,21 @@ export function NutzerVerwaltungSection() {
             className="bg-blue-600 hover:bg-blue-500 text-white gap-2"
           >
             <Plus className="h-4 w-4" />
-            Neuer Nutzer
+            {t("settings.users.newUser")}
           </Button>
         </div>
       </div>
 
       {/* Empty State */}
       {users.length === 0 ? (
-        <div className="rounded-lg border border-gray-700 p-8 text-center">
-          <p className="text-gray-400">Keine Nutzer vorhanden.</p>
+        <div className="rounded-lg border border-border p-8 text-center">
+          <p className="text-muted-foreground">{t("settings.users.emptyTitle")}</p>
           <Button
             variant="link"
             onClick={() => setCreateOpen(true)}
             className="mt-2 text-blue-400"
           >
-            Ersten Nutzer anlegen
+            {t("settings.users.createFirst")}
           </Button>
         </div>
       ) : (

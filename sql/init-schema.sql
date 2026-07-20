@@ -115,6 +115,9 @@ CREATE TABLE IF NOT EXISTS alice.permissions_system (
     can_access_api_docs     BOOLEAN DEFAULT FALSE,
     can_manage_memory       BOOLEAN DEFAULT FALSE,
     can_delete_memory       BOOLEAN DEFAULT FALSE,
+    can_manage_dms_folders  BOOLEAN DEFAULT FALSE,
+    can_view_chat_archive   BOOLEAN DEFAULT FALSE,
+    can_manage_mailboxes    BOOLEAN DEFAULT FALSE,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     updated_at              TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id)
@@ -160,7 +163,7 @@ VALUES
     'Vollzugriff auf alle Funktionen',
     '[{"domain": "*", "can_read": true, "can_control": true}]',
     '[{"doc_type": "*", "can_read": true, "can_create": true, "can_update": true, "can_delete": true, "can_download": true}]',
-    '{"can_manage_users": true, "can_manage_devices": true, "can_view_logs": true, "can_manage_workflows": true, "can_access_api_docs": true, "can_manage_memory": true, "can_delete_memory": true}',
+    '{"can_manage_users": true, "can_manage_devices": true, "can_view_logs": true, "can_manage_workflows": true, "can_access_api_docs": true, "can_manage_memory": true, "can_delete_memory": true, "can_manage_dms_folders": true, "can_view_chat_archive": true, "can_manage_mailboxes": true}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["*"]}'
 ),
 (
@@ -184,7 +187,7 @@ VALUES
         {"doc_type": "BankTransaction",    "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
         {"doc_type": "SecuritySettlement", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}
     ]',
-    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": true, "can_delete_memory": false}',
+    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": true, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant", "search_documents", "remember", "recall"]}'
 ),
 (
@@ -197,7 +200,7 @@ VALUES
         {"domain": "media_player", "can_read": true, "can_control": true,  "allowed_areas": ["wohnzimmer"]}
     ]',
     '[{"doc_type": "*", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}]',
-    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": false, "can_delete_memory": false}',
+    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": false, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant"], "max_messages_per_day": 50}'
 ),
 (
@@ -209,7 +212,7 @@ VALUES
         {"domain": "sensor",       "can_read": true, "can_control": false}
     ]',
     '[{"doc_type": "*", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}]',
-    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": false, "can_delete_memory": false}',
+    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": false, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant"], "max_messages_per_day": 20}'
 )
 ON CONFLICT (role) DO NOTHING;
@@ -294,7 +297,8 @@ BEGIN
     INSERT INTO alice.permissions_system (
         user_id,
         can_manage_users, can_manage_devices, can_view_logs,
-        can_manage_workflows, can_access_api_docs, can_manage_memory, can_delete_memory
+        can_manage_workflows, can_access_api_docs, can_manage_memory, can_delete_memory,
+        can_manage_dms_folders, can_view_chat_archive, can_manage_mailboxes
     ) VALUES (
         p_user_id,
         COALESCE((v_template.system_permissions->>'can_manage_users')::boolean,      false),
@@ -303,7 +307,10 @@ BEGIN
         COALESCE((v_template.system_permissions->>'can_manage_workflows')::boolean,  false),
         COALESCE((v_template.system_permissions->>'can_access_api_docs')::boolean,   false),
         COALESCE((v_template.system_permissions->>'can_manage_memory')::boolean,     false),
-        COALESCE((v_template.system_permissions->>'can_delete_memory')::boolean,     false)
+        COALESCE((v_template.system_permissions->>'can_delete_memory')::boolean,     false),
+        COALESCE((v_template.system_permissions->>'can_manage_dms_folders')::boolean, false),
+        COALESCE((v_template.system_permissions->>'can_view_chat_archive')::boolean,  false),
+        COALESCE((v_template.system_permissions->>'can_manage_mailboxes')::boolean,   false)
     )
     ON CONFLICT (user_id) DO UPDATE SET
         can_manage_users     = EXCLUDED.can_manage_users,
@@ -313,6 +320,9 @@ BEGIN
         can_access_api_docs  = EXCLUDED.can_access_api_docs,
         can_manage_memory    = EXCLUDED.can_manage_memory,
         can_delete_memory    = EXCLUDED.can_delete_memory,
+        can_manage_dms_folders = EXCLUDED.can_manage_dms_folders,
+        can_view_chat_archive  = EXCLUDED.can_view_chat_archive,
+        can_manage_mailboxes   = EXCLUDED.can_manage_mailboxes,
         updated_at           = NOW();
 
     -- Assistant permissions
