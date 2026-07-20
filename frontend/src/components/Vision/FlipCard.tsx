@@ -20,7 +20,7 @@ interface FlipCardProps {
 function MetadataRow({ label, value }: { label: string; value: unknown }) {
   if (value === null || value === undefined || value === "") return null;
   return (
-    <div className="flex justify-between gap-2 text-xs text-foreground py-0.5">
+    <div className="flex justify-between gap-2 text-sm text-foreground py-0.5">
       <span className="text-muted-foreground shrink-0">{label}</span>
       <span className="text-right truncate">{formatMetaValue(value)}</span>
     </div>
@@ -83,7 +83,7 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
         >
           {/* Filename header */}
           <div className="px-2 py-1.5 bg-background border-b border-border">
-            <p className="text-xs text-foreground font-medium truncate" title={result.filename}>
+            <p className="text-sm lg:text-base text-foreground font-medium truncate" title={result.filename}>
               {result.filename || t("vision.card.unknownFile")}
             </p>
           </div>
@@ -98,7 +98,7 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
           </div>
 
           {/* Metadata bar */}
-          <div className="px-2 py-1 bg-card border-t border-border text-xs text-muted-foreground truncate">
+          <div className="px-2 py-1 bg-card border-t border-border text-xs sm:text-sm text-muted-foreground truncate">
             {Object.entries(metaLabels)
               .filter(([k]) => result.metadata[k])
               .slice(0, 2)
@@ -121,11 +121,11 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              className="h-11 w-11 text-muted-foreground hover:text-foreground"
               title={t("vision.card.summary")}
               onClick={() => setFace("summary")}
             >
-              <Sigma className="h-3.5 w-3.5" />
+              <Sigma className="h-5 w-5" />
             </Button>
           </div>
         </div>
@@ -142,20 +142,20 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
           {face === "summary" ? (
             <>
               <div className="px-2 py-1.5 bg-background border-b border-border">
-                <p className="text-xs text-muted-foreground font-medium">{t("vision.card.summary")}</p>
+                <p className="text-sm text-muted-foreground font-medium">{t("vision.card.summary")}</p>
               </div>
               <div className="flex-1 overflow-y-auto p-3">
                 {result.summary ? (
-                  <p className="text-xs text-foreground leading-relaxed">{result.summary}</p>
+                  <p className="text-sm lg:text-base text-foreground leading-relaxed">{result.summary}</p>
                 ) : (
-                  <p className="text-xs text-muted-foreground italic">{t("vision.card.noSummary")}</p>
+                  <p className="text-sm text-muted-foreground italic">{t("vision.card.noSummary")}</p>
                 )}
               </div>
             </>
           ) : (
             <>
               <div className="px-2 py-1.5 bg-background border-b border-border">
-                <p className="text-xs text-muted-foreground font-medium">{t("vision.card.details")}</p>
+                <p className="text-sm text-muted-foreground font-medium">{t("vision.card.details")}</p>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-0.5">
                 <MetadataRow label={t("vision.card.typeLabel")} value={result.document_type} />
