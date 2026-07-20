@@ -27,7 +27,7 @@ export function ToolCallMessage({ message }: ToolCallMessageProps) {
       <div
         className={cn(
           "flex items-center gap-2 text-[14px] text-muted-foreground",
-          effectiveStatus === "error" && "text-red-300"
+          effectiveStatus === "error" && "text-destructive"
         )}
         aria-live="polite"
       >
@@ -38,7 +38,7 @@ export function ToolCallMessage({ message }: ToolCallMessageProps) {
           <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
         {effectiveStatus === "error" && (
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-300" aria-hidden="true" />
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
         )}
         <span className="break-words">{label}</span>
       </div>
