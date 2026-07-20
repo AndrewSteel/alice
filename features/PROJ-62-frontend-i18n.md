@@ -1,6 +1,6 @@
 # PROJ-62: Frontend Internationalisierung (i18n)
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-20
 
@@ -169,4 +169,4 @@ Kein neues DB-Feld — nutzt das bestehende `sprache`-Feld in `alice.user_profil
 - **Recommendation:** READY. Ship; schedule BUG-1 for the next sprint and BUG-2 at leisure.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

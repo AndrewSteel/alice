@@ -1,6 +1,6 @@
 # PROJ-64: Voice-Enrollment — Offene Sprachauswahl
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-19
 
@@ -156,4 +156,4 @@ None blocking. Two low-severity observations (do not fail any AC):
 - **Recommendation:** READY — deploy. Observations OBS-1/OBS-2 are optional nice-to-haves, not blockers.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

@@ -1,6 +1,6 @@
 # PROJ-70: Browser-Sprachmodi — Adaptiver Noise-Floor
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-19
 
@@ -163,4 +163,4 @@ None.
 - **Recommendation:** **READY.** Implementation matches the spec precisely — calibration suppresses `onSample`, state resets every `start()`, the `Math.max` clamp guarantees non-regression, both modes share one strategy, and short/suspend/extreme-noise paths degrade gracefully into the fixed floor or the existing 30s gateway net. Run the mic smoke test above before/after deploy (standard for mic-dependent code that can't be covered headlessly).
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

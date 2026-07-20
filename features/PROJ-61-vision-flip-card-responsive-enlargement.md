@@ -1,6 +1,6 @@
 # PROJ-61: Vision Flip-Card Grid — Responsive Enlargement
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-20
 
@@ -174,4 +174,4 @@ Implementer's implied checks are covered; the full pre/post-deploy list a human 
 - **Recommendation:** Deploy. The single Low bug is cosmetic and does not violate any acceptance criterion; address it as an optional follow-up. Complete the browser spot-checks above post-deploy.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

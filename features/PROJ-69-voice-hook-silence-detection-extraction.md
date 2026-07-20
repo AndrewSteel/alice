@@ -1,6 +1,6 @@
 # PROJ-69: Voice-Hooks — Silence-Detection-Extraktion
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-19
 
@@ -162,4 +162,4 @@ None in PROJ-69.
 - **Recommendation:** READY. Refactor is behaviorally equivalent to pre-refactor code. Recommend a quick real-hardware smoke test of Mode 1 dictation, Mode 2 conversation, and barge-in before/after deploy (standard for mic-dependent code that can't be covered headlessly).
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

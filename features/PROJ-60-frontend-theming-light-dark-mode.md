@@ -1,6 +1,6 @@
 # PROJ-60: Frontend Theming — Light/Dark Mode Switch
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-19
 
@@ -195,4 +195,4 @@ Pure client-side CSS/theme feature; no API, auth, or server surface touched.
 - **Recommendation:** Approve. Address BUG-1 as a fast follow.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

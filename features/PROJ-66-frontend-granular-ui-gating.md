@@ -1,6 +1,6 @@
 # PROJ-66: Frontend — Granulares Rollen-Gating in Settings
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-20
 
@@ -185,4 +185,4 @@ These are traced as correct/benign by static analysis and should be smoke-tested
 - **Recommendation:** Deploy. The single Low finding is cosmetic (skeleton row count) and non-blocking. Smoke-test the responsive skeleton transition and confirm a non-admin-with-flag test account sees the gated tab during `/deploy`.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

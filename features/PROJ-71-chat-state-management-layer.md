@@ -1,6 +1,6 @@
 # PROJ-71: Chat State-Management-Layer
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-20
 
@@ -167,4 +167,4 @@ None. No Critical, High, Medium, or Low functional bugs. Three Low informational
 - **Recommendation:** READY. Merge after a manual live-session smoke test covering the 5 scenarios listed under "Not Runtime-Verified". Optionally address OBS-1 to harden the extensibility guarantee.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

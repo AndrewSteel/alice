@@ -1,6 +1,6 @@
 # PROJ-63: Backend Sprachcode-Offenheit (alice-auth + alice-chat-stream)
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-19
 
@@ -166,4 +166,4 @@ Keine neuen Pakete — nutzt den bestehenden Python/FastAPI-Stack in `alice-auth
 - **Recommendation:** READY — deploy. Optionally address BUG-1 (cosmetic migration output) before running the migration, and BUG-2 (spec line refs) at leisure. Neither blocks deployment.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, alice-auth/alice-chat-stream). Confirmed working in production. Data migration (`sql/migrations/063-backend-language-codes.sql`) still needs to be run against the live DB to rewrite existing legacy word-form `sprache` values — not yet confirmed run at time of writing.

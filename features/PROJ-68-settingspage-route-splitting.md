@@ -1,6 +1,6 @@
 # PROJ-68: SettingsPage — Route-Splitting
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-20
 
@@ -204,4 +204,4 @@ AC-1's binding wording is *"Jeder bestehende Settings-Tab wird eine eigene Next.
 - **Recommendation:** Deploy. Both findings are Low and non-blocking. During `/deploy`, smoke-test: (a) back/forward across tabs, (b) a non-admin hard-loading `/settings/nutzer` redirects to profil with no flash, (c) the `/settings/xyz` fall-through behavior, and (d) confirm the permissions request fires once per Settings visit (Network tab) and not per tab click.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.

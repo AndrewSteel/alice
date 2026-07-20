@@ -1,6 +1,6 @@
 # PROJ-67: Zentraler Auth-Fetch-Wrapper
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-19
 **Last Updated:** 2026-07-19
 
@@ -140,4 +140,4 @@ Keine neuen Pakete.
 - **Recommendation:** Deploy. Optionally address BUG-1 later by moving the 401 throw's message concern out of the caller's catch (e.g. have the wrapper still redirect but let callers not wrap the wrapper's own 401 throw), but it is not blocking — the redirect, the load-bearing behavior, is preserved.
 
 ## Deployment
-_To be added by /deploy_
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, frontend bundle covering PROJ-60-62/66-71). Confirmed working in production.
