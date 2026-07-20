@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { VisionResult } from "@/services/api";
 import { ThumbnailImage } from "./ThumbnailImage";
+import { formatMetaValue } from "@/i18n/format";
 import { Sigma } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -15,73 +17,18 @@ interface FlipCardProps {
   onFaceChange?: (face: CardFace) => void;
 }
 
-// ISO date/datetime → German dd.MM.yyyy; everything else passes through.
-function formatMetaValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  const s = String(value);
-  if (/^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(s)) {
-    const d = new Date(s);
-    if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleDateString("de-DE", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-    }
-  }
-  return s;
-}
-
-// German labels for metadata keys that fall outside the doc-type label map.
-const EXTRA_META_LABELS: Record<string, string> = {
-  date: "Datum",
-  amount: "Betrag",
-  totalAmount: "Betrag",
-  sender: "Absender",
-  issuer: "Aussteller",
-  subject: "Betreff",
-  emailSubject: "Betreff",
-  fromAddress: "Von",
-  iban: "IBAN",
-  counterparty: "Gegenseite",
-  bankName: "Bank",
-};
-
-// Technical/search fields that must never appear on the detail face.
-const HIDDEN_META_KEYS = new Set([
-  "score",
-  "distance",
-  "certainty",
-  "weaviate_id",
-  "weaviate_uuid",
-  "id",
-  "uuid",
-  "collection",
-  "document_type",
-  "filename",
-]);
-
 function MetadataRow({ label, value }: { label: string; value: unknown }) {
   if (value === null || value === undefined || value === "") return null;
   return (
-    <div className="flex justify-between gap-2 text-xs text-gray-300 py-0.5">
-      <span className="text-gray-500 shrink-0">{label}</span>
+    <div className="flex justify-between gap-2 text-sm text-foreground py-0.5">
+      <span className="text-muted-foreground shrink-0">{label}</span>
       <span className="text-right truncate">{formatMetaValue(value)}</span>
     </div>
   );
 }
 
-const DOC_META_LABELS: Record<string, Record<string, string>> = {
-  Invoice: { invoiceDate: "Datum", totalAmount: "Betrag", issuer: "Aussteller" },
-  BankStatement: { statementDate: "Datum", bankName: "Bank", accountIban: "IBAN" },
-  BankTransaction: { transactionDate: "Datum", amount: "Betrag", counterparty: "Gegenseite", direction: "Art" },
-  Email: { sentAt: "Gesendet", fromAddress: "Von", emailSubject: "Betreff" },
-  Document: { date: "Datum", sender: "Absender" },
-  SecuritySettlement: { date: "Datum", amount: "Betrag" },
-  Contract: { date: "Datum", sender: "Partner" },
-};
-
 export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps) {
+  const { t } = useTranslation();
   const [internalFace, setInternalFace] = useState<CardFace>("front");
   const face = faceProp ?? internalFace;
 
@@ -94,7 +41,25 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
   };
 
   const isFlipped = face !== "front";
-  const metaLabels = DOC_META_LABELS[result.document_type] ?? DOC_META_LABELS["Document"];
+
+  // Data-driven metadata labels (PROJ-62): the former hardcoded German maps now
+  // live in the translation resource under `vision.docMeta` / `vision.extraMeta`
+  // / `vision.hiddenMetaKeys` and follow the active UI language.
+  const docMetaRaw = t(`vision.docMeta.${result.document_type}`, {
+    returnObjects: true,
+    defaultValue: {},
+  });
+  const fallbackMeta = t("vision.docMeta.Document", {
+    returnObjects: true,
+    defaultValue: {},
+  }) as Record<string, string>;
+  const metaLabels =
+    docMetaRaw && typeof docMetaRaw === "object" && Object.keys(docMetaRaw).length > 0
+      ? (docMetaRaw as Record<string, string>)
+      : fallbackMeta;
+  const hiddenMetaKeys = new Set(
+    t("vision.hiddenMetaKeys", { returnObjects: true, defaultValue: [] }) as string[]
+  );
 
   return (
     <div
@@ -112,14 +77,14 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
       >
         {/* ── Front face ── */}
         <div
-          className="relative flex flex-col bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer"
+          className="relative flex flex-col bg-card border border-border rounded-lg overflow-hidden cursor-pointer"
           style={{ backfaceVisibility: "hidden" }}
           onClick={() => setFace("back")}
         >
           {/* Filename header */}
-          <div className="px-2 py-1.5 bg-gray-900 border-b border-gray-700">
-            <p className="text-xs text-gray-300 font-medium truncate" title={result.filename}>
-              {result.filename || "Unbekannt"}
+          <div className="px-2 py-1.5 bg-background border-b border-border">
+            <p className="text-sm lg:text-base text-foreground font-medium truncate" title={result.filename}>
+              {result.filename || t("vision.card.unknownFile")}
             </p>
           </div>
 
@@ -133,41 +98,41 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
           </div>
 
           {/* Metadata bar */}
-          <div className="px-2 py-1 bg-gray-850 border-t border-gray-700 text-xs text-gray-400 truncate">
+          <div className="px-2 py-1 bg-card border-t border-border text-xs sm:text-sm text-muted-foreground truncate">
             {Object.entries(metaLabels)
               .filter(([k]) => result.metadata[k])
               .slice(0, 2)
               .map(([k, label]) => (
                 <span key={k} className="mr-2">
-                  <span className="text-gray-600">{label}: </span>
+                  <span className="text-muted-foreground">{label}: </span>
                   {formatMetaValue(result.metadata[k])}
                 </span>
               ))}
             {!Object.keys(metaLabels).some((k) => result.metadata[k]) && (
-              <span className="text-gray-600">{result.document_type}</span>
+              <span className="text-muted-foreground">{result.document_type}</span>
             )}
           </div>
 
           {/* Icon bar */}
           <div
-            className="flex items-center gap-1 px-2 py-1 bg-gray-900 border-t border-gray-700"
+            className="flex items-center gap-1 px-2 py-1 bg-background border-t border-border"
             onClick={(e) => e.stopPropagation()}
           >
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-gray-400 hover:text-gray-100"
-              title="Zusammenfassung"
+              className="h-11 w-11 text-muted-foreground hover:text-foreground"
+              title={t("vision.card.summary")}
               onClick={() => setFace("summary")}
             >
-              <Sigma className="h-3.5 w-3.5" />
+              <Sigma className="h-5 w-5" />
             </Button>
           </div>
         </div>
 
         {/* ── Back face (and Summary) — shown when flipped ── */}
         <div
-          className="absolute inset-0 flex flex-col bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer"
+          className="absolute inset-0 flex flex-col bg-card border border-border rounded-lg overflow-hidden cursor-pointer"
           style={{
             backfaceVisibility: "hidden",
             transform: "rotateY(180deg)",
@@ -176,42 +141,42 @@ export function FlipCard({ result, face: faceProp, onFaceChange }: FlipCardProps
         >
           {face === "summary" ? (
             <>
-              <div className="px-2 py-1.5 bg-gray-900 border-b border-gray-700">
-                <p className="text-xs text-gray-400 font-medium">Zusammenfassung</p>
+              <div className="px-2 py-1.5 bg-background border-b border-border">
+                <p className="text-sm text-muted-foreground font-medium">{t("vision.card.summary")}</p>
               </div>
               <div className="flex-1 overflow-y-auto p-3">
                 {result.summary ? (
-                  <p className="text-xs text-gray-300 leading-relaxed">{result.summary}</p>
+                  <p className="text-sm lg:text-base text-foreground leading-relaxed">{result.summary}</p>
                 ) : (
-                  <p className="text-xs text-gray-600 italic">Keine Zusammenfassung verfügbar.</p>
+                  <p className="text-sm text-muted-foreground italic">{t("vision.card.noSummary")}</p>
                 )}
               </div>
             </>
           ) : (
             <>
-              <div className="px-2 py-1.5 bg-gray-900 border-b border-gray-700">
-                <p className="text-xs text-gray-400 font-medium">Details</p>
+              <div className="px-2 py-1.5 bg-background border-b border-border">
+                <p className="text-sm text-muted-foreground font-medium">{t("vision.card.details")}</p>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-0.5">
-                <MetadataRow label="Typ" value={result.document_type} />
-                <MetadataRow label="Datei" value={result.filename} />
+                <MetadataRow label={t("vision.card.typeLabel")} value={result.document_type} />
+                <MetadataRow label={t("vision.card.fileLabel")} value={result.filename} />
                 {Object.entries(metaLabels).map(([k, label]) => (
                   <MetadataRow key={k} label={label} value={result.metadata[k]} />
                 ))}
-                {/* Extra metadata fields not in the labels map — German
+                {/* Extra metadata fields not in the labels map — translated
                     labels where known, technical/search fields hidden. */}
                 {Object.entries(result.metadata)
                   .filter(
                     ([k, v]) =>
                       !metaLabels[k] &&
-                      !HIDDEN_META_KEYS.has(k) &&
+                      !hiddenMetaKeys.has(k) &&
                       v !== null &&
                       v !== undefined &&
                       v !== ""
                   )
                   .slice(0, 6)
                   .map(([k, v]) => (
-                    <MetadataRow key={k} label={EXTRA_META_LABELS[k] ?? k} value={v} />
+                    <MetadataRow key={k} label={t(`vision.extraMeta.${k}`, { defaultValue: k })} value={v} />
                   ))}
               </div>
             </>

@@ -1,28 +1,30 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
 
 export function AllgemeinSection() {
+  const { t } = useTranslation();
   const { user } = useAuth();
 
   return (
-    <Card className="bg-gray-800 border-gray-700">
+    <Card className="bg-card border-border">
       <CardHeader>
-        <CardTitle className="text-gray-100">Allgemein</CardTitle>
+        <CardTitle className="text-foreground">{t("settings.allgemein.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           <div>
-            <p className="text-sm text-gray-400">Angemeldet als</p>
-            <p className="text-gray-100 font-medium">{user?.username}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.allgemein.loggedInAs")}</p>
+            <p className="text-foreground font-medium">{user?.username}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-400">Rolle</p>
-            <p className="text-gray-100 font-medium capitalize">{user?.role}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.allgemein.role")}</p>
+            <p className="text-foreground font-medium capitalize">{user?.role}</p>
           </div>
-          <p className="text-sm text-gray-500 pt-2">
-            Weitere Einstellungen folgen in einem spaeteren Update.
+          <p className="text-sm text-muted-foreground pt-2">
+            {t("settings.allgemein.moreSoon")}
           </p>
         </div>
       </CardContent>

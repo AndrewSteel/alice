@@ -6,12 +6,14 @@ All endpoints therefore start with /auth/ or are /health.
 
 Endpoints:
   GET  /health                             - Health check
+  GET  /auth/languages                     - List configured languages (public, no auth)
   POST /auth/login                         - Verify username + password, return JWT
   GET  /auth/validate                      - Verify Bearer token, return user info
   POST /auth/logout                        - Log logout event (fire-and-forget)
   POST /auth/hash-password                 - Utility: hash a plaintext password (admin use only)
   POST /auth/change-password               - Change password (required when must_change_password=TRUE)
 
+  GET   /auth/permissions                  - Read own effective system permissions (any authenticated user)
   GET   /auth/profile                      - Read own profile (any authenticated user)
   PATCH /auth/profile                      - Update own facts + preferences (any authenticated user)
   PATCH /auth/email                        - Update own email address (any authenticated user)
@@ -129,6 +131,56 @@ def _check_password_rate_limit(request: Request) -> None:
 def _check_profile_rate_limit(request: Request) -> None:
     """Raise HTTP 429 if the caller IP exceeds the profile/email update rate limit."""
     _check_rate_limit(request, _profile_rate_lock, _profile_rate_buckets, _PROFILE_RATE_LIMIT, _PROFILE_RATE_WINDOW)
+
+
+# ---------------------------------------------------------------------------
+# Language configuration (PROJ-63)
+# ---------------------------------------------------------------------------
+# Static, duplicated per container (see alice-chat-stream/app/memory.py for the
+# sibling copy). To add a language: append an entry here AND in every other
+# container's copy, then redeploy. No DB schema change required.
+LANGUAGES: list[dict[str, str]] = [
+    {
+        "code": "de",
+        "displayName_de": "Deutsch",
+        "displayName_en": "German",
+        "llm_instruction": "Antworte immer auf Deutsch. Sei präzise und hilfreich.",
+    },
+    {
+        "code": "en",
+        "displayName_de": "Englisch",
+        "displayName_en": "English",
+        "llm_instruction": "Reply in English.",
+    },
+]
+
+# Transition aliases: old word-form values are still accepted from stale
+# frontend bundles (pre-PROJ-62). Remove once the frontend rollout is complete.
+LANGUAGE_ALIASES: dict[str, str] = {
+    "deutsch": "de",
+    "englisch": "en",
+}
+
+_LANGUAGE_CODES = {lang["code"] for lang in LANGUAGES}
+
+
+def _normalize_language(value: str) -> str | None:
+    """
+    Map an incoming `sprache` value to its canonical ISO 639-1 code.
+    Accepts configured codes directly and the legacy word-form aliases
+    ("deutsch"/"englisch"). Returns None if the value is not recognised.
+    """
+    if value in _LANGUAGE_CODES:
+        return value
+    aliased = LANGUAGE_ALIASES.get(value)
+    if aliased in _LANGUAGE_CODES:
+        return aliased
+    return None
+
+
+def _invalid_language_detail() -> str:
+    """Plain-text 422 message naming the currently valid language codes."""
+    return f"Ungültige Sprache. Erlaubt: {', '.join(sorted(_LANGUAGE_CODES))}"
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +436,29 @@ async def health():
         return {"status": "degraded", "db": db_ok, "jwt_private_key": False}
 
     return {"status": "healthy" if db_ok else "degraded", "db": db_ok, "jwt_private_key": True}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Metadata
+# ---------------------------------------------------------------------------
+@app.get("/auth/languages")
+async def list_languages():
+    """
+    Public (unauthenticated) list of configured languages for the frontend
+    language dropdown. Returns code + both display names; no user data.
+    Keeping this in sync with the frontend dropdown guarantees the dropdown
+    never diverges from backend validation.
+    """
+    return {
+        "languages": [
+            {
+                "code": lang["code"],
+                "displayName_de": lang["displayName_de"],
+                "displayName_en": lang["displayName_en"],
+            }
+            for lang in LANGUAGES
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +724,66 @@ async def change_password(
 
 
 # ---------------------------------------------------------------------------
+# Endpoints — Effective system permissions (self-service, any authenticated user)
+# ---------------------------------------------------------------------------
+# All boolean flags on alice.permissions_system, in schema order. The endpoint
+# returns exactly these keys; missing/absent rows fall back to all-false.
+_SYSTEM_PERMISSION_FLAGS: tuple[str, ...] = (
+    "can_manage_users",
+    "can_manage_devices",
+    "can_view_logs",
+    "can_manage_workflows",
+    "can_access_api_docs",
+    "can_manage_memory",
+    "can_delete_memory",
+    "can_manage_dms_folders",
+    "can_view_chat_archive",
+    "can_manage_mailboxes",
+)
+
+
+@app.get("/auth/permissions")
+async def get_permissions(authorization: str | None = Header(default=None)):
+    """
+    Return the effective alice.permissions_system flags for the authenticated
+    user as JSON (all 10 boolean flags). Requires a valid Bearer JWT.
+    If no permission row exists (should not happen — init_user_permissions runs
+    on login/creation — but handled as a fallback), all flags default to false.
+    """
+    payload = _require_auth(authorization)
+    user_id = payload["user_id"]
+
+    try:
+        conn = _get_db_connection()
+    except Exception as exc:
+        logger.error("DB connection failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(_SYSTEM_PERMISSION_FLAGS)}
+                FROM alice.permissions_system
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+
+        # Fallback: no row → all flags false rather than erroring.
+        return {flag: bool(row[flag]) if row else False for flag in _SYSTEM_PERMISSION_FLAGS}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("get_permissions error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Endpoints — User profile (self-service, any authenticated user)
 # ---------------------------------------------------------------------------
 @app.get("/auth/profile")
@@ -741,8 +876,11 @@ async def update_profile(
     if body.anrede is not None and body.anrede not in ("du", "sie"):
         raise HTTPException(status_code=422, detail="Ungültige Anrede. Erlaubt: du, sie")
 
-    if body.sprache is not None and body.sprache not in ("deutsch", "englisch"):
-        raise HTTPException(status_code=422, detail="Ungültige Sprache. Erlaubt: deutsch, englisch")
+    if body.sprache is not None:
+        normalized = _normalize_language(body.sprache)
+        if normalized is None:
+            raise HTTPException(status_code=422, detail=_invalid_language_detail())
+        body.sprache = normalized
 
     try:
         conn = _get_db_connection()
@@ -1026,8 +1164,11 @@ async def admin_create_user(
     # Validate optional preference values
     if body.anrede and body.anrede not in {"du", "sie"}:
         raise HTTPException(status_code=422, detail="Ungültige Anrede. Erlaubt: du, sie")
-    if body.sprache and body.sprache not in {"deutsch", "englisch"}:
-        raise HTTPException(status_code=422, detail="Ungültige Sprache. Erlaubt: deutsch, englisch")
+    if body.sprache:
+        normalized = _normalize_language(body.sprache)
+        if normalized is None:
+            raise HTTPException(status_code=422, detail=_invalid_language_detail())
+        body.sprache = normalized
     if body.detailgrad and body.detailgrad not in {"technisch", "normal", "einfach", "kindlich"}:
         raise HTTPException(status_code=422, detail="Ungültiger Detailgrad. Erlaubt: technisch, normal, einfach, kindlich")
 

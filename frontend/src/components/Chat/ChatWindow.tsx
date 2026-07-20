@@ -17,7 +17,7 @@ export function ChatWindow({
   isStreaming = false,
 }: ChatWindowProps) {
   return (
-    <div className="flex flex-col h-full bg-gray-800">
+    <div className="flex flex-col h-full bg-card">
       <MessageList
         messages={messages}
         isLoading={isLoading}

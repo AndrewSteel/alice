@@ -4,6 +4,13 @@
 services:
   nas-base:
     volumes:
-      - /mnt/nas/shared:/mnt/nas/shared:ro
+      - /mnt/nas/ai:/mnt/nas/ai:ro
       - /mnt/nas/andreas:/mnt/nas/andreas:ro
       - /mnt/nas/lilly:/mnt/nas/lilly:ro
+      - /mnt/nas/family:/mnt/nas/family:ro
+      - /mnt/nas/media:/mnt/nas/media:ro
+      - /mnt/nas/photo:/mnt/nas/photo:ro
+      - /mnt/nas/pictures:/mnt/nas/pictures:ro
+      - /mnt/nas/public:/mnt/nas/public:ro
+      - /mnt/nas/scanner:/mnt/nas/scanner:ro
+      - /mnt/nas/templates:/mnt/nas/templates:ro

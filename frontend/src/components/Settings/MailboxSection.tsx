@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Pencil, Trash2, Users, AlertCircle, Mail, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -18,19 +19,29 @@ import { AccessDialog } from "./AccessDialog";
 import type { Mailbox, CreateMailboxInput, UpdateMailboxInput, CreateMailboxResult } from "@/services/mailApi";
 
 function StatusBadge({ status }: { status: Mailbox["status"] }) {
-  const map: Record<Mailbox["status"], { label: string; className: string }> = {
-    active:         { label: "Aktiv",              className: "bg-green-900/50 text-green-300 border-green-700" },
-    syncing:        { label: "Synchronisiert…",    className: "bg-blue-900/50 text-blue-300 border-blue-700" },
-    error:          { label: "Fehler",             className: "bg-red-900/50 text-red-300 border-red-700" },
-    unclassified:   { label: "Unklassifiziert",    className: "bg-yellow-900/50 text-yellow-300 border-yellow-700" },
+  const { t } = useTranslation();
+  const map: Record<Mailbox["status"], { labelKey: string; className: string }> = {
+    active:         { labelKey: "settings.mail.status.active",       className: "bg-green-900/50 text-green-300 border-green-700" },
+    syncing:        { labelKey: "settings.mail.status.syncing",      className: "bg-blue-900/50 text-blue-300 border-blue-700" },
+    error:          { labelKey: "settings.mail.status.error",        className: "bg-red-900/50 text-red-300 border-red-700" },
+    unclassified:   { labelKey: "settings.mail.status.unclassified", className: "bg-yellow-900/50 text-yellow-300 border-yellow-700" },
   };
-  const { label, className } = map[status] ?? map.active;
-  return <Badge variant="outline" className={`text-xs ${className}`}>{label}</Badge>;
+  const { labelKey, className } = map[status] ?? map.active;
+  return <Badge variant="outline" className={`text-xs ${className}`}>{t(labelKey)}</Badge>;
 }
 
-export function MailboxSection() {
+interface MailboxSectionProps {
+  /**
+   * PROJ-66: whether the current user may see all mailboxes, the owner column
+   * and manage other users' mailboxes. Resolved by SettingsPage (with fail-open
+   * to `role === "admin"`) so permissions are fetched once per Settings session.
+   */
+  canManageMailboxes: boolean;
+}
+
+export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
+  const { t } = useTranslation();
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
   const { mailboxes, isLoading, error, addMailbox, editMailbox, removeMailbox, reload } = useMailboxes();
 
   const [addOpen, setAddOpen] = useState(false);
@@ -44,7 +55,7 @@ export function MailboxSection() {
     try {
       return await addMailbox(data);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Erstellen.");
+      setActionError(err instanceof Error ? err.message : t("settings.mail.createError"));
       throw err;
     }
   }
@@ -54,7 +65,7 @@ export function MailboxSection() {
     try {
       await editMailbox(data);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Aktualisieren.");
+      setActionError(err instanceof Error ? err.message : t("settings.mail.updateError"));
       throw err;
     }
   }
@@ -64,7 +75,7 @@ export function MailboxSection() {
     try {
       await removeMailbox(id);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Fehler beim Löschen.");
+      setActionError(err instanceof Error ? err.message : t("settings.mail.deleteError"));
       throw err;
     }
   }
@@ -73,10 +84,10 @@ export function MailboxSection() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Skeleton className="h-7 w-40 bg-gray-700" />
-          <Skeleton className="h-9 w-44 bg-gray-700" />
+          <Skeleton className="h-7 w-40 bg-muted" />
+          <Skeleton className="h-9 w-44 bg-muted" />
         </div>
-        {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full bg-gray-700" />)}
+        {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full bg-muted" />)}
       </div>
     );
   }
@@ -98,62 +109,62 @@ export function MailboxSection() {
           <AlertDescription className="flex items-center justify-between">
             <span>{actionError}</span>
             <Button variant="ghost" size="sm" onClick={() => setActionError(null)}
-              className="text-red-300 hover:text-red-100 h-auto py-0 px-2">Schließen</Button>
+              className="text-red-300 hover:text-red-100 h-auto py-0 px-2">{t("common.close")}</Button>
           </AlertDescription>
         </Alert>
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">
-          {isAdmin ? "Alle Postfächer" : "Meine Postfächer"}
+        <h2 className="text-lg font-semibold text-foreground">
+          {canManageMailboxes ? t("settings.mail.adminTitle") : t("settings.mail.userTitle")}
         </h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => reload()} className="text-gray-400 hover:text-gray-100"
-            title="Aktualisieren">
+          <Button variant="ghost" size="icon" onClick={() => reload()} className="text-muted-foreground hover:text-foreground"
+            title={t("settings.mail.refresh")}>
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button onClick={() => { setActionError(null); setAddOpen(true); }}
             size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />
-            Postfach hinzufügen
+            {t("settings.mail.addMailbox")}
           </Button>
         </div>
       </div>
 
       {mailboxes.length === 0 ? (
-        <div className="rounded-lg border border-gray-700 bg-gray-800 p-10 text-center">
-          <Mail className="h-10 w-10 text-gray-600 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">Noch kein Postfach konfiguriert.</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Füge ein IMAP-Postfach hinzu, damit Alice deine Mails indexiert.
+        <div className="rounded-lg border border-border bg-card p-10 text-center">
+          <Mail className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground font-medium">{t("settings.mail.emptyTitle")}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t("settings.mail.emptyDesc")}
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-gray-700 overflow-hidden">
+        <div className="rounded-lg border border-border overflow-hidden">
           <Table>
-            <TableHeader className="bg-gray-800">
-              <TableRow className="border-gray-700 hover:bg-transparent">
-                <TableHead className="text-gray-400">Anzeigename</TableHead>
-                <TableHead className="text-gray-400">Host</TableHead>
-                {isAdmin && <TableHead className="text-gray-400">Besitzer</TableHead>}
-                <TableHead className="text-gray-400">Status</TableHead>
-                <TableHead className="text-gray-400 text-right">Mails</TableHead>
-                <TableHead className="text-gray-400">Zugriff</TableHead>
-                <TableHead className="text-gray-400 text-right">Aktionen</TableHead>
+            <TableHeader className="bg-card">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-muted-foreground">{t("settings.mail.table.displayName")}</TableHead>
+                <TableHead className="text-muted-foreground">{t("settings.mail.table.host")}</TableHead>
+                {canManageMailboxes && <TableHead className="text-muted-foreground">{t("settings.mail.table.owner")}</TableHead>}
+                <TableHead className="text-muted-foreground">{t("settings.mail.table.status")}</TableHead>
+                <TableHead className="text-muted-foreground text-right">{t("settings.mail.table.mails")}</TableHead>
+                <TableHead className="text-muted-foreground">{t("settings.mail.table.access")}</TableHead>
+                <TableHead className="text-muted-foreground text-right">{t("settings.mail.table.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {mailboxes.map((mb) => {
                 const isOwner = mb.owner_id === user?.id;
-                const canManage = isOwner || isAdmin;
+                const canManage = isOwner || canManageMailboxes;
                 return (
-                  <TableRow key={mb.id} className="border-gray-700 hover:bg-gray-800/50">
-                    <TableCell className="text-gray-100 font-medium">{mb.display_name}</TableCell>
-                    <TableCell className="text-gray-400 text-sm font-mono">
+                  <TableRow key={mb.id} className="border-border hover:bg-accent/50">
+                    <TableCell className="text-foreground font-medium">{mb.display_name}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm font-mono">
                       {canManage ? `${mb.imap_host}:${mb.imap_port}` : "••••••••"}
                     </TableCell>
-                    {isAdmin && (
-                      <TableCell className="text-gray-400 text-sm">{mb.owner_name ?? "—"}</TableCell>
+                    {canManageMailboxes && (
+                      <TableCell className="text-muted-foreground text-sm">{mb.owner_name ?? "—"}</TableCell>
                     )}
                     <TableCell>
                       <div className="space-y-1">
@@ -165,29 +176,29 @@ export function MailboxSection() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-gray-400 text-sm text-right">{mb.mails_indexed}</TableCell>
-                    <TableCell className="text-gray-500 text-sm">
+                    <TableCell className="text-muted-foreground text-sm text-right">{mb.mails_indexed}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       {(mb.access_users ?? []).length === 0
-                        ? "nur Eigentümer"
+                        ? t("settings.mail.table.ownerOnly")
                         : (mb.access_users ?? []).map((u) => u.display_name).join(", ")}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         {isOwner && (
                           <Button variant="ghost" size="icon" onClick={() => setAccessTarget(mb)}
-                            className="h-8 w-8 text-gray-400 hover:text-gray-100" title="Zugriffsrechte">
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground" title={t("settings.mail.table.accessRights")}>
                             <Users className="h-4 w-4" />
                           </Button>
                         )}
                         {isOwner && (
                           <Button variant="ghost" size="icon" onClick={() => setEditTarget(mb)}
-                            className="h-8 w-8 text-gray-400 hover:text-gray-100" title="Bearbeiten">
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground" title={t("settings.mail.table.edit")}>
                             <Pencil className="h-4 w-4" />
                           </Button>
                         )}
                         {canManage && (
                           <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(mb)}
-                            className="h-8 w-8 text-gray-400 hover:text-red-400" title="Löschen">
+                            className="h-8 w-8 text-muted-foreground hover:text-red-400" title={t("settings.mail.table.delete")}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         )}

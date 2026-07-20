@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ export function DeactivateUserDialog({
   onOpenChange,
   onConfirm,
 }: DeactivateUserDialogProps) {
+  const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const willActivate = !user.is_active;
 
@@ -41,36 +43,25 @@ export function DeactivateUserDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="bg-gray-800 border-gray-700 text-gray-100">
+      <AlertDialogContent className="bg-card border-border text-foreground">
         <AlertDialogHeader>
           <AlertDialogTitle>
-            Nutzer {willActivate ? "aktivieren" : "deaktivieren"}?
+            {willActivate
+              ? t("settings.users.deactivateDialog.activateTitle")
+              : t("settings.users.deactivateDialog.deactivateTitle")}
           </AlertDialogTitle>
-          <AlertDialogDescription className="text-gray-400">
-            {willActivate ? (
-              <>
-                <span className="font-medium text-gray-300">
-                  {user.username}
-                </span>{" "}
-                wird wieder aktiviert und kann sich erneut einloggen.
-              </>
-            ) : (
-              <>
-                <span className="font-medium text-gray-300">
-                  {user.username}
-                </span>{" "}
-                wird deaktiviert und kann sich danach nicht mehr einloggen.
-                Die Daten bleiben erhalten.
-              </>
-            )}
+          <AlertDialogDescription className="text-muted-foreground">
+            {willActivate
+              ? t("settings.users.deactivateDialog.activateDesc", { name: user.username })
+              : t("settings.users.deactivateDialog.deactivateDesc", { name: user.username })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel
             disabled={isSubmitting}
-            className="bg-transparent border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+            className="bg-transparent border-border text-foreground hover:bg-accent hover:text-foreground"
           >
-            Abbrechen
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
@@ -82,10 +73,10 @@ export function DeactivateUserDialog({
             }
           >
             {isSubmitting
-              ? "Wird gespeichert..."
+              ? t("common.saving")
               : willActivate
-                ? "Aktivieren"
-                : "Deaktivieren"}
+                ? t("settings.users.deactivateDialog.activate")
+                : t("settings.users.deactivateDialog.deactivate")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

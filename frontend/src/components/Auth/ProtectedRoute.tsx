@@ -9,11 +9,11 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900">
+      <div className="flex items-center justify-center min-h-screen bg-background">
         <div className="space-y-3 w-64">
-          <Skeleton className="h-8 w-full bg-gray-700" />
-          <Skeleton className="h-8 w-3/4 bg-gray-700" />
-          <Skeleton className="h-8 w-1/2 bg-gray-700" />
+          <Skeleton className="h-8 w-full bg-muted" />
+          <Skeleton className="h-8 w-3/4 bg-muted" />
+          <Skeleton className="h-8 w-1/2 bg-muted" />
         </div>
       </div>
     );

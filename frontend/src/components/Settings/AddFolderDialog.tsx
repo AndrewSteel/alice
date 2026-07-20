@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTranslation } from "react-i18next";
 import { SUGGESTED_TYPES } from "./dms-constants";
 import type { CreateFolderInput } from "@/services/dms";
 
@@ -35,6 +36,7 @@ export function AddFolderDialog({
   onOpenChange,
   onSubmit,
 }: AddFolderDialogProps) {
+  const { t } = useTranslation();
   const [path, setPath] = useState("");
   const [suggestedType, setSuggestedType] = useState<string>(AUTO_VALUE);
   const [description, setDescription] = useState("");
@@ -59,11 +61,11 @@ export function AddFolderDialog({
 
     const trimmedPath = path.trim();
     if (!trimmedPath) {
-      setError("Pfad ist erforderlich.");
+      setError(t("settings.dms.dialog.pathRequired"));
       return;
     }
     if (trimmedPath.length > 500) {
-      setError("Pfad darf maximal 500 Zeichen lang sein.");
+      setError(t("settings.dms.dialog.pathTooLong"));
       return;
     }
 
@@ -76,7 +78,7 @@ export function AddFolderDialog({
       });
       resetForm();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Erstellen.");
+      setError(err instanceof Error ? err.message : t("settings.dms.createError"));
     } finally {
       setSubmitting(false);
     }
@@ -84,53 +86,53 @@ export function AddFolderDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-gray-800 border-gray-700 text-gray-100 sm:max-w-md">
+      <DialogContent className="bg-card border-border text-foreground sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Ordner hinzufügen</DialogTitle>
-          <DialogDescription className="text-gray-400">
-            Füge einen NAS-Pfad zur DMS-Überwachung hinzu.
+          <DialogTitle>{t("settings.dms.dialog.addTitle")}</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            {t("settings.dms.dialog.addDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="add-path" className="text-gray-300">
-              Pfad <span className="text-red-400">*</span>
+            <Label htmlFor="add-path" className="text-foreground">
+              {t("settings.dms.dialog.pathLabel")} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="add-path"
               value={path}
               onChange={(e) => setPath(e.target.value)}
-              placeholder="/mnt/nas/dokumente/rechnungen"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500 font-mono text-sm"
+              placeholder={t("settings.dms.dialog.pathPlaceholder")}
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground font-mono text-sm"
               maxLength={500}
               autoFocus
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="add-type" className="text-gray-300">
-              Dokumenttyp-Hint
+            <Label htmlFor="add-type" className="text-foreground">
+              {t("settings.dms.dialog.typeLabel")}
             </Label>
             <Select value={suggestedType} onValueChange={setSuggestedType}>
               <SelectTrigger
                 id="add-type"
-                className="bg-gray-900 border-gray-600 text-gray-100"
+                className="bg-background border-border text-foreground"
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-700">
+              <SelectContent className="bg-card border-border">
                 <SelectItem
                   value={AUTO_VALUE}
-                  className="text-gray-300 focus:bg-gray-700 focus:text-gray-100"
+                  className="text-foreground focus:bg-accent focus:text-foreground"
                 >
-                  Automatisch (LLM)
+                  {t("settings.dms.dialog.autoLlm")}
                 </SelectItem>
                 {SUGGESTED_TYPES.map((t) => (
                   <SelectItem
                     key={t}
                     value={t}
-                    className="text-gray-300 focus:bg-gray-700 focus:text-gray-100"
+                    className="text-foreground focus:bg-accent focus:text-foreground"
                   >
                     {t}
                   </SelectItem>
@@ -140,15 +142,15 @@ export function AddFolderDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="add-desc" className="text-gray-300">
-              Beschreibung
+            <Label htmlFor="add-desc" className="text-foreground">
+              {t("settings.dms.dialog.descLabel")}
             </Label>
             <Input
               id="add-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="z.B. Rechnungen 2026"
-              className="bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500"
+              placeholder={t("settings.dms.dialog.descPlaceholder")}
+              className="bg-background border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
 
@@ -160,16 +162,16 @@ export function AddFolderDialog({
               variant="ghost"
               onClick={() => handleOpenChange(false)}
               disabled={submitting}
-              className="text-gray-400 hover:text-gray-100"
+              className="text-muted-foreground hover:text-foreground"
             >
-              Abbrechen
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={submitting}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
-              {submitting ? "Wird erstellt..." : "Hinzufügen"}
+              {submitting ? t("settings.dms.dialog.creating") : t("settings.dms.dialog.add")}
             </Button>
           </DialogFooter>
         </form>

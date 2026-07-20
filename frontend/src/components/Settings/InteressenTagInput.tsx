@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 
@@ -14,6 +15,7 @@ interface InteressenTagInputProps {
 }
 
 export function InteressenTagInput({ tags, onChange }: InteressenTagInputProps) {
+  const { t } = useTranslation();
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -59,20 +61,20 @@ export function InteressenTagInput({ tags, onChange }: InteressenTagInputProps) 
     <div className="space-y-2">
       {/* Tags display */}
       {tags.length > 0 && (
-        <div className="flex flex-wrap gap-2" role="list" aria-label="Interessen">
+        <div className="flex flex-wrap gap-2" role="list" aria-label={t("settings.interests.listLabel")}>
           {tags.map((tag, index) => (
             <Badge
               key={`${tag}-${index}`}
               variant="secondary"
-              className="bg-gray-700 text-gray-200 border-gray-600 gap-1 pr-1"
+              className="bg-muted text-foreground border-border gap-1 pr-1"
               role="listitem"
             >
               {tag}
               <button
                 type="button"
                 onClick={() => removeTag(index)}
-                className="ml-1 rounded-full p-0.5 hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-gray-500"
-                aria-label={`${tag} entfernen`}
+                className="ml-1 rounded-full p-0.5 hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring"
+                aria-label={t("settings.interests.removeAria", { tag })}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -88,17 +90,17 @@ export function InteressenTagInput({ tags, onChange }: InteressenTagInputProps) 
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isAtLimit ? "Maximum erreicht (20 Tags)" : "Interesse eingeben + Enter"}
+          placeholder={isAtLimit ? t("settings.interests.maxReached") : t("settings.interests.placeholder")}
           maxLength={MAX_TAG_LENGTH}
           disabled={isAtLimit}
-          className="bg-gray-800 border-gray-600 text-gray-100 placeholder:text-gray-500"
-          aria-label="Neues Interesse eingeben"
+          className="bg-card border-border text-foreground placeholder:text-muted-foreground"
+          aria-label={t("settings.interests.ariaLabel")}
         />
       </div>
 
       {/* Hint */}
       {isAtLimit && (
-        <p className="text-xs text-amber-400">Maximum erreicht (20 Tags)</p>
+        <p className="text-xs text-amber-400">{t("settings.interests.maxReached")}</p>
       )}
     </div>
   );

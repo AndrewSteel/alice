@@ -31,9 +31,9 @@ export default function LoginPage() {
   if (!ready) return null;
 
   return (
-    <main className="min-h-screen bg-gray-900 flex items-start justify-center md:items-center p-6">
+    <main className="min-h-screen bg-background flex items-start justify-center md:items-center p-6">
       {/* Mobile: vollflächig, Tablet+: zentrierte Card */}
-      <div className="w-full max-w-sm md:bg-gray-800 md:rounded-xl md:shadow-xl md:p-8 pt-12 md:pt-8">
+      <div className="w-full max-w-sm md:bg-card md:rounded-xl md:shadow-xl md:p-8 pt-12 md:pt-8">
         <LoginForm />
       </div>
     </main>

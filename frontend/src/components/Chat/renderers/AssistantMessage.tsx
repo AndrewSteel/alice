@@ -24,7 +24,7 @@ const markdownComponents: Components = {
     }
     return (
       <code
-        className="bg-gray-800 text-pink-300 rounded px-1 py-0.5 text-[13px] font-mono"
+        className="bg-card text-pink-600 dark:text-pink-300 rounded px-1 py-0.5 text-[13px] font-mono"
         {...props}
       >
         {children}
@@ -32,7 +32,7 @@ const markdownComponents: Components = {
     );
   },
   pre: ({ children }) => (
-    <pre className="not-prose my-3 rounded-md bg-gray-950 border border-gray-700 p-3 text-[13px] font-mono overflow-x-auto">
+    <pre className="not-prose my-3 rounded-md bg-background border border-border p-3 text-[13px] font-mono overflow-x-auto">
       {children}
     </pre>
   ),
@@ -50,29 +50,29 @@ export function AssistantMessage({ message }: AssistantMessageProps) {
     <div className="px-4 py-3 min-w-0">
       <div
         className={cn(
-          "prose prose-invert max-w-none min-w-0 break-words [overflow-wrap:anywhere]",
+          "prose dark:prose-invert max-w-none min-w-0 break-words [overflow-wrap:anywhere]",
           // Base typography (16px / gray-200)
-          "text-[16px] text-gray-200 leading-relaxed",
-          "prose-p:text-[16px] prose-p:text-gray-200 prose-p:my-2 prose-p:leading-relaxed",
+          "text-[16px] text-foreground leading-relaxed",
+          "prose-p:text-[16px] prose-p:text-foreground prose-p:my-2 prose-p:leading-relaxed",
           // Headings
-          "prose-headings:text-gray-100 prose-headings:font-semibold",
+          "prose-headings:text-foreground prose-headings:font-semibold",
           "prose-h1:text-[22px] prose-h2:text-[19px] prose-h3:text-[17px] prose-h4:text-[16px]",
           // Strong / em
-          "prose-strong:font-semibold prose-strong:text-gray-100",
+          "prose-strong:font-semibold prose-strong:text-foreground",
           "prose-em:italic",
           // Links
           "prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-a:underline-offset-2",
           // Blockquotes / hr / lists
-          "prose-blockquote:border-gray-600 prose-blockquote:text-gray-300",
-          "prose-hr:border-gray-700",
+          "prose-blockquote:border-border prose-blockquote:text-foreground",
+          "prose-hr:border-border",
           "prose-ul:my-2 prose-ol:my-2 prose-li:my-1",
           // Tables (gfm)
           "prose-table:text-sm",
-          "prose-th:border prose-th:border-gray-700 prose-th:px-2 prose-th:py-1",
-          "prose-td:border prose-td:border-gray-700 prose-td:px-2 prose-td:py-1",
+          "prose-th:border prose-th:border-border prose-th:px-2 prose-th:py-1",
+          "prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1",
           // Streaming caret
           streaming &&
-            "after:content-[''] after:inline-block after:w-[2px] after:h-[1em] after:bg-gray-300 after:ml-0.5 after:align-text-bottom after:animate-pulse"
+            "after:content-[''] after:inline-block after:w-[2px] after:h-[1em] after:bg-muted-foreground after:ml-0.5 after:align-text-bottom after:animate-pulse"
         )}
       >
         <ReactMarkdown
