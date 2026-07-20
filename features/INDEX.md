@@ -53,7 +53,7 @@
 | PROJ-68 | 3.2   | SettingsPage Route-Splitting — eigene Subrouten je Tab (/settings/profil, /settings/dms, ...) mit Code-Splitting und Permission-Route-Guards                                                                            | Architected | [Spec](PROJ-68-settingspage-route-splitting.md) | 2026-07-19 |
 | PROJ-69 | 3.2   | Voice-Hooks Silence-Detection-Extraktion — gemeinsamer Hook für die duplizierte RMS-AnalyserNode-Logik aus useVoiceMode1/2, kein Verhaltensunterschied                                                                  | Approved | [Spec](PROJ-69-voice-hook-silence-detection-extraction.md) | 2026-07-19 |
 | PROJ-70 | 3.2   | Browser Adaptiver Noise-Floor — Kalibrierungsfenster pro Aufnahme statt Fixwert 700/0.01, analog zu PROJ-57 für die WebApp-Sprachmodi                                                                                    | Approved | [Spec](PROJ-70-browser-adaptive-noise-floor.md) | 2026-07-19 |
-| PROJ-71 | 3.2   | Chat State-Management-Layer — useChatSessions.ts auf zentralen Reducer/Dispatch statt 13+ verstreuter setMessagesBySession-Aufrufe umgestellt, kein Verhaltensunterschied                                               | Architected | [Spec](PROJ-71-chat-state-management-layer.md) | 2026-07-19 |
+| PROJ-71 | 3.2   | Chat State-Management-Layer — useChatSessions.ts auf zentralen Reducer/Dispatch statt 13+ verstreuter setMessagesBySession-Aufrufe umgestellt, kein Verhaltensunterschied                                               | Approved | [Spec](PROJ-71-chat-state-management-layer.md) | 2026-07-19 |
 
 <!-- Add features above this line -->
 
