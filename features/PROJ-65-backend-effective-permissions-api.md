@@ -181,4 +181,4 @@ These are traced as correct by static analysis; they should be smoke-tested duri
 - **Recommendation:** Deploy. The single Low finding is cosmetic (migration report line) and does not block. Smoke-test the endpoint and run the migration on the live DB during `/deploy` to cover the items that cannot be exercised statically.
 
 ## Deployment
-Deployed 2026-07-20 (manual production deploy by Andrew Steel, alice-auth). Confirmed working in production. Schema migration (`sql/migrations/065-permission-flags.sql`) still needs to be run against the live DB to add the 3 new columns and backfill existing admins — not yet confirmed run at time of writing.
+Deployed 2026-07-20 (manual production deploy by Andrew Steel, alice-auth). Confirmed working in production. `sql/migrations/065-permission-flags.sql` confirmed run against the live DB (columns added, admin backfill applied).
