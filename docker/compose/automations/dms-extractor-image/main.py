@@ -5,7 +5,8 @@ Pipeline per image:
   1. Receive MQTT message from alice/dms/image
   2. Validate file path (/mnt/nas/ prefix required)
   3. Extract EXIF metadata (datetime, GPS, camera)
-  4. Reverse geocode GPS coordinates via local Nominatim
+  4. If GPS present: RPUSH {file_hash, latitude, longitude} to alice:dms:geocode_pending
+     (reverse geocoding itself happens decoupled, nightly, in alice-dms-processor via Geoapify)
   5. Generate German AI description via Ollama Vision
   6. RPUSH result JSON to Redis alice:dms:image
   7. On any failure: write extraction_failed=True, still push to Redis
@@ -48,8 +49,8 @@ REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD") or None
 REDIS_KEY = "alice:dms:image"
+GEOCODE_PENDING_KEY = "alice:dms:geocode_pending"
 
-NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim:8080")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen3.5:27b-q4_K_M")
 
@@ -261,32 +262,6 @@ def extract_exif(file_path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Nominatim reverse geocoding
-# ---------------------------------------------------------------------------
-def reverse_geocode(lat: float, lon: float) -> dict:
-    """Call local Nominatim for reverse geocoding. Returns empty dict on failure."""
-    try:
-        resp = requests.get(
-            f"{NOMINATIM_URL}/reverse",
-            params={"lat": lat, "lon": lon, "format": "json"},
-            timeout=10,
-            headers={"User-Agent": "alice-dms-extractor-image/1.0"},
-        )
-        resp.raise_for_status()
-        addr = resp.json().get("address", {})
-        result = {
-            "country": addr.get("country"),
-            "country_code": addr.get("country_code", "").upper() or None,
-            "city": addr.get("city") or addr.get("town") or addr.get("village"),
-            "district": addr.get("suburb") or addr.get("quarter") or addr.get("district"),
-        }
-        return {k: v for k, v in result.items() if v}
-    except Exception as exc:
-        log("warn", "Nominatim geocoding failed", lat=lat, lon=lon, error=str(exc))
-        return {}
-
-
-# ---------------------------------------------------------------------------
 # Ollama Vision — AI description
 # ---------------------------------------------------------------------------
 def get_ai_description(file_path: str) -> str:
@@ -345,7 +320,6 @@ def process_message(payload: dict) -> None:
 
     extraction_failed = False
     exif: dict = {}
-    geocoding: dict = {}
     ai_description = ""
 
     try:
@@ -364,9 +338,22 @@ def process_message(payload: dict) -> None:
         except Exception as exc:
             log("warn", "EXIF extraction failed", file_path=file_path, error=str(exc))
 
-        # Reverse geocoding (non-fatal, skipped if no GPS)
+        # Queue for decoupled reverse geocoding (non-fatal, skipped if no GPS)
         if "latitude" in exif and "longitude" in exif:
-            geocoding = reverse_geocode(exif["latitude"], exif["longitude"])
+            try:
+                _redis_client.rpush(
+                    GEOCODE_PENDING_KEY,
+                    json.dumps(
+                        {
+                            "file_hash": file_hash,
+                            "latitude": exif["latitude"],
+                            "longitude": exif["longitude"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            except Exception as exc:
+                log("warn", "Failed to queue geocode_pending entry", file_path=file_path, error=str(exc))
 
         # AI description (fatal if fails)
         try:
@@ -390,8 +377,6 @@ def process_message(payload: dict) -> None:
     }
     if exif:
         output["exif"] = exif
-    if geocoding:
-        output["geocoding"] = geocoding
 
     # Push to Redis
     try:

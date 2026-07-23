@@ -770,21 +770,33 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [53136, -5200],
+      "position": [
+        53136,
+        -5200
+      ],
       "id": "img-01-fetch-items",
       "name": "Code: Fetch Image Items"
     },
     {
       "parameters": {
         "conditions": {
-          "options": {"version": 2, "caseSensitive": true, "typeValidation": "strict", "leftValue": "", "rightValue": ""},
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
           "combinator": "and",
           "conditions": [
             {
               "id": "check-image-empty",
               "leftValue": "={{ $json._image_empty }}",
               "rightValue": true,
-              "operator": {"type": "boolean", "operation": "equals"}
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
             }
           ]
         },
@@ -792,7 +804,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [53440, -5200],
+      "position": [
+        53440,
+        -5200
+      ],
       "id": "img-02-queue-empty",
       "name": "IF: Image Queue Empty"
     },
@@ -800,15 +815,25 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [53728, -4960],
+      "position": [
+        53728,
+        -4960
+      ],
       "id": "img-03-end-image",
       "name": "End: Image Done"
     },
     {
-      "parameters": {"options": {"reset": false}},
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [53728, -5200],
+      "position": [
+        53728,
+        -5200
+      ],
       "id": "img-04-split",
       "name": "Split: Image Batches"
     },
@@ -818,21 +843,33 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [54032, -5200],
+      "position": [
+        54032,
+        -5200
+      ],
       "id": "img-05-process",
       "name": "Code: Process Image Item"
     },
     {
       "parameters": {
         "conditions": {
-          "options": {"version": 2, "caseSensitive": true, "typeValidation": "strict", "leftValue": "", "rightValue": ""},
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
           "combinator": "and",
           "conditions": [
             {
               "id": "check-image-new",
               "leftValue": "={{ $json._image_action }}",
               "rightValue": "new",
-              "operator": {"type": "string", "operation": "equals"}
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
           ]
         },
@@ -840,7 +877,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [54336, -5200],
+      "position": [
+        54336,
+        -5200
+      ],
       "id": "img-06-is-new",
       "name": "IF: Image Is New"
     },
@@ -849,11 +889,16 @@
         "topic": "alice/dms/done",
         "sendInputData": false,
         "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, weaviate_uuid: $json._new_weaviate_id, original_path: $json.file_path, document_type: 'Image', file_type: $json.file_type || ($json.file_path || '').split('.').pop().toLowerCase(), timestamp: new Date().toISOString() }) }}",
-        "options": {"qos": 1}
+        "options": {
+          "qos": 1
+        }
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [54640, -5200],
+      "position": [
+        54640,
+        -5200
+      ],
       "id": "img-07-done",
       "name": "MQTT: Publish Image Done",
       "credentials": {
@@ -871,7 +916,10 @@
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [53136, -5500],
+      "position": [
+        53136,
+        -5500
+      ],
       "id": "img-sticky-note",
       "name": "Sticky: Image Processing"
     },
@@ -957,6 +1005,150 @@
       ],
       "id": "c818983d-fd61-475c-8db5-3463448dd955",
       "name": "If: Has Existing Entry"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const items = await client.lRange('alice:dms:geocode_pending', 0, -1);\n  if (items.length === 0) {\n    return [{ json: { _geocode_empty: true } }];\n  }\n  const results = [];\n  for (const raw of items) {\n    try {\n      const parsed = JSON.parse(raw);\n      results.push({ json: { ...parsed, _geocode_empty: false, _raw_json: raw } });\n    } catch(e) {\n      await client.lRem('alice:dms:geocode_pending', 0, raw).catch(() => {});\n    }\n  }\n  if (results.length === 0) {\n    return [{ json: { _geocode_empty: true } }];\n  }\n  console.log('[Geocode Batch] Found ' + results.length + ' geocode items to process');\n  return results;\n} finally {\n  await client.quit();\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        53136,
+        -5760
+      ],
+      "id": "geo-01-fetch-items",
+      "name": "Code: Fetch Geocode Items"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-geocode-empty",
+              "leftValue": "={{ $json._geocode_empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        53440,
+        -5760
+      ],
+      "id": "geo-02-queue-empty",
+      "name": "IF: Geocode Queue Empty"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        53728,
+        -5520
+      ],
+      "id": "geo-03-end-geocode",
+      "name": "End: Geocode Done"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        53728,
+        -5760
+      ],
+      "id": "geo-04-split",
+      "name": "Split: Geocode Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const fileHash = item.file_hash;\n  const lat = item.latitude;\n  const lon = item.longitude;\n  if (!fileHash || lat == null || lon == null) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'skip' } }];\n  }\n\n  // Daily quota check (resets automatically via date-keyed counter)\n  let dailyLimit = 3000; try { dailyLimit = parseInt($env.GEOAPIFY_DAILY_LIMIT, 10) || 3000; } catch(e) {}\n  const today = new Date().toISOString().slice(0, 10);\n  const quotaKey = `alice:dms:geocode_quota:${today}`;\n  const usedRaw = await client.get(quotaKey).catch(() => null);\n  const used = parseInt(usedRaw, 10) || 0;\n  if (used >= dailyLimit) {\n    console.log('[Geocode] Daily quota reached (' + used + '/' + dailyLimit + '), aborting phase');\n    return [{ json: { ...item, _geo_action: 'quota_reached' } }];\n  }\n\n  // Look up Weaviate Image object by file_hash (image must already be inserted by the image sub-flow)\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } } } }`;\n  let existingId = null;\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) existingId = results[0]._additional?.id;\n  } catch(e) {\n    console.log('[Geocode] Weaviate search error: ' + e.message);\n  }\n  if (!existingId) {\n    // Race condition: image not yet inserted (processor restart between phases). Leave queued, retry next run.\n    return [{ json: { ...item, _geo_action: 'not_found_yet' } }];\n  }\n\n  // Call Geoapify reverse geocoding\n  const apiKey = $env.GEOAPIFY_API_KEY || '';\n  let geoResp;\n  try {\n    geoResp = await axios.get('https://api.geoapify.com/v1/geocode/reverse', {\n      params: { lat, lon, format: 'json', apiKey },\n      timeout: 10000,\n    });\n  } catch(e) {\n    console.log('[Geocode] Geoapify unreachable: ' + e.message);\n    return [{ json: { ...item, _geo_action: 'unreachable' } }];\n  }\n\n  // Quota is consumed by any completed call, match or not\n  await client.incr(quotaKey).catch(() => {});\n\n  // Geoapify free tier caps at 5 req/s. Processing here is strictly sequential\n  // (one item in flight at a time via Split In Batches), so a flat per-call delay\n  // is enough to stay under the limit without a shared cross-run token bucket.\n  await new Promise((resolve) => setTimeout(resolve, 220));\n\n  const result = geoResp.data?.results?.[0];\n  if (!result) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'done_no_match' } }];\n  }\n\n  const props = {};\n  if (result.country) props.country = String(result.country);\n  if (result.country_code) props.country_code = String(result.country_code).toUpperCase();\n  if (result.city) props.city = String(result.city);\n  const district = result.suburb || result.district || result.quarter;\n  if (district) props.district = String(district);\n\n  try {\n    await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`, { properties: props }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n  } catch(e) {\n    console.log('[Geocode] Weaviate PATCH error: ' + e.message);\n    return [{ json: { ...item, _geo_action: 'error' } }];\n  }\n\n  if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n  return [{ json: { ...item, _geo_action: 'done' } }];\n} catch(e) {\n  console.log('[Geocode] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'error' } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        54032,
+        -5760
+      ],
+      "id": "geo-05-process",
+      "name": "Code: Process Geocode Item"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "geo-not-quota",
+              "leftValue": "={{ $json._geo_action }}",
+              "rightValue": "quota_reached",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "geo-not-unreachable",
+              "leftValue": "={{ $json._geo_action }}",
+              "rightValue": "unreachable",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        54336,
+        -5760
+      ],
+      "id": "geo-06-continue",
+      "name": "IF: Geocode Continue Loop"
+    },
+    {
+      "parameters": {
+        "content": "## Geocode Sub-Flow (PROJ-56 refinement, 2026-07-21)\n\nRuns after the image sub-flow completes (End: Image Done).\nReads pending GPS refs from Redis list `alice:dms:geocode_pending`\n({file_hash, latitude, longitude}), checks the daily quota counter\n`alice:dms:geocode_quota:<YYYY-MM-DD>` (GEOAPIFY_DAILY_LIMIT, default 3000),\nlooks up the Weaviate Image object by file_hash, calls Geoapify reverse\ngeocoding, and PATCHes country/country_code/city/district onto the\nexisting object. Quota reached or Geoapify unreachable aborts the whole\nphase; remaining entries stay queued for the next night. Not-found\n(race with image insert) leaves the entry queued too.",
+        "height": 240,
+        "width": 380
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        53136,
+        -6060
+      ],
+      "id": "geo-sticky-note",
+      "name": "Sticky: Geocode Processing"
     }
   ],
   "pinData": {},
@@ -1541,6 +1733,93 @@
         [
           {
             "node": "Code: Build Weaviate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "End: Image Done": {
+      "main": [
+        [
+          {
+            "node": "Code: Fetch Geocode Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Fetch Geocode Items": {
+      "main": [
+        [
+          {
+            "node": "IF: Geocode Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Geocode Queue Empty": {
+      "main": [
+        [
+          {
+            "node": "End: Geocode Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split: Geocode Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split: Geocode Batches": {
+      "main": [
+        [
+          {
+            "node": "End: Geocode Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Process Geocode Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Process Geocode Item": {
+      "main": [
+        [
+          {
+            "node": "IF: Geocode Continue Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Geocode Continue Loop": {
+      "main": [
+        [
+          {
+            "node": "Split: Geocode Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End: Geocode Done",
             "type": "main",
             "index": 0
           }
