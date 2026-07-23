@@ -28,6 +28,9 @@ services:
       - HA_URL=${HA_URL}
       - HA_TOKEN=${HA_TOKEN}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # PROJ-56 refinement: Geoapify reverse geocoding (2026-07-21)
+      - GEOAPIFY_API_KEY=${GEOAPIFY_API_KEY}
+      - GEOAPIFY_DAILY_LIMIT=${GEOAPIFY_DAILY_LIMIT}
       # PROJ-7: JWT Auth (2026-02-27)
       # PROJ-36: Change HS256 to RS256 (2026-06-10)
       # - JWT_SECRET="${JWT_SECRET}"

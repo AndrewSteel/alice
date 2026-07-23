@@ -2,7 +2,9 @@
 
 ## Status: Deployed
 **Created:** 2026-06-29
-**Last Updated:** 2026-07-03
+**Last Updated:** 2026-07-23
+
+> **Hinweis:** Ursprünglich am 2026-07-03 vollständig deployed (siehe historische Sektionen unten: Tech Design, Implementation Notes, QA Test Results, Deployment). Am 2026-07-21 wurde das Geocoding-Subsystem grundlegend überarbeitet (Nominatim → externer Anbieter, siehe Abschnitt "Refinement Notes" am Ende des Dokuments) — die historischen Sektionen beschreiben den **veralteten** Nominatim-Ansatz und dienen nur noch als Referenz. Status auf "Planned" zurückgesetzt, da das Geocoding-Subsystem eine neue Architektur benötigt (`/architecture` als nächster Schritt). Alle anderen Komponenten (Scanner, EXIF-Extraktion, KI-Bildbeschreibung, Weaviate-Collection, Thumbnails) bleiben unverändert und sind weiterhin gültig — im Weaviate-Schema existierten laut Nutzer noch keine Bilddaten (Schema war nie vollständig deployed), ein Backfill bestehender Objekte ist daher nicht nötig.
 
 ## Dependencies
 - Requires: PROJ-16 (DMS Scanner) — SUPPORTED_EXTENSIONS um Bildformate erweitern
@@ -13,11 +15,13 @@
 
 ## Overview
 
-Bilder (JPG, PNG, WEBP, HEIC, TIFF) werden in die bestehende DMS-Pipeline integriert. Ein neuer Container `dms-extractor-image` abonniert die MQTT-Queue `alice/dms/image`, liest das Bild vom NAS, extrahiert EXIF-Metadaten (Aufnahmedatum, GPS, Kamera), konvertiert GPS-Koordinaten via lokaler Nominatim-Instanz in Adressinformationen und erzeugt eine KI-generierte Bildbeschreibung in deutscher Sprache über ein lokales Vision-Modell (Ollama). Das Ergebnis landet in der Redis-Liste `alice:dms:image`, aus der PROJ-19 nachts liest und es in eine neue Weaviate-Collection "Image" schreibt.
+Bilder (JPG, PNG, WEBP, HEIC, TIFF) werden in die bestehende DMS-Pipeline integriert. Ein neuer Container `dms-extractor-image` abonniert die MQTT-Queue `alice/dms/image`, liest das Bild vom NAS, extrahiert EXIF-Metadaten (Aufnahmedatum, GPS, Kamera) und erzeugt eine KI-generierte Bildbeschreibung in deutscher Sprache über ein lokales Vision-Modell (Ollama). Das Ergebnis landet in der Redis-Liste `alice:dms:image`, aus der PROJ-19 nachts liest und es in eine neue Weaviate-Collection "Image" schreibt.
 
-Bilder, die denselben Datei-Hash haben (identischer Inhalt unter verschiedenen Pfaden), werden dedupliziert: der neue Pfad wird im `additionalPaths`-Feld der bestehenden Weaviate-Objekt ergänzt, ohne eine erneute KI-Analyse auszulösen. Thumbnails generiert der bereits deployede PROJ-55-Thumbnailer automatisch.
+Falls GPS-Koordinaten im EXIF vorhanden sind, schreibt der Extractor zusätzlich eine Referenz (`file_hash`, `latitude`, `longitude`) in die separate Redis-Liste `alice:dms:geocode_pending`. Das eigentliche Reverse-Geocoding erfolgt **entkoppelt** als zweite Phase im nächtlichen `alice-dms-processor`-Lauf: nachdem alle Bilder der Nacht in Weaviate eingefügt wurden, ruft der Processor für ausstehende Geocode-Referenzen den externen Anbieter **Geoapify** auf (bis zum konfigurierten Tageslimit) und aktualisiert die bereits bestehenden Weaviate-Objekte per PATCH mit `country`, `country_code`, `city`, `district`. Reste, die das Tageslimit überschreiten, bleiben in der Liste und werden in der folgenden Nacht weiterverarbeitet.
 
-**Warum lokales Nominatim statt Online-API?** Bei einer Photosession mit 200 Bildern würde das 1-req/s-Rate-Limit von nominatim.openstreetmap.org ~3 Minuten Wartezeit erzeugen. Eine lokale Instanz mit Planetdaten (~60 GB auf `/srv/warm`) hat kein Rate-Limit und keine externe Abhängigkeit.
+Bilder, die denselben Datei-Hash haben (identischer Inhalt unter verschiedenen Pfaden), werden dedupliziert: der neue Pfad wird im `additionalPaths`-Feld der bestehenden Weaviate-Objekt ergänzt, ohne eine erneute KI-Analyse oder ein erneutes Geocoding auszulösen. Thumbnails generiert der bereits deployede PROJ-55-Thumbnailer automatisch.
+
+**Warum externer Anbieter statt lokalem Nominatim?** Der ursprüngliche Ansatz (lokale Nominatim-Instanz mit ~60 GB Planetdaten auf `/srv/warm`) wurde verworfen: Der Speicherbedarf steht in keinem Verhältnis zum tatsächlichen Bedarf (< 1000 neue Bilder pro Urlaub), zusätzliche lokale Speicher-Investitionen sind aktuell nicht gewünscht, und der Nominatim-Container wurde bereits gestoppt. Bei diesem Volumen ist die Tageslimit-Problematik externer APIs (der ursprüngliche Ablehnungsgrund) irrelevant — ein Urlaubs-Backlog passt bequem in eine einzelne Nacht. Geoapify wurde als Anbieter gewählt (3000 Requests/Tag im Free-Tier, natives Batch-Geocoding passend zur nächtlichen Verarbeitung). Ein Kombinieren mehrerer Anbieter (OpenCage, LocationIQ) zur Erweiterung der Tageslimits wurde geprüft, aber verworfen — bei diesem Volumen unnötige Komplexität. Mapbox wurde ausgeschlossen: Nutzungsbedingungen verlangen i.d.R. Anzeige der Ergebnisse auf einer Mapbox-Karte, was nicht zur reinen Datenspeicherung in Weaviate passt.
 
 ## User Stories
 
@@ -45,7 +49,7 @@ Bilder, die denselben Datei-Hash haben (identischer Inhalt unter verschiedenen P
 - [ ] Dateipfad wird gegen `/mnt/nas/`-Präfix validiert; ungültige Pfade werden verworfen
 - [ ] Container liest Bilddatei vom NAS (read-only NAS-Mount via `nas-volumes.yml`)
 - [ ] EXIF-Extraktion: `exif_datetime` (Aufnahmedatum), `latitude`, `longitude`, `altitude`, `camera_make`, `camera_model` — alle Felder optional (fehlen wenn nicht im EXIF vorhanden)
-- [ ] Wenn GPS-Koordinaten vorhanden: Reverse Geocoding via lokaler Nominatim-Instanz → `country`, `country_code`, `city`, `district`
+- [ ] Wenn GPS-Koordinaten vorhanden: Extractor führt **kein** synchrones Geocoding mehr aus, sondern schreibt `{file_hash, latitude, longitude}` via `RPUSH` in die neue Redis-Liste `alice:dms:geocode_pending`
 - [ ] KI-generierte Bildbeschreibung in deutscher Sprache via Ollama Vision-Modell (`ai_description`)
 - [ ] `ai_description` wird auf max. 50.000 Zeichen begrenzt
 - [ ] Output-JSON wird via `RPUSH` in Redis-Liste `alice:dms:image` geschrieben
@@ -55,14 +59,16 @@ Bilder, die denselben Datei-Hash haben (identischer Inhalt unter verschiedenen P
 - [ ] Compose-File: `docker/compose/automations/dms-extractor-image/compose.yml`
 - [ ] NAS-Mounts via `extends: ../nas-volumes.yml` (read-only)
 
-### Nominatim-Container
+### Externes Geocoding (Geoapify, nächtliche Batch-Verarbeitung)
 
-- [ ] Lokaler Nominatim-Docker-Container läuft im `backend`-Netzwerk
-- [ ] Initialer Import: weltweite OpenStreetMap-Planetdaten; Datenverzeichnis auf `/srv/warm/nominatim/`
-- [ ] Reverse-Geocoding-Endpunkt erreichbar unter `http://nominatim:8080/reverse?lat=...&lon=...&format=json`
-- [ ] Nicht via nginx nach außen exponiert (nur intern)
-- [ ] Wöchentliches Update-Skript für OSM-Diffs ist dokumentiert
-- [ ] Compose-File: `docker/compose/data/nominatim/compose.yml`
+- [ ] Reverse-Geocoding erfolgt über die externe Geoapify-API (`GEOAPIFY_API_KEY` als Secret)
+- [ ] Verarbeitung erfolgt als zweite Phase im nächtlichen `alice-dms-processor`-Lauf, **nach** dem Insert-Schritt für `alice:dms:image` (garantiert, dass das Weaviate-Objekt beim Geocoding bereits existiert)
+- [ ] Processor liest Einträge aus `alice:dms:geocode_pending`, sucht das zugehörige Weaviate-Objekt über `file_hash` und aktualisiert es per PATCH mit `country`, `country_code`, `city`, `district`
+- [ ] Tageslimit wird über einen Redis-Zähler (`alice:dms:geocode_quota:<YYYY-MM-DD>`) nachgehalten; Standardwert `GEOAPIFY_DAILY_LIMIT=3000`
+- [ ] Wird das Tageslimit während der Nachtverarbeitung erreicht, bricht die Geocoding-Phase ab; verbleibende Einträge bleiben in `alice:dms:geocode_pending` und werden in der nächsten Nacht weiterverarbeitet
+- [ ] Liefert Geoapify für eine Koordinate kein Ergebnis (z.B. offene See): Eintrag gilt als verarbeitet (aus Warteschlange entfernt), Geocoding-Felder bleiben leer, kein Fehler
+- [ ] Wird zu einem `file_hash` aus `alice:dms:geocode_pending` kein Weaviate-Objekt gefunden (Race Condition, z.B. Prozessor-Neustart zwischen den Phasen): Eintrag bleibt in der Warteschlange und wird im nächsten Lauf erneut versucht
+- [ ] Keine lokale Vorhaltung von Kartendaten nötig (kein Nominatim-Container, kein `/srv/warm`-Speicherbedarf für Geodaten)
 
 ### Weaviate Collection "Image"
 
@@ -83,6 +89,7 @@ Bilder, die denselben Datei-Hash haben (identischer Inhalt unter verschiedenen P
 - [ ] Deduplication via `file_hash`: wenn Hash bereits in Collection "Image" vorhanden → neuer Pfad wird zu `additionalPaths` hinzugefügt; kein neues Weaviate-Objekt
 - [ ] Nach erfolgreichem Weaviate-Insert: MQTT `alice/dms/done` mit `weaviate_uuid`, `original_path`, `document_type: "Image"`, `file_type` publizieren → PROJ-55 generiert Thumbnail automatisch
 - [ ] `extraction_failed: true` Einträge werden in Weaviate geschrieben (Fehler dokumentiert, kein stummer Verlust)
+- [ ] **Neue Phase (Geocoding):** nach Abschluss aller Inserts aus `alice:dms:image` verarbeitet der Processor `alice:dms:geocode_pending` gemäß den Kriterien im Abschnitt "Externes Geocoding (Geoapify, nächtliche Batch-Verarbeitung)"
 
 ## Output-Format (Redis-Liste `alice:dms:image`)
 
@@ -104,28 +111,41 @@ Bilder, die denselben Datei-Hash haben (identischer Inhalt unter verschiedenen P
     "altitude": 45.2,
     "camera_make": "Nikon",
     "camera_model": "D850"
-  },
-  "geocoding": {
-    "country": "Japan",
-    "country_code": "JP",
-    "city": "Tokyo",
-    "district": "Shibuya"
   }
 }
 ```
 
 Pflichtfelder (immer vorhanden): `file_path`, `file_hash`, `file_type`, `file_size`, `detected_at`, `extracted_at`, `extractor`, `ai_description`, `extraction_failed`
 
-Optionale Felder: `exif` (komplett oder einzelne Unterfelder), `geocoding` (nur wenn GPS vorhanden)
+Optionale Felder: `exif` (komplett oder einzelne Unterfelder)
+
+Das `geocoding`-Objekt ist **nicht mehr Teil** des Extractor-Outputs — Geocoding erfolgt entkoppelt über die nächtliche Processor-Phase (siehe unten).
+
+## Output-Format (Redis-Liste `alice:dms:geocode_pending`)
+
+Nur geschrieben, wenn `exif.latitude`/`exif.longitude` vorhanden sind:
+
+```json
+{
+  "file_hash": "sha256:abc123...",
+  "latitude": 35.6762,
+  "longitude": 139.6503
+}
+```
+
+Der nächtliche Processor löst `file_hash` gegen das bereits in Weaviate eingefügte Objekt auf und aktualisiert es per PATCH mit den von Geoapify gelieferten Feldern (`country`, `country_code`, `city`, `district`).
 
 ## Edge Cases
 
 - **Kein EXIF-Datum vorhanden** (Screenshot, WhatsApp-Bild): `exif_datetime` bleibt leer; `detected_at` (Scan-Zeitpunkt) wird nicht als Ersatz gesetzt — fehlende Daten bleiben fehlend
-- **Keine GPS-Koordinaten**: Geocoding wird übersprungen; `country`, `city`, `district` bleiben leer; kein Fehler
-- **Nominatim nicht erreichbar**: Geocoding wird übersprungen; Bild wird trotzdem vollständig verarbeitet; Geocoding-Felder bleiben leer; kein `extraction_failed`
+- **Keine GPS-Koordinaten**: Es wird kein Eintrag in `alice:dms:geocode_pending` geschrieben; `country`, `city`, `district` bleiben leer; kein Fehler
+- **Geoapify-Tageslimit erreicht**: Geocoding-Phase bricht für die laufende Nacht ab; verbleibende Einträge bleiben in `alice:dms:geocode_pending` und werden in der nächsten Nacht weiterverarbeitet; kein `extraction_failed`
+- **Geoapify liefert kein Ergebnis für Koordinate** (z.B. offene See): Eintrag gilt als verarbeitet; Geocoding-Felder bleiben leer; kein Fehler
+- **Geoapify nicht erreichbar (Ausfall)**: Geocoding-Phase bricht ab; Einträge bleiben in `alice:dms:geocode_pending`; Bild selbst wurde bereits vollständig verarbeitet (EXIF + KI-Beschreibung unabhängig vom Geocoding)
+- **`file_hash` aus `alice:dms:geocode_pending` noch nicht in Weaviate vorhanden** (Race Condition, z.B. Processor-Neustart zwischen Insert- und Geocoding-Phase): Eintrag bleibt in der Warteschlange, wird im nächsten Lauf erneut versucht
 - **Vision-Modell (Ollama) nicht erreichbar / Timeout**: `extraction_failed: true`, `ai_description: ""`; trotzdem in Redis schreiben
 - **HEIC-Datei ohne EXIF**: KI-Beschreibung wird generiert; alle EXIF-Felder bleiben leer
-- **Dasselbe Bild unter zwei Pfaden** (gleicher `file_hash`): Beim zweiten Scanner-Fund → PROJ-19 ergänzt `additionalPaths`; keine neue KI-Analyse; kein neues Thumbnail
+- **Dasselbe Bild unter zwei Pfaden** (gleicher `file_hash`): Beim zweiten Scanner-Fund → PROJ-19 ergänzt `additionalPaths`; keine neue KI-Analyse; kein neues Thumbnail; kein doppelter Geocode-Eintrag (bereits geocodetes Objekt wird nicht erneut in die Warteschlange aufgenommen)
 - **Bild auf NAS nach Scan-Zeitpunkt gelöscht**: Container loggt Fehler; schreibt `extraction_failed: true` in Redis
 - **Container-Neustart während Verarbeitung**: MQTT QoS 1 stellt Nachricht erneut zu; PROJ-19 dedupliziert via `file_hash`; idempotent
 - **Sehr große Bilddatei (> 50 MB)**: KI-Beschreibung und EXIF-Extraktion werden durchgeführt; `ai_description` auf 50.000 Zeichen begrenzt
@@ -136,23 +156,25 @@ Optionale Felder: `exif` (komplett oder einzelne Unterfelder), `geocoding` (nur 
 ## Technical Requirements
 
 ### dms-extractor-image
+
 - **Sprache**: Python (Debian Slim)
-- **Bibliotheken**: `Pillow` (Bildverarbeitung), `pillow-heif` (HEIC-Support), `piexif` oder `exifread` (EXIF-Extraktion), `paho-mqtt` (MQTT-Input), `redis` (Output), `requests` (Nominatim + Ollama)
+- **Bibliotheken**: `Pillow` (Bildverarbeitung), `pillow-heif` (HEIC-Support), `piexif` oder `exifread` (EXIF-Extraktion), `paho-mqtt` (MQTT-Input), `redis` (Output), `requests` (Ollama)
 - **Compose**: `docker/compose/automations/dms-extractor-image/compose.yml`
 
-### Nominatim
-- **Docker Image**: `mediagis/nominatim` (offizielle OSM-Nominatim-Instanz)
-- **Datenspeicher**: `/srv/warm/nominatim/` (initialer Planetdaten-Import, ~60 GB)
-- **Update**: wöchentliche OSM-Diffs via Nominatim-Update-Mechanismus
-- **Compose**: `docker/compose/data/nominatim/compose.yml`
+### Geoapify (Geocoding, in alice-dms-processor integriert)
+
+- **Anbieter**: Geoapify Reverse Geocoding API (Free-Tier, 3000 Requests/Tag)
+- **Kein eigener Container/Compose-File nötig** — Aufruf erfolgt aus dem bestehenden `alice-dms-processor`-Workflow (n8n HTTP-Request-Node)
+- **Quota-Tracking**: Redis-Zähler `alice:dms:geocode_quota:<YYYY-MM-DD>`
 
 ### Shared
+
 - **MQTT-Konfiguration**: `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`
 - **Redis-Konfiguration**: `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
-- **Nominatim-URL**: `NOMINATIM_URL` (intern, z.B. `http://nominatim:8080`)
+- **Geoapify-Konfiguration**: `GEOAPIFY_API_KEY`, `GEOAPIFY_DAILY_LIMIT` (Default `3000`)
 - **Ollama-URL**: `OLLAMA_URL` (intern, z.B. `http://ollama:11434`)
 - **Ollama-Modell**: `OLLAMA_VISION_MODEL` (Vision-fähiges Modell, in Architektur festlegen)
-- **Redis-Liste**: `alice:dms:image`
+- **Redis-Listen**: `alice:dms:image`, `alice:dms:geocode_pending`
 - **Docker-Netzwerk**: `backend`
 - **Restart-Policy**: `unless-stopped`
 
@@ -400,3 +422,165 @@ Built 2026-06-29. All components created from scratch (no prior code existed).
 - **Date:** 2026-07-03
 - Deployed by user directly on `ki.lan`: Nominatim planet import, Weaviate "Image" schema, `dms-extractor-image` container, `alice-dms-scanner` + `alice-dms-processor` workflows
 - Post-deploy config fixes applied (see Implementation Notes above)
+
+**Diese historische Deployment-Sektion beschreibt den mittlerweile abgelösten Nominatim-Ansatz — siehe [Refinement Notes](#refinement-notes-2026-07-21) unten.**
+
+---
+
+## Refinement Notes (2026-07-21)
+
+**Trigger:** Path 1 — Something Changed (`/refine`)
+
+**Was sich geändert hat:**
+Der lokale Nominatim-Ansatz wurde verworfen. Gründe:
+- Der Speicherbedarf (~60 GB Planetdaten auf `/srv/warm`) steht in keinem Verhältnis zum tatsächlichen Bedarf — künftige Bilder kommen in kleinen Stückzahlen (< 1000 pro Urlaub) hinzu, für die die eigentliche Motivation für lokales Geocoding (Umgehen externer Rate-Limits bei großen Foto-Sessions) nicht mehr relevant ist
+- Keine zusätzlichen lokalen Speicher-Investitionen aktuell gewünscht
+- Der Nominatim-Container wurde bereits gestoppt und steht nicht mehr zur Verfügung
+
+**Getroffene Entscheidungen:**
+1. **Anbieter:** Geoapify (Free-Tier, 3000 Requests/Tag), einzelner Anbieter — kein Kombinieren mehrerer APIs. Bei < 1000 Bildern/Urlaub reicht ein Anbieter bequem aus (Backlog < 1 Nacht); Kombinieren mehrerer APIs (OpenCage, LocationIQ) wäre unnötige Komplexität bei diesem Volumen. Mapbox ausgeschlossen (Nutzungsbedingungen verlangen i.d.R. Kartenanzeige der Ergebnisse).
+2. **Entkopplung:** `dms-extractor-image` löst kein synchrones Geocoding mehr aus, sondern schreibt GPS-Referenzen in die neue Redis-Liste `alice:dms:geocode_pending`. Das eigentliche Geocoding erfolgt als zweite, vom Rest der Bildanalyse unabhängige Phase im bestehenden nächtlichen `alice-dms-processor`-Lauf (nach dem Insert-Schritt), orientiert an Geoapifys Tageslimit. Integration in den bestehenden Workflow statt separatem neuen Workflow — nutzt bestehende Redis-/Weaviate-Verbindungen, ein Wartungspunkt.
+3. **Backfill:** Nicht nötig — das Weaviate-Schema für die Collection "Image" wurde nie vollständig deployed, es existieren noch keine Bilddaten in Weaviate.
+
+**Betroffene Abschnitte:** Overview, Acceptance Criteria (Nominatim-Container-Sektion ersetzt durch "Externes Geocoding (Geoapify, nächtliche Batch-Verarbeitung)"; dms-extractor-image- und PROJ-19-Processor-Sektionen aktualisiert), Output-Format (neue Redis-Liste `alice:dms:geocode_pending`), Edge Cases, Technical Requirements.
+
+**Nicht betroffen:** Scanner-Erweiterung, EXIF-Extraktion, KI-Bildbeschreibung (Ollama Vision), Weaviate-Collection-Struktur (Feldnamen `country`/`country_code`/`city`/`district` unverändert — nur die Datenquelle ändert sich), Thumbnail-Generierung (PROJ-55).
+
+**Nächster Schritt:** `/architecture` — Solution-Architect-Entwurf für die neue Geocoding-Phase im `alice-dms-processor`-Workflow (Geoapify-API-Integration, Quota-Zähler-Logik, PATCH-Update-Mechanismus für bestehende Weaviate-Objekte). Der bestehende Tech-Design-Abschnitt oben beschreibt weiterhin korrekt Scanner, Extractor-Grundgerüst und Weaviate-Schema — nur die Nominatim-bezogenen Teile sind obsolet.
+
+---
+
+## Tech Design Update (Solution Architect) — 2026-07-21: Geoapify Geocoding Phase
+
+Ersetzt nur den Nominatim-bezogenen Teil des Tech-Designs oben (Scanner, Extractor-Grundgerüst, Weaviate-Schema bleiben wie oben beschrieben gültig).
+
+### Workflow Architecture
+
+**Trigger:** Kein neuer Trigger. Die Geocoding-Phase ist eine dritte Phase innerhalb des bestehenden nächtlichen `alice-dms-processor`-Laufs (Schedule: Nightly 02:00) — sie startet direkt im Anschluss an die bereits deployte Bild-Phase (endet aktuell bei "MQTT: Publish Image Done").
+
+**Nodes (High-Level, in Ablaufreihenfolge):**
+
+1. **Fetch Geocode Batch** — liest ausstehende Einträge aus der Redis-Liste `alice:dms:geocode_pending`
+2. **IF Queue Empty** — keine Einträge → Phase überspringen, Workflow endet regulär
+3. **Check Quota** — liest den Redis-Tageszähler `alice:dms:geocode_quota:<YYYY-MM-DD>`; ist das Limit (`GEOAPIFY_DAILY_LIMIT`, Standard 3000) erreicht → Phase sofort abbrechen, verbleibende Einträge bleiben unangetastet in der Warteschlange
+4. **Lookup Weaviate Object** — sucht das Image-Objekt anhand `file_hash`
+5. **IF Not Found** — Race-Condition-Fall (Objekt noch nicht eingefügt): Eintrag bleibt in der Warteschlange, weiter zum nächsten Eintrag (kein Abbruch der ganzen Phase)
+6. **Call Geoapify** — Reverse-Geocoding-Aufruf mit `latitude`/`longitude`; Quota-Zähler wird nach jedem Aufruf erhöht
+7. **IF No Result** — Geoapify liefert keinen Treffer (z. B. offene See): Eintrag gilt als erledigt, Geocoding-Felder bleiben leer
+8. **Update Weaviate (PATCH)** — aktualisiert nur `country`, `country_code`, `city`, `district` am bestehenden Objekt; alle anderen Felder (inkl. `ai_description`) bleiben unangetastet
+9. **Dequeue Entry** — entfernt den erledigten Eintrag aus `alice:dms:geocode_pending`
+10. **Loop** — nächster Eintrag, bis Warteschlange leer, Quota erreicht, oder Geoapify nicht erreichbar
+
+**Data Flow:**
+
+```
+alice:dms:geocode_pending (Redis)
+     ↓ Quota-Check (alice:dms:geocode_quota:<datum>)
+     ↓ Weaviate-Lookup per file_hash
+     ↓ Geoapify Reverse-Geocoding-Aufruf
+     ↓ Weaviate PATCH (country, country_code, city, district)
+     ↓ Dequeue
+```
+
+**Integrations:**
+- **Redis** — Warteschlange (`alice:dms:geocode_pending`) + Tages-Quota-Zähler (`alice:dms:geocode_quota:<YYYY-MM-DD>`), gleiche Redis-Instanz wie der Rest des Processors
+- **Geoapify** — externe Reverse-Geocoding-API, Zugriff per API-Key (als n8n-Credential hinterlegt, nicht im Workflow-JSON)
+- **Weaviate** — bestehende "Image"-Collection, PATCH-Update auf vorhandene Objekte (kein neues Objekt, kein Re-Insert)
+
+**Error Handling:**
+- **Tageslimit erreicht** → Phase bricht kontrolliert ab, keine Fehlermeldung, Rest bleibt für die nächste Nacht in der Warteschlange
+- **Geoapify nicht erreichbar** → Phase bricht ab (wie Tageslimit), Warteschlange bleibt bestehen; Bildverarbeitung selbst ist davon unabhängig bereits abgeschlossen
+- **Kein Ergebnis für Koordinate** → kein Fehler, Eintrag wird trotzdem als erledigt markiert
+- **Weaviate-Objekt nicht gefunden** → kein Fehler, Eintrag bleibt in Warteschlange für nächsten Lauf
+
+### Tech Decisions
+
+| Entscheidung | Wahl | Begründung |
+| --- | --- | --- |
+| Workflow-Platzierung | Dritte Phase im bestehenden `alice-dms-processor` | Nutzt vorhandene Redis-/Weaviate-Verbindungen und den vorhandenen Nightly-Trigger; kein zweiter Wartungspunkt für einen separaten Workflow |
+| Update-Mechanismus | PATCH statt Re-Insert | Verhindert versehentliches Überschreiben von `ai_description` oder anderen bereits gesetzten Feldern |
+| Quota-Tracking | Redis-Tageszähler mit datumsbasiertem Key | Selbstzurücksetzend (kein Cleanup-Job nötig), einfache Lese-Erhöhen-Logik ohne Cross-Run-Koordination |
+| API-Key-Ablage | n8n-Credential | Konsistent mit "kein Secret im Code" (siehe `.claude/rules/backend.md`); kein Klartext-Key im Workflow-JSON |
+| Rate-Limiting (5 req/s) | Fixe 220ms-Pause nach jedem Geoapify-Call | Geoapify Free-Tier begrenzt zusätzlich zum Tageslimit auf 5 Requests/Sekunde. Die Phase verarbeitet Einträge streng sequenziell (ein Item gleichzeitig via `Split In Batches`), daher reicht eine flache Pause pro Call statt eines Token-Buckets über mehrere Läufe hinweg |
+
+### Dependencies
+
+Keine neuen Packages — der Geoapify-Aufruf erfolgt über den bestehenden n8n-HTTP-Request-Node-Typ, der im Workflow bereits für Ollama/Weaviate-Aufrufe verwendet wird.
+
+### No UI Changes Required
+
+Diese Phase ist rein workflow-intern; es gibt keine Nutzeroberfläche für Geocoding-Status oder Quota.
+
+## Implementation Notes (Refinement 2026-07-21)
+
+**Files modified:**
+- `docker/compose/automations/dms-extractor-image/main.py` — `reverse_geocode()` (Nominatim call) und `NOMINATIM_URL` entfernt; wenn GPS im EXIF vorhanden, wird stattdessen `{file_hash, latitude, longitude}` via `RPUSH` in die neue Redis-Liste `alice:dms:geocode_pending` geschrieben. Das `geocoding`-Objekt erscheint nicht mehr im `alice:dms:image`-Output.
+- `docker/compose/automations/dms-extractor-image/.env.example` — `NOMINATIM_URL`-Block entfernt.
+- `docker/compose/automations/n8n/compose.yml` und `.env.example` — `GEOAPIFY_API_KEY` und `GEOAPIFY_DAILY_LIMIT` als neue Environment-Variablen ergänzt.
+- `workflows/alice-dms-processor.json` — neue dritte Phase ("Geocode Sub-Flow") mit 6 Nodes + Sticky Note (`geo-01-fetch-items` … `geo-06-continue`, Slug-Konvention analog zu `img-*`), verdrahtet ab `End: Image Done`. Liest `alice:dms:geocode_pending`, prüft den Tages-Quota-Zähler `alice:dms:geocode_quota:<YYYY-MM-DD>` (`GEOAPIFY_DAILY_LIMIT`, Default 3000), sucht das Weaviate-Image-Objekt per `file_hash`, ruft Geoapify auf und aktualisiert `country`/`country_code`/`city`/`district` per PATCH. Quota erreicht oder Geoapify nicht erreichbar bricht die ganze Phase ab (verbleibende Einträge bleiben in der Warteschlange); "nicht gefunden" (Race Condition) lässt nur den einzelnen Eintrag in der Warteschlange, die Phase läuft weiter. Nach jedem tatsächlichen Geoapify-Call wartet der Node fix 220ms, um Geoapifys Limit von 5 Requests/Sekunde einzuhalten (zusätzlich zum Tageslimit; siehe Tech-Decisions-Tabelle und BUG-2 im QA-Abschnitt). `Code: Process Image Item` (bestehender Node) brauchte keine Änderung — `const geo = item.geocoding || {};` behandelt das Fehlen von `geocoding` bereits korrekt.
+- `docker/compose/data/nominatim/compose.yml` — gelöscht (Container bereits gestoppt, war schon aus dem Makefile `STACKS` auskommentiert).
+
+**Design deviations from architecture doc:**
+- Tech Design Update schlug ein n8n-Credential-Objekt für `GEOAPIFY_API_KEY` vor. Stattdessen wurde ein einfacher Environment-Variable-Ansatz gewählt (Nutzerentscheidung während `/plan`), konsistent mit allen anderen Secrets in diesem Workflow (`REDIS_PASSWORD`, `HA_TOKEN`, `OLLAMA_*`), die ebenfalls ausschließlich über `$env` gelesen werden — kein n8n-Credential existiert in diesem Workflow außer beim MQTT-Node (dort vom Node-Typ erzwungen).
+
+**Nicht betroffen:** `schemas/image.json` (Felder `country`/`country_code`/`city`/`district` existierten bereits, non-vectorized, keine Änderung nötig), `docker/compose/scripts/Makefile` (Nominatim-Zeile war bereits auskommentiert, keine weitere Änderung nötig).
+
+## QA Test Results (Refinement 2026-07-21)
+
+**Method:** Static code review + JS syntax check (`node --check`) + JSON structural/connectivity validation of the workflow (no live server — same methodology as the original PROJ-56 QA pass).
+
+### Acceptance Criteria — Externes Geocoding (Geoapify, nächtliche Batch-Verarbeitung)
+
+| Criterion                                                                    | Result                                                        |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Reverse-Geocoding über Geoapify-API, `GEOAPIFY_API_KEY` als Secret            | PASS — env var only, no hardcoded key                          |
+| Läuft als zweite/dritte Phase nach Insert-Schritt für `alice:dms:image`       | PASS — wired from `End: Image Done`, the image phase's true terminal node |
+| Liest `alice:dms:geocode_pending`, sucht per `file_hash`, PATCH 4 Felder      | PASS — GraphQL lookup + PATCH with only `country`/`country_code`/`city`/`district` |
+| Tageslimit via `alice:dms:geocode_quota:<YYYY-MM-DD>`, Default 3000           | PASS                                                            |
+| Tageslimit erreicht → Phase bricht ab, Reste bleiben in Warteschlange         | PASS — `quota_reached` routes to `End: Geocode Done`, un-dequeued entries stay |
+| Kein Geoapify-Treffer → Eintrag verarbeitet, Felder leer, kein Fehler         | PASS — `done_no_match` dequeues without PATCH                  |
+| `file_hash` nicht in Weaviate (Race Condition) → Eintrag bleibt, Retry        | PASS — `not_found_yet` does not dequeue                        |
+| Keine lokale Kartendaten nötig                                                | PASS — Nominatim container/compose file removed                |
+
+### Edge Cases Verified
+
+| Edge Case                                                                        | Verdict |
+| ----------------------------------------------------------------------------------- | ------- |
+| Keine GPS-Koordinaten → kein `geocode_pending`-Eintrag                              | PASS — extractor only RPUSHes when both lat/lon present |
+| Geoapify-Tageslimit erreicht während der Nacht                                      | PASS |
+| Geoapify liefert kein Ergebnis                                                      | PASS |
+| Geoapify nicht erreichbar → Phase bricht ab, Bild selbst bereits verarbeitet        | PASS — `unreachable` stops the loop without touching quota/dequeue |
+| `file_hash` noch nicht in Weaviate (Prozessor-Neustart zwischen Phasen)             | PASS |
+| Dasselbe Bild unter zwei Pfaden → kein doppelter Geocode-Eintrag                    | PASS with note — relies on the same scanner-level dedup (`alice:dms:queued_files`/`processed_files`) that already covers "no duplicate AI analysis" in the original spec; the extractor itself does not check Weaviate before queueing a geocode entry, so a theoretical race window (both paths in-flight simultaneously before either completes) could double-queue — this is the same accepted race class as the pre-existing AI-dedup behavior, not a new risk introduced by this refinement |
+
+### Security Audit
+
+| Check                                                        | Result                                                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------ |
+| `GEOAPIFY_API_KEY` never hardcoded                              | PASS — only in `.env`/`.env.example`/`$env`, dummy value in example |
+| Weaviate PATCH scoped to exactly `country`/`country_code`/`city`/`district` | PASS — no other properties can be injected from the Geoapify response |
+| `file_hash` GraphQL escaping                                    | PASS — identical `safeHash` pattern to the already-audited `img-05-process` node |
+| Geoapify request params (`lat`/`lon`/`apiKey`)                  | PASS — passed via axios `params` (URL-encoded), not string-interpolated into the URL; `lat`/`lon` are EXIF-derived floats, not user strings |
+| No secrets in logs                                              | PASS — only `e.message` is logged on error, never the API key or full request config |
+
+### Bugs Found
+
+**BUG-2 (Medium, found post-Approval on 2026-07-22, fixed same day): Geoapify 5 req/s rate limit not enforced**
+- **Root cause:** The initial implementation relied only on the geocode phase's strict sequential processing (one item in flight at a time via `Split In Batches`) to stay under Geoapify's rate limit, but added no explicit minimum delay between calls. If the surrounding Redis/Weaviate round-trips complete faster than ~200ms (plausible on a local/LAN setup), consecutive Geoapify calls could exceed 5 requests/second and get 429-rate-limited.
+- **Fix:** Added a flat `await new Promise((resolve) => setTimeout(resolve, 220))` in `geo-05-process` immediately after each completed Geoapify call (both match and no-match outcomes), guaranteeing ≥220ms spacing. Re-validated: JSON structure/connectivity intact, JS syntax valid.
+- **Missed in the original QA pass** because that pass checked the daily quota and the "not found" retry path but did not cross-check Geoapify's separate per-second rate limit — flagged by the user afterwards.
+
+None further (Critical/High). One accepted-risk note carried over from the pre-existing dedup design (see edge case table above) — same class as an already-accepted behavior, not a regression.
+
+### Production-Ready Decision
+
+**APPROVED** — No Critical or High bugs. BUG-2 (Medium) fixed before deployment.
+
+## Deployment (Refinement 2026-07-23)
+
+- **Date:** 2026-07-23
+- Deployed by user directly on `ki.lan`:
+  1. `dms-extractor-image` container rebuilt and restarted (Nominatim call removed, `alice:dms:geocode_pending` RPUSH active)
+  2. `n8n` container updated with `GEOAPIFY_API_KEY` / `GEOAPIFY_DAILY_LIMIT` and recreated
+  3. `alice-dms-processor` n8n workflow updated/imported with the new geocode sub-flow (incl. BUG-2 rate-limit fix)
+- **Not confirmed as done:** teardown of the old, already-stopped Nominatim container/volume on the server (`/srv/warm/nominatim`, ~60 GB) — optional cleanup, left to the user's discretion, not required for this feature to function.

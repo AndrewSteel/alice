@@ -35,7 +35,7 @@
 | PROJ-54 | 2.3   | Vision-Chat: Flip-Card Ergebnisansicht — Visuelle Darstellung von Suchergebnissen als Flip-Cards; Split-Screen Vision/Text; responsive Grid-Layout                           | Deployed  | [Spec](PROJ-54-vision-chat-flip-card-results.md) | 2026-06-27 |
 | PROJ-55 | 2.3   | DMS Thumbnail-Generierung — Quadratische 1:1-Thumbnails nach DMS-Import (PDF/Office/Bilder), Ablage im Warm-Storage, API-Endpunkt, Backfill für Bestandsdokumente            | Deployed  | [Spec](PROJ-55-dms-thumbnail-generation.md)      | 2026-06-27 |
 
-| PROJ-56 | 2.3   | DMS Bildanalyse — KI-Bildbeschreibung (Ollama Vision), EXIF-Extraktion, GPS-Reverse-Geocoding (lokales Nominatim), neue Weaviate-Collection "Image"                        | Deployed  | [Spec](PROJ-56-dms-image-analysis.md)            | 2026-06-29 |
+| PROJ-56 | 2.3   | DMS Bildanalyse — KI-Bildbeschreibung (Ollama Vision), EXIF-Extraktion, GPS-Reverse-Geocoding (Geoapify, entkoppelte Nachtverarbeitung), neue Weaviate-Collection "Image"   | Deployed  | [Spec](PROJ-56-dms-image-analysis.md)            | 2026-06-29 |
 
 | PROJ-57 | 2.2   | On-Device VAD Noise Robustness — wyoming_satellite Silence-Detector nutzt Fixed-RMS-Threshold (700) statt adaptivem Noise-Floor; Hintergrundgeräusche (Lüfter, Dunstabzugshaube, Kühlschrank, Staubsauger) verhindern sauberes Beenden der Utterance | Deployed | [Spec](PROJ-57-on-device-vad-noise-robustness.md) | 2026-07-03 |
 
