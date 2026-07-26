@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-03-09
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-07-26
 
 ## Dependencies
 - Requires: PROJ-15 (DMS Ordnerverwaltung) — Scanner liest Ordner aus `alice.dms_watched_folders`
@@ -364,3 +364,17 @@ Liest aus: `alice.dms_watched_folders` (PROJ-15, bereits vorhanden)
 - Compose-Änderungen deployed (`NODE_FUNCTION_ALLOW_BUILTIN=crypto,fs,path`, NAS-Mount, Runner deaktiviert)
 - Workflow `alice-dms-scanner` in n8n deployed und aktiviert (ID: `agJgZmjdcNiAP0VA`)
 - Workflow-JSON: `workflows/core/alice-dms-scanner.json`
+
+### Update 2026-07-26: NAS-Zugriff über dedizierten `ki-server`-User
+
+BUG-LIVE: Scanner schlug mit `EACCES: permission denied, access '/mnt/nas/pictures'` fehl, da NFS (AUTH_SYS) die UID des mountenden Prozesses prüft, nicht die des Mount-Users. Grundsätzliche Lösung (siehe `docs/planning/synology_storage_concept.md` §9), da neben n8n auch andere Container-Apps NAS-Zugriff brauchen:
+
+- Neuer dedizierter NAS-Account `ki-server` (UID 1031, GID 100) mit Read-ACL auf allen relevanten Shares angelegt
+- `docker/compose/automations/nas-volumes.yml`: `user: "1031:100"` auf `nas-base` gesetzt — propagiert via `extends` auf alle 7 NAS-nutzenden Container (u.a. n8n, dms-extractor-ocr/-pdf, ollama-3090/-titan, alice-dms-thumbnailer)
+
+Seiteneffekte (UID 1031 hat keinen `/etc/passwd`-Eintrag im Container → `$HOME`-Auflösung schlägt fehl):
+- **n8n** (`docker/compose/automations/n8n/compose.yml`): `HOME=/home/node` + `N8N_USER_FOLDER=/home/node` gesetzt; zusätzlicher Bind-Mount `/srv/warm/n8n/cache:/home/node/.cache` (image-baked Verzeichnis, sonst EACCES beim Start)
+- **ollama-3090 / ollama-titan** (`docker/compose/ai/ollama/compose.yml`): `HOME=/home/ollama` gesetzt (nicht `/root` — das ist `0700 root:root` und für UID 1031 nicht traversierbar); neuer Bind-Mount `/srv/warm/ollama-{3090,titan}/config:/home/ollama/.ollama` (chowned auf `1031:100`) für Key/Config, bestehender Modelle-Mount unverändert unter `/home/ollama/.ollama/models` verschachtelt
+- Unabhängiger Fund während der Recreates: `ollama`-Container starteten zwischenzeitlich nicht (`unable to start container process: ... open /run/nvidia-persistenced/socket`) — Host-seitiges GPU/Treiber-Problem (nicht NAS-bezogen), durch Host-Neustart behoben
+
+Ergebnis: EACCES auf `/mnt/nas/pictures` behoben, alle betroffenen Container laufen wieder.

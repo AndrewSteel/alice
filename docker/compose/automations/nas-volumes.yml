@@ -3,6 +3,7 @@
 # Referenced via `extends: file: ../nas-volumes.yml` in each compose.yml.
 services:
   nas-base:
+    user: "1031:100" # ki-server NAS account — read ACL on all shares below
     volumes:
       - /mnt/nas/ai:/mnt/nas/ai:ro
       - /mnt/nas/andreas:/mnt/nas/andreas:ro
