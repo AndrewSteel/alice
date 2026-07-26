@@ -5,6 +5,10 @@ services:
     restart: unless-stopped
     networks: [frontend, app_int]
     environment:
+      # ki-server (UID 1031) has no /etc/passwd entry in the container, so
+      # $HOME can't be resolved automatically. /root itself is 0700 root:root
+      # and not traversable by UID 1031, so home must live outside /root.
+      - HOME=/home/ollama
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=-1
       - HF_HOME=/data/hf
@@ -20,7 +24,8 @@ services:
               device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"] # RTX 3090
               capabilities: ["gpu"]
     volumes:
-      - /srv/hot/models/ollama:/root/.ollama/models
+      - /srv/warm/ollama-3090/config:/home/ollama/.ollama
+      - /srv/hot/models/ollama:/home/ollama/.ollama/models
     healthcheck:
       test: ["CMD-SHELL", "ollama ps >/dev/null 2>&1 || exit 1"]
       interval: 60s
@@ -34,6 +39,10 @@ services:
     restart: unless-stopped
     networks: [app_int, frontend]
     environment:
+      # ki-server (UID 1031) has no /etc/passwd entry in the container, so
+      # $HOME can't be resolved automatically. /root itself is 0700 root:root
+      # and not traversable by UID 1031, so home must live outside /root.
+      - HOME=/home/ollama
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=-1
       - HF_HOME=/data/hf
@@ -49,7 +58,8 @@ services:
               device_ids: ["GPU-ed6554a1-fe67-5286-11c3-a19c2f3554a6"] # TITAN X
               capabilities: ["gpu"]
     volumes:
-      - /srv/hot/models/ollama:/root/.ollama/models
+      - /srv/warm/ollama-titan/config:/home/ollama/.ollama
+      - /srv/hot/models/ollama:/home/ollama/.ollama/models
     healthcheck:
       test: ["CMD-SHELL", "ollama ps >/dev/null 2>&1 || exit 1"]
       interval: 120s

@@ -3,6 +3,11 @@ services:
     image: n8nio/n8n:latest
     container_name: n8n
     environment:
+      # ki-server (UID 1031) has no /etc/passwd entry in the container, so
+      # $HOME can't be resolved automatically — n8n would otherwise try to
+      # write its state under / instead of the mounted volume below.
+      - HOME=/home/node
+      - N8N_USER_FOLDER=/home/node
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_SECURE_COOKIE=false
       - N8N_METRICS=true
@@ -45,6 +50,7 @@ services:
       service: nas-base
     volumes:
       - /srv/warm/n8n/data:/home/node/.n8n
+      - /srv/warm/n8n/cache:/home/node/.cache
       - /srv/warm/n8n/inbox:/data_inbox
     networks:
       frontend:
