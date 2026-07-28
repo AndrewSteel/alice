@@ -54,7 +54,8 @@
 | PROJ-69 | 3.2   | Voice-Hooks Silence-Detection-Extraktion — gemeinsamer Hook für die duplizierte RMS-AnalyserNode-Logik aus useVoiceMode1/2, kein Verhaltensunterschied                                                                  | Deployed | [Spec](PROJ-69-voice-hook-silence-detection-extraction.md) | 2026-07-19 |
 | PROJ-70 | 3.2   | Browser Adaptiver Noise-Floor — Kalibrierungsfenster pro Aufnahme statt Fixwert 700/0.01, analog zu PROJ-57 für die WebApp-Sprachmodi                                                                                    | Deployed | [Spec](PROJ-70-browser-adaptive-noise-floor.md) | 2026-07-19 |
 | PROJ-71 | 3.2   | Chat State-Management-Layer — useChatSessions.ts auf zentralen Reducer/Dispatch statt 13+ verstreuter setMessagesBySession-Aufrufe umgestellt, kein Verhaltensunterschied                                               | Deployed | [Spec](PROJ-71-chat-state-management-layer.md) | 2026-07-19 |
+| PROJ-72 | 2.3   | DMS Scanner/Processor Backlog-Locking — Verhindert Mehrfachverarbeitung und gegenseitige Blockade von DMS-Pfad-Einträgen bei großen Backlogs (z.B. Erstaufnahme von 70k+ Bildern); ausgegliedert aus PROJ-56              | Roadmap  | —                                         | 2026-07-26 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-72
+## Next Available ID: PROJ-73

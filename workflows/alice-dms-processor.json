@@ -839,7 +839,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item._raw_json) {\n    await client.lRem('alice:dms:image', 0, item._raw_json).catch(() => {});\n  }\n  const fileHash = item.file_hash;\n  if (!fileHash) {\n    return [{ json: { ...item, _image_action: 'skip' } }];\n  }\n  // Search Weaviate Image collection by file_hash\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  let existingId = null;\n  let existingPaths = [];\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) {\n      existingId = results[0]._additional?.id;\n      existingPaths = results[0].additionalPaths || [];\n    }\n  } catch(e) {\n    console.log('[Image] Weaviate search error: ' + e.message);\n  }\n  if (existingId) {\n    const filePath = item.file_path;\n    if (filePath && !existingPaths.includes(filePath)) {\n      try {\n        await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`,\n          { properties: { additionalPaths: [...existingPaths, filePath] } },\n          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n        );\n      } catch(e) { console.log('[Image] additionalPaths patch error: ' + e.message); }\n    }\n    return [{ json: { ...item, _image_action: 'add_path', _image_existing_id: existingId } }];\n  }\n  // New image: build Weaviate properties\n  const exif = item.exif || {};\n  const geo = item.geocoding || {};\n  const now = new Date().toISOString();\n  function toISODate(val) { if (!val) return null; try { const d = new Date(val); return isNaN(d.getTime()) ? null : d.toISOString(); } catch(e) { return null; } }\n  const props = {\n    file_path: item.file_path || '',\n    file_hash: fileHash,\n    file_type: item.file_type || '',\n    file_size: item.file_size || 0,\n    detected_at: toISODate(item.detected_at) || now,\n    extracted_at: toISODate(item.extracted_at) || now,\n    extractor: item.extractor || 'dms-extractor-image',\n    ai_description: (item.ai_description || '').slice(0, 50000),\n    extraction_failed: item.extraction_failed || false,\n    additionalPaths: []\n  };\n  if (exif.datetime) { const d = toISODate(exif.datetime); if (d) props.exif_datetime = d; }\n  if (exif.latitude != null) props.latitude = parseFloat(exif.latitude);\n  if (exif.longitude != null) props.longitude = parseFloat(exif.longitude);\n  if (exif.altitude != null) props.altitude = parseFloat(exif.altitude);\n  if (exif.camera_make) props.camera_make = String(exif.camera_make);\n  if (exif.camera_model) props.camera_model = String(exif.camera_model);\n  if (geo.country) props.country = String(geo.country);\n  if (geo.country_code) props.country_code = String(geo.country_code);\n  if (geo.city) props.city = String(geo.city);\n  if (geo.district) props.district = String(geo.district);\n  const cleanProps = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  let newId = null;\n  let insertOk = false;\n  try {\n    const insertResp = await axios.post('http://weaviate:8080/v1/objects', { class: 'Image', properties: cleanProps }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n    newId = insertResp.data?.id;\n    insertOk = !!newId;\n  } catch(e) { console.log('[Image] Weaviate insert error: ' + e.message); }\n  if (insertOk) {\n    await client.sAdd('alice:dms:processed', fileHash).catch(() => {});\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1).catch(() => {});\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1).catch(() => {});\n  }\n  return [{ json: { ...item, _image_action: insertOk ? 'new' : 'error', _new_weaviate_id: newId, _image_insert_ok: insertOk } }];\n} catch(e) {\n  console.log('[Image] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'error', _image_error: e.message } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Image] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'redis_error' } }];\n}\ntry {\n  if (item._raw_json) {\n    await client.lRem('alice:dms:image', 0, item._raw_json).catch(() => {});\n  }\n  const fileHash = item.file_hash;\n  if (!fileHash) {\n    return [{ json: { ...item, _image_action: 'skip' } }];\n  }\n  // Search Weaviate Image collection by file_hash\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  let existingId = null;\n  let existingPaths = [];\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) {\n      existingId = results[0]._additional?.id;\n      existingPaths = results[0].additionalPaths || [];\n    }\n  } catch(e) {\n    console.log('[Image] Weaviate search error: ' + e.message);\n  }\n  if (existingId) {\n    const filePath = item.file_path;\n    if (filePath && !existingPaths.includes(filePath)) {\n      try {\n        await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`,\n          { properties: { additionalPaths: [...existingPaths, filePath] } },\n          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n        );\n      } catch(e) { console.log('[Image] additionalPaths patch error: ' + e.message); }\n    }\n    return [{ json: { ...item, _image_action: 'add_path', _image_existing_id: existingId } }];\n  }\n  // New image: build Weaviate properties\n  const exif = item.exif || {};\n  const geo = item.geocoding || {};\n  const now = new Date().toISOString();\n  function toISODate(val) { if (!val) return null; try { const d = new Date(val); return isNaN(d.getTime()) ? null : d.toISOString(); } catch(e) { return null; } }\n  const props = {\n    file_path: item.file_path || '',\n    file_hash: fileHash,\n    file_type: item.file_type || '',\n    file_size: item.file_size || 0,\n    detected_at: toISODate(item.detected_at) || now,\n    extracted_at: toISODate(item.extracted_at) || now,\n    extractor: item.extractor || 'dms-extractor-image',\n    ai_description: (item.ai_description || '').slice(0, 50000),\n    extraction_failed: item.extraction_failed || false,\n    additionalPaths: []\n  };\n  if (exif.datetime) { const d = toISODate(exif.datetime); if (d) props.exif_datetime = d; }\n  if (exif.latitude != null) props.latitude = parseFloat(exif.latitude);\n  if (exif.longitude != null) props.longitude = parseFloat(exif.longitude);\n  if (exif.altitude != null) props.altitude = parseFloat(exif.altitude);\n  if (exif.camera_make) props.camera_make = String(exif.camera_make);\n  if (exif.camera_model) props.camera_model = String(exif.camera_model);\n  if (geo.country) props.country = String(geo.country);\n  if (geo.country_code) props.country_code = String(geo.country_code);\n  if (geo.city) props.city = String(geo.city);\n  if (geo.district) props.district = String(geo.district);\n  const cleanProps = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  let newId = null;\n  let insertOk = false;\n  try {\n    const insertResp = await axios.post('http://weaviate:8080/v1/objects', { class: 'Image', properties: cleanProps }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n    newId = insertResp.data?.id;\n    insertOk = !!newId;\n  } catch(e) { console.log('[Image] Weaviate insert error: ' + e.message); }\n  if (insertOk) {\n    await client.sAdd('alice:dms:processed', fileHash).catch(() => {});\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1).catch(() => {});\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1).catch(() => {});\n  }\n  return [{ json: { ...item, _image_action: insertOk ? 'new' : 'error', _new_weaviate_id: newId, _image_insert_ok: insertOk } }];\n} catch(e) {\n  console.log('[Image] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'error', _image_error: e.message } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1081,7 +1081,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const fileHash = item.file_hash;\n  const lat = item.latitude;\n  const lon = item.longitude;\n  if (!fileHash || lat == null || lon == null) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'skip' } }];\n  }\n\n  // Daily quota check (resets automatically via date-keyed counter)\n  let dailyLimit = 3000; try { dailyLimit = parseInt($env.GEOAPIFY_DAILY_LIMIT, 10) || 3000; } catch(e) {}\n  const today = new Date().toISOString().slice(0, 10);\n  const quotaKey = `alice:dms:geocode_quota:${today}`;\n  const usedRaw = await client.get(quotaKey).catch(() => null);\n  const used = parseInt(usedRaw, 10) || 0;\n  if (used >= dailyLimit) {\n    console.log('[Geocode] Daily quota reached (' + used + '/' + dailyLimit + '), aborting phase');\n    return [{ json: { ...item, _geo_action: 'quota_reached' } }];\n  }\n\n  // Look up Weaviate Image object by file_hash (image must already be inserted by the image sub-flow)\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } } } }`;\n  let existingId = null;\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) existingId = results[0]._additional?.id;\n  } catch(e) {\n    console.log('[Geocode] Weaviate search error: ' + e.message);\n  }\n  if (!existingId) {\n    // Race condition: image not yet inserted (processor restart between phases). Leave queued, retry next run.\n    return [{ json: { ...item, _geo_action: 'not_found_yet' } }];\n  }\n\n  // Call Geoapify reverse geocoding\n  const apiKey = $env.GEOAPIFY_API_KEY || '';\n  let geoResp;\n  try {\n    geoResp = await axios.get('https://api.geoapify.com/v1/geocode/reverse', {\n      params: { lat, lon, format: 'json', apiKey },\n      timeout: 10000,\n    });\n  } catch(e) {\n    console.log('[Geocode] Geoapify unreachable: ' + e.message);\n    return [{ json: { ...item, _geo_action: 'unreachable' } }];\n  }\n\n  // Quota is consumed by any completed call, match or not\n  await client.incr(quotaKey).catch(() => {});\n\n  // Geoapify free tier caps at 5 req/s. Processing here is strictly sequential\n  // (one item in flight at a time via Split In Batches), so a flat per-call delay\n  // is enough to stay under the limit without a shared cross-run token bucket.\n  await new Promise((resolve) => setTimeout(resolve, 220));\n\n  const result = geoResp.data?.results?.[0];\n  if (!result) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'done_no_match' } }];\n  }\n\n  const props = {};\n  if (result.country) props.country = String(result.country);\n  if (result.country_code) props.country_code = String(result.country_code).toUpperCase();\n  if (result.city) props.city = String(result.city);\n  const district = result.suburb || result.district || result.quarter;\n  if (district) props.district = String(district);\n\n  try {\n    await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`, { properties: props }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n  } catch(e) {\n    console.log('[Geocode] Weaviate PATCH error: ' + e.message);\n    return [{ json: { ...item, _geo_action: 'error' } }];\n  }\n\n  if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n  return [{ json: { ...item, _geo_action: 'done' } }];\n} catch(e) {\n  console.log('[Geocode] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'error' } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Geocode] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'redis_error' } }];\n}\ntry {\n  const fileHash = item.file_hash;\n  const lat = item.latitude;\n  const lon = item.longitude;\n  if (!fileHash || lat == null || lon == null) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'skip' } }];\n  }\n\n  // Daily quota check (resets automatically via date-keyed counter)\n  let dailyLimit = 3000; try { dailyLimit = parseInt($env.GEOAPIFY_DAILY_LIMIT, 10) || 3000; } catch(e) {}\n  const today = new Date().toISOString().slice(0, 10);\n  const quotaKey = `alice:dms:geocode_quota:${today}`;\n  const usedRaw = await client.get(quotaKey).catch(() => null);\n  const used = parseInt(usedRaw, 10) || 0;\n  if (used >= dailyLimit) {\n    console.log('[Geocode] Daily quota reached (' + used + '/' + dailyLimit + '), aborting phase');\n    return [{ json: { ...item, _geo_action: 'quota_reached' } }];\n  }\n\n  // Look up Weaviate Image object by file_hash (image must already be inserted by the image sub-flow)\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } } } }`;\n  let existingId = null;\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) existingId = results[0]._additional?.id;\n  } catch(e) {\n    console.log('[Geocode] Weaviate search error: ' + e.message);\n  }\n  if (!existingId) {\n    // Race condition: image not yet inserted (processor restart between phases). Leave queued, retry next run.\n    return [{ json: { ...item, _geo_action: 'not_found_yet' } }];\n  }\n\n  return [{ json: { ...item, existingId, lat, lon, quotaKey } }];\n} catch(e) {\n  console.log('[Geocode] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'error' } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1089,8 +1089,95 @@
         54032,
         -5760
       ],
-      "id": "geo-05-process",
-      "name": "Code: Process Geocode Item"
+      "id": "geo-05a-prepare",
+      "name": "Code: Prepare Geocode Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "geo-should-call-geoapify",
+              "leftValue": "={{ $json._geo_action }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        54240,
+        -5760
+      ],
+      "id": "geo-05a-if-call",
+      "name": "IF: Should Call Geoapify"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.geoapify.com/v1/geocode/reverse",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "lat",
+              "value": "={{ $json.lat }}"
+            },
+            {
+              "name": "lon",
+              "value": "={{ $json.lon }}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{ $env.GEOAPIFY_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        54448,
+        -5760
+      ],
+      "id": "geo-05b-call",
+      "name": "HTTP: Call Geoapify",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst httpResp = $input.first().json;\nconst item = $('Code: Prepare Geocode Request').first().json;\nconst existingId = item.existingId;\nconst quotaKey = item.quotaKey;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Geocode] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'redis_error' } }];\n}\ntry {\n  if (httpResp.error) {\n    console.log('[Geocode] Geoapify unreachable: ' + (httpResp.error.message || JSON.stringify(httpResp.error)));\n    return [{ json: { ...item, _geo_action: 'unreachable' } }];\n  }\n\n  // Quota is consumed by any completed call, match or not\n  await client.incr(quotaKey).catch(() => {});\n\n  // Geoapify free tier caps at 5 req/s. Processing here is strictly sequential\n  // (one item in flight at a time via Split In Batches), so a flat per-call delay\n  // is enough to stay under the limit without a shared cross-run token bucket.\n  await new Promise((resolve) => setTimeout(resolve, 220));\n\n  const body = httpResp.body !== undefined ? httpResp.body : httpResp;\n  const result = body?.results?.[0];\n  if (!result) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'done_no_match' } }];\n  }\n\n  const props = {};\n  if (result.country) props.country = String(result.country);\n  if (result.country_code) props.country_code = String(result.country_code).toUpperCase();\n  if (result.city) props.city = String(result.city);\n  const district = result.suburb || result.district || result.quarter;\n  if (district) props.district = String(district);\n\n  try {\n    await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`, { properties: props }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n  } catch(e) {\n    console.log('[Geocode] Weaviate PATCH error: ' + e.message);\n    return [{ json: { ...item, _geo_action: 'error' } }];\n  }\n\n  if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n  return [{ json: { ...item, _geo_action: 'done' } }];\n} catch(e) {\n  console.log('[Geocode] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'error' } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        54656,
+        -5760
+      ],
+      "id": "geo-05c-process",
+      "name": "Code: Process Geocode Response"
     },
     {
       "parameters": {
@@ -1129,7 +1216,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        54336,
+        54864,
         -5760
       ],
       "id": "geo-06-continue",
@@ -1137,7 +1224,7 @@
     },
     {
       "parameters": {
-        "content": "## Geocode Sub-Flow (PROJ-56 refinement, 2026-07-21)\n\nRuns after the image sub-flow completes (End: Image Done).\nReads pending GPS refs from Redis list `alice:dms:geocode_pending`\n({file_hash, latitude, longitude}), checks the daily quota counter\n`alice:dms:geocode_quota:<YYYY-MM-DD>` (GEOAPIFY_DAILY_LIMIT, default 3000),\nlooks up the Weaviate Image object by file_hash, calls Geoapify reverse\ngeocoding, and PATCHes country/country_code/city/district onto the\nexisting object. Quota reached or Geoapify unreachable aborts the whole\nphase; remaining entries stay queued for the next night. Not-found\n(race with image insert) leaves the entry queued too.",
+        "content": "## Geocode Sub-Flow (PROJ-56 refinement, 2026-07-21; robustness fix 2026-07-26)\n\nRuns after the image sub-flow completes (End: Image Done).\nReads pending GPS refs from Redis list `alice:dms:geocode_pending`\n({file_hash, latitude, longitude}), checks the daily quota counter\n`alice:dms:geocode_quota:<YYYY-MM-DD>` (GEOAPIFY_DAILY_LIMIT, default 3000),\nlooks up the Weaviate Image object by file_hash, calls Geoapify reverse\ngeocoding, and PATCHes country/country_code/city/district onto the\nexisting object. Quota reached or Geoapify unreachable aborts the whole\nphase; remaining entries stay queued for the next night. Not-found\n(race with image insert) leaves the entry queued too.\n\n2026-07-26: the external Geoapify call was moved out of the Code-node\nsandbox into a native HTTP Request node (geo-05b), which was the likely\ncause of a reproducible InternalTaskRunnerDisconnectAnalyzer crash. The\nold monolithic geo-05 node is now three nodes: geo-05a (Redis/Weaviate\nprep, connect() now guarded by try/catch), geo-05b (native HTTP call),\ngeo-05c (quota increment, rate-limit delay, Weaviate PATCH, dequeue).",
         "height": 240,
         "width": 380
       },
@@ -1790,18 +1877,7 @@
         ],
         [
           {
-            "node": "Code: Process Geocode Item",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code: Process Geocode Item": {
-      "main": [
-        [
-          {
-            "node": "IF: Geocode Continue Loop",
+            "node": "Code: Prepare Geocode Request",
             "type": "main",
             "index": 0
           }
@@ -1820,6 +1896,57 @@
         [
           {
             "node": "End: Geocode Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Prepare Geocode Request": {
+      "main": [
+        [
+          {
+            "node": "IF: Should Call Geoapify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Should Call Geoapify": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Call Geoapify",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Geocode Continue Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Call Geoapify": {
+      "main": [
+        [
+          {
+            "node": "Code: Process Geocode Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Process Geocode Response": {
+      "main": [
+        [
+          {
+            "node": "IF: Geocode Continue Loop",
             "type": "main",
             "index": 0
           }

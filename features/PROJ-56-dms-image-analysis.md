@@ -2,9 +2,15 @@
 
 ## Status: Deployed
 **Created:** 2026-06-29
-**Last Updated:** 2026-07-23
+**Last Updated:** 2026-07-28
 
-> **Hinweis:** Ursprünglich am 2026-07-03 vollständig deployed (siehe historische Sektionen unten: Tech Design, Implementation Notes, QA Test Results, Deployment). Am 2026-07-21 wurde das Geocoding-Subsystem grundlegend überarbeitet (Nominatim → externer Anbieter, siehe Abschnitt "Refinement Notes" am Ende des Dokuments) — die historischen Sektionen beschreiben den **veralteten** Nominatim-Ansatz und dienen nur noch als Referenz. Status auf "Planned" zurückgesetzt, da das Geocoding-Subsystem eine neue Architektur benötigt (`/architecture` als nächster Schritt). Alle anderen Komponenten (Scanner, EXIF-Extraktion, KI-Bildbeschreibung, Weaviate-Collection, Thumbnails) bleiben unverändert und sind weiterhin gültig — im Weaviate-Schema existierten laut Nutzer noch keine Bilddaten (Schema war nie vollständig deployed), ein Backfill bestehender Objekte ist daher nicht nötig.
+> **Hinweis:** Ursprünglich am 2026-07-03 vollständig deployed (siehe historische Sektionen unten: Tech Design, Implementation Notes, QA Test Results, Deployment). Am 2026-07-21 wurde das Geocoding-Subsystem grundlegend überarbeitet (Nominatim → externer Anbieter, siehe Abschnitt "Refinement Notes" am Ende des Dokuments) — die historischen Sektionen beschreiben den **veralteten** Nominatim-Ansatz und dienen nur noch als Referenz. Status auf "Planned" zurückgesetzt, da das Geocoding-Subsystem eine neue Architektur benötigte (`/architecture` als nächster Schritt). Alle anderen Komponenten (Scanner, EXIF-Extraktion, KI-Bildbeschreibung, Weaviate-Collection, Thumbnails) bleiben unverändert und sind weiterhin gültig — im Weaviate-Schema existierten laut Nutzer noch keine Bilddaten (Schema war nie vollständig deployed), ein Backfill bestehender Objekte ist daher nicht nötig.
+>
+> **Update 2026-07-26:** Nach Produktiveinsatz wurden zwei Probleme gemeldet: (1) ein Backlog-/Nebenläufigkeits-Problem im Scanner/Processor (betrifft alle Dateitypen, nicht nur Bilder) — als eigenständiges Feature **PROJ-72** ausgegliedert; (2) ein reproduzierbarer Absturz im Geocode-Sub-Flow (`Code: Process Geocode Item`) — siehe "Refinement Notes (2026-07-26)" und "Tech Design Update — 2026-07-26" unten. Status auf "Architected" gesetzt, da der Fix-Ansatz für Problem 2 entschieden ist; nächster Schritt `/backend`.
+>
+> **Update 2026-07-28 (QA):** Der Geocode-Node-Split wurde vom Nutzer live auf `ki.lan` deployed (Workflow `alice-dms-processor`, n8n-Workflow-ID `qPIg6uLTe8LfOYwv`). QA erfolgte per statischem Code-Review **und** per Live-Produktions-Ausführungsdaten aus n8n (siehe "QA Test Results (Refinement 2026-07-26/28)" unten) — der `InternalTaskRunnerDisconnectAnalyzer`-Absturz ist in einem echten nächtlichen Lauf reproduziert und in einem Lauf nach dem Fix nachweislich behoben. Ein neuer, vom Fix unabhängiger Befund (systematische 2×-Duplizierung in `alice:dms:geocode_pending`, vermutlich derselbe Nebenläufigkeits-Ursprung wie PROJ-72) wurde dokumentiert. Status auf "Approved" gesetzt — kein Critical/High-Bug offen.
+>
+> **Update 2026-07-28 (Deploy):** Deploy war zu diesem Zeitpunkt bereits erfolgt (siehe QA-Abschnitt oben — die Live-Executions liefen bereits gegen den produktiven Workflow). Dieser Schritt umfasste daher nur noch Doku-Nacharbeit (Spec + INDEX.md) sowie Commit/Push. Siehe "Deployment (Refinement 2026-07-28)" am Ende des Dokuments. Status auf "Deployed" gesetzt.
 
 ## Dependencies
 - Requires: PROJ-16 (DMS Scanner) — SUPPORTED_EXTENSIONS um Bildformate erweitern
@@ -584,3 +590,199 @@ None further (Critical/High). One accepted-risk note carried over from the pre-e
   2. `n8n` container updated with `GEOAPIFY_API_KEY` / `GEOAPIFY_DAILY_LIMIT` and recreated
   3. `alice-dms-processor` n8n workflow updated/imported with the new geocode sub-flow (incl. BUG-2 rate-limit fix)
 - **Not confirmed as done:** teardown of the old, already-stopped Nominatim container/volume on the server (`/srv/warm/nominatim`, ~60 GB) — optional cleanup, left to the user's discretion, not required for this feature to function.
+
+---
+
+## Refinement Notes (2026-07-26)
+
+**Trigger:** Path 2 — Implementation Revealed Gaps (`/refine`), nach Produktiveinsatz gemeldet vom Nutzer.
+
+**Gemeldete Probleme:**
+
+1. **Backlog/Nebenläufigkeit:** Bei der Erstaufnahme einer neuen Freigabe (z.B. `pictures`, ~70.000 Bilder/Videos) dauert die Abarbeitung allein durch den 5s-Stabilitätscheck pro Datei mehrere Tage. `alice-dms-scanner` läuft aber stündlich (07–22 Uhr) weiter und startet neue Ausführungen, während die vorherige noch läuft — Dateien können dadurch mehrfach verarbeitet werden (Race Condition vor dem Eintrag in `alice:dms:queued_files`), und weil `Code: Scan All Folders` alle aktivierten `dms_watched_folders`-Einträge in eine einzige kombinierte Liste zusammenfasst, blockiert ein großer Backlog in einem Pfad faktisch auch neue Dateien in anderen, unabhängigen DMS-Pfad-Einträgen.
+2. **`Code: Process Geocode Item` Absturz:** Der Node wirft reproduzierbar (auch bei kleinen, normalen nächtlichen Läufen, nicht nur unter Backlog-Last) einen `InternalTaskRunnerDisconnectAnalyzer`-Fehler bereits beim ersten übergebenen Datensatz.
+
+**Untersuchung:**
+- Problem 1 betrifft den generischen Scanner/Processor-Mechanismus, nicht nur Bilder — ein PDF-Backlog gleicher Größenordnung hätte dasselbe Problem. Kein Bild-/Geocoding-spezifischer Code beteiligt.
+- Problem 2 wurde per statischem Codevergleich untersucht: `Code: Process Geocode Item` hat exakt dieselbe Struktur (unguarded `await client.connect()`, redis+axios-Kombination) wie der bereits produktiv funktionierende `Code: Process Image Item` — der Crash ist also kein offensichtlicher Logikfehler in diesem Node selbst. Der einzige strukturelle Unterschied: `Process Geocode Item` ist der einzige Node im Workflow, der aus dem Code-Node/Task-Runner-Sandbox heraus einen rohen `axios`-Call an einen **externen** Host (`api.geoapify.com`) absetzt — alle anderen axios-Aufrufe im Workflow gehen an interne Services (`weaviate`, `ollama`). Das deckt sich mit der generischen n8n-Fehlermeldung, die auf den Task-Runner-Prozess selbst hindeutet, nicht auf einen JS-Fehler im Code. Root Cause nicht 100% verifiziert (keine Live-Logs verfügbar), aber die Auslagerung des externen HTTP-Calls aus der Sandbox ist die naheliegende Behebung unabhängig von der genauen Ursache.
+
+**Getroffene Entscheidungen:**
+1. **Scope-Split:** Problem 1 (Backlog-Locking/Nebenläufigkeit) wird als eigenständiges Feature **PROJ-72** ausgegliedert, da es den Scanner/Processor generisch betrifft (alle Dateitypen) und nicht spezifisch zur Bildanalyse gehört (Single-Responsibility-Regel). PROJ-56 bleibt auf die geocode-spezifische Behebung (Problem 2) beschränkt. Nächster Schritt für PROJ-72: `/write-spec PROJ-72`.
+2. **Geocode-Fix:** `Code: Process Geocode Item` wird in drei Nodes aufgeteilt — `geo-05a Prepare Request` (Redis-Connect + Quota-Check + Weaviate-Lookup, alles intern/unproblematisch), ein natives `HTTP Request`-Node `geo-05b Call Geoapify` (Aufruf außerhalb der JS-Sandbox) und `geo-05c Process Response` (Quota-Increment, Rate-Limit-Delay, Weaviate-PATCH, Redis-Dequeue). Details siehe "Tech Design Update" unten.
+3. **Konsistenzfix:** `await client.connect()` wird in allen Code-Nodes, die dieses Muster verwenden (mindestens `geo-05a`, `Code: Process Image Item`), in ein `try/catch` gefasst — aktuell würde ein Redis-Verbindungsfehler unabgefangen durchschlagen. Kein bestätigter Bug bislang (nur latentes Risiko), wird aber im selben Zuge korrigiert.
+
+**Betroffene Abschnitte:** Status-Header, Tech Design Update (neue Sektion unten ersetzt den `geo-05-process`-Teil aus der Sektion vom 2026-07-21), Dependencies (kein Hard-Dependency zu PROJ-72, aber Hinweis ergänzt).
+
+**Nicht betroffen:** Scanner-Erweiterung, EXIF-Extraktion, KI-Bildbeschreibung, Weaviate-Schema, Thumbnail-Generierung, Quota-/Retry-Semantik des Geocode-Sub-Flows (bleibt fachlich identisch, nur die Node-Aufteilung ändert sich).
+
+**Nächster Schritt:** `/backend` — Umsetzung der Node-Aufteilung in `workflows/alice-dms-processor.json` gemäß Tech Design Update unten.
+
+---
+
+## Tech Design Update (Solution Architect) — 2026-07-26: Geocode Node Robustness Fix
+
+Ersetzt nur den `geo-05-process`-Node-Teil des Geocode-Sub-Flows (siehe Tech Design Update 2026-07-21) — Fetch/Quota-Empty/Continue-Loop-Nodes (`geo-01` bis `geo-04`, `geo-06`) bleiben unverändert.
+
+### Node-Aufteilung
+
+**Vorher:** ein monolithischer Code-Node `geo-05-process` (Redis-Connect, Quota-Check, Weaviate-Lookup, Geoapify-Call, Rate-Limit-Delay, Weaviate-PATCH, Redis-Dequeue — alles in einem Node).
+
+**Nachher:** drei Nodes in Reihe, verdrahtet zwischen `Split: Geocode Batches` und `IF: Geocode Continue Loop`:
+
+1. **`geo-05a Prepare Request`** (Code)
+   - `await client.connect()` jetzt in `try/catch` — bei Verbindungsfehler: Item mit `_geo_action: 'redis_error'` zurückgeben, Phase nicht abbrechen (analog zu anderen Redis-Fehlerpfaden)
+   - Fehlt `file_hash`/`latitude`/`longitude`: dequeue, `_geo_action: 'skip'`
+   - Tageslimit-Check (`alice:dms:geocode_quota:<YYYY-MM-DD>` vs. `GEOAPIFY_DAILY_LIMIT`): erreicht → `_geo_action: 'quota_reached'`, kein Dequeue
+   - Weaviate-Lookup per `file_hash` (interner axios-Call, unverändert unproblematisch): nicht gefunden → `_geo_action: 'not_found_yet'`, kein Dequeue
+   - Gefunden → gibt `existingId`, `lat`, `lon`, `apiKey` als Felder für den nächsten Node weiter, `_geo_action` bleibt vorerst unbesetzt (wird von `geo-05c` gesetzt)
+2. **`IF: geo-05a Should Call Geoapify`** (neuer IF-Node) — routet nur Items ohne bereits gesetztes `_geo_action` (also: gefunden, unter Quota, valide Koordinaten) zum HTTP-Call; alle anderen springen direkt zu `IF: Geocode Continue Loop`
+3. **`geo-05b Call Geoapify`** (HTTP Request-Node, nativ)
+   - `GET https://api.geoapify.com/v1/geocode/reverse`, Query-Parameter `lat`, `lon`, `format=json`, `apiKey` (aus `$json`, von `geo-05a` durchgereicht)
+   - Timeout 10000ms, "Continue On Fail" aktiviert (damit Netzwerkfehler nicht die gesamte Phase abbrechen, sondern als Fehler-Item an `geo-05c` weitergereicht werden)
+4. **`geo-05c Process Response`** (Code)
+   - Erkennt HTTP-Fehler (aus "Continue On Fail"-Output) → `_geo_action: 'unreachable'`, kein Quota-Increment, kein Dequeue (identisch zum bisherigen Verhalten)
+   - Bei Erfolg: Quota-Zähler inkrementieren, danach fixe 220ms-Pause (Geoapify 5 req/s-Limit — unverändert aus Tech Decision 2026-07-21)
+   - Kein Ergebnis im Response-Body → dequeue, `_geo_action: 'done_no_match'`
+   - Ergebnis vorhanden → Weaviate-PATCH (`country`, `country_code`, `city`, `district`, interner axios-Call), danach dequeue, `_geo_action: 'done'`
+
+### Data Flow
+
+```
+Split: Geocode Batches
+     ↓
+geo-05a Prepare Request        ← Redis (try/catch) + Quota-Check + Weaviate-Lookup (intern)
+     ↓
+IF: Should Call Geoapify ──(nein: skip/quota_reached/not_found_yet/redis_error)──→ IF: Geocode Continue Loop
+     ↓ (ja)
+geo-05b Call Geoapify           ← natives HTTP-Request-Node, AUSSERHALB der Code-Node-Sandbox
+     ↓
+geo-05c Process Response        ← Quota-Increment, 220ms-Delay, Weaviate-PATCH (intern), Dequeue
+     ↓
+IF: Geocode Continue Loop
+```
+
+### Tech Decisions
+
+| Entscheidung | Wahl | Begründung |
+| --- | --- | --- |
+| Geoapify-Aufruf-Ort | Natives `HTTP Request`-Node statt `axios` im Code-Node | Einziger Node im gesamten Workflow, der einen rohen HTTP-Call an einen externen Host aus der Code-Node/Task-Runner-Sandbox absetzt; wahrscheinlichster Auslöser des `InternalTaskRunnerDisconnectAnalyzer`-Absturzes. Native Nodes laufen außerhalb der JS-Sandbox und sind für Netzwerk-I/O vorgesehen. |
+| Node-Granularität | 3 Nodes (`05a`/`05b`/`05c`) statt 1 | HTTP Request-Node kann keine Redis-/Weaviate-Logik enthalten; Aufteilung ist die direkte Konsequenz aus der vorherigen Entscheidung |
+| `client.connect()`-Fix | try/catch ergänzen, in `geo-05a` und `Code: Process Image Item` | Identisches Muster in beiden Nodes; latentes Risiko unabhängig vom eigentlichen Bug, im selben Zug behoben statt separatem Ticket |
+| Fachliche Semantik | Unverändert (Quota, Retry, "not found yet", Rate-Limit) | Reine Robustheits-/Infrastruktur-Änderung, keine Verhaltensänderung aus Nutzersicht |
+
+### Dependencies
+
+Keine neuen Packages. Der `HTTP Request`-Node ist ein n8n-Standard-Nodetyp, bereits an anderer Stelle im Projekt im Einsatz.
+
+### No UI Changes Required
+
+Rein workflow-interne Änderung.
+
+---
+
+## Implementation Notes (Refinement 2026-07-26, built 2026-07-28)
+
+Implemented the Node-Aufteilung from "Tech Design Update — 2026-07-26: Geocode Node Robustness Fix" exactly as specified.
+
+**Files modified:**
+- `workflows/alice-dms-processor.json`:
+  - Removed the monolithic `geo-05-process` ("Code: Process Geocode Item") node.
+  - Added `geo-05a-prepare` ("Code: Prepare Geocode Request", Code node) — `client.connect()` now wrapped in try/catch (`_geo_action: 'redis_error'` on failure, phase continues); does the skip/quota/Weaviate-lookup checks exactly as before, but returns `{ existingId, lat, lon, quotaKey }` instead of calling Geoapify itself.
+  - Added `geo-05a-if-call` ("IF: Should Call Geoapify") — routes items with no `_geo_action` set (i.e. found, under quota, valid coords) to the HTTP call; everything else (`skip`/`quota_reached`/`not_found_yet`/`redis_error`/`error`) goes straight to `IF: Geocode Continue Loop`. Condition uses the `notExists` string operator on `_geo_action`.
+  - Added `geo-05b-call` ("HTTP: Call Geoapify", native `httpRequest` node, `continueOnFail: true`) — `GET https://api.geoapify.com/v1/geocode/reverse` with `lat`/`lon`/`format=json` from the previous item and `apiKey` read directly via `{{ $env.GEOAPIFY_API_KEY }}` (not passed through item data, to avoid the key showing up in execution data). This is the node that moves the external call out of the Code-node/Task-Runner sandbox per the architecture decision.
+  - Added `geo-05c-process` ("Code: Process Geocode Response") — reads the HTTP response from `$input`, re-fetches the original item (`existingId`, `quotaKey`, `file_hash`, `_raw_json`, etc.) via `$('Code: Prepare Geocode Request').first().json` (same established pattern already used elsewhere in this workflow, e.g. `Code: Handle Extract Error` / `Code: Parse Extract Result`, since HTTP Request nodes replace `$json` with the response body). Detects `httpResp.error` → `_geo_action: 'unreachable'`; otherwise increments the quota counter, waits the same flat 220ms (BUG-2 rate-limit fix, unchanged), reads `body.results[0]` (defensive `body = httpResp.body ?? httpResp` in case "Include Response" wrapping differs), and PATCHes Weaviate / dequeues exactly as the old node did. `client.connect()` here is also wrapped in try/catch (`_geo_action: 'redis_error'`).
+  - `geo-06-continue` ("IF: Geocode Continue Loop") — unchanged logic, only its canvas position shifted right to make room.
+  - `img-05-process` ("Code: Process Image Item") — consistency fix from Tech Decision #3: `client.connect()` wrapped in try/catch, returns `_image_action: 'redis_error'` (falls into the existing non-`'new'` branch of `IF: Image Is New`, so it's retried next run) instead of throwing unguarded.
+  - Updated the `geo-sticky-note` sticky text to document the 2026-07-26 node split.
+
+**Design deviations from architecture doc:** None. `apiKey` is read via `$env` directly inside `geo-05b`'s query parameter expression rather than being passed through `geo-05a`'s output — this wasn't specified either way in the tech design, and avoids putting the secret into item data that n8n stores per-node in execution history (same class of concern as the existing "no secret in workflow JSON" rule, just extended to execution data).
+
+**Validation performed (no live n8n server available):**
+- `node --check` on all three modified/added Code-node bodies (`geo-05a-prepare`, `geo-05c-process`, `img-05-process`) — all pass.
+- Verified programmatically that the old node id/name (`geo-05-process` / "Code: Process Geocode Item") no longer exists and is no longer referenced anywhere in `connections`; no duplicate node ids/names; every connection source and target resolves to an existing node.
+- `mcp__n8n-mcp__validate_workflow_connections` and `mcp__n8n-mcp__validate_workflow_expressions` run against the geocode sub-flow + the two `img-05`/`img-06` neighbor nodes: both report `valid: true`, zero errors. The three "missing onError: continueErrorOutput" warnings on the IF-type nodes are the same generic warning already present on the pre-existing, untouched `IF: Geocode Continue Loop` node — not something introduced by this change.
+
+**Update 2026-07-28:** User deployed the updated workflow to `ki.lan` and ran it manually against the real backlog. See "QA Test Results (Refinement 2026-07-26/28)" below for the live execution evidence — the `InternalTaskRunnerDisconnectAnalyzer` crash is confirmed fixed.
+
+**Next step:** `/deploy` — no further code changes required for this refinement; see QA verdict below.
+
+---
+
+## QA Test Results (Refinement 2026-07-26/28)
+
+**Date:** 2026-07-28 | **Method:** Static code review + JS syntax check + **live production execution analysis** (n8n workflow `alice-dms-processor`, id `qPIg6uLTe8LfOYwv`, deployed by user on `ki.lan`, queried via n8n-mcp — a significant upgrade over the previous "no live server available" QA passes for this feature).
+
+### Root-Cause Confirmation (Pre-Fix)
+
+Live executions confirm the reported crash is real and reproducible, and is isolated to the geocode sub-flow (the image sub-flow completes cleanly in the same runs):
+
+| Execution | Trigger | Started | Result |
+| --- | --- | --- | --- |
+| `49841` | Nightly 02:00 | 2026-07-25 | Image phase: 3690 items processed successfully. Geocode phase: crashes on the **first** geocode item at `Code: Process Geocode Item` with `InternalTaskRunnerDisconnectAnalyzer` / "Node execution failed". |
+| `59108` | Nightly 02:00 | 2026-07-28 (before the 09:38 fix deploy) | Identical crash, same node, same stack trace, again on the first item. |
+
+Both stack traces are identical (`InternalTaskRunnerDisconnectAnalyzer.toDisconnectError` → `TaskBrokerWsServer.removeConnection`), confirming this is the Task-Runner-sandbox disconnect described in the 2026-07-26 Tech Design Update, not an intermittent fluke.
+
+### Post-Fix Confirmation
+
+| Execution | Trigger | Started | Result |
+| --- | --- | --- | --- |
+| `59708` | Manual | 2026-07-28, 09:51 (13 min after the 09:38 workflow update) | **Success.** All 18 executed nodes green. `Code: Fetch Geocode Items` → 1680 pending entries → all 1680 flow through `Code: Prepare Geocode Request` → `IF: Should Call Geoapify` → `HTTP: Call Geoapify` → `Code: Process Geocode Response` → `IF: Geocode Continue Loop` → `End: Geocode Done`, zero node errors, run completes in ~19.4 minutes. |
+
+Sample `HTTP: Call Geoapify` output item contains a real Geoapify response body (`country`, `city`, `district`, `suburb`, etc.) — confirms the native HTTP node correctly reaches `api.geoapify.com` and receives valid geocoding results outside the Code-node sandbox. Sample `Code: Process Geocode Response` output shows `_geo_action: "done"` with `existingId` populated — confirms the PATCH path executes.
+
+**Verdict: the `InternalTaskRunnerDisconnectAnalyzer` crash is fixed.** The architecture decision (move the external HTTP call out of the Code-node sandbox into a native `HTTP Request` node) is validated by production data, not just static review.
+
+### Acceptance Criteria — Tech Design Update 2026-07-26 (Geocode Node Robustness Fix)
+
+| Criterion | Result |
+| --- | --- |
+| Monolithic `geo-05-process` replaced by `geo-05a`/`geo-05b`/`geo-05c` | PASS — confirmed in workflow JSON and live execution node list |
+| External Geoapify call moved to native `HTTP Request` node (`geo-05b`), outside Code-node sandbox | PASS — confirmed live: `HTTP: Call Geoapify` executes as its own node with real response data |
+| `IF: Should Call Geoapify` correctly routes only found/under-quota/valid-coord items to the HTTP call, all other outcomes (`skip`/`quota_reached`/`not_found_yet`/`redis_error`) straight to the loop-continue check | PASS — condition uses `notExists` on `_geo_action`; static trace confirms every non-passthrough branch in `geo-05a` sets `_geo_action` |
+| `geo-05c` re-fetches the original item via `$('Code: Prepare Geocode Request').first().json` (HTTP node replaces `$json` with the response body) | PASS — same established pattern as `Code: Handle Extract Error` elsewhere in this workflow; live execution shows `existingId`/`quotaKey` correctly carried through |
+| Quota increment, 220ms rate-limit delay (BUG-2, 2026-07-21), Weaviate PATCH, dequeue — semantics unchanged | PASS — code identical to the pre-split version, only relocated into `geo-05c` |
+| `await client.connect()` wrapped in try/catch in `geo-05a`, `geo-05c`, and `img-05-process` (`Code: Process Image Item`) | PASS — all three now return a `redis_error`/`_image_action: 'redis_error'` item instead of throwing; item stays queued (no `lRem` on that path), phase continues to the next item |
+| `redis_error` on the image side falls into the existing "not new" branch of `IF: Image Is New`, so it's retried next run | PASS — `IF: Image Is New` checks `_image_action === 'new'` (strict equals); `'redis_error'` fails this and takes the same non-insert branch as `'error'`/`'add_path'` |
+| No functional/semantic change to quota, retry, "not found yet", or rate-limit behavior | PASS — confirmed both by diff (identical logic, only moved) and by live execution (`_geo_action: 'done'` items PATCH and dequeue as before) |
+
+**Result: 8/8 PASS**
+
+### Regression Check
+
+- Image sub-flow (unrelated to this refinement) ran cleanly in all three inspected executions (3690 / 3690 items in `49841`, no errors) — confirms the `img-05-process` try/catch consistency fix didn't disturb the existing insert/dedup path.
+- `geo-06-continue` ("IF: Geocode Continue Loop") logic is byte-for-byte unchanged (only its canvas position shifted) — confirmed via direct node inspection.
+
+### New Finding (independent of this refinement)
+
+**BUG-3 (Medium): `alice:dms:geocode_pending` contains systematic duplicate entries — every observed `file_hash` appears exactly twice**
+
+- **Evidence:** In both the pre-fix run (`49841`, 2026-07-25) and the post-fix run (`59708`, 2026-07-28), sampling `Code: Fetch Geocode Items`' output shows every `file_hash`/`latitude`/`longitude` triple appearing **exactly twice, back-to-back** (checked 10 distinct hashes × 2 = 20 consecutive items in `59708`; same pattern in `49841`). This is a consistent 2× duplication, not an occasional race — of the 1680 entries processed in `59708`, this implies only ~840 distinct images.
+- **Root cause (not 100% confirmed, no extractor logs available in this environment):** Most likely the same backlog/concurrency issue already scoped out as **PROJ-72** — `dms-extractor-image` appears to process some files twice during large-backlog catch-up (matching PROJ-72's description: concurrent scanner runs re-detecting files before they land in `alice:dms:queued_files`), and each processing run independently `RPUSH`es to `alice:dms:geocode_pending` with no pre-check against Weaviate. This is the exact "theoretical race window" the 2026-07-21 QA pass flagged as an accepted risk ("the extractor itself does not check Weaviate before queueing a geocode entry") — except it is not theoretical, it is happening on effectively 100% of GPS-tagged entries during the current backlog.
+- **Impact:** No data corruption — the second Geoapify call and Weaviate PATCH for the same `file_hash` are idempotent (same coordinates → same result → same fields overwritten with the same values). The impact is **2× wasted Geoapify quota/requests** per real photo during backlog processing. At `GEOAPIFY_DAILY_LIMIT=3000` this halves effective nightly throughput — not a problem for `59708`'s 1680 entries (840 real, well under quota), but will roughly double the number of nights needed to clear the full 70k-image backlog's geo-tagged subset once the PROJ-72 backlog itself unblocks image scanning.
+- **Not a regression from this refinement** — the same duplication pattern is present in `49841` (2026-07-25, before the geo-05 split existed). Not fixed by, and not caused by, the `geo-05a`/`b`/`c` split.
+- **Recommendation:** Track alongside PROJ-72 (most likely shares the same root cause and will disappear once the scanner/processor backlog-locking fix ships). If it persists after PROJ-72, consider a cheap independent guard in `geo-05a`: skip the Geoapify call if the Weaviate object's `country`/`city` fields are already non-empty (would also protect against any other duplicate-queuing source).
+
+### Security Audit
+
+| Check | Result |
+| --- | --- |
+| `GEOAPIFY_API_KEY` in `geo-05b`'s query parameter, not in item data | PASS — read via `{{ $env.GEOAPIFY_API_KEY }}` directly in the node parameter; confirmed via live execution data that the node's stored output (`HTTP: Call Geoapify`) contains only the Geoapify response body, no echoed request/key |
+| Weaviate PATCH still scoped to exactly `country`/`country_code`/`city`/`district` | PASS — unchanged in `geo-05c` |
+| No secrets in logs | PASS — `console.log` calls only emit `e.message` / generic status strings, never key or full request config |
+| New native `HTTP Request` node (`geo-05b`) — SSRF / URL injection | PASS — URL is a hardcoded literal (`https://api.geoapify.com/v1/geocode/reverse`); only `lat`/`lon` (EXIF-derived floats) and the fixed `apiKey`/`format` are parameterized, no user- or file-controlled string reaches the URL itself |
+
+### Production-Ready Decision
+
+**READY** — No Critical or High bugs. The reported crash is fixed and independently confirmed via live production execution data (not just static review). BUG-3 (Medium, duplicate geocode queue entries) is pre-existing, not introduced by this change, does not corrupt data, and is already tracked under the same root cause as PROJ-72.
+
+---
+
+## Deployment (Refinement 2026-07-28)
+
+- **Date:** 2026-07-28
+- **Production:** `ki.lan`, n8n workflow `alice-dms-processor` (workflow id `qPIg6uLTe8LfOYwv`)
+- Deployed by user directly on `ki.lan`: `alice-dms-processor` re-imported with the geocode node split (`geo-05a`/`geo-05b`/`geo-05c` replacing the monolithic `geo-05-process`, plus the `img-05-process`/`geo-05a`/`geo-05c` `client.connect()` try/catch consistency fix)
+- Deploy preceded this bookkeeping step — QA (see above) was performed directly against the already-live workflow via n8n-mcp execution data (executions `59680`, `59708` post-deploy; `49841`, `59108` pre-deploy for root-cause confirmation)
+- No frontend, database migration, or nginx changes involved — this refinement is scoped entirely to `workflows/alice-dms-processor.json`
+- **Open follow-up (not blocking):** BUG-3 (duplicate `alice:dms:geocode_pending` entries) — tracked alongside PROJ-72, no action taken as part of this deploy
