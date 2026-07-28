@@ -121,7 +121,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n    console.log(`DMS Processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached } }];"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n    console.log(`DMS Processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\n\nconst owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\nconst RENEW_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end data.last_heartbeat = ARGV[2] redis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3]) return 1`;\nlet lockLost = false;\nconst renewClient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await renewClient.connect();\n  const res = await renewClient.eval(RENEW_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner, new Date().toISOString(), '1800000'] });\n  lockLost = (res !== 1);\n  if (lockLost) console.log('[Processor] Lock ownership lost during plaintext phase - aborting run');\n} catch(e) {\n  console.log('[Processor] Renewal error: ' + e.message);\n  lockLost = true;\n} finally {\n  await renewClient.quit().catch(() => {});\n}\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached, _lock_lost: lockLost } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -146,7 +146,7 @@
           "conditions": [
             {
               "id": "check-time-limit",
-              "leftValue": "={{ $json._time_limit_reached }}",
+              "leftValue": "={{ $json._time_limit_reached || $json._lock_lost }}",
               "rightValue": true,
               "operator": {
                 "type": "boolean",
@@ -168,7 +168,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    reason: 'time_limit_reached',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    transactions_indexed: parseInt(stats.transactions_indexed || '0'),\n    phase_b_chunk_retries: parseInt(stats.phase_b_chunk_retries || '0'),\n    phase_b_chunk_failures: parseInt(stats.phase_b_chunk_failures || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:run:start_time');\n  const remainingQueue = await client.lLen('alice:dms:plaintext');\n  const stats = await client.hGetAll('alice:dms:run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:dms:run:start_time');\n  await client.del('alice:dms:run:stats');\n  const log = {\n    event: 'alice-dms-processor-complete',\n    reason: ($input.first().json || {})._lock_lost ? 'lock_lost' : 'time_limit_reached',\n    processed: parseInt(stats.processed || '0'),\n    failed: parseInt(stats.failed || '0'),\n    skipped: parseInt(stats.skipped || '0'),\n    llm_classified: parseInt(stats.llm_classified || '0'),\n    used_suggested_type: parseInt(stats.used_suggested_type || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    transactions_indexed: parseInt(stats.transactions_indexed || '0'),\n    phase_b_chunk_retries: parseInt(stats.phase_b_chunk_retries || '0'),\n    phase_b_chunk_failures: parseInt(stats.phase_b_chunk_failures || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }).catch(() => {});\n  console.log(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -839,7 +839,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Image] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'redis_error' } }];\n}\ntry {\n  if (item._raw_json) {\n    await client.lRem('alice:dms:image', 0, item._raw_json).catch(() => {});\n  }\n  const fileHash = item.file_hash;\n  if (!fileHash) {\n    return [{ json: { ...item, _image_action: 'skip' } }];\n  }\n  // Search Weaviate Image collection by file_hash\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  let existingId = null;\n  let existingPaths = [];\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) {\n      existingId = results[0]._additional?.id;\n      existingPaths = results[0].additionalPaths || [];\n    }\n  } catch(e) {\n    console.log('[Image] Weaviate search error: ' + e.message);\n  }\n  if (existingId) {\n    const filePath = item.file_path;\n    if (filePath && !existingPaths.includes(filePath)) {\n      try {\n        await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`,\n          { properties: { additionalPaths: [...existingPaths, filePath] } },\n          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n        );\n      } catch(e) { console.log('[Image] additionalPaths patch error: ' + e.message); }\n    }\n    return [{ json: { ...item, _image_action: 'add_path', _image_existing_id: existingId } }];\n  }\n  // New image: build Weaviate properties\n  const exif = item.exif || {};\n  const geo = item.geocoding || {};\n  const now = new Date().toISOString();\n  function toISODate(val) { if (!val) return null; try { const d = new Date(val); return isNaN(d.getTime()) ? null : d.toISOString(); } catch(e) { return null; } }\n  const props = {\n    file_path: item.file_path || '',\n    file_hash: fileHash,\n    file_type: item.file_type || '',\n    file_size: item.file_size || 0,\n    detected_at: toISODate(item.detected_at) || now,\n    extracted_at: toISODate(item.extracted_at) || now,\n    extractor: item.extractor || 'dms-extractor-image',\n    ai_description: (item.ai_description || '').slice(0, 50000),\n    extraction_failed: item.extraction_failed || false,\n    additionalPaths: []\n  };\n  if (exif.datetime) { const d = toISODate(exif.datetime); if (d) props.exif_datetime = d; }\n  if (exif.latitude != null) props.latitude = parseFloat(exif.latitude);\n  if (exif.longitude != null) props.longitude = parseFloat(exif.longitude);\n  if (exif.altitude != null) props.altitude = parseFloat(exif.altitude);\n  if (exif.camera_make) props.camera_make = String(exif.camera_make);\n  if (exif.camera_model) props.camera_model = String(exif.camera_model);\n  if (geo.country) props.country = String(geo.country);\n  if (geo.country_code) props.country_code = String(geo.country_code);\n  if (geo.city) props.city = String(geo.city);\n  if (geo.district) props.district = String(geo.district);\n  const cleanProps = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  let newId = null;\n  let insertOk = false;\n  try {\n    const insertResp = await axios.post('http://weaviate:8080/v1/objects', { class: 'Image', properties: cleanProps }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n    newId = insertResp.data?.id;\n    insertOk = !!newId;\n  } catch(e) { console.log('[Image] Weaviate insert error: ' + e.message); }\n  if (insertOk) {\n    await client.sAdd('alice:dms:processed', fileHash).catch(() => {});\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1).catch(() => {});\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1).catch(() => {});\n  }\n  return [{ json: { ...item, _image_action: insertOk ? 'new' : 'error', _new_weaviate_id: newId, _image_insert_ok: insertOk } }];\n} catch(e) {\n  console.log('[Image] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'error', _image_error: e.message } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Image] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'redis_error' } }];\n}\ntry {\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RENEW_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end data.last_heartbeat = ARGV[2] redis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3]) return 1`;\n  let renewed = false;\n  try {\n    const renewRes = await client.eval(RENEW_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner, new Date().toISOString(), '1800000'] });\n    renewed = (renewRes === 1);\n  } catch(renewErr) {\n    console.log('[Processor] Renewal error (image phase): ' + renewErr.message);\n  }\n  if (!renewed) {\n    console.log('[Processor] Lock ownership lost during image phase - aborting run');\n    return [{ json: { ...item, _lock_lost: true, _image_action: 'lock_lost' } }];\n  }\n  if (item._raw_json) {\n    await client.lRem('alice:dms:image', 0, item._raw_json).catch(() => {});\n  }\n  const fileHash = item.file_hash;\n  if (!fileHash) {\n    return [{ json: { ...item, _image_action: 'skip' } }];\n  }\n  // Search Weaviate Image collection by file_hash\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  let existingId = null;\n  let existingPaths = [];\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) {\n      existingId = results[0]._additional?.id;\n      existingPaths = results[0].additionalPaths || [];\n    }\n  } catch(e) {\n    console.log('[Image] Weaviate search error: ' + e.message);\n  }\n  if (existingId) {\n    const filePath = item.file_path;\n    if (filePath && !existingPaths.includes(filePath)) {\n      try {\n        await axios.patch(`http://weaviate:8080/v1/objects/Image/${existingId}`,\n          { properties: { additionalPaths: [...existingPaths, filePath] } },\n          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n        );\n      } catch(e) { console.log('[Image] additionalPaths patch error: ' + e.message); }\n    }\n    return [{ json: { ...item, _image_action: 'add_path', _image_existing_id: existingId } }];\n  }\n  // New image: build Weaviate properties\n  const exif = item.exif || {};\n  const geo = item.geocoding || {};\n  const now = new Date().toISOString();\n  function toISODate(val) { if (!val) return null; try { const d = new Date(val); return isNaN(d.getTime()) ? null : d.toISOString(); } catch(e) { return null; } }\n  const props = {\n    file_path: item.file_path || '',\n    file_hash: fileHash,\n    file_type: item.file_type || '',\n    file_size: item.file_size || 0,\n    detected_at: toISODate(item.detected_at) || now,\n    extracted_at: toISODate(item.extracted_at) || now,\n    extractor: item.extractor || 'dms-extractor-image',\n    ai_description: (item.ai_description || '').slice(0, 50000),\n    extraction_failed: item.extraction_failed || false,\n    additionalPaths: []\n  };\n  if (exif.datetime) { const d = toISODate(exif.datetime); if (d) props.exif_datetime = d; }\n  if (exif.latitude != null) props.latitude = parseFloat(exif.latitude);\n  if (exif.longitude != null) props.longitude = parseFloat(exif.longitude);\n  if (exif.altitude != null) props.altitude = parseFloat(exif.altitude);\n  if (exif.camera_make) props.camera_make = String(exif.camera_make);\n  if (exif.camera_model) props.camera_model = String(exif.camera_model);\n  if (geo.country) props.country = String(geo.country);\n  if (geo.country_code) props.country_code = String(geo.country_code);\n  if (geo.city) props.city = String(geo.city);\n  if (geo.district) props.district = String(geo.district);\n  const cleanProps = Object.fromEntries(Object.entries(props).filter(([_, v]) => v !== null && v !== undefined));\n  let newId = null;\n  let insertOk = false;\n  try {\n    const insertResp = await axios.post('http://weaviate:8080/v1/objects', { class: 'Image', properties: cleanProps }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n    newId = insertResp.data?.id;\n    insertOk = !!newId;\n  } catch(e) { console.log('[Image] Weaviate insert error: ' + e.message); }\n  if (insertOk) {\n    await client.sAdd('alice:dms:processed', fileHash).catch(() => {});\n    await client.hIncrBy('alice:dms:run:stats', 'processed', 1).catch(() => {});\n  } else {\n    await client.hIncrBy('alice:dms:run:stats', 'failed', 1).catch(() => {});\n  }\n  return [{ json: { ...item, _image_action: insertOk ? 'new' : 'error', _new_weaviate_id: newId, _image_insert_ok: insertOk } }];\n} catch(e) {\n  console.log('[Image] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _image_action: 'error', _image_error: e.message } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1081,7 +1081,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Geocode] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'redis_error' } }];\n}\ntry {\n  const fileHash = item.file_hash;\n  const lat = item.latitude;\n  const lon = item.longitude;\n  if (!fileHash || lat == null || lon == null) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'skip' } }];\n  }\n\n  // Daily quota check (resets automatically via date-keyed counter)\n  let dailyLimit = 3000; try { dailyLimit = parseInt($env.GEOAPIFY_DAILY_LIMIT, 10) || 3000; } catch(e) {}\n  const today = new Date().toISOString().slice(0, 10);\n  const quotaKey = `alice:dms:geocode_quota:${today}`;\n  const usedRaw = await client.get(quotaKey).catch(() => null);\n  const used = parseInt(usedRaw, 10) || 0;\n  if (used >= dailyLimit) {\n    console.log('[Geocode] Daily quota reached (' + used + '/' + dailyLimit + '), aborting phase');\n    return [{ json: { ...item, _geo_action: 'quota_reached' } }];\n  }\n\n  // Look up Weaviate Image object by file_hash (image must already be inserted by the image sub-flow)\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } } } }`;\n  let existingId = null;\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) existingId = results[0]._additional?.id;\n  } catch(e) {\n    console.log('[Geocode] Weaviate search error: ' + e.message);\n  }\n  if (!existingId) {\n    // Race condition: image not yet inserted (processor restart between phases). Leave queued, retry next run.\n    return [{ json: { ...item, _geo_action: 'not_found_yet' } }];\n  }\n\n  return [{ json: { ...item, existingId, lat, lon, quotaKey } }];\n} catch(e) {\n  console.log('[Geocode] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'error' } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
+        "jsCode": "const redis = require('redis');\nconst axios = require('axios');\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n} catch(e) {\n  console.log('[Geocode] Redis connect error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'redis_error' } }];\n}\ntry {\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RENEW_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end data.last_heartbeat = ARGV[2] redis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3]) return 1`;\n  let renewed = false;\n  try {\n    const renewRes = await client.eval(RENEW_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner, new Date().toISOString(), '1800000'] });\n    renewed = (renewRes === 1);\n  } catch(renewErr) {\n    console.log('[Processor] Renewal error (geocode phase): ' + renewErr.message);\n  }\n  if (!renewed) {\n    console.log('[Processor] Lock ownership lost during geocode phase - aborting run');\n    return [{ json: { ...item, _lock_lost: true, _geo_action: 'lock_lost' } }];\n  }\n  const fileHash = item.file_hash;\n  const lat = item.latitude;\n  const lon = item.longitude;\n  if (!fileHash || lat == null || lon == null) {\n    if (item._raw_json) { await client.lRem('alice:dms:geocode_pending', 0, item._raw_json).catch(() => {}); }\n    return [{ json: { ...item, _geo_action: 'skip' } }];\n  }\n\n  // Daily quota check (resets automatically via date-keyed counter)\n  let dailyLimit = 3000; try { dailyLimit = parseInt($env.GEOAPIFY_DAILY_LIMIT, 10) || 3000; } catch(e) {}\n  const today = new Date().toISOString().slice(0, 10);\n  const quotaKey = `alice:dms:geocode_quota:${today}`;\n  const usedRaw = await client.get(quotaKey).catch(() => null);\n  const used = parseInt(usedRaw, 10) || 0;\n  if (used >= dailyLimit) {\n    console.log('[Geocode] Daily quota reached (' + used + '/' + dailyLimit + '), aborting phase');\n    return [{ json: { ...item, _geo_action: 'quota_reached' } }];\n  }\n\n  // Look up Weaviate Image object by file_hash (image must already be inserted by the image sub-flow)\n  const safeHash = fileHash.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/[\\x00-\\x1f]/g, c => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));\n  const query = `{ Get { Image(where: { path: [\"file_hash\"], operator: Equal, valueText: \"${safeHash}\" }, limit: 1) { _additional { id } } } }`;\n  let existingId = null;\n  try {\n    const searchResp = await axios.post('http://weaviate:8080/v1/graphql', { query }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n    const results = searchResp.data?.data?.Get?.Image || [];\n    if (results.length > 0) existingId = results[0]._additional?.id;\n  } catch(e) {\n    console.log('[Geocode] Weaviate search error: ' + e.message);\n  }\n  if (!existingId) {\n    // Race condition: image not yet inserted (processor restart between phases). Leave queued, retry next run.\n    return [{ json: { ...item, _geo_action: 'not_found_yet' } }];\n  }\n\n  return [{ json: { ...item, existingId, lat, lon, quotaKey } }];\n} catch(e) {\n  console.log('[Geocode] Unhandled error: ' + e.message);\n  return [{ json: { ...item, _geo_action: 'error' } }];\n} finally {\n  try { await client.quit(); } catch(e) {}\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1236,6 +1236,158 @@
       ],
       "id": "geo-sticky-note",
       "name": "Sticky: Geocode Processing"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst crypto = require('crypto');\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 1800000; // 30 min (PROJ-72)\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false, lockError = false;\ntry {\n  await client.connect();\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  console.log('[Processor] Lock acquire error: ' + e.message);\n  acquired = false; lockError = true;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { _lock_acquired: acquired, _lock_error: lockError, lock_owner: acquired ? ownerToken : null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        52680,
+        -3840
+      ],
+      "id": "proj72-code-acquire-processor-lock-v1",
+      "name": "Code: Acquire Processor Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-processor-lock-acquired",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        52832,
+        -3840
+      ],
+      "id": "proj72-if-processor-lock-acquired-v1",
+      "name": "IF: Processor Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconsole.log(JSON.stringify({ event: 'alice-dms-processor-skip-locked', reason: item._lock_error ? 'redis_error' : 'already_running', timestamp: new Date().toISOString() }));\nreturn [{ json: item }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        52832,
+        -3600
+      ],
+      "id": "proj72-code-log-already-running-v1",
+      "name": "Code: Log Already Running"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        53120,
+        -3600
+      ],
+      "id": "proj72-end-already-running-v1",
+      "name": "End: Already Running"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-image-lock-lost",
+              "leftValue": "={{ $json._lock_lost }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        54336,
+        -5040
+      ],
+      "id": "proj72-if-image-lock-lost-v1",
+      "name": "IF: Image Lock Lost"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-geocode-lock-lost",
+              "leftValue": "={{ $json._lock_lost }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        54160,
+        -5760
+      ],
+      "id": "proj72-if-geocode-lock-lost-v1",
+      "name": "IF: Geocode Lock Lost"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  const res = await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] });\n  if (res !== 1) console.log('[Processor] Release skipped at completion: not owner (already expired/reassigned)');\n} catch(e) {\n  console.log('[Processor] Release error: ' + e.message);\n} finally {\n  await client.quit().catch(() => {});\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        53984,
+        -5760
+      ],
+      "id": "proj72-code-release-lock-success-v1",
+      "name": "Code: Release Processor Lock (Success)"
     }
   ],
   "pinData": {},
@@ -1244,7 +1396,7 @@
       "main": [
         [
           {
-            "node": "Code: Init",
+            "node": "Code: Acquire Processor Lock",
             "type": "main",
             "index": 0
           }
@@ -1358,7 +1510,7 @@
       "main": [
         [
           {
-            "node": "IF: Image Is New",
+            "node": "IF: Image Lock Lost",
             "type": "main",
             "index": 0
           }
@@ -1852,7 +2004,7 @@
       "main": [
         [
           {
-            "node": "End: Geocode Done",
+            "node": "Code: Release Processor Lock (Success)",
             "type": "main",
             "index": 0
           }
@@ -1870,7 +2022,7 @@
       "main": [
         [
           {
-            "node": "End: Geocode Done",
+            "node": "Code: Release Processor Lock (Success)",
             "type": "main",
             "index": 0
           }
@@ -1895,7 +2047,7 @@
         ],
         [
           {
-            "node": "End: Geocode Done",
+            "node": "Code: Release Processor Lock (Success)",
             "type": "main",
             "index": 0
           }
@@ -1906,7 +2058,7 @@
       "main": [
         [
           {
-            "node": "IF: Should Call Geoapify",
+            "node": "IF: Geocode Lock Lost",
             "type": "main",
             "index": 0
           }
@@ -1947,6 +2099,93 @@
         [
           {
             "node": "IF: Geocode Continue Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Acquire Processor Lock": {
+      "main": [
+        [
+          {
+            "node": "IF: Processor Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Processor Lock Acquired": {
+      "main": [
+        [
+          {
+            "node": "Code: Init",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Already Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log Already Running": {
+      "main": [
+        [
+          {
+            "node": "End: Already Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Image Lock Lost": {
+      "main": [
+        [
+          {
+            "node": "Code: Final Log (Time)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Image Is New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Geocode Lock Lost": {
+      "main": [
+        [
+          {
+            "node": "Code: Final Log (Time)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Should Call Geoapify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Release Processor Lock (Success)": {
+      "main": [
+        [
+          {
+            "node": "End: Geocode Done",
             "type": "main",
             "index": 0
           }
