@@ -87,7 +87,7 @@ DCGM_FI_DRIVER_VERSION,        label, Driver Version
 DCGM_FI_DEV_VBIOS_VERSION,          label, VBIOS version of the device
 DCGM_FI_DEV_PSTATE,                 gauge, Performance state (0-15)
 DCGM_FI_DEV_FAN_SPEED,              gauge, Fan speed (in %)
-DCGM_FI_DEV_CLOCK_THROTTLE_REASONS, gauge, Clock throttle reasons (bitmask)
+# DCGM_FI_DEV_CLOCK_THROTTLE_REASONS, gauge, Clock throttle reasons (bitmask)
 DCGM_FI_DEV_POWER_MGMT_LIMIT,       gauge, Current power limit (in W)
 DCGM_FI_DEV_POWER_MGMT_LIMIT_DEF,   gauge, Default power limit (in W)
 DCGM_FI_DEV_POWER_MGMT_LIMIT_MAX,   gauge, Maximum power limit (in W)
