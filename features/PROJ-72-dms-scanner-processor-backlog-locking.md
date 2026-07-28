@@ -1,8 +1,10 @@
 # PROJ-72: DMS Scanner/Processor Backlog-Locking
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-07-28
 **Last Updated:** 2026-07-28
+
+> **Update 2026-07-28 (Backend):** Implementiert gemäß Tech Design. Status auf "In Progress" gesetzt, nächster Schritt `/qa`. Details siehe "Implementation Notes" unten.
 
 ## Dependencies
 - Requires: PROJ-16 (DMS Scanner) — Sperrmechanismus erweitert `alice-dms-scanner`
@@ -165,8 +167,43 @@ Keine neuen Packages, keine neue externe Infrastruktur. Beide bestehenden Workfl
 
 Bewusste Entscheidung aus der Spec (kein Sperrstatus-Badge im Settings-UI für den MVP-Scope; Admin-Zugriff im Notfall direkt über Redis).
 
+## Implementation Notes
+
+### Scanner: Dispatcher + Path-Worker Split (`workflows/alice-dms-scanner.json`, `workflows/alice-dms-path-worker.json` neu)
+
+`alice-dms-scanner.json` wurde vom bisherigen monolithischen Scan-Workflow (36 Nodes) auf einen schlanken **Dispatcher** reduziert (16 Nodes): lädt aktive Pfade, iteriert einmal darüber (`Loop: Folders`), versucht pro Pfad einen atomaren Redis-Lock (`Code: Try Lock Folder`, `SET NX PX 180000`), und stößt bei Erfolg den neuen Sub-Workflow **`alice-dms-path-worker`** per `Execute Workflow`-Node **ohne zu warten** an (`options.waitForSubWorkflow: false`). Bereits gesperrte Pfade werden übersprungen. Die komplette bisherige Datei-Verarbeitung (Hash/Dedup, Lifecycle-Check, 5s-Stabilitätscheck, OCR-Check, MQTT-Routing nach Typ) wurde unverändert in den neuen Pfad-Worker verschoben, jetzt auf genau einen Pfad pro Aufruf beschränkt statt auf die frühere kombinierte Liste.
+
+- **Sperrschlüssel:** `alice:dms:scanner:lock:folder:<folder_id>` (Redis, JSON-Wert mit `owner`-UUID, `NX`+`PX`). Renewal und Release sind **besitz-geprüft** (Lua-Skript: `GET` → `cjson.decode` → Owner-Vergleich → `SET`/`DEL`), nicht blindes Verlängern/Löschen.
+- **Heartbeat:** Renewal einmal pro Datei im Pfad-Worker (`Code: Renew Path Lock`), TTL 180s. Verliert ein Worker den Besitz (Redis-Fehler wird **fail-closed** als Besitzverlust behandelt, siehe Nutzer-Entscheidung unten), bricht er über `Code: Self-Abort on Lock Loss` sofort ab (`throw`) — kein Release-Versuch, da der Besitz bereits weg ist.
+- **Stats-Umbau:** Die bisherigen globalen `alice:dms:scanner:stats:*`-Zähler wären bei parallel laufenden Pfad-Workern nicht mehr korrekt (mehrere Worker würden sich gegenseitig überschreiben). Neu: pro-Pfad-Zähler `alice:dms:scanner:stats:folder:<folder_id>:*`, zurückgesetzt bei jedem Worker-Start, veröffentlicht am Ende auf dem **neuen** Topic `alice/dms/scanner/path_stats`. Der Dispatcher veröffentlicht auf dem bisherigen Topic `alice/dms/scanner/stats` nur noch eine schlanke Zusammenfassung (`paths_dispatched`, `paths_skipped_locked`) — **kein** in-Repo-Konsument dieses Topics gefunden, aber falls extern etwas die alten Datei-Zähler-Felder auf diesem Topic erwartet, ändert sich dessen Payload-Form.
+- `Code: Find Stale Paths` (globaler Sweep, PROJ-44) bleibt unverändert im Dispatcher (läuft einmal pro Dispatcher-Lauf, nicht pro Pfad).
+- **workflowId-Platzhalter:** Der `Execute: Path Worker`-Node im Dispatcher referenziert die neue Sub-Workflow-ID aktuell als Platzhalter `__REPLACE_WITH_PATH_WORKER_WORKFLOW_ID__`, da die echte n8n-Workflow-ID erst nach dem ersten Import von `alice-dms-path-worker` bekannt ist. Siehe "Deployment"-Abschnitt unten für den nötigen manuellen Schritt.
+
+### Processor: Lauf-Lock (`workflows/alice-dms-processor.json`)
+
+Neuer Node `Code: Acquire Processor Lock` direkt nach dem Schedule-Trigger (atomarer `SET NX PX 1800000` auf `alice:dms:processor:lock:run`). Bei Sperrfehlschlag beendet sich der Lauf sofort und sauber über `Code: Log Already Running` → `End: Already Running` (kein Fehler). Heartbeat-Renewal (besitz-geprüft, gleiches Lua-Muster wie beim Scanner) wurde in die drei bereits pro Batch-Item laufenden Nodes integriert: `Code: Time Check` (Plaintext-Phase), `Code: Process Image Item` (Image-Phase), `Code: Prepare Geocode Request` (Geocode-Phase). Verliert der Lauf die Sperre, nimmt er denselben bestehenden, nicht-werfenden Ausstiegspfad wie beim Zeitlimit (`Code: Final Log (Time)` → `End: Time Limit`) — bewusst asymmetrisch zum Pfad-Worker-`throw`, da der Prozessor an jeder Phase bereits einen sauberen Ausstiegspunkt hat. Freigabe erfolgt an den beiden einzigen echten Enden des gesamten Laufs: in `Code: Final Log (Time)` (vor `End: Time Limit`) und im neuen Node `Code: Release Processor Lock (Success)` (vor `End: Geocode Done`, ersetzt die frühere direkte Verkabelung von drei Erfolgspfaden dorthin). Die restliche Plaintext-/BankTransaction-/Image-/Geocode-Logik wurde nicht angefasst.
+
+### Nutzer-Entscheidung (diese Session)
+
+Bei einem Redis-Fehler während der Sperr-Erneuerung wurde **fail-closed** gewählt (als Sperrverlust behandeln, sofort abbrechen) statt fail-open — priorisiert "niemals doppelt verarbeiten" (der Kern von BUG-3) über einen möglichen unnötigen Abbruch bei einem kurzen Redis-Verbindungsfehler.
+
+### Validierung durchgeführt
+
+- Alle 44 Code-Node-JS-Bodies über alle drei Workflow-Dateien mit Node.js (`node -e "new Function(...)"`) syntaktisch geprüft — 0 Fehler.
+- `alice-dms-scanner.json` und `alice-dms-path-worker.json` vollständig mit n8n-mcp `validate_workflow` geprüft: keine ungültigen Verbindungen, keine echten Ausdrucksfehler. Die gemeldeten "Cannot return primitive values directly"-Fehler sind ein bekannter Fehlalarm des heuristischen Linters (er erkennt `return true/false` innerhalb verschachtelter `.filter()`-Callbacks bzw. `return 0/1` innerhalb der Lua-Skript-Strings fälschlich als Top-Level-Return) — reproduzierbar auch auf unverändertem, bereits produktivem Code (`Code: Lifecycle Check`, `Code: Find Stale Paths`), also kein PROJ-72-Regressions-Befund.
+- `alice-dms-processor.json` (67 Nodes) wurde wegen Tool-Payload-Größe nicht als Ganzes durch `validate_workflow` geschickt; stattdessen wurde der komplette Verbindungsgraph händisch (Python) auf fehlende/verwaiste Referenzen und die beiden echten Terminal-Exits geprüft (bestanden), zusätzlich zur Node.js-Syntaxprüfung aller Code-Nodes.
+- Kein PostgreSQL-Schema geändert (Tech Design: Redis-only).
+
 ## QA Test Results
 _To be added by /qa_
 
 ## Deployment
-_To be added by /deploy_
+
+**Manueller Schritt vor dem ersten Deploy (workflowId-Platzhalter):**
+1. `alice-dms-path-worker` zuerst deployen ("Deploy n8n-workflow alice-dms-path-worker").
+2. Echte Workflow-ID ermitteln (n8n-UI oder `n8n_get_workflow_minimal`).
+3. In `workflows/alice-dms-scanner.json` im Node `Execute: Path Worker` den Platzhalter `__REPLACE_WITH_PATH_WORKER_WORKFLOW_ID__` durch die echte ID ersetzen.
+4. `alice-dms-scanner` deployen ("Deploy n8n-workflow alice-dms-scanner").
+5. `alice-dms-processor` deployen ("Deploy n8n-workflow alice-dms-processor").
+
+_Weitere Details nach /deploy._
