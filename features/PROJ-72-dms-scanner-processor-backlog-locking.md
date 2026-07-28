@@ -1,10 +1,12 @@
 # PROJ-72: DMS Scanner/Processor Backlog-Locking
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-07-28
 **Last Updated:** 2026-07-28
 
-> **Update 2026-07-28 (Backend):** Implementiert gemäß Tech Design. Status auf "In Progress" gesetzt, nächster Schritt `/qa`. Details siehe "Implementation Notes" unten.
+> **Update 2026-07-28 (Backend):** Implementiert gemäß Tech Design. Details siehe "Implementation Notes" unten.
+>
+> **Update 2026-07-28 (QA):** Statischer Code-Review, Node.js-Syntaxprüfung, n8n-mcp-Validierung und Live-Verifikation der Redis-Lock-Primitiven (temporärer Docker-Redis) durchgeführt — keine Live-Ausführung gegen die produktive n8n-Instanz möglich, da noch nicht deployed. 2 nicht-blockierende Bugs dokumentiert (1 Medium: Sperrfreigabe bei unerwarteten Node-Fehlern verzögert statt sofort, selbstheilend über TTL; 1 Low: workflowId-Platzhalter muss vor Deploy ersetzt werden, bereits in "Deployment" dokumentiert). Kein Critical/High-Bug offen. Status auf "Approved" gesetzt, nächster Schritt `/deploy`. Details siehe "QA Test Results" unten.
 
 ## Dependencies
 - Requires: PROJ-16 (DMS Scanner) — Sperrmechanismus erweitert `alice-dms-scanner`
@@ -195,7 +197,103 @@ Bei einem Redis-Fehler während der Sperr-Erneuerung wurde **fail-closed** gewä
 - Kein PostgreSQL-Schema geändert (Tech Design: Redis-only).
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-07-28
+**Environment:** Statischer Code-Review + Node.js-Syntaxprüfung + n8n-mcp-Validierung + Live-Redis-Verifikation der Lock-Primitiven (Docker-Container `redis:7-alpine`, temporär, nach Test entfernt). **Keine Live-Ausführung gegen die produktive n8n-Instanz** — die Workflows sind zu diesem Zeitpunkt noch nicht deployed (Deploy ist laut Projektkonvention ein manueller Nutzer-Schritt). Die beiden Verifikations-ACs zu BUG-3 (echte überlappende Executions, echte Warteschlangen-Stichprobe) konnten daher nicht live getestet werden — siehe "Nicht verifizierbar" unten.
+**Tester:** QA Engineer (AI)
+
+### Acceptance Criteria Status
+
+#### AC-1: Scanner — Pfad-Locking & Fairness
+- [x] Jeder aktivierte `dms_watched_folders`-Eintrag hat einen Sperrstatus (Redis-Key `alice:dms:scanner:lock:folder:<id>`, Existenz = gesperrt)
+- [x] Atomares Sperren — verifiziert live gegen echtes Redis: zweiter `SET NX PX`-Versuch auf denselben Key schlägt fehl, solange der erste Eintrag noch besteht (kein Zeitfenster für Doppel-Lock)
+- [x] Scanner-Lauf geht alle aktivierten Pfade der Reihe nach durch (`Loop: Folders`, sortiert wie zuvor `sort_order ASC, id ASC`), überspringt gesperrte Pfade, fährt mit dem nächsten fort
+- [x] Periodische Sperr-Erneuerung während der Verarbeitung (`Code: Renew Path Lock`, einmal pro Datei)
+- [x] Sperre verfällt automatisch bei ausbleibendem Heartbeat (Redis `PX`-TTL, passiv) — Mechanismus live verifiziert (Renew auf abgelaufenen/gelöschten Key liefert `0`)
+- [x] Sperre wird nach Abschluss freigegeben (No-Files-Zweig und nach Abschluss der Datei-Schleife, jeweils besitz-geprüft) — **mit Einschränkung, siehe BUG-1**
+- [x] Großer Backlog in einem Pfad blockiert andere Pfade strukturell nicht mehr (Dispatcher wartet nicht auf den Pfad-Worker — `waitForSubWorkflow: false` — mehrere Worker laufen als unabhängige Executions)
+- [x] Bestehende Datei-Level-Mechanismen (SHA-256-Dedup, 5s-Stabilitätscheck) unverändert — Code 1:1 übernommen, nur Redis-Statistik-Keys auf Pfad-Ebene umbenannt
+
+#### AC-2: Processor — Lauf-Locking
+- [x] Prüft vor Start, ob bereits ein Lauf aktiv ist (`Code: Acquire Processor Lock`, atomar)
+- [x] Bereits aktiv → neuer Trigger startet keinen zweiten Lauf, beendet sich sauber ohne Fehler (`End: Already Running`, `noOp`)
+- [x] Aktiver Lauf erneuert Sperre periodisch (einmal pro Plaintext-/Image-/Geocode-Item, alle drei Phasen abgedeckt)
+- [x] Sperre verfällt automatisch bei ausbleibendem Heartbeat
+- [x] Nach regulärem Abschluss (auch bei Zeitlimit) freigegeben — **mit Einschränkung, siehe BUG-1**
+
+#### AC-3: Verifikation (BUG-3 aus PROJ-56)
+- [ ] **Nicht verifizierbar in dieser Session:** Keine doppelten `file_hash`-Einträge über mehrere echte überlappende Scanner-Läufe — erfordert eine deployte Instanz mit echtem Backlog; strukturell durch das Pfad-Lock-Design ausgeschlossen (kein Pfad kann von zwei Workern gleichzeitig bearbeitet werden, live am Redis-Mechanismus verifiziert), aber nicht am echten n8n mit echten Daten beobachtet
+- [ ] **Nicht verifizierbar in dieser Session:** Stichprobe aus n8n-Executions — es existieren noch keine Executions, da die Workflows noch nicht deployed sind
+
+### Edge Cases Status
+
+#### EC-1: Zwei Scanner-Läufe starten praktisch zeitgleich
+- [x] Verifiziert live: Nur einer sperrt einen gegebenen Pfad erfolgreich, der andere überspringt ihn (Redis `SET NX` ist atomar, kein Zeitfenster)
+
+#### EC-2: Scanner-Lauf stürzt mitten in Pfad-Verarbeitung ab
+- [x] Sperre verfällt nach TTL (180s), Pfad wird im nächsten Lauf erneut aufgenommen, File-Level-Dedup bleibt zusätzlich bestehen
+
+#### EC-3: Pfad wird während laufender Sperre deaktiviert
+- [x] Laufender Worker hat Pfad-Info bereits vom Dispatcher übernommen, arbeitet unbeeinflusst weiter; künftige Dispatcher-Läufe filtern über `WHERE enabled = true` und überspringen den Pfad automatisch
+
+#### EC-4: Alle Pfade aktuell gesperrt
+- [x] Dispatcher durchläuft alle Pfade, sperrt keinen, beendet sich ohne Datei-Verarbeitung, kein Fehler (`Code: Dispatcher Summary Log` mit `paths_dispatched: 0`)
+
+#### EC-5: Processor-Lauf über Mitternacht/mehrere Tage
+- [x] Lock-TTL (30 Min) wird durch Heartbeat pro Item weit vor Ablauf erneuert; nächster 02:00-Trigger findet die Sperre noch aktiv und beendet sich sauber
+
+#### EC-6: Processor-Lauf hängt fest (Ollama/Weaviate reagiert nicht)
+- [x] Alle Einzel-HTTP-Calls in der Pipeline haben bestehende Timeouts (10–300s je nach Call), alle deutlich unter der 30-Min-TTL — ein Hänger an einer einzelnen Operation lässt die Sperre nicht vorzeitig verfallen
+- [x] Verfällt die Sperre dennoch (z.B. durch mehrere Retries in Folge), erkennt der ursprüngliche Lauf dies beim nächsten Renewal-Versuch und bricht sich selbst ab (kein Doppel-Lauf)
+
+#### EC-7: Pfad-Worker hängt bei einzelner Datei (z.B. langsames NAS) fest
+- [x] Verhält sich exakt wie in der Spec beschrieben: Erkennung/Selbstabbruch erfolgt beim NÄCHSTEN Renewal-Versuch (nächste Datei), nicht mitten in der hängenden Operation selbst — die Spec akzeptiert das explizit und verweist auf die zusätzliche File-Level-Dedup als Sicherheitsnetz für genau diesen Fall; Verhalten deckt sich mit dem Design
+
+#### EC-8: Manuelles Zurücksetzen einer hängenden Sperre durch Admin
+- [x] Sperrwert ist lesbares JSON (`owner`, `path`, `folder_id`, `started_at`, `last_heartbeat`) — per direktem `DEL` in Redis jederzeit außerhalb des n8n-Flows entfernbar, kein UI nötig
+
+### Security Audit Results
+
+**n8n workflow features (kein neuer externer Trigger, rein interne Scheduled Workflows):**
+- [x] Keine neue Angriffsfläche: keine neuen Webhooks, keine neuen Credentials, kein neuer externer Service
+- [x] Redis-Key-Konstruktion sicher: `folder.id` stammt aus PostgreSQL `SERIAL` (Integer, kein Nutzereingabe-String), keine Injection-Möglichkeit in Key-Namen
+- [x] Lua-Skript-Injection ausgeschlossen: Owner-Token und Timestamps werden ausschließlich über `ARGV`/`arguments` an `EVAL` übergeben, niemals in den Skript-Text interpoliert — live gegen echtes Redis verifiziert
+- [x] Fehlerhafte/korrumpierte Lock-Werte (z.B. durch manuellen Admin-Eingriff mit ungültigem JSON) führen zu einem sauberen `pcall`-Fehlschlag (Rückgabe `0`, kein Lua-Crash) — live verifiziert
+- [x] Keine neuen Secrets im Code; bestehende `REDIS_PASSWORD`-Handhabung unverändert übernommen
+- [x] `callerPolicy: workflowsFromSameOwner` auf beiden Workflows (Dispatcher + neuer Sub-Workflow) — konsistent mit bestehender Konvention, keine Rechteausweitung
+
+### Bugs Found
+
+#### BUG-1: Sperre wird bei einem echten, unerwarteten Node-Fehler (nicht Zeitlimit/Lock-Verlust) nicht sofort freigegeben
+- **Severity:** Medium
+- **Steps to Reproduce:**
+  1. Angenommen, ein bislang unbekannter Bug oder eine Laufzeitausnahme lässt einen der bestehenden, unveränderten Verarbeitungsschritte (z.B. `Code: Lifecycle Check` im Pfad-Worker oder `Code: BankTransaction Phase B` im Processor) eine nicht abgefangene Exception werfen (alle diese Nodes haben zwar bereits eigene try/catch/finally-Blöcke aus früheren PROJs, aber ohne `onError`-Konfiguration auf Node-Ebene stoppt n8n bei einer wirklich unerwarteten Exception die gesamte Execution sofort an dieser Stelle)
+  2. Erwartet laut Spec/Tech-Design ("Bricht die Datei-Verarbeitung ... mit Fehler ab, gibt der Worker seine Pfad-Sperre trotzdem frei" bzw. "Nach regulärem Abschluss ... wird die Sperre freigegeben"): Sperre wird auch in diesem Fall sofort freigegeben
+  3. Tatsächlich: Es gibt keinen verkabelten Error-Output-Pfad (`onError: 'continueErrorOutput'`) zu `Code: Release Path Lock` bzw. `Code: Release Processor Lock (Success)` — eine solche Exception würde die Execution beenden, ohne dass der Release-Code läuft. Die Sperre bleibt bis zum TTL-Ablauf bestehen (Scanner: 180s, Processor: 30 Min)
+- **Einordnung:** Kein Datenverlust und kein Doppelverarbeitungs-Risiko (die Sperre verfällt selbstständig und ist danach wieder frei) — reines Verzögerungsrisiko, im Scanner-Fall sehr kurz (180s), im Processor-Fall potenziell bis zu 30 Min am nächsten Abend. Dasselbe Fehlerbehandlungs-Muster (kein durchgängiges `onError`-Routing) besteht bereits unverändert im gesamten übrigen Workflow und ist keine PROJ-72-spezifische Regression, aber die Tech-Design-Formulierung verspricht für die Sperre explizit eine Freigabe "auch bei Fehler", was so nicht vollständig eingehalten wird.
+- **Priority:** Nice to have (kann in einem Folge-Sprint durch `onError: 'continueErrorOutput'` + eine zusätzliche Fehler-Route zum jeweiligen Release-Node geschlossen werden, falls gewünscht)
+
+#### BUG-2: workflowId-Platzhalter im Dispatcher muss vor dem ersten Deploy manuell ersetzt werden
+- **Severity:** Low
+- **Steps to Reproduce:**
+  1. `alice-dms-scanner` wird deployed, ohne vorher den Platzhalter `__REPLACE_WITH_PATH_WORKER_WORKFLOW_ID__` im Node `Execute: Path Worker` durch die echte `alice-dms-path-worker`-Workflow-ID zu ersetzen
+  2. Erwartet: Dispatcher stößt den Pfad-Worker an
+  3. Tatsächlich: Der `Execute: Path Worker`-Node schlägt fehl (ungültige Workflow-ID), da die echte ID erst nach dem ersten Import von `alice-dms-path-worker` bekannt ist
+- **Priority:** Fix before deployment (bereits als expliziter manueller Schritt im Abschnitt "Deployment" dieser Spec dokumentiert — kein Code-Bug, sondern ein Deploy-Reihenfolge-Punkt, den der Nutzer beim Deploy beachten muss)
+
+### Regression-Check (bestehende, deployte Features)
+- [x] MQTT-Topics für Datei-Routing unverändert (`alice/dms/pdf|ocr|txt|office|image`) — Nachrichtenformat 1:1 identisch, keine Auswirkung auf `dms-extractor-*`-Container (PROJ-16/17/18/56)
+- [x] `alice/dms/lifecycle` (PROJ-21) und `alice/dms/done`, Thumbnail-Trigger (PROJ-55) unverändert
+- [x] Kein PostgreSQL-Schema geändert — `alice.dms_watched_folders` weiterhin identisch gelesen (SELECT unverändert)
+- [x] Bestehende Datei-Level-Redis-Strukturen (`alice:dms:processed`, `queued_files`, `path_to_hash`, `hash_to_paths:<hash>`) unverändert genutzt
+- [ ] **Nicht verifizierbar:** Live-Regressionstest der Plaintext-/BankTransaction-/Image-/Geocode-Kernlogik im Processor, da diese Session keinen Zugriff auf eine laufende n8n-Instanz mit echten Daten hat — Code dieser Bereiche wurde nachweislich nicht verändert (nur um Lock-Aufruf/-Renewal ergänzt), Diff-Review bestätigt dies
+
+### Summary
+- **Acceptance Criteria:** 13/15 passed (2 nicht live verifizierbar mangels Deployment, s.o.; strukturell/statisch aber erfüllt)
+- **Bugs Found:** 2 total (0 critical, 0 high, 1 medium, 1 low)
+- **Security:** Pass — keine neue Angriffsfläche, Lock-Primitiven live gegen echtes Redis auf Atomarität, Besitzprüfung und Robustheit gegen korrupte Werte verifiziert
+- **Production Ready:** YES (kein Critical/High-Bug offen)
+- **Recommendation:** Deploy — BUG-1 und BUG-2 sind dokumentierte, nicht-blockierende Punkte (Nice-to-have bzw. bereits im Deployment-Ablauf abgedeckt). Nach dem Deploy wird empfohlen, die beiden nicht verifizierbaren ACs (echte überlappende Executions, Stichprobe gegen `alice:dms:geocode_pending`) einmalig anhand echter n8n-Executions nachzuprüfen, analog zur Methode aus der PROJ-56-QA.
 
 ## Deployment
 
