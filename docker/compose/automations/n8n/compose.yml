@@ -16,12 +16,20 @@ services:
       - N8N_METRICS_QUEUE_METRICS_INTERVAL=15
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_RUNNERS_TASK_TIMEOUT=3600
+      # PROJ-72 follow-up: task runner OOM/disconnects under concurrent Path-Worker load (2026-07-29)
+      - N8N_RUNNERS_MAX_OLD_SPACE_SIZE=4096
+      # PROJ-72 follow-up: persistent file logging (was console-only, not reviewable after the fact)
+      - N8N_LOG_OUTPUT=file
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_FILE_LOCATION=/home/node/.n8n/logs/n8n.log
+      - N8N_LOG_FILE_SIZE_MAX=50
+      - N8N_LOG_FILE_COUNT_MAX=10
       - N8N_DIAGNOSTICS_ENABLED=false
       - QUEUE_HEALTH_CHECK_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${USER}
       - N8N_BASIC_AUTH_PASSWORD=${PASSWORD}
       - WEBHOOK_URL=https://alice.happy-mining.de
-      - NODE_FUNCTION_ALLOW_EXTERNAL=axios,redis
+      - NODE_FUNCTION_ALLOW_EXTERNAL=axios,redis,winston
       - NODE_FUNCTION_ALLOW_BUILTIN=crypto,fs,path
       # PROJ-1: HA Intent Infrastructure (2026-02-24)
       - INTENT_MIN_CERTAINTY=${INTENT_MIN_CERTAINTY}
