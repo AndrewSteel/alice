@@ -1,12 +1,14 @@
 # PROJ-72: DMS Scanner/Processor Backlog-Locking
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-28
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-07-29
 
 > **Update 2026-07-28 (Backend):** Implementiert gemäß Tech Design. Details siehe "Implementation Notes" unten.
 >
 > **Update 2026-07-28 (QA):** Statischer Code-Review, Node.js-Syntaxprüfung, n8n-mcp-Validierung und Live-Verifikation der Redis-Lock-Primitiven (temporärer Docker-Redis) durchgeführt — keine Live-Ausführung gegen die produktive n8n-Instanz möglich, da noch nicht deployed. 2 nicht-blockierende Bugs dokumentiert (1 Medium: Sperrfreigabe bei unerwarteten Node-Fehlern verzögert statt sofort, selbstheilend über TTL; 1 Low: workflowId-Platzhalter muss vor Deploy ersetzt werden, bereits in "Deployment" dokumentiert). Kein Critical/High-Bug offen. Status auf "Approved" gesetzt, nächster Schritt `/deploy`. Details siehe "QA Test Results" unten.
+>
+> **Update 2026-07-29 (Deploy/Betrieb):** Alle drei Workflows live deployed. Erstlauf mit vollem Backlog aufgedeckt, dass n8n-Task-Runner unter der neuen Nebenläufigkeit (mehrere parallele Pfad-Worker + Nightly-Prozessor) an Speichergrenzen und Timeout stieß (Task-Runner-Disconnects, `Find Stale Paths` lief in den 3600s-Task-Timeout). Zusätzlich stellte sich heraus, dass `console.log`/`warn`/`error` in Code-Nodes grundsätzlich nur im Browser sichtbar ist, nie im Container — nachträgliche Fehleranalyse war damit nicht möglich. Beides behoben, siehe neuer Abschnitt "Betriebs-Fix: Logging & Task-Runner-Speicher" unten. Details zum aktuellen Produktionsstand siehe "Deployment" unten.
 
 ## Dependencies
 - Requires: PROJ-16 (DMS Scanner) — Sperrmechanismus erweitert `alice-dms-scanner`
@@ -189,6 +191,14 @@ Neuer Node `Code: Acquire Processor Lock` direkt nach dem Schedule-Trigger (atom
 
 Bei einem Redis-Fehler während der Sperr-Erneuerung wurde **fail-closed** gewählt (als Sperrverlust behandeln, sofort abbrechen) statt fail-open — priorisiert "niemals doppelt verarbeiten" (der Kern von BUG-3) über einen möglichen unnötigen Abbruch bei einem kurzen Redis-Verbindungsfehler.
 
+### Betriebs-Fix: Logging & Task-Runner-Speicher (2026-07-29, nach erstem Produktions-Lauf)
+
+Der erste Lauf gegen den echten Backlog (5 Pfade, davon einer mit mehreren tausend Bildern) deckte zwei produktive Probleme auf, die im QA-Review nicht sichtbar waren (kein echter Backlog zum Testzeitpunkt vorhanden):
+
+- **Task-Runner-Überlastung:** Mit der neuen Nebenläufigkeit (mehrere parallele Pfad-Worker-Ausführungen statt eines sequenziellen Laufs) gerieten n8n-Task-Runner-Prozesse an Speicher-/Kapazitätsgrenzen — sichtbar als `Node execution failed` (`InternalTaskRunnerDisconnectAnalyzer`, Task-Broker-WS-Verbindungsabbruch) im Prozessor (`Code: BankTransaction Phase B`, langlaufender sequenzieller Ollama-Chunk-Loop) und im Pfad-Worker (zweiter stündlicher Trigger, während der Bild-Pfad noch lief), sowie als exaktes `N8N_RUNNERS_TASK_TIMEOUT`-Timeout (3600s) im Dispatcher (`Code: Find Stale Paths`, vermutlich durch NAS-I/O-Konkurrenz mit den parallel laufenden Pfad-Workern verlangsamt). Fix: `N8N_RUNNERS_MAX_OLD_SPACE_SIZE=4096` in `docker/compose/automations/n8n/compose.yml` (Server hat 64GB RAM, ~24GB durch die 33 laufenden Container belegt — 4096MB Headroom für den Task-Runner bestätigt ausreichend).
+- **Keine nachträgliche Fehleranalyse möglich:** `console.log`/`warn`/`error` in n8n-Code-Nodes wird laut n8n-eigener Doku/Community by design ausschließlich an den Browser weitergereicht, nie an die Container-Logs — unabhängig von Task-Runner-Modus. Fix: alle 61 `console.*`-Aufrufe über alle drei Workflows (22 betroffene Code-Nodes) auf pro-Node-`winston`-Logger umgestellt, die direkt auf Datei schreiben (`/home/node/.n8n/logs/n8n.log`, dieselbe Datei wie n8n-eigenes Core-Logging via `N8N_LOG_OUTPUT=file`), mit `defaultMeta: { workflow, node }` für Greppability. `winston` wurde dafür zu `NODE_FUNCTION_ALLOW_EXTERNAL` hinzugefügt.
+  - Ein zusätzlicher `winston.transports.Console()`-Transport wurde getestet, in der Annahme, damit auch `docker logs --follow n8n` nutzbar zu machen — funktioniert nicht: der Code-Node-Task-Runner läuft als eigener Prozess, der mit dem n8n-Hauptprozess über ein WebSocket-Task-Broker-Protokoll kommuniziert (nicht über einfache stdio-Vererbung), dessen eigener stdout nicht an den Container-stdout durchgereicht wird — unabhängig von `N8N_LOG_OUTPUT` (das nur n8n's eigenen internen Core-Logger steuert, nicht selbst erstellte `winston`-Logger-Instanzen in Code-Nodes). Der Console-Transport wurde daher wieder entfernt (nur `File`-Transport bleibt). Einzig zuverlässiger Zugriffsweg: `docker exec n8n tail -f /home/node/.n8n/logs/n8n.log`.
+
 ### Validierung durchgeführt
 
 - Alle 44 Code-Node-JS-Bodies über alle drei Workflow-Dateien mit Node.js (`node -e "new Function(...)"`) syntaktisch geprüft — 0 Fehler.
@@ -304,4 +314,11 @@ Bei einem Redis-Fehler während der Sperr-Erneuerung wurde **fail-closed** gewä
 4. `alice-dms-scanner` deployen ("Deploy n8n-workflow alice-dms-scanner").
 5. `alice-dms-processor` deployen ("Deploy n8n-workflow alice-dms-processor").
 
-_Weitere Details nach /deploy._
+### Produktionsstand (2026-07-29)
+
+Alle drei Workflows sind live deployed. Erster Lauf gegen den echten Backlog:
+
+- **Pfade mit geringem Datenaufkommen:** alle abgearbeitet, aktuell keine neuen Dateien in diesen Pfaden.
+- **Bild-/Video-Pfad:** läuft noch (mehrere tausend Dateien), Fertigstellung wird noch einige Zeit in Anspruch nehmen. Redis-Lock verhält sich dabei erwartungsgemäß (Sperre bleibt beim laufenden Worker, kein Doppel-Dispatch bei den dazwischenliegenden stündlichen Triggern).
+- **`alice-dms-processor`:** manuell gestartet, läuft bisher ohne Fehler (nach dem Task-Runner-Speicher-Fix, siehe "Betriebs-Fix"-Abschnitt oben).
+- **n8n neu deployed** nach dem Betriebs-Fix (`N8N_RUNNERS_MAX_OLD_SPACE_SIZE`, Datei-Logging, winston-Umstellung) — Container-Neustart hat den zu dem Zeitpunkt laufenden Bild-Pfad-Worker beendet; dieser wird durch den nächsten stündlichen Trigger sauber neu gestartet (bereits verarbeitete Dateien werden über den bestehenden Hash-Abgleich in `Code: Lifecycle Check` übersprungen, kein Re-OCR/Re-Queueing).
