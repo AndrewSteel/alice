@@ -2,13 +2,15 @@
 
 ## Status: Deployed
 **Created:** 2026-07-28
-**Last Updated:** 2026-07-29
+**Last Updated:** 2026-07-30
 
 > **Update 2026-07-28 (Backend):** Implementiert gemäß Tech Design. Details siehe "Implementation Notes" unten.
 >
 > **Update 2026-07-28 (QA):** Statischer Code-Review, Node.js-Syntaxprüfung, n8n-mcp-Validierung und Live-Verifikation der Redis-Lock-Primitiven (temporärer Docker-Redis) durchgeführt — keine Live-Ausführung gegen die produktive n8n-Instanz möglich, da noch nicht deployed. 2 nicht-blockierende Bugs dokumentiert (1 Medium: Sperrfreigabe bei unerwarteten Node-Fehlern verzögert statt sofort, selbstheilend über TTL; 1 Low: workflowId-Platzhalter muss vor Deploy ersetzt werden, bereits in "Deployment" dokumentiert). Kein Critical/High-Bug offen. Status auf "Approved" gesetzt, nächster Schritt `/deploy`. Details siehe "QA Test Results" unten.
 >
 > **Update 2026-07-29 (Deploy/Betrieb):** Alle drei Workflows live deployed. Erstlauf mit vollem Backlog aufgedeckt, dass n8n-Task-Runner unter der neuen Nebenläufigkeit (mehrere parallele Pfad-Worker + Nightly-Prozessor) an Speichergrenzen und Timeout stieß (Task-Runner-Disconnects, `Find Stale Paths` lief in den 3600s-Task-Timeout). Zusätzlich stellte sich heraus, dass `console.log`/`warn`/`error` in Code-Nodes grundsätzlich nur im Browser sichtbar ist, nie im Container — nachträgliche Fehleranalyse war damit nicht möglich. Beides behoben, siehe neuer Abschnitt "Betriebs-Fix: Logging & Task-Runner-Speicher" unten. Details zum aktuellen Produktionsstand siehe "Deployment" unten.
+>
+> **Update 2026-07-30 (Betrieb):** Nach dem Logging-/Speicher-Fix traten im `alice-dms-processor` weiterhin Task-Runner-Abstürze auf, diesmal durch einen axios/Node.js-v24-Interop-Bug bei jedem Ollama-Timeout (`Code: BankTransaction Phase B`, dann `Code: Parse Extract Result`, dann `Code: Parse Classify Result`). Root-Cause per SSH-Log-Analyse auf `ollama-3090` verifiziert: kein Modell-Swap, sondern unbegrenzte Generierungslänge (kein `num_predict`) kombiniert mit zu kurzen Timeouts auf den Retry-Pfaden. Fix: `num_predict`-Obergrenzen + angepasste Timeouts in allen drei betroffenen Code-Nodes; Nutzer hat zusätzlich unabhängig `OLLAMA_MODEL_DMS` auf dasselbe Modell wie der Haupt-Chat (`qwen3.5:27b-q4_K_M`) umgestellt. Details siehe neuer Abschnitt "Betriebs-Fix: Ollama-Timeout-Crashes im Processor" unten.
 
 ## Dependencies
 - Requires: PROJ-16 (DMS Scanner) — Sperrmechanismus erweitert `alice-dms-scanner`
@@ -199,12 +201,33 @@ Der erste Lauf gegen den echten Backlog (5 Pfade, davon einer mit mehreren tause
 - **Keine nachträgliche Fehleranalyse möglich:** `console.log`/`warn`/`error` in n8n-Code-Nodes wird laut n8n-eigener Doku/Community by design ausschließlich an den Browser weitergereicht, nie an die Container-Logs — unabhängig von Task-Runner-Modus. Fix: alle 61 `console.*`-Aufrufe über alle drei Workflows (22 betroffene Code-Nodes) auf pro-Node-`winston`-Logger umgestellt, die direkt auf Datei schreiben (`/home/node/.n8n/logs/n8n.log`, dieselbe Datei wie n8n-eigenes Core-Logging via `N8N_LOG_OUTPUT=file`), mit `defaultMeta: { workflow, node }` für Greppability. `winston` wurde dafür zu `NODE_FUNCTION_ALLOW_EXTERNAL` hinzugefügt.
   - Ein zusätzlicher `winston.transports.Console()`-Transport wurde getestet, in der Annahme, damit auch `docker logs --follow n8n` nutzbar zu machen — funktioniert nicht: der Code-Node-Task-Runner läuft als eigener Prozess, der mit dem n8n-Hauptprozess über ein WebSocket-Task-Broker-Protokoll kommuniziert (nicht über einfache stdio-Vererbung), dessen eigener stdout nicht an den Container-stdout durchgereicht wird — unabhängig von `N8N_LOG_OUTPUT` (das nur n8n's eigenen internen Core-Logger steuert, nicht selbst erstellte `winston`-Logger-Instanzen in Code-Nodes). Der Console-Transport wurde daher wieder entfernt (nur `File`-Transport bleibt). Einzig zuverlässiger Zugriffsweg: `docker exec n8n tail -f /home/node/.n8n/logs/n8n.log`.
 
+### Betriebs-Fix: Ollama-Timeout-Crashes im Processor (2026-07-30, nach dem Logging-/Speicher-Fix)
+
+Nach dem Task-Runner-Speicher-Fix (siehe oben) lief `alice-dms-processor` stabiler, stürzte aber weiterhin wiederholt ab — diesmal mit `TypeError: Cannot assign to read only property 'name' of object 'Error: timeout of <N>ms exceeded'` beim Konstruieren eines `AxiosError`, gefolgt vom selben `TaskBrokerWsServer`/`InternalTaskRunnerDisconnectAnalyzer`-Verbindungsabbruch wie zuvor. Zuerst in `Code: BankTransaction Phase B` (180000ms-Timeout), danach in `Code: Parse Extract Result` und `Code: Parse Classify Result` (je 30000ms-Timeout).
+
+**Root Cause (verifiziert via SSH-Log-Analyse auf `ollama-3090`, `docker logs ollama-3090`):**
+- Es handelt sich um einen bekannten axios@1.18.0/Node.js-v24-Interop-Bug: Bei **jedem** axios-`timeout`, der tatsächlich feuert, versucht `AxiosError`s Konstruktor `this.name` auf ein bereits nicht-beschreibbares Error-Objekt zu setzen und wirft dabei selbst eine `TypeError`. Das passiert in einem Timer-Callback außerhalb der Promise-Chain des aufrufenden Codes — kein `try`/`catch` im Code-Node kann das abfangen, der Absturz betrifft den ganzen Task-Runner-Prozess, nicht nur den einzelnen Workflow-Schritt. Da n8n-Code-Nodes ihre `axios`-Version aus n8n's eigenem, gebündelten `node_modules` beziehen (über `NODE_FUNCTION_ALLOW_EXTERNAL`), kann diese Version projektseitig nicht gepinnt werden — der einzig wirksame Hebel ist, ein Timeout möglichst gar nicht erst feuern zu lassen.
+- Der ursprüngliche Verdacht (Weaviate zu langsam / teilweise auf CPU statt GPU) wurde geprüft und verworfen: `docker exec ollama-3090 ollama ps` zeigte das Modell durchgehend zu 100% auf der GPU. Die anschließende Log-Analyse zeigte stattdessen: ein einzelner Slot, kein Modell-Wechsel während des Vorfalls, aber eine einzelne Generierung, die weit über 8000 Tokens hinaus weiterlief (kein `num_predict` gesetzt) und dadurch den 180s-Timeout überschritt, während Ollama serverseitig einfach weiterrechnete.
+- `HTTP: Ollama Extract`/`HTTP: Ollama Classify` (native n8n-HTTP-Nodes, nicht Code-Node-axios) sind laut Nutzer-Bestätigung nicht betroffen — deren Verarbeitung liegt durchgehend deutlich unter 60s, daher dort keine Änderung.
+
+**Fix (`workflows/alice-dms-processor.json`):**
+| Node | Vorher | Nachher |
+| --- | --- | --- |
+| `Code: BankTransaction Phase B` | `timeout: 180000`, kein `num_predict` | `timeout: 300000`, `num_predict: 10000` |
+| `Code: Parse Extract Result` (Retry) | `timeout: 30000`, kein `num_predict` | `timeout: 300000` (jetzt konsistent mit dem Primäraufruf `HTTP: Ollama Extract`), `num_predict: 4000` |
+| `Code: Parse Classify Result` (Retry) | `timeout: 30000`, kein `num_predict` | `timeout: 120000` (konsistent mit `HTTP: Ollama Classify`), `num_predict: 500` |
+
+**Abwägung Vollständigkeit vs. Stabilität:** Eine `num_predict`-Obergrenze verhindert zwar unbegrenztes Wachstum, kann aber bei einer legitim sehr dichten Antwort (z.B. ein 8000-Zeichen-Kontoauszug-Chunk mit ungewöhnlich vielen Buchungszeilen) die Ausgabe mitten im JSON abschneiden, falls die Grenze zu knapp gewählt ist — das würde einen Parse-Fehler statt eines Timeouts erzeugen und im schlimmsten Fall (Retry ebenfalls abgeschnitten) einzelne Transaktionen eines Chunks verwerfen. Da bei `Code: BankTransaction Phase B` das Limit für **jeden** Aufruf gilt (nicht nur den Retry), wurde hier bewusst großzügig auf 10000 Tokens gesetzt (deckt rechnerisch auch sehr dichte Chunks ab) statt konservativ auf 4000. Bei den beiden anderen Nodes betrifft die Grenze nur den Retry-Pfad und die Antwort-Schemas sind deutlich kleiner (Kopfdaten-Felder bzw. ein Klassifizierungs-Label) — dort ist ein engeres Limit sicher ausreichend.
+
+**Zusätzlich (Nutzer-Entscheidung, unabhängig von diesem Fix):** `OLLAMA_MODEL_DMS` in `docker/compose/automations/n8n/.env` wurde von `mistral-small3.2:24b` auf `qwen3.5:27b-q4_K_M` umgestellt (dasselbe Modell wie der Haupt-Chat), um die Anzahl unterschiedlicher, gleichzeitig auf der einen RTX-3090-Instanz gehaltener Modelle zu reduzieren. Reine `.env`-Änderung, kein Workflow-Code betroffen. Ob sich das auf die Extraktionsqualität bei BankTransaction-Daten auswirkt, ist bisher nicht durch reale Dokumente verifiziert — sollte nach dem nächsten Produktionslauf stichprobenartig geprüft werden.
+
 ### Validierung durchgeführt
 
 - Alle 44 Code-Node-JS-Bodies über alle drei Workflow-Dateien mit Node.js (`node -e "new Function(...)"`) syntaktisch geprüft — 0 Fehler.
 - `alice-dms-scanner.json` und `alice-dms-path-worker.json` vollständig mit n8n-mcp `validate_workflow` geprüft: keine ungültigen Verbindungen, keine echten Ausdrucksfehler. Die gemeldeten "Cannot return primitive values directly"-Fehler sind ein bekannter Fehlalarm des heuristischen Linters (er erkennt `return true/false` innerhalb verschachtelter `.filter()`-Callbacks bzw. `return 0/1` innerhalb der Lua-Skript-Strings fälschlich als Top-Level-Return) — reproduzierbar auch auf unverändertem, bereits produktivem Code (`Code: Lifecycle Check`, `Code: Find Stale Paths`), also kein PROJ-72-Regressions-Befund.
 - `alice-dms-processor.json` (67 Nodes) wurde wegen Tool-Payload-Größe nicht als Ganzes durch `validate_workflow` geschickt; stattdessen wurde der komplette Verbindungsgraph händisch (Python) auf fehlende/verwaiste Referenzen und die beiden echten Terminal-Exits geprüft (bestanden), zusätzlich zur Node.js-Syntaxprüfung aller Code-Nodes.
 - Kein PostgreSQL-Schema geändert (Tech Design: Redis-only).
+- Nachtrag 2026-07-30: Die drei geänderten Code-Nodes im Ollama-Timeout-Fix (`Code: BankTransaction Phase B`, `Code: Parse Extract Result`, `Code: Parse Classify Result`) wurden erneut einzeln mit `node --check` syntaktisch geprüft (0 Fehler), Node-Anzahl in `alice-dms-processor.json` vor/nach jedem Edit verglichen (67, unverändert).
 
 ## QA Test Results
 
@@ -322,3 +345,4 @@ Alle drei Workflows sind live deployed. Erster Lauf gegen den echten Backlog:
 - **Bild-/Video-Pfad:** läuft noch (mehrere tausend Dateien), Fertigstellung wird noch einige Zeit in Anspruch nehmen. Redis-Lock verhält sich dabei erwartungsgemäß (Sperre bleibt beim laufenden Worker, kein Doppel-Dispatch bei den dazwischenliegenden stündlichen Triggern).
 - **`alice-dms-processor`:** manuell gestartet, läuft bisher ohne Fehler (nach dem Task-Runner-Speicher-Fix, siehe "Betriebs-Fix"-Abschnitt oben).
 - **n8n neu deployed** nach dem Betriebs-Fix (`N8N_RUNNERS_MAX_OLD_SPACE_SIZE`, Datei-Logging, winston-Umstellung) — Container-Neustart hat den zu dem Zeitpunkt laufenden Bild-Pfad-Worker beendet; dieser wird durch den nächsten stündlichen Trigger sauber neu gestartet (bereits verarbeitete Dateien werden über den bestehenden Hash-Abgleich in `Code: Lifecycle Check` übersprungen, kein Re-OCR/Re-Queueing).
+- **2026-07-30:** Nach dem obigen Fix weiterhin Task-Runner-Abstürze im `alice-dms-processor` durch axios-Timeout-Crashes beobachtet (siehe "Betriebs-Fix: Ollama-Timeout-Crashes im Processor" oben) — behoben, noch nicht redeployed. Nächster Schritt: `alice-dms-processor` erneut deployen ("Deploy n8n-workflow alice-dms-processor").
