@@ -1,6 +1,6 @@
 # PROJ-73: Weaviate-Suchkriterien-Qualität
 
-## Status: Planned
+## Status: Architected
 
 **Created:** 2026-08-02
 **Last Updated:** 2026-08-02
@@ -85,7 +85,56 @@ Analyse ergab zwei unterschiedliche Ursachen, die beide in dieser Spec behandelt
 
 ## Tech Design (Solution Architect)
 
-_To be added by /architecture_
+### Workflow Architecture
+
+**Betroffene Workflows:** `alice-tool-search` (Dokumentensuche), `alice-mail-tools` (Mailsuche) — beide werden von `alice-chat-stream` aufgerufen, wenn das LLM `search_documents` bzw. `search_emails` einsetzt.
+
+**Trigger:** unverändert — Aufruf durch `alice-chat-stream` über Execute-Workflow (Webhook bleibt als Debug-Fallback bestehen).
+
+**Neue Entscheidung vor dem Tool-Aufruf (im LLM-Prompt/Tool-Schema von `alice-chat-stream`):**
+- Das LLM erhält ein neues Argument „Sortiermodus" (Relevanz vs. Aktualität) und setzt „Aktualität", sobald die Anfrage im Kern zeitlich ist („die letzten…", „neueste…", „zuletzt…").
+- Klare Anweisung im Tool-Schema: vom Nutzer genannte konkrete Begriffe (Firmennamen, Themen) werden unverändert als Suchbegriff übernommen; gibt es gar kein Inhaltskriterium, bleibt der Suchbegriff leer statt einer erfundenen Paraphrase.
+- Bei einer Aktualitäts-Anfrage ganz ohne erkennbaren Dokumenttyp fragt das LLM zuerst nach, welchen Typ der Nutzer meint — wie es heute schon bei anderen unklaren Angaben nachfragt. Erst ein ausdrücklicher „alles"-Wunsch löst eine typübergreifende Suche aus.
+
+**Verarbeitungsschritte im Workflow (aktualisiert):**
+1. **Eingangsprüfung/Normalisierung** — wie bisher (Dokumenttyp-Zuordnung, Datumsangaben, Anzahl-Begrenzung), zusätzlich wird der neue Sortiermodus validiert (Default: Relevanz = heutiges, unverändertes Verhalten).
+2. **Berechtigungsfilter** — unverändert, schränkt weiterhin vor jeder Suche auf die für den Nutzer freigegebenen Dokumenttypen/Postfächer ein.
+3. **Such-Ausführung** — verzweigt neu in zwei Modi:
+   - *Relevanz-Modus* (heutiges Verhalten, unverändert): inhaltliche Ähnlichkeitssuche, Treffer nach Relevanz-Score sortiert.
+   - *Aktualitäts-Modus* (neu):
+     - Mit Inhaltskriterium (z.B. „Rechnungen von Enercity"): dieselbe inhaltliche Suche wie heute liefert die Trefferkandidaten (unverändertes Matching-Verhalten), anschließend werden diese Kandidaten nach Datum absteigend statt nach Relevanz sortiert und auf N begrenzt.
+     - Ohne Inhaltskriterium (reine „letzte N"-Anfrage): direkter Abruf nach Datum absteigend, ganz ohne Relevanz-Bewertung — dadurch kann eine leere/erfundene Suchphrase keine Treffer mehr verhindern.
+     - Bei ausdrücklichem typübergreifendem Wunsch: aktuellste Treffer je Typ einholen, anschließend über alle Typen hinweg gemeinsam nach Datum mischen und auf N begrenzen.
+4. **Rückgabeformat** — unverändert. Jeder Treffer trägt weiterhin Typ und Datum, damit die bestehende „keine Treffer gefunden"-Behandlung (PROJ-37) und die Chat-Darstellung ohne Anpassung weiterlaufen.
+
+**Datenfluss:** Nutzeräußerung → LLM zerlegt sie in strukturierte Suchargumente (Typ, Datum, Richtung, neu: Sortiermodus, unverändert übernommene Suchbegriffe) → Normalisierung/Validierung → Berechtigungsfilter → Such-Ausführung (Relevanz oder Aktualität) → Ergebnisliste → LLM formuliert die Antwort.
+
+**Integrationen:** unverändert — Weaviate (Suchindex), PostgreSQL (Berechtigungen), Ollama/`alice-chat-stream` (Sprachverständnis & Argument-Befüllung). Keine neuen externen Systeme.
+
+**Fehlerbehandlung:** unverändert für 0-Treffer- und Fehlerfälle (bestehende Nutzer-Rückmeldung aus PROJ-37 gilt für beide Modi weiter). Neu zu beachten: Da hohe Trefferzahlen bewusst nicht produktseitig gedeckelt werden (nur die technische Obergrenze von 100 gilt), wird das aktuelle 10-Sekunden-Zeitlimit für Weaviate-Anfragen angehoben, damit auch Anfragen nahe der Obergrenze zuverlässig durchlaufen.
+
+### Datenmodell (einfache Sprache)
+
+Es werden keine neuen Daten gespeichert — die Dokumente/Mails in Weaviate bleiben unverändert. Neu ist nur, wie eine einzelne Suchanfrage interpretiert wird:
+
+```
+Jede Suchanfrage an search_documents / search_emails hat jetzt zusätzlich:
+- Sortiermodus: "Relevanz" (Standard, heutiges Verhalten) oder "Aktualität" (neu)
+
+Unverändert: Suchbegriff, Dokumenttyp, Datumsbereich, Richtung (nur Buchungen), Anzahl
+```
+
+### Tech-Entscheidungen (Begründung für PM)
+
+1. **Sortiermodus wird vom LLM gesetzt, nicht im Workflow automatisch aus Freitext erkannt.** Das LLM zerlegt Anfragen bereits heute in Typ/Datum/Richtung — „das ist eine Aktualitäts-Anfrage" reiht sich als ein weiteres, gleich behandeltes Feld ein. Vorteil: eine einzige Stelle für Sprachverständnis statt doppelter Logik in Workflow und Chat-Backend; Feintuning läuft über Anweisungstexte statt über Workflow-Codeänderungen.
+2. **Bei reiner Aktualitäts-Anfrage (kein Inhaltskriterium) wird gar keine Relevanzsuche mehr versucht**, sondern direkt nach Datum abgerufen. Das behebt die in der Spec beschriebene Ursache: eine erfundene Suchphrase kann keine Treffer mehr verhindern, weil sie in diesem Fall gar nicht erst gebildet wird.
+3. **Bei Aktualitäts-Anfrage MIT Inhaltskriterium bleibt das bestehende Matching unverändert** — nur die abschließende Sortierung wechselt von Relevanz auf Datum. Das entspricht der Vorgabe der Spec, Schreibweise-/Fuzzy-Matching bei Firmennamen nicht anzufassen.
+4. **Die Rückfrage nach dem Dokumenttyp bei unklaren Aktualitäts-Anfragen ist eine Gesprächsregel für das LLM**, keine neue technische Komponente — sie reiht sich in die bestehende Klärungslogik ein, ohne einen neuen Bestätigungs-Dialog im Frontend zu benötigen.
+5. **Zeitlimit für Weaviate-Anfragen wird erhöht** (von 10 auf z.B. 30 Sekunden), weil die Spec bewusst keine Produkt-seitige Deckelung unterhalb der technischen Obergrenze von 100 Treffern will — das bisherige Zeitlimit war für kleinere Standardanfragen (5-20 Treffer) ausgelegt.
+
+### Abhängigkeiten (zu installierende Pakete)
+
+Keine neuen Pakete — die Umsetzung nutzt ausschließlich bestehende Bausteine (Weaviate, PostgreSQL, n8n, Ollama-Tool-Schema).
 
 ## QA Test Results
 
