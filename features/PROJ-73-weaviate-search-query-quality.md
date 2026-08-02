@@ -1,6 +1,6 @@
 # PROJ-73: Weaviate-Suchkriterien-Qualität
 
-## Status: Approved
+## Status: Deployed
 
 **Created:** 2026-08-02
 **Last Updated:** 2026-08-02
@@ -230,4 +230,9 @@ Keine neuen Pakete — die Umsetzung nutzt ausschließlich bestehende Bausteine 
 
 ## Deployment
 
-_To be added by /deploy_
+**Deployed:** 2026-08-02
+
+- `alice-chat-stream` container redeployed with the updated tool schemas (`sort_mode`), rewritten query descriptions, and the `search_emails`/system-prompt fixes.
+- n8n workflows `alice-tool-search` and `alice-mail-tools` deployed (three iterations during QA — see Bugs Found above for what each redeploy fixed).
+- User confirmed via first live chat requests post-deploy that PROJ-73's features work as intended in the actual chat flow, closing out the "Not Tested" LLM-behavior scope boundary noted in the QA section.
+- Not part of this deployment: the nginx `alice.conf` upstream-resolution fix found while debugging an unrelated post-restart 502 — that fix ships separately directly to `dev` (unrelated to PROJ-73's scope).
