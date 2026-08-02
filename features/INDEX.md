@@ -55,7 +55,7 @@
 | PROJ-70 | 3.2   | Browser Adaptiver Noise-Floor — Kalibrierungsfenster pro Aufnahme statt Fixwert 700/0.01, analog zu PROJ-57 für die WebApp-Sprachmodi                                                                                    | Deployed | [Spec](PROJ-70-browser-adaptive-noise-floor.md) | 2026-07-19 |
 | PROJ-71 | 3.2   | Chat State-Management-Layer — useChatSessions.ts auf zentralen Reducer/Dispatch statt 13+ verstreuter setMessagesBySession-Aufrufe umgestellt, kein Verhaltensunterschied                                               | Deployed | [Spec](PROJ-71-chat-state-management-layer.md) | 2026-07-19 |
 | PROJ-72 | 2.3   | DMS Scanner/Processor Backlog-Locking — Verhindert Mehrfachverarbeitung und gegenseitige Blockade von DMS-Pfad-Einträgen bei großen Backlogs (z.B. Erstaufnahme von 70k+ Bildern); ausgegliedert aus PROJ-56              | Deployed  | [Spec](PROJ-72-dms-scanner-processor-backlog-locking.md) | 2026-07-26 |
-| PROJ-73 | 2.3   | Weaviate-Suchkriterien-Qualität — LLM erzeugt für search_documents/search_emails konkrete Suchbegriffe statt minimaler Paraphrasen (z.B. "neueste E-Mails"); betrifft alice-chat-stream                                | In Progress | [Spec](PROJ-73-weaviate-search-query-quality.md) | 2026-08-02 |
+| PROJ-73 | 2.3   | Weaviate-Suchkriterien-Qualität — LLM erzeugt für search_documents/search_emails konkrete Suchbegriffe statt minimaler Paraphrasen (z.B. "neueste E-Mails"); betrifft alice-chat-stream                                | Approved | [Spec](PROJ-73-weaviate-search-query-quality.md) | 2026-08-02 |
 
 <!-- Add features above this line -->
 
