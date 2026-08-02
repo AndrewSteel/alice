@@ -75,6 +75,12 @@ def _build_tool_status(tool_name: str, args: dict[str, Any]) -> str:
             return _truncate(f"Suche nach '{query}'…", TOOL_STATUS_MAX_LEN)
         return "Suche in Dokumenten…"
 
+    if tool_name == "search_emails":
+        query = str(args.get("query") or "").strip()
+        if query:
+            return _truncate(f"Suche E-Mails nach '{query}'…", TOOL_STATUS_MAX_LEN)
+        return "Suche in E-Mails…"
+
     if tool_name == "get_document_details":
         doc_id = (
             str(args.get("weaviate_id") or "").strip()
@@ -144,6 +150,12 @@ def _build_tool_summary(tool_name: str, ok: bool, result: dict[str, Any]) -> str
         if n is None or n <= 0:
             return "Keine Dokumente gefunden"
         return f"{n} Dokument{'e' if n != 1 else ''} gefunden"
+
+    if tool_name == "search_emails":
+        n = _result_count(result)
+        if n is None or n <= 0:
+            return "Keine E-Mails gefunden"
+        return f"{n} E-Mail{'s' if n != 1 else ''} gefunden"
 
     if tool_name == "recall":
         n = _result_count(result)
