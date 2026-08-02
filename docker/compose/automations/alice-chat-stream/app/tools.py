@@ -7,6 +7,8 @@ Tools advertised to the LLM:
   - home_assistant       → POST N8N_TOOL_HA_URL      (only if URL is set)
   - remember             → direct write to alice.user_profiles
   - recall               → direct read from Weaviate AliceMemory
+  - search_emails        → POST N8N_TOOL_MAIL_URL    {operation: 'search_emails', ...} (only if URL is set)
+  - get_email_body       → POST N8N_TOOL_MAIL_URL    {operation: 'get_email_body', ...} (only if URL is set)
 
 Each tool returns a dict that is given verbatim back to Ollama as the
 tool result. Errors are returned as {"error": "..."} so the LLM can
@@ -27,7 +29,7 @@ logger = logging.getLogger("alice-chat-stream.tools")
 N8N_TOOL_SEARCH_URL = os.environ.get("N8N_TOOL_SEARCH_URL", "").strip()
 N8N_TOOL_HA_URL = os.environ.get("N8N_TOOL_HA_URL", "").strip()
 N8N_TOOL_MAIL_URL = os.environ.get("N8N_TOOL_MAIL_URL", "").strip()
-TOOL_TIMEOUT_SECONDS = float(os.environ.get("TOOL_TIMEOUT_SECONDS", "15"))
+TOOL_TIMEOUT_SECONDS = float(os.environ.get("TOOL_TIMEOUT_SECONDS", "40"))
 
 
 # ---------------------------------------------------------------------------
@@ -48,10 +50,25 @@ def tool_schema() -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Suchbegriff oder Frage auf Deutsch"},
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Vom Nutzer genannte konkrete Suchbegriffe (Firmennamen, Themen, "
+                                "Stichworte) unverändert übernehmen — NICHT paraphrasieren oder "
+                                "durch eigene Umschreibungen ersetzen. Gibt es gar kein "
+                                "Inhaltskriterium (z.B. bei 'zeig mir die letzten Rechnungen'), "
+                                "leer lassen statt eines erfundenen Suchtexts."
+                            ),
+                        },
                         "doc_type": {
                             "type": "string",
-                            "description": "Rechnung | Kontoauszug | BankTransaction | Dokument | Email | WertpapierAbrechnung | Vertrag | alle",
+                            "description": (
+                                "Rechnung | Kontoauszug | BankTransaction | Dokument | Email | "
+                                "WertpapierAbrechnung | Vertrag | alle. Bei sort_mode=recency ohne "
+                                "erkennbaren Typ: nicht raten, sondern den Nutzer zuerst fragen, "
+                                "welchen Typ er meint. 'alle' nur nach ausdrücklichem Wunsch des "
+                                "Nutzers nach einer typübergreifenden Sicht verwenden."
+                            ),
                         },
                         "date_from": {"type": "string", "description": "YYYY-MM-DD (optional)"},
                         "date_to": {"type": "string", "description": "YYYY-MM-DD (optional)"},
@@ -59,7 +76,16 @@ def tool_schema() -> list[dict]:
                             "type": "string",
                             "description": "Nur BankTransaction: credit (Eingang) | debit (Ausgang). Leer = beide.",
                         },
-                        "limit": {"type": "integer", "description": "1-20, Standard 5"},
+                        "sort_mode": {
+                            "type": "string",
+                            "enum": ["relevance", "recency"],
+                            "description": (
+                                "recency setzen bei rein zeitlichen Anfragen ('die letzten...', "
+                                "'neueste...', 'zuletzt...') — Treffer werden dann nach Datum "
+                                "absteigend statt nach Relevanz sortiert. Sonst relevance (Standard)."
+                            ),
+                        },
+                        "limit": {"type": "integer", "description": "1-100, Standard 5"},
                     },
                     "required": ["query"],
                 },
@@ -145,10 +171,28 @@ def tool_schema() -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Suchbegriff auf Deutsch"},
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Vom Nutzer genannte konkrete Suchbegriffe (Absender, Betreff-"
+                                "Stichworte, Themen) unverändert übernehmen — NICHT paraphrasieren "
+                                "oder durch eigene Umschreibungen ersetzen. Gibt es gar kein "
+                                "Inhaltskriterium (z.B. bei 'zeig mir die letzten Mails'), leer "
+                                "lassen statt eines erfundenen Suchtexts."
+                            ),
+                        },
                         "date_from": {"type": "string", "description": "YYYY-MM-DD (optional)"},
                         "date_to": {"type": "string", "description": "YYYY-MM-DD (optional)"},
-                        "limit": {"type": "integer", "description": "1-20, Standard 5"},
+                        "sort_mode": {
+                            "type": "string",
+                            "enum": ["relevance", "recency"],
+                            "description": (
+                                "recency setzen bei rein zeitlichen Anfragen ('die letzten...', "
+                                "'neueste...', 'zuletzt...') — Treffer werden dann nach Datum "
+                                "absteigend statt nach Relevanz sortiert. Sonst relevance (Standard)."
+                            ),
+                        },
+                        "limit": {"type": "integer", "description": "1-100, Standard 5"},
                     },
                     "required": ["query"],
                 },
@@ -198,6 +242,7 @@ async def execute_tool(
                 "date_from": args.get("date_from") or "",
                 "date_to": args.get("date_to") or "",
                 "direction": args.get("direction") or "",
+                "sort_mode": args.get("sort_mode") or "relevance",
                 "limit": int(args.get("limit") or 5),
             }, client)
 
@@ -240,6 +285,7 @@ async def execute_tool(
                 "query": str(args.get("query") or "").strip(),
                 "date_from": args.get("date_from") or "",
                 "date_to": args.get("date_to") or "",
+                "sort_mode": args.get("sort_mode") or "relevance",
                 "limit": int(args.get("limit") or 5),
             }, client)
 
