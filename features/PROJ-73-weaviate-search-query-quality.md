@@ -1,6 +1,6 @@
 # PROJ-73: Weaviate-Suchkriterien-Qualität
 
-## Status: Architected
+## Status: In Progress
 
 **Created:** 2026-08-02
 **Last Updated:** 2026-08-02
@@ -135,6 +135,25 @@ Unverändert: Suchbegriff, Dokumenttyp, Datumsbereich, Richtung (nur Buchungen),
 ### Abhängigkeiten (zu installierende Pakete)
 
 Keine neuen Pakete — die Umsetzung nutzt ausschließlich bestehende Bausteine (Weaviate, PostgreSQL, n8n, Ollama-Tool-Schema).
+
+## Implementation Notes (Backend)
+
+**Betroffene Dateien:**
+- `docker/compose/automations/alice-chat-stream/app/tools.py` — neues `sort_mode`-Argument (Enum `relevance`/`recency`) für `search_documents` und `search_emails`; `query`-Beschreibung umgeschrieben (wörtliche Übernahme konkreter Begriffe, leer statt erfundener Paraphrase bei fehlendem Inhaltskriterium); `doc_type`-Beschreibung um Nachfrage-Regel bei typloser Aktualitäts-Anfrage ergänzt; `sort_mode` durchgereicht an beide n8n-Payloads; `TOOL_TIMEOUT_SECONDS`-Default 15s → 40s.
+- `docker/compose/automations/alice-chat-stream/app/memory.py` — Tool-Übersicht im System-Prompt um `search_emails`/`get_email_body` ergänzt (fehlten bisher vollständig); gemeinsamer Hinweis zu wörtlicher Begriffsübernahme + `sort_mode` bei Aktualitäts-Anfragen.
+- `docker/compose/automations/alice-chat-stream/app/streaming.py` — `_build_tool_status()`/`_build_tool_summary()` um `search_emails`-Zweige ergänzt (fehlten bisher; "Keine E-Mails gefunden" existierte vorher nicht als eigene Meldung — Voraussetzung für den entsprechenden Edge Case dieser Spec).
+- `docker/compose/automations/alice-chat-stream/.env.example` — `TOOL_TIMEOUT_SECONDS` Default-Dokumentation auf 40 aktualisiert.
+- `workflows/alice-tool-search.json` — `Input Normalizer`: `sortMode`-Normalisierung (allowlisted, Default `relevance`). `Weaviate Search`: bei `sort_mode=recency` ohne Inhaltskriterium direkter Weaviate-`Get` mit `sort: [{date desc}]` statt Hybrid-Suche (kein Score-Threshold nötig); mit Inhaltskriterium unverändertes Hybrid-Matching, aber Kandidaten-Pool auf technische Obergrenze (100) statt `limit` erweitert, anschließend nach Datum statt Score sortiert; funktioniert unverändert auch typübergreifend (`doc_type='alle'`), da jede Collection eigenständig nach Datum sortiert wird und der Merge über alle Collections hinweg erneut nach Datum sortiert. Weaviate-Timeout 10s → 30s.
+- `workflows/alice-mail-tools.json` — analoge `sortMode`-Logik in `Input Normalizer` + `Weaviate: Search Emails`; Limit-Obergrenze von 20 auf 100 angehoben (Angleichung an `alice-tool-search`, siehe Rückfrage an Nutzer); Timeout 10s → 30s.
+
+**Bewusste Abweichungen / Ergänzungen gegenüber dem Tech Design:**
+- Die "Nachfrage nach Dokumenttyp bei typloser Aktualitäts-Anfrage" ist wie im Tech Design vorgesehen rein prompt-seitig gelöst (Tool-Beschreibung + System-Prompt), keine neue Workflow-Komponente.
+- `search_emails`-Statustexte/-Summary (`streaming.py`) waren technisch nicht vorhanden, obwohl die Spec's Edge-Case-Abschnitt "Keine E-Mails gefunden (PROJ-37) greift unverändert" voraussetzt — das wurde ergänzt, damit dieser Edge Case tatsächlich zutrifft.
+- Mail-Such-Limit-Obergrenze 20→100: nicht explizit im Tech Design gefordert (das dort genannte "100" bezieht sich nur auf `alice-tool-search`), aber vom Nutzer bei der Planung bestätigt, um „die letzten 50 Mails" nicht stillschweigend zu kappen.
+
+**Noch offen / für QA relevant:**
+- `alice-tool-search`/`alice-mail-tools` sind lokale Workflow-JSON-Dateien; sie müssen manuell deployed werden (`Deploy n8n-workflow alice-tool-search` / `alice-mail-tools`) bevor End-to-End-Tests gegen die echte n8n-Instanz laufen können.
+- Der n8n-mcp `validate_workflow`-Check zeigt einige generische Warnungen/Fehler (fehlendes `onError`, veraltete `typeVersion`en, ein Validator-Fehlalarm "Cannot return primitive values directly" bei Code-Nodes mit `return [{ json: {...} }]`); alle sind bereits vor dieser Änderung im jeweiligen Workflow vorhanden und nicht Teil dieser Spec.
 
 ## QA Test Results
 

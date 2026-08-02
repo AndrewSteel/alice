@@ -198,9 +198,16 @@ def build_system_prompt(
         "- search_documents: Durchsucht das Dokumentenarchiv (Rechnungen, Kontoauszüge, BankTransactions, Verträge, E-Mails, Wertpapierabrechnungen). "
         "Für Fragen nach konkreten Zahlungen/Buchungen doc_type='BankTransaction' verwenden.",
         "- get_document_details: Holt alle Details zu einem Dokument per weaviate_id + collection.",
+        "- search_emails: Durchsucht indexierte E-Mails des Nutzers semantisch.",
+        "- get_email_body: Lädt den vollständigen Inhalt einer E-Mail (benötigt mailbox_id + uid aus search_emails).",
         "- home_assistant: Steuert Home-Assistant-Geräte direkt (Licht, Heizung, Schalter, ...).",
         "- remember: Speichert dauerhafte Fakten oder Präferenzen über den Nutzer.",
         "- recall: Sucht semantisch in vergangenen Gesprächen.",
+        "",
+        "Bei search_documents und search_emails: vom Nutzer genannte konkrete Begriffe "
+        "(Firmennamen, Themen, Stichworte) unverändert als query übernehmen, nicht "
+        "paraphrasieren. Bei rein zeitlichen Anfragen ('die letzten...', 'neueste...') "
+        "sort_mode='recency' setzen statt einen erfundenen Suchtext zu bilden.",
         "",
         _current_datetime_line(),
     ]
