@@ -10,7 +10,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-848, 80],
+      "position": [
+        -848,
+        80
+      ],
       "id": "81f85944-10ad-43a0-9724-47e5a4b428c8",
       "name": "Webhook: GET Folders",
       "webhookId": "dms-f1-get-folders",
@@ -27,7 +30,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-560, 80],
+      "position": [
+        -560,
+        80
+      ],
       "id": "e67ec74d-482f-41db-8171-dfc152bcffb0",
       "name": "JWT: GET Folders"
     },
@@ -58,7 +64,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-288, 80],
+      "position": [
+        -288,
+        80
+      ],
       "id": "0b3ad398-f2cc-4bd3-98bf-7d71c44f7016",
       "name": "IF: GET Admin"
     },
@@ -70,7 +79,10 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "id": "6abe9de4-7ab6-46f5-a542-639553c7ca8b",
       "name": "PG: List Folders",
       "credentials": {
@@ -87,7 +99,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [288, 0],
+      "position": [
+        288,
+        0
+      ],
       "id": "4ed661ee-6e23-482c-9c04-c2ad37566b1f",
       "name": "Aggregate: Folders"
     },
@@ -97,7 +112,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [560, 0],
+      "position": [
+        560,
+        0
+      ],
       "id": "0a3509fe-d166-482d-811a-40540ef3bf35",
       "name": "Respond: GET 200"
     },
@@ -107,7 +125,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [0, 160],
+      "position": [
+        0,
+        160
+      ],
       "id": "ab7a3ded-a5b4-4ac6-ac49-79bbc95f8848",
       "name": "Body: GET 403"
     },
@@ -119,7 +140,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [288, 160],
+      "position": [
+        288,
+        160
+      ],
       "id": "637c3d6f-1395-48d3-8f84-8ed8ed74a857",
       "name": "Respond: GET 403"
     },
@@ -133,7 +157,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-848, 560],
+      "position": [
+        -848,
+        560
+      ],
       "id": "c3600771-d308-4bd6-9490-dcfbce8e6880",
       "name": "Webhook: POST Folder",
       "webhookId": "dms-f2-post-folder",
@@ -146,11 +173,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// SECURITY NOTE: JWT signature is validated by n8n's Webhook node (JWT Auth account credential).\n// This base64 decode extracts the role claim only — it is NOT an authentication check.\n// Requests with invalid signatures are rejected at the Webhook level before reaching this node.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst path = String(body.path || '').trim();\nconst suggestedType = body.suggested_type || null;\nconst description = body.description || null;\n\n// Validate required field\nif (!path) {\n  return [{ json: { _validationError: 'path is required' } }];\n}\nif (path.length > 500) {\n  return [{ json: { _validationError: 'path must be at most 500 characters' } }];\n}\n\n// Validate suggested_type enum\nconst validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nif (suggestedType !== null && !validTypes.includes(suggestedType)) {\n  return [{ json: { _validationError: 'suggested_type must be one of: ' + validTypes.join(', ') + ', or null' } }];\n}\n\nreturn [{ json: { role: payload.role, path, suggestedType, description } }];"
+        "jsCode": "// SECURITY NOTE: JWT signature is validated by n8n's Webhook node (JWT Auth account credential).\n// This base64 decode extracts the role claim only — it is NOT an authentication check.\n// Requests with invalid signatures are rejected at the Webhook level before reaching this node.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst path = String(body.path || '').trim();\nconst suggestedType = body.suggested_type || null;\nconst description = body.description || null;\n\n// Validate required field\nif (!path) {\n  return [{ json: { _validationError: 'path is required' } }];\n}\nif (path.length > 500) {\n  return [{ json: { _validationError: 'path must be at most 500 characters' } }];\n}\nif (path === '/mnt/nas') {\n  return [{ json: { _validationError: 'Der NAS-Mount-Punkt selbst kann nicht als Ordner erfasst werden' } }];\n}\n\n// Validate suggested_type enum\nconst validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nif (suggestedType !== null && !validTypes.includes(suggestedType)) {\n  return [{ json: { _validationError: 'suggested_type must be one of: ' + validTypes.join(', ') + ', or null' } }];\n}\n\nreturn [{ json: { role: payload.role, path, suggestedType, description } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-560, 560],
+      "position": [
+        -560,
+        560
+      ],
       "id": "6ac35adf-37c0-47a6-9c2e-5f22f9cf65a4",
       "name": "JWT+Validate: POST Folder"
     },
@@ -180,7 +210,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-288, 560],
+      "position": [
+        -288,
+        560
+      ],
       "id": "51060c16-3426-4e97-b14d-1930183c05b6",
       "name": "IF: POST Admin"
     },
@@ -210,7 +243,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [0, 480],
+      "position": [
+        0,
+        480
+      ],
       "id": "4ab82fe5-85b6-4e6e-b685-6cc143792f93",
       "name": "IF: POST Valid"
     },
@@ -219,12 +255,15 @@
         "operation": "executeQuery",
         "query": "INSERT INTO alice.dms_watched_folders (path, suggested_type, description, sort_order) VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM alice.dms_watched_folders)) RETURNING id, path, suggested_type, description, enabled, sort_order, created_at::text, updated_at::text",
         "options": {
-          "queryReplacement": "={{ [$json.path, $json.suggestedType, $json.description] }}"
+          "queryReplacement": "={{ [$('JWT+Validate: POST Folder').first().json.path, $('JWT+Validate: POST Folder').first().json.suggestedType, $('JWT+Validate: POST Folder').first().json.description] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [288, 400],
+      "position": [
+        288,
+        400
+      ],
       "id": "54afe74b-695d-4783-9679-cf9fdf6aca42",
       "name": "PG: Insert Folder",
       "credentials": {
@@ -241,7 +280,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [560, 400],
+      "position": [
+        560,
+        400
+      ],
       "id": "4cb2ccc0-6a65-441c-a86b-db3014324f22",
       "name": "Check: Insert Result"
     },
@@ -272,7 +314,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [848, 400],
+      "position": [
+        848,
+        400
+      ],
       "id": "6b7f1205-8941-47d8-b752-532bddda5473",
       "name": "IF: No Conflict"
     },
@@ -284,7 +329,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 320],
+      "position": [
+        1120,
+        320
+      ],
       "id": "bac7c9f0-d4dd-46ff-a2f8-08f95a3600dd",
       "name": "Respond: POST 201"
     },
@@ -294,7 +342,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 480],
+      "position": [
+        1120,
+        480
+      ],
       "id": "96bc7352-92c7-430d-8172-5cb8e3c67c9f",
       "name": "Body: POST 409"
     },
@@ -306,7 +357,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1408, 480],
+      "position": [
+        1408,
+        480
+      ],
       "id": "623979a7-9b3f-49e2-9692-0b71fd9e427e",
       "name": "Respond: POST 409"
     },
@@ -316,7 +370,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [288, 560],
+      "position": [
+        288,
+        560
+      ],
       "id": "4aa63f00-543e-40f2-9783-6a7a6177ee2b",
       "name": "Body: POST 400"
     },
@@ -328,7 +385,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [560, 560],
+      "position": [
+        560,
+        560
+      ],
       "id": "07ea8c50-9b69-477a-8a41-3d2ec2adb889",
       "name": "Respond: POST 400"
     },
@@ -338,7 +398,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [0, 720],
+      "position": [
+        0,
+        720
+      ],
       "id": "47a641d3-ee5b-4d2d-b7f6-bbcc560b92b8",
       "name": "Body: POST 403"
     },
@@ -350,7 +413,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [288, 720],
+      "position": [
+        288,
+        720
+      ],
       "id": "b7494da9-de2f-4750-bcea-462226e2dad9",
       "name": "Respond: POST 403"
     },
@@ -364,7 +430,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-848, 1040],
+      "position": [
+        -848,
+        1040
+      ],
       "id": "1c8eaac0-9f70-4f83-9511-10c56fd61cb0",
       "name": "Webhook: PUT Folder",
       "webhookId": "dms-f3-put-folder",
@@ -377,11 +446,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// SECURITY NOTE: JWT signature is validated by n8n's Webhook node (JWT Auth account credential).\n// This base64 decode extracts the role claim only — it is NOT an authentication check.\n// Requests with invalid signatures are rejected at the Webhook level before reaching this node.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst query = $json.query || {};\nconst id = parseInt(body.id || query.id, 10);\nif (!id || isNaN(id)) {\n  return [{ json: { _validationError: 'id is required (integer)' } }];\n}\n\n// Validate and extract fields — null means 'not sent', COALESCE in the PG node keeps existing value\nlet path = null;\nlet suggestedType = null;\nlet description = null;\nlet enabled = null;\nlet hasUpdate = false;\n\n// Explicit-null flags: true when key is present in body AND value is null (PROJ-25)\nconst clearSuggestedType = ('suggested_type' in body) && body.suggested_type === null;\nconst clearDescription = ('description' in body) && body.description === null;\n\nif (body.path !== undefined) {\n  path = String(body.path).trim();\n  if (!path) return [{ json: { _validationError: 'path cannot be empty' } }];\n  if (path.length > 500) return [{ json: { _validationError: 'path must be at most 500 characters' } }];\n  hasUpdate = true;\n}\nif (body.suggested_type !== undefined) {\n  const st = body.suggested_type;\n  const validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n  if (st !== null && !validTypes.includes(st)) {\n    return [{ json: { _validationError: 'suggested_type must be one of: ' + validTypes.join(', ') + ', or null' } }];\n  }\n  suggestedType = st;\n  hasUpdate = true;\n}\nif (body.description !== undefined) {\n  description = body.description;\n  hasUpdate = true;\n}\nif (body.enabled !== undefined) {\n  enabled = Boolean(body.enabled);\n  hasUpdate = true;\n}\n\nif (!hasUpdate) {\n  return [{ json: { _validationError: 'No fields to update' } }];\n}\n\nreturn [{ json: { role: payload.role, path, suggestedType, description, enabled, folderId: id, clearSuggestedType, clearDescription } }];"
+        "jsCode": "// SECURITY NOTE: JWT signature is validated by n8n's Webhook node (JWT Auth account credential).\n// This base64 decode extracts the role claim only — it is NOT an authentication check.\n// Requests with invalid signatures are rejected at the Webhook level before reaching this node.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst body = $json.body || {};\nconst query = $json.query || {};\nconst id = parseInt(body.id || query.id, 10);\nif (!id || isNaN(id)) {\n  return [{ json: { _validationError: 'id is required (integer)' } }];\n}\n\n// Validate and extract fields — null means 'not sent', COALESCE in the PG node keeps existing value\nlet path = null;\nlet suggestedType = null;\nlet description = null;\nlet enabled = null;\nlet hasUpdate = false;\n\n// Explicit-null flags: true when key is present in body AND value is null (PROJ-25)\nconst clearSuggestedType = ('suggested_type' in body) && body.suggested_type === null;\nconst clearDescription = ('description' in body) && body.description === null;\n\nif (body.path !== undefined) {\n  path = String(body.path).trim();\n  if (!path) return [{ json: { _validationError: 'path cannot be empty' } }];\n  if (path.length > 500) return [{ json: { _validationError: 'path must be at most 500 characters' } }];\n  if (path === '/mnt/nas') return [{ json: { _validationError: 'Der NAS-Mount-Punkt selbst kann nicht als Ordner erfasst werden' } }];\n  hasUpdate = true;\n}\nif (body.suggested_type !== undefined) {\n  const st = body.suggested_type;\n  const validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n  if (st !== null && !validTypes.includes(st)) {\n    return [{ json: { _validationError: 'suggested_type must be one of: ' + validTypes.join(', ') + ', or null' } }];\n  }\n  suggestedType = st;\n  hasUpdate = true;\n}\nif (body.description !== undefined) {\n  description = body.description;\n  hasUpdate = true;\n}\nif (body.enabled !== undefined) {\n  enabled = Boolean(body.enabled);\n  hasUpdate = true;\n}\n\nif (!hasUpdate) {\n  return [{ json: { _validationError: 'No fields to update' } }];\n}\n\nreturn [{ json: { role: payload.role, path, suggestedType, description, enabled, folderId: id, clearSuggestedType, clearDescription } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-560, 1040],
+      "position": [
+        -560,
+        1040
+      ],
       "id": "a1489b6a-59cb-4875-9380-2178b2c6d332",
       "name": "JWT+Validate: PUT Folder"
     },
@@ -412,7 +484,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-288, 1040],
+      "position": [
+        -288,
+        1040
+      ],
       "id": "5e4a7372-d9f7-48dc-8e83-d35771af7b6d",
       "name": "IF: PUT Admin"
     },
@@ -443,7 +518,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [0, 960],
+      "position": [
+        0,
+        960
+      ],
       "id": "c62f73cd-bbd5-45e5-82c3-a27bc3439907",
       "name": "IF: PUT Valid"
     },
@@ -452,12 +530,15 @@
         "operation": "executeQuery",
         "query": "UPDATE alice.dms_watched_folders SET path = COALESCE($1, path), suggested_type = CASE WHEN $6 THEN NULL ELSE COALESCE($2, suggested_type) END, description = CASE WHEN $7 THEN NULL ELSE COALESCE($3, description) END, enabled = COALESCE($4, enabled) WHERE id = $5 RETURNING id, path, suggested_type, description, enabled, sort_order, created_at::text, updated_at::text",
         "options": {
-          "queryReplacement": "={{ [$json.path, $json.suggestedType, $json.description, $json.enabled, $json.folderId, $json.clearSuggestedType, $json.clearDescription] }}"
+          "queryReplacement": "={{ [$('JWT+Validate: PUT Folder').first().json.path, $('JWT+Validate: PUT Folder').first().json.suggestedType, $('JWT+Validate: PUT Folder').first().json.description, $('JWT+Validate: PUT Folder').first().json.enabled, $('JWT+Validate: PUT Folder').first().json.folderId, $('JWT+Validate: PUT Folder').first().json.clearSuggestedType, $('JWT+Validate: PUT Folder').first().json.clearDescription] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [288, 880],
+      "position": [
+        288,
+        880
+      ],
       "id": "e2994af8-d71a-4bc6-aea4-3669af9d9c78",
       "name": "PG: Update Folder",
       "credentials": {
@@ -474,7 +555,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [560, 880],
+      "position": [
+        560,
+        880
+      ],
       "id": "3ed034e3-1325-44e0-9ad6-07c66c8458c7",
       "name": "Check: Update Result"
     },
@@ -505,7 +589,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [848, 880],
+      "position": [
+        848,
+        880
+      ],
       "id": "2783e355-11b0-4f45-94ed-c2d9794de322",
       "name": "IF: PUT Success"
     },
@@ -515,7 +602,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 800],
+      "position": [
+        1120,
+        800
+      ],
       "id": "52dd602f-ec55-486e-90ad-4167ad804d82",
       "name": "Respond: PUT 200"
     },
@@ -525,7 +615,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 960],
+      "position": [
+        1120,
+        960
+      ],
       "id": "e348880a-a86c-4c9b-b856-1afabfc2dbcd",
       "name": "Body: PUT Error"
     },
@@ -537,7 +630,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1408, 960],
+      "position": [
+        1408,
+        960
+      ],
       "id": "1ed0fe2a-8492-4f1a-88bb-0188535c8ef6",
       "name": "Respond: PUT Error"
     },
@@ -547,7 +643,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [288, 1040],
+      "position": [
+        288,
+        1040
+      ],
       "id": "88a20658-8ea8-4c5b-8703-10c44fd13fcf",
       "name": "Body: PUT 400"
     },
@@ -559,7 +658,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [560, 1040],
+      "position": [
+        560,
+        1040
+      ],
       "id": "33e66216-1d48-4381-9cd9-768525ac452d",
       "name": "Respond: PUT 400"
     },
@@ -569,7 +671,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [16, 1200],
+      "position": [
+        16,
+        1200
+      ],
       "id": "a61083d2-0c9c-461e-9ecf-4c23be4c5134",
       "name": "Body: PUT 403"
     },
@@ -581,7 +686,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [288, 1200],
+      "position": [
+        288,
+        1200
+      ],
       "id": "d2308d78-aec4-4c12-82e3-b3a19bfe9d6e",
       "name": "Respond: PUT 403"
     },
@@ -595,7 +703,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-848, 1520],
+      "position": [
+        -848,
+        1520
+      ],
       "id": "7e735fa4-8c31-4ad7-9525-d626494644b7",
       "name": "Webhook: DELETE Folder",
       "webhookId": "dms-f4-delete-folder",
@@ -612,7 +723,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-560, 1520],
+      "position": [
+        -560,
+        1520
+      ],
       "id": "04427183-57a3-4af7-bca1-98aa6a0f0087",
       "name": "JWT+Validate: DELETE Folder"
     },
@@ -643,7 +757,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-288, 1520],
+      "position": [
+        -288,
+        1520
+      ],
       "id": "0938598b-6707-49c2-ab60-c165f1b789de",
       "name": "IF: DELETE Admin"
     },
@@ -674,7 +791,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [0, 1440],
+      "position": [
+        0,
+        1440
+      ],
       "id": "d8634fe6-ff91-405f-b395-8f4b48cc15d7",
       "name": "IF: DELETE Valid"
     },
@@ -688,7 +808,10 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [288, 1360],
+      "position": [
+        288,
+        1360
+      ],
       "id": "d3b7f7e1-1329-47d8-8281-08deff6de182",
       "name": "PG: Delete Folder",
       "credentials": {
@@ -725,7 +848,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [560, 1360],
+      "position": [
+        560,
+        1360
+      ],
       "id": "27222811-fd81-490d-a04b-cdf85ee28a88",
       "name": "IF: Deleted"
     },
@@ -738,7 +864,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [848, 1280],
+      "position": [
+        848,
+        1280
+      ],
       "id": "e9128ef4-d682-40e5-ab1f-72b56f4875fb",
       "name": "Respond: DELETE 204"
     },
@@ -748,7 +877,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [848, 1440],
+      "position": [
+        848,
+        1440
+      ],
       "id": "72dc0a16-899e-4607-a8a1-2821f191a576",
       "name": "Body: DELETE 404"
     },
@@ -760,7 +892,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 1440],
+      "position": [
+        1120,
+        1440
+      ],
       "id": "c57b7595-5367-4395-9514-8a2b7f1b90c0",
       "name": "Respond: DELETE 404"
     },
@@ -770,7 +905,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [288, 1520],
+      "position": [
+        288,
+        1520
+      ],
       "id": "f7646413-2e43-49f7-aaf0-20098c845ea0",
       "name": "Body: DELETE 400"
     },
@@ -782,7 +920,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [560, 1520],
+      "position": [
+        560,
+        1520
+      ],
       "id": "00b1fbab-28e2-47d0-a02c-442d0055d763",
       "name": "Respond: DELETE 400"
     },
@@ -792,7 +933,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [16, 1696],
+      "position": [
+        16,
+        1696
+      ],
       "id": "41c0bbfd-d9ed-43b5-a644-b0211f9449e8",
       "name": "Body: DELETE 403"
     },
@@ -804,7 +948,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [288, 1696],
+      "position": [
+        288,
+        1696
+      ],
       "id": "1bcf6491-04ae-4ccc-97b1-72987253357b",
       "name": "Respond: DELETE 403"
     },
@@ -818,7 +965,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-848, 2000],
+      "position": [
+        -848,
+        2000
+      ],
       "id": "b1a0f5e1-1c2d-4a3b-8e4f-5d6c7b8a9e0f",
       "name": "Webhook: PATCH Reorder",
       "webhookId": "dms-f5-patch-reorder",
@@ -835,7 +985,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-560, 2000],
+      "position": [
+        -560,
+        2000
+      ],
       "id": "c2b1e6f2-2d3e-5b4c-9f50-6e7d8c9b0a1e",
       "name": "JWT+Validate: PATCH Reorder"
     },
@@ -866,7 +1019,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-288, 2000],
+      "position": [
+        -288,
+        2000
+      ],
       "id": "d3c2f7a3-3e4f-6c5d-0a61-7f8e9d0c1b2f",
       "name": "IF: PATCH Admin"
     },
@@ -897,7 +1053,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [0, 1920],
+      "position": [
+        0,
+        1920
+      ],
       "id": "e4d3a8b4-4f50-7d6e-1b72-8a9f0e1d2c3a",
       "name": "IF: PATCH Valid"
     },
@@ -911,7 +1070,10 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [288, 1840],
+      "position": [
+        288,
+        1840
+      ],
       "id": "f5e4b9c5-5a61-8e7f-2c83-9b0a1f2e3d4b",
       "name": "PG: Reorder Folders",
       "credentials": {
@@ -929,7 +1091,10 @@
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [560, 1840],
+      "position": [
+        560,
+        1840
+      ],
       "id": "a6f5c0d6-6b72-9f8a-3d94-0c1b2a3f4e5c",
       "name": "PG: List After Reorder",
       "credentials": {
@@ -945,7 +1110,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [848, 1840],
+      "position": [
+        848,
+        1840
+      ],
       "id": "b7a6d1e7-7c83-0a9b-4e05-1d2c3b4a5f6d",
       "name": "Aggregate: Reorder"
     },
@@ -955,7 +1123,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1120, 1840],
+      "position": [
+        1120,
+        1840
+      ],
       "id": "c8b7e2f8-8d94-1b0c-5f16-2e3d4c5b6a7e",
       "name": "Respond: PATCH 200"
     },
@@ -965,7 +1136,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [288, 2000],
+      "position": [
+        288,
+        2000
+      ],
       "id": "d9c8f3a9-9e05-2c1d-6a27-3f4e5d6c7b8f",
       "name": "Body: PATCH 400"
     },
@@ -977,7 +1151,10 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [560, 2000],
+      "position": [
+        560,
+        2000
+      ],
       "id": "e0d9a4b0-0f16-3d2e-7b38-4a5f6e7d8c9a",
       "name": "Respond: PATCH 400"
     },
@@ -987,7 +1164,10 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [16, 2176],
+      "position": [
+        16,
+        2176
+      ],
       "id": "f1e0b5c1-1a27-4e3f-8c49-5b6a7f8e9d0b",
       "name": "Body: PATCH 403"
     },
@@ -999,9 +1179,510 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [288, 2176],
+      "position": [
+        288,
+        2176
+      ],
       "id": "a2f1c6d2-2b38-5f4a-9d50-6c7b8a9f0e1c",
       "name": "Respond: PATCH 403"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dms/folders/browse",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -848,
+        2480
+      ],
+      "id": "b112aea3-316c-4492-a7b6-ea408d80ce22",
+      "name": "Webhook: GET Browse",
+      "webhookId": "dms-f6-get-browse",
+      "credentials": {
+        "jwtAuth": {
+          "id": "4iUJhbFCSgQeHAGL",
+          "name": "JWT Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// SECURITY NOTE: JWT signature is validated by n8n's Webhook node (JWT Auth account credential).\n// This base64 decode extracts the role claim only — it is NOT an authentication check.\n// Requests with invalid signatures are rejected at the Webhook level before reaching this node.\nconst authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payloadB64 = token.split('.')[1];\nconst payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));\nif (payload.role !== 'admin') {\n  return [{ json: { _forbidden: true } }];\n}\n\nconst path = require('path');\nconst MOUNT = '/mnt/nas';\nconst query = $json.query || {};\n\nlet normalized = path.normalize(String(query.path || MOUNT));\nif (normalized.length > 1 && normalized.endsWith('/')) normalized = normalized.slice(0, -1);\n\nconst withinMount = normalized === MOUNT || normalized.startsWith(MOUNT + '/');\nif (!withinMount) {\n  return [{ json: { _validationError: 'Pfad außerhalb des NAS-Mounts nicht erlaubt' } }];\n}\n\nlet excludeFolderId = query.excludeFolderId != null ? parseInt(query.excludeFolderId, 10) : null;\nif (excludeFolderId !== null && isNaN(excludeFolderId)) excludeFolderId = null;\n\nreturn [{ json: { role: payload.role, browsePath: normalized, excludeFolderId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        2480
+      ],
+      "id": "a9a95778-ad14-4e7c-88e0-ecde4c4c9693",
+      "name": "JWT+Validate: GET Browse"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f6-forbidden-check",
+              "leftValue": "={{ $json._forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -288,
+        2480
+      ],
+      "id": "d1a8fd18-06b5-4cd0-9bc8-7cbb480133e2",
+      "name": "IF: Browse Admin"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f6-validation-check",
+              "leftValue": "={{ $json._validationError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        2400
+      ],
+      "id": "1c25976a-71d2-41eb-a8c7-6ced254a0f20",
+      "name": "IF: Browse Valid"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\n\nconst { browsePath, excludeFolderId } = $json;\nlet entries = [];\nlet readError = null;\ntry {\n  const dirEntries = fs.readdirSync(browsePath, { withFileTypes: true });\n  for (const entry of dirEntries) {\n    if (entry.isSymbolicLink()) continue;\n    const fullPath = path.join(browsePath, entry.name);\n    let isSymlink = false;\n    try { isSymlink = fs.lstatSync(fullPath).isSymbolicLink(); } catch (e) { isSymlink = false; }\n    if (isSymlink) continue;\n    if (entry.isDirectory()) {\n      entries.push({ name: entry.name, path: fullPath });\n    }\n  }\n  entries.sort((a, b) => a.name.localeCompare(b.name));\n} catch (e) {\n  readError = e.code === 'ENOENT'\n    ? 'Der angeforderte Ordner wurde auf dem NAS nicht gefunden.'\n    : e.code === 'EACCES'\n      ? 'Keine Berechtigung, diesen Ordner zu lesen.'\n      : 'Der NAS-Mount ist nicht erreichbar.';\n}\n\nreturn [{ json: { browsePath, excludeFolderId, entries, readError } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        2400
+      ],
+      "id": "a32e1f21-c662-4a21-b952-f7a1811e0cb0",
+      "name": "Code: Read Directory"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f6-readok-check",
+              "leftValue": "={{ $json.readError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        2400
+      ],
+      "id": "c8b084ee-eeb6-4e9a-a8a7-5146ee939a4f",
+      "name": "IF: Browse Read OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { entries, excludeFolderId, browsePath } = $json;\nreturn [{ json: { candidatePaths: [browsePath, ...entries.map(e => e.path)], excludeFolderId: excludeFolderId != null ? excludeFolderId : null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        2320
+      ],
+      "id": "ef05f904-6e73-4a08-91e4-66f4897a294a",
+      "name": "Code: Build Browse Conflict Input"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PENDING_IMPORT_alice-dms-folder-conflict-check",
+          "cachedResultName": "alice-dms-folder-conflict-check"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        2320
+      ],
+      "id": "e2924b9e-bae3-41f9-b96d-e6ab1a68957e",
+      "name": "Execute: Browse Check Conflict"
+    },
+    {
+      "parameters": {
+        "jsCode": "const browsePath = $('Code: Read Directory').first().json.browsePath;\nconst entries = $('Code: Read Directory').first().json.entries || [];\nconst conflictItems = $input.all().map(i => i.json).filter(c => !c._empty);\nconst conflictByPath = new Map(conflictItems.map(c => [c.path, c]));\n\nconst ownConflict = conflictByPath.get(browsePath) || { conflictType: null, message: null };\n\nconst result = entries.map(e => {\n  const c = conflictByPath.get(e.path);\n  return {\n    name: e.name,\n    path: e.path,\n    conflictType: c ? c.conflictType : null,\n    message: c ? c.message : null\n  };\n});\n\nreturn [{ json: { path: browsePath, conflictType: ownConflict.conflictType, message: ownConflict.message, entries: result } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        2320
+      ],
+      "id": "7548044e-24a0-4a0a-84b6-d8d3ae18f6cb",
+      "name": "Code: Build Browse Response"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        2320
+      ],
+      "id": "e98d6ce2-b18f-4921-b4e8-d5c77a07ef2e",
+      "name": "Respond: Browse 200"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json._validationError || 'Validation failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        2560
+      ],
+      "id": "09c40f17-2fbe-4d30-95bf-042b31237ff0",
+      "name": "Body: Browse 400"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        2560
+      ],
+      "id": "bd724719-076c-4889-9ce4-67e51d2fffcf",
+      "name": "Respond: Browse 400"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Forbidden: admin role required' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        2640
+      ],
+      "id": "34ec40ca-3397-4854-82ed-5fd44bf57a98",
+      "name": "Body: Browse 403"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        280,
+        2640
+      ],
+      "id": "7240f733-d77e-4e07-b44c-066ee5417595",
+      "name": "Respond: Browse 403"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json.readError || 'Failed to read directory' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        2480
+      ],
+      "id": "bbd3b8db-6111-4bb4-9a4d-a574d39e2e6c",
+      "name": "Body: Browse 500"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        2480
+      ],
+      "id": "472dcfca-12f6-4d3b-8116-13c6186907ab",
+      "name": "Respond: Browse 500"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { candidatePaths: [$json.path], excludeFolderId: null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        260
+      ],
+      "id": "08043242-df86-4a13-80c6-f043097cc6ba",
+      "name": "Code: Build POST Conflict Input"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PENDING_IMPORT_alice-dms-folder-conflict-check",
+          "cachedResultName": "alice-dms-folder-conflict-check"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        380,
+        260
+      ],
+      "id": "d5330653-5ef8-46ad-8028-a5460595e2f6",
+      "name": "Execute: POST Check Conflict"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f2-path-conflict-check",
+              "leftValue": "={{ $json.hasConflict }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        260
+      ],
+      "id": "363c0716-ed1d-46f4-b7bc-a9607a536365",
+      "name": "IF: POST No Path Conflict"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json.message || 'Conflict: overlapping folder path' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        320
+      ],
+      "id": "cd36ceba-ab6c-4950-b71c-b2ab92242df5",
+      "name": "Body: POST 409 Path Conflict"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f3-path-changed-check",
+              "leftValue": "={{ $json.path }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        140,
+        820
+      ],
+      "id": "91b6db2f-9aae-4a5d-b406-74e676348087",
+      "name": "IF: PUT Path Changed"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { candidatePaths: [$json.path], excludeFolderId: $json.folderId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        740
+      ],
+      "id": "fd5fe32b-a518-4283-a15b-06fe8dda293b",
+      "name": "Code: Build PUT Conflict Input"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PENDING_IMPORT_alice-dms-folder-conflict-check",
+          "cachedResultName": "alice-dms-folder-conflict-check"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        420,
+        740
+      ],
+      "id": "a22801d2-be24-4d51-a173-9819247587d3",
+      "name": "Execute: PUT Check Conflict"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f3-path-conflict-check",
+              "leftValue": "={{ $json.hasConflict }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        740
+      ],
+      "id": "34a2af7e-2b7d-4d0c-8194-d7c5c39e655f",
+      "name": "IF: PUT No Path Conflict"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: $json.message || 'Conflict: overlapping folder path', _status: 409 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        660
+      ],
+      "id": "b094f663-e2e2-41d5-9168-c10453d090f3",
+      "name": "Body: PUT 409 Path Conflict"
     }
   ],
   "pinData": {},
@@ -1123,7 +1804,7 @@
       "main": [
         [
           {
-            "node": "PG: Insert Folder",
+            "node": "Code: Build POST Conflict Input",
             "type": "main",
             "index": 0
           }
@@ -1254,7 +1935,7 @@
       "main": [
         [
           {
-            "node": "PG: Update Folder",
+            "node": "IF: PUT Path Changed",
             "type": "main",
             "index": 0
           }
@@ -1568,6 +2249,279 @@
         [
           {
             "node": "Respond: PATCH 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build POST Conflict Input": {
+      "main": [
+        [
+          {
+            "node": "Execute: POST Check Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: POST Check Conflict": {
+      "main": [
+        [
+          {
+            "node": "IF: POST No Path Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: POST No Path Conflict": {
+      "main": [
+        [
+          {
+            "node": "PG: Insert Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: POST 409 Path Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: POST 409 Path Conflict": {
+      "main": [
+        [
+          {
+            "node": "Respond: POST 409",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: PUT Path Changed": {
+      "main": [
+        [
+          {
+            "node": "Code: Build PUT Conflict Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PG: Update Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build PUT Conflict Input": {
+      "main": [
+        [
+          {
+            "node": "Execute: PUT Check Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: PUT Check Conflict": {
+      "main": [
+        [
+          {
+            "node": "IF: PUT No Path Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: PUT No Path Conflict": {
+      "main": [
+        [
+          {
+            "node": "PG: Update Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: PUT 409 Path Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: PUT 409 Path Conflict": {
+      "main": [
+        [
+          {
+            "node": "Respond: PUT Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: GET Browse": {
+      "main": [
+        [
+          {
+            "node": "JWT+Validate: GET Browse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JWT+Validate: GET Browse": {
+      "main": [
+        [
+          {
+            "node": "IF: Browse Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Browse Admin": {
+      "main": [
+        [
+          {
+            "node": "IF: Browse Valid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: Browse 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Browse Valid": {
+      "main": [
+        [
+          {
+            "node": "Code: Read Directory",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: Browse 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Read Directory": {
+      "main": [
+        [
+          {
+            "node": "IF: Browse Read OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Browse Read OK": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Browse Conflict Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Body: Browse 500",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Browse Conflict Input": {
+      "main": [
+        [
+          {
+            "node": "Execute: Browse Check Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Browse Check Conflict": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Browse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Browse Response": {
+      "main": [
+        [
+          {
+            "node": "Respond: Browse 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: Browse 400": {
+      "main": [
+        [
+          {
+            "node": "Respond: Browse 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: Browse 403": {
+      "main": [
+        [
+          {
+            "node": "Respond: Browse 403",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Body: Browse 500": {
+      "main": [
+        [
+          {
+            "node": "Respond: Browse 500",
             "type": "main",
             "index": 0
           }

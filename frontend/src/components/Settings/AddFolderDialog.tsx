@@ -19,8 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Folder } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SUGGESTED_TYPES } from "./dms-constants";
+import { FolderPathPicker } from "./FolderPathPicker";
 import type { CreateFolderInput } from "@/services/dms";
 
 interface AddFolderDialogProps {
@@ -42,6 +44,7 @@ export function AddFolderDialog({
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   function resetForm() {
     setPath("");
@@ -94,20 +97,27 @@ export function AddFolderDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="add-path" className="text-foreground">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
+          <div className="min-w-0 space-y-2">
+            <Label className="text-foreground">
               {t("settings.dms.dialog.pathLabel")} <span className="text-red-400">*</span>
             </Label>
-            <Input
-              id="add-path"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder={t("settings.dms.dialog.pathPlaceholder")}
-              className="bg-background border-border text-foreground placeholder:text-muted-foreground font-mono text-sm"
-              maxLength={500}
-              autoFocus
-            />
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              title={path || undefined}
+              aria-label={t("settings.dms.dialog.choosePath")}
+              className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left font-mono text-sm text-foreground hover:bg-accent"
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {path || (
+                  <span className="font-sans text-muted-foreground">
+                    {t("settings.dms.dialog.pathPlaceholder")}
+                  </span>
+                )}
+              </span>
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
           </div>
 
           <div className="space-y-2">
@@ -176,6 +186,13 @@ export function AddFolderDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <FolderPathPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        startPath="/mnt/nas"
+        onSelect={setPath}
+      />
     </Dialog>
   );
 }

@@ -19,8 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Folder } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SUGGESTED_TYPES } from "./dms-constants";
+import { FolderPathPicker } from "./FolderPathPicker";
 import type { DmsFolder, UpdateFolderInput } from "@/services/dms";
 
 interface EditFolderDialogProps {
@@ -46,6 +48,7 @@ export function EditFolderDialog({
   const [description, setDescription] = useState(folder.description ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -96,18 +99,27 @@ export function EditFolderDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="edit-path" className="text-foreground">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
+          <div className="min-w-0 space-y-2">
+            <Label className="text-foreground">
               {t("settings.dms.dialog.pathLabel")} <span className="text-red-400">*</span>
             </Label>
-            <Input
-              id="edit-path"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              className="bg-background border-border text-foreground font-mono text-sm"
-              maxLength={500}
-            />
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              title={path || undefined}
+              aria-label={t("settings.dms.dialog.choosePath")}
+              className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left font-mono text-sm text-foreground hover:bg-accent"
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {path || (
+                  <span className="font-sans text-muted-foreground">
+                    {t("settings.dms.dialog.pathPlaceholder")}
+                  </span>
+                )}
+              </span>
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
           </div>
 
           <div className="space-y-2">
@@ -171,6 +183,14 @@ export function EditFolderDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <FolderPathPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        startPath={folder.path}
+        excludeFolderId={folder.id}
+        onSelect={setPath}
+      />
     </Dialog>
   );
 }

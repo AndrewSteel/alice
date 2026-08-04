@@ -1,0 +1,101 @@
+{
+  "name": "alice-dms-folder-conflict-check",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-560, 0],
+      "id": "aef91771-0b54-4b39-b271-8ef0f2b97df8",
+      "name": "Execute Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input contract: { candidatePaths: string[], excludeFolderId?: number|null }\n// Normalizes each candidate path to a trailing-slash-free absolute path so\n// prefix comparisons downstream are exact (PROJ-74).\nconst path = require('path');\n\nfunction normalize(p) {\n  let n = path.normalize(String(p || ''));\n  if (n.length > 1 && n.endsWith('/')) n = n.slice(0, -1);\n  return n;\n}\n\nconst input = $input.first().json;\nconst candidatePaths = Array.isArray(input.candidatePaths) ? input.candidatePaths.map(normalize) : [];\nlet excludeFolderId = input.excludeFolderId != null ? parseInt(input.excludeFolderId, 10) : null;\nif (excludeFolderId !== null && isNaN(excludeFolderId)) excludeFolderId = null;\n\nreturn [{ json: { candidatePaths, excludeFolderId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 0],
+      "id": "69b45b01-3726-45b0-a27e-0dbfce81d2f3",
+      "name": "Code: Normalize Input"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', id, 'path', path)), '[]'::json) AS folders FROM alice.dms_watched_folders WHERE enabled = true AND ($1::int IS NULL OR id != $1)",
+        "options": {
+          "queryReplacement": "={{ [$json.excludeFolderId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-40, 0],
+      "id": "ca273970-8719-48c7-8403-b249ac09ba69",
+      "name": "PG: Active Folders",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ancestor/Descendant conflict check (PROJ-74), string-prefix comparison of\n// normalized absolute paths, evaluated only against active (enabled=true) folders\n// at depth >= 1 below /mnt/nas — the mount point itself is never treated as an\n// ancestor of anything (it's a shared prefix of every registered folder, not a\n// meaningful conflict source; it's excluded from selection entirely upstream).\nconst MOUNT = '/mnt/nas';\nconst { candidatePaths } = $('Code: Normalize Input').first().json;\nconst activeFolders = ($input.first().json.folders || []).filter(f => f && f.path && f.path !== MOUNT);\n\nfunction conflictFor(candidate) {\n  if (candidate === MOUNT) return { conflictType: null, message: null };\n  for (const folder of activeFolders) {\n    const active = folder.path;\n    if (candidate === active) {\n      return { conflictType: 'exact', message: 'Dieser Ordner ist bereits als DMS-Ordner erfasst.' };\n    }\n    if (candidate.startsWith(active + '/')) {\n      // candidate lies below an already-watched folder\n      return { conflictType: 'ancestor', message: 'Dieser Ordner liegt unterhalb eines bereits erfassten Ordners.' };\n    }\n    if (active.startsWith(candidate + '/')) {\n      // candidate would contain an already-watched folder\n      return { conflictType: 'descendant', message: 'Dieser Ordner enthält einen bereits erfassten Ordner.' };\n    }\n  }\n  return { conflictType: null, message: null };\n}\n\n// A Code node emitting zero items breaks the caller's downstream chain (n8n\n// skips nodes that receive zero input items), so always emit at least one\n// item — a sentinel when there was nothing to check.\nif (candidatePaths.length === 0) {\n  return [{ json: { _empty: true } }];\n}\n\n// Refinement 2026-08-04: only an EXACT path match blocks Create/Update.\n// Ancestor/Descendant overlap is now an accepted trade-off (real NAS layouts\n// need a broad collector folder alongside specifically-typed subfolders) —\n// conflictType is still classified/returned for informational badges in the\n// Browse endpoint, but hasConflict (what POST/PUT gate on) no longer fires\n// for 'ancestor'/'descendant'.\nreturn candidatePaths.map(p => {\n  const c = conflictFor(p);\n  return { json: { path: p, conflictType: c.conflictType, message: c.message, hasConflict: c.conflictType === 'exact' } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "id": "61a265cd-cb12-4986-9739-f7b6d864804e",
+      "name": "Code: Compute Conflicts"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code: Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "PG: Active Folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Active Folders": {
+      "main": [
+        [
+          {
+            "node": "Code: Compute Conflicts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "instanceId": "42c43dc32870835c23e01976dcb7812ab12ad1f1ff1c1305b521ba9c5dcc860a"
+  },
+  "tags": []
+}

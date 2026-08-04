@@ -33,6 +33,20 @@ export interface UpdateFolderInput {
   enabled?: boolean;
 }
 
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  conflictType: "exact" | "ancestor" | "descendant" | null;
+  message: string | null;
+}
+
+export interface BrowseResult {
+  path: string;
+  conflictType: "exact" | "ancestor" | "descendant" | null;
+  message: string | null;
+  entries: BrowseEntry[];
+}
+
 // ---------- API Functions ----------
 
 /**
@@ -95,7 +109,8 @@ export async function createFolder(data: CreateFolderInput): Promise<DmsFolder> 
   }
 
   if (res.status === 409) {
-    throw new Error("Dieser Pfad existiert bereits.");
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Dieser Pfad existiert bereits.");
   }
 
   if (res.status === 400) {
@@ -136,7 +151,8 @@ export async function updateFolder(
   }
 
   if (res.status === 409) {
-    throw new Error("Dieser Pfad existiert bereits.");
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Dieser Pfad existiert bereits.");
   }
 
   if (res.status === 400) {
@@ -191,6 +207,56 @@ export async function reorderFolders(order: ReorderEntry[]): Promise<DmsFolder[]
     return body.folders;
   }
   return [];
+}
+
+/**
+ * Lists the direct subdirectories of a NAS path (defaults to the /mnt/nas
+ * mount point), annotated with conflict status against active DMS folders.
+ * `excludeFolderId` excludes a folder (e.g. the one currently being edited)
+ * from conflict marking.
+ */
+export async function browseFolders(
+  path?: string,
+  excludeFolderId?: number
+): Promise<BrowseResult> {
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  if (excludeFolderId != null) params.set("excludeFolderId", String(excludeFolderId));
+  const qs = params.toString();
+
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${DMS_FOLDERS_ENDPOINT}/browse${qs ? `?${qs}` : ""}`, {
+      method: "GET",
+    });
+  } catch {
+    throw new Error("Netzwerkfehler -- Ordner konnte nicht geladen werden.");
+  }
+
+  if (res.status === 403) {
+    throw new Error("Zugriff verweigert -- Admin-Rechte erforderlich.");
+  }
+
+  if (res.status === 400) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Ungueltige Eingabe.");
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Serverfehler (${res.status}) beim Laden des Ordners.`);
+  }
+
+  const body = await res.json();
+
+  // Same n8n response-wrapping quirk as getFolders/reorderFolders
+  if (Array.isArray(body) && body.length > 0 && Array.isArray(body[0]?.entries)) {
+    return body[0];
+  }
+  if (body && Array.isArray(body.entries)) {
+    return body;
+  }
+  return { path: path ?? "/mnt/nas", conflictType: null, message: null, entries: [] };
 }
 
 /**
