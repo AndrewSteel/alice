@@ -1,6 +1,6 @@
 # PROJ-76: DMS Bild-Backlog-Bereinigung
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-08-05
 **Last Updated:** 2026-08-05
 
@@ -172,8 +172,16 @@ Alle anderen Felder des Objekts (`weaviate_uuid`, EXIF-Felder, Geocoding-Felder,
   - Ollama nicht erreichbar/Timeout → Item bleibt `extraction_failed = true`, geloggt, kein Abbruch des gesamten Laufs (nächster manueller Lauf versucht es erneut)
   - Kein Konflikt mit dem nächtlichen `alice-dms-processor` (inkl. PROJ-72-Lock) — der Backfill berührt weder die Redis-Listen `alice:dms:image`/`alice:dms:geocode_pending` noch den Processor-Lock, sondern ausschließlich bereits abgeschlossene Weaviate-Objekte
 
-## QA Test Results
-_To be added by /qa_
+## Implementation Notes (Backend)
+
+Alle vier Fixes wie im Tech Design entworfen umgesetzt:
+
+1. **Trigger-Fix**: `workflows/alice-dms-processor.json`, Node `MQTT: Publish Image Done` — `inserted: true` in die MQTT-Payload aufgenommen.
+2. **TIFF/HEIC-Support**: `docker/compose/automations/alice-dms-thumbnailer/` — `pillow-heif` zu `requirements.txt` hinzugefügt, `libheif1` im Dockerfile installiert (analog zu `dms-extractor-image`), `generate_thumbnail()` um `tif`/`tiff`/`heic` erweitert, HEIC-Opener beim Modul-Import registriert.
+3. **Thumbnail-Backfill-Erweiterung**: `workflows/alice-dms-thumbnailer-backfill.json` — `"Image"` zur `COLLECTIONS`-Liste hinzugefügt. **Abweichung vom Tech Design (Bugfix während der Implementierung)**: Die Collection "Image" verwendet in Weaviate snake_case-Feldnamen (`file_path`, `file_hash`), während die anderen 7 Collections camelCase (`filePath`, `fileHash`) verwenden. Der bestehende Query-Node `Code: Query Weaviate (no thumbnail)` hatte die Feldnamen hartkodiert (`filePath fileHash`) — ein reines Hinzufügen von "Image" zur Liste hätte für diese Collection einen GraphQL-Fehler verursacht (Feld nicht gefunden) und dadurch 0 Ergebnisse geliefert. Der Query-Node wurde so angepasst, dass er je Collection die korrekten Feldnamen wählt (`isImage ? 'file_path' : 'filePath'`, analog für `fileHash`/`file_hash`).
+4. **Neuer Beschreibungs-Backfill**: `workflows/alice-dms-image-description-backfill.json` (neu) — Webhook-Trigger, Batch-Fetch (Weaviate GraphQL, `extraction_failed = true`, Limit 50 pro Lauf), pro Bild: Pfadauflösung (`file_path` → `additionalPaths`-Fallback) über direkten NAS-Lesezugriff (`fs`, gleicher Mount wie `dms-extractor-image`), Ollama-Vision-Aufruf (gleicher Prompt/gleiches Modell), bei Erfolg PATCH auf `ai_description`/`extraction_failed`. Zusammenfassung `{ processed, updated, still_failed, remaining }` wird geloggt und als Webhook-Response zurückgegeben; `remaining` wird per separater Weaviate-Aggregate-Query nach Lauf-Ende ermittelt (Anzahl noch offener `extraction_failed = true`-Objekte, unabhängig vom eigenen Batch-Limit). Neue Env-Var `OLLAMA_VISION_MODEL` zum n8n-Container hinzugefügt (`docker/compose/automations/n8n/compose.yml`, `.env.example`, `.env`), Wert identisch zu `dms-extractor-image`.
+
+Keine Frontend-Änderungen (kein UI-Element für den neuen Backfill, wie im Spec gefordert).
 
 ## Deployment
 _To be added by /deploy_
