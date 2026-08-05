@@ -18,6 +18,7 @@ export interface ProfileData {
     anrede: "du" | "sie" | null;
     sprache: string | null;
     detailgrad: string | null;
+    bilder_standardanzahl: number | null;
   };
 }
 
@@ -26,6 +27,7 @@ export interface ProfileUpdateInput {
   interessen: string[];
   anrede: "du" | "sie";
   sprache: string;
+  bilder_standardanzahl: number;
 }
 
 export interface EmailUpdateInput {
@@ -60,7 +62,7 @@ export async function getProfile(): Promise<ProfileData> {
 }
 
 /**
- * Updates profile facts and preferences (name, interessen, anrede, sprache).
+ * Updates profile facts and preferences (name, interessen, anrede, sprache, bilder_standardanzahl).
  */
 export async function updateProfile(input: ProfileUpdateInput): Promise<void> {
   let res: Response;

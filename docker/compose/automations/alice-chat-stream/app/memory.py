@@ -198,16 +198,28 @@ def build_system_prompt(
         "- search_documents: Durchsucht das Dokumentenarchiv (Rechnungen, Kontoauszüge, BankTransactions, Verträge, E-Mails, Wertpapierabrechnungen). "
         "Für Fragen nach konkreten Zahlungen/Buchungen doc_type='BankTransaction' verwenden.",
         "- get_document_details: Holt alle Details zu einem Dokument per weaviate_id + collection.",
+        "- search_images: Durchsucht die Bilder-Sammlung (Ort, Motiv, Aktualität). Ergebnisse "
+        "erscheinen immer als Kachel-Raster, auch ohne 'zeige mir' in der Anfrage.",
         "- search_emails: Durchsucht indexierte E-Mails des Nutzers semantisch.",
         "- get_email_body: Lädt den vollständigen Inhalt einer E-Mail (benötigt mailbox_id + uid aus search_emails).",
         "- home_assistant: Steuert Home-Assistant-Geräte direkt (Licht, Heizung, Schalter, ...).",
         "- remember: Speichert dauerhafte Fakten oder Präferenzen über den Nutzer.",
         "- recall: Sucht semantisch in vergangenen Gesprächen.",
         "",
-        "Bei search_documents und search_emails: vom Nutzer genannte konkrete Begriffe "
-        "(Firmennamen, Themen, Stichworte) unverändert als query übernehmen, nicht "
-        "paraphrasieren. Bei rein zeitlichen Anfragen ('die letzten...', 'neueste...') "
-        "sort_mode='recency' setzen statt einen erfundenen Suchtext zu bilden.",
+        "Bei search_documents, search_emails und search_images: vom Nutzer genannte konkrete "
+        "Begriffe (Firmennamen, Themen, Orte, Motive, Stichworte) unverändert als query/location "
+        "übernehmen, nicht paraphrasieren. Bei rein zeitlichen Anfragen ('die letzten...', "
+        "'neueste...') sort_mode='recency' setzen statt einen erfundenen Suchtext zu bilden.",
+        "",
+        "Äußert der Nutzer bei search_documents, search_emails oder search_images einen "
+        "ausdrücklichen 'alle zeigen'-Wunsch (z.B. 'alle Rechnungen', 'alle Bilder aus Tokyo'), "
+        "frage zuerst nach, ob wirklich alle (potenziell vielen) Treffer gezeigt werden sollen — "
+        "rufe das Werkzeug NICHT sofort mit limit=100 auf. Erst nach ausdrücklicher Bestätigung "
+        "das Werkzeug mit limit=100 aufrufen; lehnt der Nutzer ab oder nennt stattdessen eine "
+        "Zahl, diese Zahl bzw. die Standardanzahl verwenden. Jede neue 'alle'-Anfrage löst erneut "
+        "die Rückfrage aus, auch wenn eine frühere bereits bestätigt wurde. Enthält ein "
+        "Werkzeugergebnis more_available=true, weise im Antworttext explizit darauf hin, dass es "
+        "weitere, nicht angezeigte Treffer gibt.",
         "",
         _current_datetime_line(),
     ]
