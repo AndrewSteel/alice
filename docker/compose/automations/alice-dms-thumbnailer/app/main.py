@@ -23,6 +23,13 @@ from pydantic import BaseModel, field_validator
 
 from .auth import verify_jwt
 
+# Register HEIC support if available
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("alice-dms-thumbnailer")
@@ -186,7 +193,7 @@ def generate_thumbnail(original_path: str, file_type: str) -> Image.Image | None
                 if img:
                     img = _square_crop(img, top_crop=True)
 
-        elif ext in ("jpg", "jpeg", "png", "webp", "gif", "bmp"):
+        elif ext in ("jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff", "heic"):
             try:
                 img = Image.open(original_path).copy()
                 img = _square_crop(img, top_crop=False)

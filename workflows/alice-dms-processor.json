@@ -888,7 +888,7 @@
       "parameters": {
         "topic": "alice/dms/done",
         "sendInputData": false,
-        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, weaviate_uuid: $json._new_weaviate_id, original_path: $json.file_path, document_type: 'Image', file_type: $json.file_type || ($json.file_path || '').split('.').pop().toLowerCase(), timestamp: new Date().toISOString() }) }}",
+        "message": "={{ JSON.stringify({ file_path: $json.file_path, file_hash: $json.file_hash, weaviate_uuid: $json._new_weaviate_id, original_path: $json.file_path, document_type: 'Image', inserted: true, file_type: $json.file_type || ($json.file_path || '').split('.').pop().toLowerCase(), timestamp: new Date().toISOString() }) }}",
         "options": {
           "qos": 1
         }
