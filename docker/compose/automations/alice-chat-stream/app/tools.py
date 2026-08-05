@@ -4,6 +4,7 @@ Tool execution for the streaming LLM path.
 Tools advertised to the LLM:
   - search_documents     → POST N8N_TOOL_SEARCH_URL  {operation: 'search', ...}
   - get_document_details → POST N8N_TOOL_SEARCH_URL  {operation: 'details', ...}
+  - search_images        → POST N8N_TOOL_SEARCH_URL  {operation: 'search_images', ...}
   - home_assistant       → POST N8N_TOOL_HA_URL      (only if URL is set)
   - remember             → direct write to alice.user_profiles
   - recall               → direct read from Weaviate AliceMemory
@@ -85,7 +86,18 @@ def tool_schema() -> list[dict]:
                                 "absteigend statt nach Relevanz sortiert. Sonst relevance (Standard)."
                             ),
                         },
-                        "limit": {"type": "integer", "description": "1-100, Standard 5"},
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "1-100, Standard 5. Bei einem ausdrücklichen 'alle zeigen'-Wunsch "
+                                "des Nutzers (z.B. 'alle Rechnungen') zuerst rückfragen, ob wirklich "
+                                "alle (potenziell vielen) Treffer gezeigt werden sollen — erst nach "
+                                "Bestätigung limit=100 setzen (technische Obergrenze). Lehnt der "
+                                "Nutzer ab oder nennt eine Zahl, diese Zahl bzw. den Standardwert "
+                                "verwenden. Enthält das Ergebnis more_available=true, im Antworttext "
+                                "explizit erwähnen, dass weitere, nicht angezeigte Treffer existieren."
+                            ),
+                        },
                     },
                     "required": ["query"],
                 },
@@ -103,6 +115,63 @@ def tool_schema() -> list[dict]:
                         "collection": {"type": "string"},
                     },
                     "required": ["weaviate_id", "collection"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_images",
+                "description": (
+                    "Durchsucht die Bilder-Sammlung (Fotos aus dem DMS). Ergebnisse erscheinen "
+                    "immer als Kachel-Raster, unabhängig davon ob die Anfrage 'zeige mir' enthält."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": (
+                                "Vom Nutzer genannter Ort (Stadt, Land, Bezirk), z.B. 'Tokyo' oder "
+                                "'Japan' — wird gegen strukturierte Geodaten gematcht, nicht gegen "
+                                "die Bildbeschreibung. Unverändert übernehmen, nicht übersetzen. Leer "
+                                "lassen, wenn kein Ortskriterium genannt wurde."
+                            ),
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Vom Nutzer genanntes Motiv/Inhaltskriterium (z.B. 'Sonnenuntergang', "
+                                "'Wiese', 'Kirschblüten') unverändert übernehmen — NICHT paraphrasieren. "
+                                "Gibt es kein Inhaltskriterium (z.B. bei 'zeig mir die letzten Bilder' "
+                                "oder einer reinen Ortssuche), leer lassen statt eines erfundenen Texts."
+                            ),
+                        },
+                        "sort_mode": {
+                            "type": "string",
+                            "enum": ["relevance", "recency"],
+                            "description": (
+                                "recency setzen bei rein zeitlichen Anfragen ('die letzten...', "
+                                "'neueste...'). Ohne Inhaltskriterium wird ohnehin immer nach Datum "
+                                "sortiert. Sonst relevance (Standard)."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "1-100. Ohne Angabe wird die vom Nutzer in den Einstellungen "
+                                "konfigurierte Standardanzahl verwendet (System-Default 5). Bei einem "
+                                "ausdrücklichen 'alle zeigen'-Wunsch (z.B. 'alle Bilder aus Tokyo') "
+                                "zuerst rückfragen, ob wirklich alle (potenziell vielen) Treffer "
+                                "gezeigt werden sollen — erst nach Bestätigung limit=100 setzen "
+                                "(technische Obergrenze). Lehnt der Nutzer ab oder nennt eine Zahl, "
+                                "diese Zahl bzw. die Standardanzahl verwenden. Enthält das Ergebnis "
+                                "more_available=true, im Antworttext explizit erwähnen, dass weitere, "
+                                "nicht angezeigte Treffer existieren."
+                            ),
+                        },
+                    },
+                    "required": [],
                 },
             },
         },
@@ -192,7 +261,18 @@ def tool_schema() -> list[dict]:
                                 "absteigend statt nach Relevanz sortiert. Sonst relevance (Standard)."
                             ),
                         },
-                        "limit": {"type": "integer", "description": "1-100, Standard 5"},
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "1-100, Standard 5. Bei einem ausdrücklichen 'alle zeigen'-Wunsch "
+                                "des Nutzers (z.B. 'alle Mails') zuerst rückfragen, ob wirklich alle "
+                                "(potenziell vielen) Treffer gezeigt werden sollen — erst nach "
+                                "Bestätigung limit=100 setzen (technische Obergrenze). Lehnt der "
+                                "Nutzer ab oder nennt eine Zahl, diese Zahl bzw. den Standardwert "
+                                "verwenden. Enthält das Ergebnis more_available=true, im Antworttext "
+                                "explizit erwähnen, dass weitere, nicht angezeigte Treffer existieren."
+                            ),
+                        },
                     },
                     "required": ["query"],
                 },
@@ -253,6 +333,19 @@ async def execute_tool(
                 "weaviate_id": str(args.get("weaviate_id") or ""),
                 "collection": str(args.get("collection") or ""),
             }, client)
+
+        if name == "search_images":
+            payload = {
+                "operation": "search_images",
+                "user_id": user_id,
+                "location": str(args.get("location") or "").strip(),
+                "query": str(args.get("query") or "").strip(),
+                "sort_mode": args.get("sort_mode") or "relevance",
+            }
+            limit = args.get("limit")
+            if limit is not None and str(limit).strip() != "":
+                payload["limit"] = int(limit)
+            return await _call_n8n_search(payload, client)
 
         if name == "home_assistant":
             if not N8N_TOOL_HA_URL:

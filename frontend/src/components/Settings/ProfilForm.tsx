@@ -35,9 +35,13 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
   const [sprache, setSprache] = useState<"de" | "en">(
     spracheToLocale(profile.preferences.sprache)
   );
+  const [bilderAnzahl, setBilderAnzahl] = useState<number>(
+    profile.preferences.bilder_standardanzahl ?? 5
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [bilderAnzahlError, setBilderAnzahlError] = useState<string | null>(null);
 
   // Sync with profile changes (e.g., after reload)
   useEffect(() => {
@@ -45,6 +49,7 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
     setInteressen(profile.facts.interessen ?? []);
     setAnrede(profile.preferences.anrede ?? "du");
     setSprache(spracheToLocale(profile.preferences.sprache));
+    setBilderAnzahl(profile.preferences.bilder_standardanzahl ?? 5);
   }, [profile]);
 
   function validateName(value: string): boolean {
@@ -56,17 +61,28 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
     return true;
   }
 
+  function validateBilderAnzahl(value: number): boolean {
+    if (!Number.isInteger(value) || value < 1 || value > 100) {
+      setBilderAnzahlError(t("settings.profilForm.imageResultCountError"));
+      return false;
+    }
+    setBilderAnzahlError(null);
+    return true;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
     if (!validateName(name)) return;
+    if (!validateBilderAnzahl(bilderAnzahl)) return;
 
     const input: ProfileUpdateInput = {
       name: name.trim() || "",
       interessen,
       anrede,
       sprache,
+      bilder_standardanzahl: bilderAnzahl,
     };
 
     setIsSaving(true);
@@ -161,6 +177,29 @@ export function ProfilForm({ profile, onSave }: ProfilFormProps) {
                 <SelectItem value="en">{t("settings.profilForm.langEn")}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Standardanzahl Bilderergebnisse (PROJ-75) */}
+          <div className="space-y-2">
+            <Label htmlFor="profile-bilder-anzahl" className="text-foreground">
+              {t("settings.profilForm.imageResultCount")}
+            </Label>
+            <Input
+              id="profile-bilder-anzahl"
+              type="number"
+              min={1}
+              max={100}
+              value={bilderAnzahl}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                setBilderAnzahl(Number.isNaN(value) ? 0 : value);
+                validateBilderAnzahl(value);
+              }}
+              className="bg-card border-border text-foreground placeholder:text-muted-foreground"
+            />
+            {bilderAnzahlError && (
+              <p className="text-sm text-red-400">{bilderAnzahlError}</p>
+            )}
           </div>
 
           {/* Read-only: Rolle */}
