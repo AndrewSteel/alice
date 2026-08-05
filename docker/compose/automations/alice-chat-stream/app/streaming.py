@@ -157,6 +157,12 @@ def _build_tool_summary(tool_name: str, ok: bool, result: dict[str, Any]) -> str
             return "Keine E-Mails gefunden"
         return f"{n} E-Mail{'s' if n != 1 else ''} gefunden"
 
+    if tool_name == "search_images":
+        n = _result_count(result)
+        if n is None or n <= 0:
+            return "Keine Bilder gefunden"
+        return f"{n} Bild{'er' if n != 1 else ''} gefunden"
+
     if tool_name == "recall":
         n = _result_count(result)
         if n is None or n <= 0:
