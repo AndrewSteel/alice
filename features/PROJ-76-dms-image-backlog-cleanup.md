@@ -1,6 +1,6 @@
 # PROJ-76: DMS Bild-Backlog-Bereinigung
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-08-05
 **Last Updated:** 2026-08-05
 
@@ -80,7 +80,97 @@ Dieses Feature bündelt die Behebung aller drei Mängel: den Trigger-Fix (rückw
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Component Overview
+
+Vier unabhängige, kleine Änderungen an drei bestehenden Komponenten plus ein neuer Workflow. Kein neuer Container, keine neue HTTP-Schnittstelle.
+
+```
+alice-dms-processor (n8n, bestehend)
+  └─ Node "MQTT: Publish Image Done"        ← GEÄNDERT: + inserted: true
+         │ MQTT alice/dms/done
+         ▼
+alice-dms-thumbnailer (n8n, bestehend)      ← unverändert, ab jetzt korrekt getriggert
+         │ HTTP POST /generate
+         ▼
+alice-dms-thumbnailer Container (Python)    ← GEÄNDERT: + tif/tiff (Pillow nativ), + heic (pillow-heif)
+
+
+alice-dms-thumbnailer-backfill (n8n, bestehend)
+  └─ Node "Code: Init Collections"          ← GEÄNDERT: COLLECTIONS += "Image"
+         │ HTTP POST /generate (derselbe Container wie oben)
+         ▼
+alice-dms-thumbnailer Container
+
+
+alice-dms-image-description-backfill (n8n, NEU)
+  Webhook POST /image-description-backfill
+         │
+         ├─ Weaviate-Abfrage: Image-Objekte mit extraction_failed = true (Batch)
+         ├─ pro Objekt: Bilddatei von NAS lesen (file_path, Fallback additionalPaths[0])
+         ├─ Ollama Vision (gleicher Prompt/gleiches Modell wie dms-extractor-image)
+         ├─ Erfolg → Weaviate PATCH (ai_description, extraction_failed: false)
+         ├─ Fehlschlag → loggen, extraction_failed bleibt true, weiter zum nächsten Item
+         └─ Abschluss-Log: { processed, updated, still_failed, remaining }
+```
+
+### Data Model (plain language)
+
+Keine neuen Felder, keine Schemaänderung. Betroffen sind ausschließlich zwei bereits existierende Felder der Weaviate-Collection "Image":
+
+- `ai_description` — wird im Beschreibungs-Backfill per PATCH überschrieben, wenn ein neuer Ollama-Vision-Aufruf erfolgreich war
+- `extraction_failed` — wird von `true` auf `false` gesetzt, sobald `ai_description` erfolgreich nachgetragen wurde
+
+Alle anderen Felder des Objekts (`weaviate_uuid`, EXIF-Felder, Geocoding-Felder, `thumbnail_path`, `additionalPaths`) werden von keinem der vier Fixes berührt.
+
+### Tech Decisions
+
+| Entscheidung | Wahl | Begründung |
+| --- | --- | --- |
+| Beschreibungs-Backfill: eigener Workflow statt Erweiterung von `alice-dms-thumbnailer-backfill` | Neuer Workflow `alice-dms-image-description-backfill` | Andere Filterkriterien (`extraction_failed`) und anderer Scope (nur Collection "Image") als der bestehende Thumbnail-Backfill (`thumbnail_path` über 7 Collections); getrennt zu halten vermeidet bedingte Verzweigungen in einem sonst einfachen Workflow — folgt demselben Muster wie die bestehende Trennung zwischen `alice-dms-thumbnailer` (Laufzeit) und `alice-dms-thumbnailer-backfill` (einmalig) |
+| Bilddatei-Zugriff direkt aus n8n (Code-Node, `fs`) statt neuer HTTP-Endpunkt in `dms-extractor-image` | Direkter NAS-Lesezugriff aus n8n | Der n8n-Container hat bereits denselben schreibgeschützten NAS-Mount wie `dms-extractor-image` (`nas-volumes.yml`); `dms-extractor-image` ist bewusst rein MQTT-getrieben ohne HTTP-Server — ein neuer Endpunkt nur für diesen einmaligen Backfill wäre zusätzliche Angriffsfläche und Wartungsaufwand ohne Wiederverwendung |
+| Ollama-Vision-Aufruf direkt aus n8n (HTTP-Request-Node) statt über `dms-extractor-image` | Direkter Ollama-Call aus dem neuen Workflow | Gleiches Muster wie bereits bestehende direkte Weaviate-Aufrufe aus `alice-dms-processor` (z. B. `Code: Process Image Item`, Geocode-Phase); kein neuer Container nötig |
+| Update-Mechanismus | PATCH statt Re-Insert | Verhindert Überschreiben/Verlust von EXIF-, Geocoding- oder Thumbnail-Daten, die für dieses Objekt bereits korrekt gesetzt sind (analog zur bestehenden Geoapify-PATCH-Phase aus PROJ-56) |
+| Batch-Verarbeitung mit Wiederaufnahme | `Split In Batches`, gleiches Muster wie `alice-dms-thumbnailer-backfill` | Bereits erprobtes, unterbrechbares Muster; der Filter `extraction_failed = true` schließt bereits erfolgreich nachbearbeitete Bilder bei einem erneuten Lauf automatisch aus — kein zusätzlicher Fortschritts-Zustand nötig |
+| HEIC-Unterstützung im Thumbnailer | `pillow-heif`-Abhängigkeit ergänzen | Bereits produktiv erprobt in `dms-extractor-image`; kein neues Toolchain-Risiko |
+| TIFF-Unterstützung im Thumbnailer | Nur Erweiterung der Format-Liste, keine neue Abhängigkeit | Pillow unterstützt TIFF nativ |
+
+### Dependencies (packages to install)
+
+- `pillow-heif` — HEIC-Support für `alice-dms-thumbnailer` (Python-Container), ergänzt zu `requirements.txt`
+
+### Workflow Architecture — `alice-dms-image-description-backfill` (neu)
+
+- **Trigger:** Webhook POST (manuell ausgelöst durch Admin, analog zu `alice-dms-thumbnailer-backfill`)
+- **Nodes (High-Level, in Ablaufreihenfolge):**
+  1. **Fetch Failed Batch** — Weaviate-Query auf Collection "Image", Filter `extraction_failed = true`, Batch-Limit
+  2. **IF Batch Empty** — keine Treffer → Workflow endet regulär mit leerem Summary
+  3. **Split In Batches** — Einzelverarbeitung pro Bild
+  4. **Resolve File Path** — versucht `file_path`; existiert die Datei nicht, wird der erste Eintrag aus `additionalPaths` versucht
+  5. **IF File Readable** — keine der Pfad-Optionen lesbar → Item als `still_failed` loggen, weiter zum nächsten
+  6. **Call Ollama Vision** — gleicher Prompt/gleiches Modell wie `dms-extractor-image` (`OLLAMA_VISION_MODEL`)
+  7. **IF Ollama OK** — Fehler/Timeout → Item als `still_failed` loggen, `extraction_failed` bleibt `true`, weiter zum nächsten
+  8. **Update Weaviate (PATCH)** — aktualisiert nur `ai_description` und `extraction_failed: false` am bestehenden Objekt
+  9. **Loop** — nächstes Item, bis Batch abgearbeitet
+  10. **Summary** — `{ processed, updated, still_failed, remaining }` im Execution Log
+
+- **Data Flow:**
+
+  ```
+  Weaviate (Image, extraction_failed=true)
+       ↓ Batch-Query
+  NAS (file_path / additionalPaths, read-only)
+       ↓ Bilddatei
+  Ollama Vision (/api/generate)
+       ↓ ai_description
+  Weaviate PATCH (ai_description, extraction_failed: false)
+  ```
+
+- **Integrations:** Weaviate (Query + PATCH), NAS-Dateisystem (read-only, gleicher Mount wie `dms-extractor-image`), Ollama (Vision-Modell, gleiche Konfiguration wie `dms-extractor-image`: `OLLAMA_URL`, `OLLAMA_VISION_MODEL`)
+- **Error Handling:**
+  - Datei nicht lesbar (weder `file_path` noch `additionalPaths`) → Item bleibt `extraction_failed = true`, geloggt, kein Abbruch des gesamten Laufs
+  - Ollama nicht erreichbar/Timeout → Item bleibt `extraction_failed = true`, geloggt, kein Abbruch des gesamten Laufs (nächster manueller Lauf versucht es erneut)
+  - Kein Konflikt mit dem nächtlichen `alice-dms-processor` (inkl. PROJ-72-Lock) — der Backfill berührt weder die Redis-Listen `alice:dms:image`/`alice:dms:geocode_pending` noch den Processor-Lock, sondern ausschließlich bereits abgeschlossene Weaviate-Objekte
 
 ## QA Test Results
 _To be added by /qa_
