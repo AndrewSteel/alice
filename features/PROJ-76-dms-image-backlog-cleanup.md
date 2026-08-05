@@ -1,6 +1,6 @@
 # PROJ-76: DMS Bild-Backlog-Bereinigung
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-08-05
 **Last Updated:** 2026-08-05
 
@@ -182,6 +182,83 @@ Alle vier Fixes wie im Tech Design entworfen umgesetzt:
 4. **Neuer Beschreibungs-Backfill**: `workflows/alice-dms-image-description-backfill.json` (neu) — Webhook-Trigger, Batch-Fetch (Weaviate GraphQL, `extraction_failed = true`, Limit 50 pro Lauf), pro Bild: Pfadauflösung (`file_path` → `additionalPaths`-Fallback) über direkten NAS-Lesezugriff (`fs`, gleicher Mount wie `dms-extractor-image`), Ollama-Vision-Aufruf (gleicher Prompt/gleiches Modell), bei Erfolg PATCH auf `ai_description`/`extraction_failed`. Zusammenfassung `{ processed, updated, still_failed, remaining }` wird geloggt und als Webhook-Response zurückgegeben; `remaining` wird per separater Weaviate-Aggregate-Query nach Lauf-Ende ermittelt (Anzahl noch offener `extraction_failed = true`-Objekte, unabhängig vom eigenen Batch-Limit). Neue Env-Var `OLLAMA_VISION_MODEL` zum n8n-Container hinzugefügt (`docker/compose/automations/n8n/compose.yml`, `.env.example`, `.env`), Wert identisch zu `dms-extractor-image`.
 
 Keine Frontend-Änderungen (kein UI-Element für den neuen Backfill, wie im Spec gefordert).
+
+---
+
+## QA Test Results
+
+**Tested:** 2026-08-05
+**Environment:** No live/VPN-connected n8n, Weaviate, Ollama or NAS mount available in this dev sandbox (production is VPN-only per CLAUDE.md). Testing methodology: real local execution of the Python container logic (actual Pillow/pillow-heif, real TIFF/HEIC files), faithful Node.js execution of every n8n Code node's JS body against mocked n8n globals (`$input`, `$(...)`, `$getWorkflowStaticData`, `axios`), n8n-mcp schema/connection validation, and full connection-graph/source review for every changed node. No workflow was deployed or triggered against the live n8n instance (`https://n8n.happy-mining.de`), consistent with the project rule that deployment is a manual, user-initiated step.
+**Tester:** QA Engineer (AI)
+
+### Acceptance Criteria Status
+
+#### AC-1: Thumbnail-Trigger-Fix (`alice-dms-processor`)
+- [x] `MQTT: Publish Image Done` includes `inserted: true` in the payload (verified in diff and by reading the final node JSON)
+- [x] Confirmed via connection-graph inspection: `IF: Image Is New` (`_image_action === 'new'`) output 0 (true) is the *only* path into `MQTT: Publish Image Done`
+- [x] Confirmed the dedup path (`IF: Image Is New` output 1 / false, `_image_action === 'add_path'`) routes to `Split: Image Batches` instead — no `alice/dms/done` message, unchanged
+- [x] Confirmed root cause end-to-end: `alice-dms-thumbnailer`'s `Code: Parse & Filter` node does `if (!msg.inserted) { ...; return []; }` — before this fix `msg.inserted` was always `undefined` (falsy), so **every** image silently skipped thumbnail generation since PROJ-56 shipped. After the fix `inserted: true` passes the filter with zero changes needed to `alice-dms-thumbnailer` itself.
+
+#### AC-2: Thumbnail-Formatunterstützung (`alice-dms-thumbnailer`)
+- [x] `tif`/`tiff`: real Pillow test (800×600 RGB TIFF) → thumbnail generated, 400×400 RGB, both lowercase and uppercase `file_type` values handled correctly
+- [x] `heic`: real HEIC test file encoded via `pillow-heif` in an isolated venv, fed through the actual `generate_thumbnail()` → 400×400 RGB thumbnail generated successfully
+- [x] Existing formats (`jpg`, `png` spot-checked) unaffected — no regression
+- [x] Corrupt/undecodable TIFF and HEIC files both return `None` (existing 422 + placeholder error path unchanged, no new exception type introduced)
+
+#### AC-3: Thumbnail-Backfill-Erweiterung (`alice-dms-thumbnailer-backfill`)
+- [x] `"Image"` added to `COLLECTIONS` in `Code: Init Collections`
+- [x] **Bug caught and fixed during implementation** (see Implementation Notes): the query node hardcoded camelCase field names (`filePath`/`fileHash`); Image uses snake_case (`file_path`/`file_hash`) in its Weaviate schema. Verified via mocked-axios test: without the per-collection field fix, an "Image" query would return a GraphQL field-not-found error → 0 results, silently defeating the backfill for all images. With the fix, a mixed `['Invoice', 'Image']` run correctly sends `filePath fileHash` for Invoice and `file_path file_hash` for Image, and correctly extracts `file_path` for each.
+- [x] Docs without `thumbnail_path` still correctly filtered per-collection (verified: an Image doc with `thumbnail_path` already set was correctly excluded from results in the mock test)
+- [x] Other 7 collections unchanged — verified Invoice still queries/extracts via camelCase, unaffected by the Image-specific branch
+- [ ] BUG (Low, pre-existing, not introduced by this change): the workflow's sticky-note documentation already claimed a progress-log format (`skipped_already_has_thumb`, `remaining`) that doesn't match the actual `Code: Summary` output fields (`skipped_no_path`, `total`). This drift predates PROJ-76; only the collection list in that same sticky note was updated. Documented here for visibility, not blocking.
+
+#### AC-4: Beschreibungs-Backfill (neuer Workflow)
+- [x] New webhook-triggered workflow `alice-dms-image-description-backfill` created, POST-triggered, analogous structure to `alice-dms-thumbnailer-backfill`
+- [x] Fetches Image objects with `extraction_failed = true` (GraphQL, batch limit 50/run) — verified via mocked axios (results mapping, empty-result sentinel, GraphQL-error and network-error graceful degradation all tested)
+- [x] Path resolution tested for all 4 combinations: primary path exists; primary missing + `additionalPaths[0]` exists; all paths missing (graceful `_read_ok: false`, no crash); `file_path` null with only `additionalPaths` present
+- [x] Only the Ollama Vision step is repeated — verified via code review: PATCH body only ever contains `{ ai_description, extraction_failed }`, nothing else is read or touched
+- [x] On success: PATCH with new `ai_description` and `extraction_failed: false` — verified via mocked HTTP-status branch test (2xx → `updated`, non-2xx → `still_failed`)
+- [x] On repeated failure (no file / Ollama unreachable / PATCH failure): no PATCH sent, `extraction_failed` stays `true`, error logged, run continues to next item — verified all three failure branches independently
+- [x] Batch processing with safe resumption — verified: `extraction_failed = true` filter naturally excludes already-fixed images on the next invocation; no duplicate Ollama calls possible across runs
+- [x] Summary `{ processed, updated, still_failed, remaining }` — exact field names verified via direct execution of the summary logic (both successful and failed remaining-count-query paths tested); `weaviate_uuid`, `thumbnail_path`, `additionalPaths`, EXIF/geo fields never touched (PATCH scope verified)
+- [x] No UI element — confirmed, zero frontend files changed
+- [ ] BUG (Low): if the *initial* Weaviate query itself fails (e.g. Weaviate briefly unreachable), the workflow reports the same `{processed:0, updated:0, still_failed:0, remaining:0}` summary as a genuine "nothing left to do" result — indistinguishable from the response alone (the underlying `console.warn` is visible in the n8n execution log, so it's not silent, just not surfaced in the HTTP response). This mirrors the exact same non-distinguishing behavior already present in the sibling `alice-dms-thumbnailer-backfill` query node, so it's a consistent (if imperfect) convention, not a new regression.
+- [ ] BUG (Low): if the final "remaining" Aggregate query fails, `remaining` is reported as `null` rather than a number. Reasonable degrade-gracefully behavior; spec doesn't define expected behavior for this specific failure mode.
+
+### Edge Cases Status
+
+- [x] Bild-Datei nicht mehr unter `file_path` — additionalPaths fallback tested, graceful `extraction_failed = true` retained
+- [x] Ollama nicht erreichbar während Backfill-Lauf — tested via IF: Ollama OK false-branch, item logged `still_failed`, run continues
+- [x] Bereits korrekt beschriebenes Bild (`extraction_failed = false`) — excluded by the GraphQL filter itself, not re-processed
+- [x] Gleichzeitiger Lauf von `alice-dms-processor` und Beschreibungs-Backfill — verified via code review: the new workflow touches neither the Redis lists (`alice:dms:image`, `alice:dms:geocode_pending`) nor the PROJ-72 processor lock; PATCH scope is disjoint from the geocode phase's PATCH fields (`country`/`city`/`district`/`country_code`)
+- [x] HEIC-Datei, die pillow-heif nicht öffnen kann — tested with a corrupt `.heic` file, returns `None` gracefully, no crash
+- [x] Sehr großer Backlog — batch limit (50/run) + `extraction_failed` filter allows safe interruption/resumption without duplicate Ollama calls
+- [x] Bild mit `thumbnail_path` bereits gesetzt, erneut im Thumbnail-Backfill — `skipped_already_has_thumb` behavior unchanged, verified for Image collection specifically
+- [x] Bild mit `extraction_failed = true`, Thumbnail aber bereits vorhanden — the two backfills are independent by design (different Weaviate filters), confirmed via code review
+
+### Security Audit Results
+
+**n8n workflow features:**
+- [x] No secrets in code, logs, or HTTP responses — env vars referenced via `$env`, never echoed back
+- [x] No path-traversal risk from the webhook caller: file paths read by `Code: Resolve & Read Image` originate only from Weaviate query results (previously written by `dms-extractor-image` after its own `/mnt/nas/` prefix validation), never from the webhook request body — the caller cannot influence which file is read
+- [x] PATCH-only update strategy prevents accidental data loss/overwrite of EXIF, geocoding, thumbnail, or path fields
+- [ ] NOTE (informational, not a new issue): the new webhook has `authentication: "none"`, identical to the existing `alice-dms-thumbnailer-backfill` webhook. Both rely on network-level trust (VPN + internal `/api/webhook/` routing) rather than app-level auth. Consistent with established convention for this class of admin-triggered backfill workflow — not a regression, but noting it since it's a new attack surface addition of the same class.
+
+### Bugs Found
+
+No Critical or High bugs. Three Low-severity items, all documented above:
+1. Pre-existing sticky-note doc drift in `alice-dms-thumbnailer-backfill` (not introduced by PROJ-76)
+2. New workflow can't distinguish "genuinely empty backlog" from "initial Weaviate query failed" in its HTTP response (matches existing sibling-workflow convention)
+3. `remaining` reports `null` instead of a number if the final count query fails
+
+None block deployment; all are candidates for a future polish pass if desired.
+
+### Summary
+- **Acceptance Criteria:** 4/4 passed (with 3 Low-severity notes, no Critical/High)
+- **Bugs Found:** 3 total (0 critical, 0 high, 0 medium, 3 low)
+- **Security:** Pass (no new attack surface beyond the established webhook-trust convention already used by the sibling backfill workflow)
+- **Production Ready:** YES
+- **Recommendation:** Deploy
 
 ## Deployment
 _To be added by /deploy_
