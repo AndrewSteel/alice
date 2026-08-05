@@ -80,13 +80,13 @@ CREATE TABLE IF NOT EXISTS alice.permissions_home_assistant (
 CREATE INDEX IF NOT EXISTS idx_perm_ha_user   ON alice.permissions_home_assistant(user_id);
 CREATE INDEX IF NOT EXISTS idx_perm_ha_domain ON alice.permissions_home_assistant(domain);
 
--- 2.2 DMS (final CHECK includes BankTransaction from migration 013)
+-- 2.2 DMS (final CHECK includes BankTransaction from migration 013, Image from migration 066)
 CREATE TABLE IF NOT EXISTS alice.permissions_dms (
     id                  SERIAL PRIMARY KEY,
     user_id             UUID NOT NULL REFERENCES alice.users(id) ON DELETE CASCADE,
     doc_type            VARCHAR(50) NOT NULL CHECK (doc_type IN (
                             'Invoice', 'BankStatement', 'BankTransaction',
-                            'SecuritySettlement', 'Document', 'Email', 'Contract', '*'
+                            'SecuritySettlement', 'Document', 'Email', 'Contract', 'Image', '*'
                         )),
     can_read            BOOLEAN DEFAULT FALSE,
     can_create          BOOLEAN DEFAULT FALSE,
@@ -183,12 +183,13 @@ VALUES
         {"doc_type": "Invoice",            "can_read": true,  "can_create": true,  "can_update": false, "can_delete": false, "can_download": true},
         {"doc_type": "Document",           "can_read": true,  "can_create": true,  "can_update": false, "can_delete": false, "can_download": true},
         {"doc_type": "Email",              "can_read": true,  "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
+        {"doc_type": "Image",              "can_read": true,  "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
         {"doc_type": "BankStatement",      "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
         {"doc_type": "BankTransaction",    "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
         {"doc_type": "SecuritySettlement", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}
     ]',
     '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": true, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
-    '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant", "search_documents", "remember", "recall"]}'
+    '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant", "search_documents", "search_images", "remember", "recall"]}'
 ),
 (
     'guest',

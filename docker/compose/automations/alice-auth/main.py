@@ -227,6 +227,7 @@ class UpdateProfileRequest(BaseModel):
     interessen: list[str] | None = None
     anrede: str | None = None
     sprache: str | None = None
+    bilder_standardanzahl: int | None = None
 
 
 class UpdateEmailRequest(BaseModel):
@@ -843,8 +844,8 @@ async def update_profile(
     authorization: str | None = Header(default=None),
 ):
     """
-    Update own facts (name, interessen) and preferences (anrede, sprache).
-    Uses UPSERT on alice.user_profiles. Read-only fields (rolle, detailgrad)
+    Update own facts (name, interessen) and preferences (anrede, sprache,
+    bilder_standardanzahl). Uses UPSERT on alice.user_profiles. Read-only fields (rolle, detailgrad)
     are never modified by this endpoint.
     """
     _check_profile_rate_limit(request)
@@ -881,6 +882,9 @@ async def update_profile(
         if normalized is None:
             raise HTTPException(status_code=422, detail=_invalid_language_detail())
         body.sprache = normalized
+
+    if body.bilder_standardanzahl is not None and not (1 <= body.bilder_standardanzahl <= 100):
+        raise HTTPException(status_code=422, detail="bilder_standardanzahl muss zwischen 1 und 100 liegen")
 
     try:
         conn = _get_db_connection()
@@ -921,6 +925,9 @@ async def update_profile(
 
         if body.sprache is not None:
             preferences["sprache"] = body.sprache
+
+        if body.bilder_standardanzahl is not None:
+            preferences["bilder_standardanzahl"] = body.bilder_standardanzahl
 
         # UPSERT
         with conn.cursor() as cur:
