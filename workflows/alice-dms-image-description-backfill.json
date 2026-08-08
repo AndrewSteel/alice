@@ -1,0 +1,501 @@
+{
+  "name": "alice-dms-image-description-backfill",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-dms-image-description-backfill\n\nManual backfill: retries the AI vision description for Weaviate \"Image\"\nobjects where extraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Trigger**: POST /webhook/alice-dms-image-description-backfill\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
+        "height": 220,
+        "width": 460,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -240],
+      "id": "sticky-image-desc-backfill",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-dms-image-description-backfill",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "webhook-trigger",
+      "name": "Webhook: POST /image-description-backfill",
+      "webhookId": "alice-dms-image-description-backfill-v1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\n\n// Reset per-run counters (workflow static data persists across executions, so it must be zeroed at the start of every run)\nconst staticData = $getWorkflowStaticData('node');\nstaticData.updated = 0;\nstaticData.still_failed = 0;\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 50;\nconst gql = `{ Get { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }, limit: ${LIMIT}) { _additional { id } file_path additionalPaths } } }`;\n\nlet results = [];\ntry {\n  const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  if (r.data?.errors) {\n    console.warn('[image-description-backfill] GraphQL error:', JSON.stringify(r.data.errors));\n  } else {\n    results = r.data?.data?.Get?.Image || [];\n  }\n} catch (e) {\n  console.warn('[image-description-backfill] Fetch failed:', e.message);\n}\n\nconsole.log('[image-description-backfill] Found', results.length, 'image(s) with extraction_failed=true');\n\nif (results.length === 0) {\n  return [{ json: { _empty: true } }];\n}\n\nreturn results.map(doc => ({\n  json: {\n    weaviate_uuid: doc._additional?.id,\n    file_path: doc.file_path || null,\n    additionalPaths: doc.additionalPaths || [],\n    _empty: false\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 0],
+      "id": "code-fetch-failed",
+      "name": "Code: Fetch Failed Batch"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-batch-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [600, 0],
+      "id": "if-batch-empty",
+      "name": "IF: Batch Empty"
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = { processed: 0, updated: 0, still_failed: 0, remaining: 0 };\nconsole.log('[image-description-backfill] Summary:', JSON.stringify(summary));\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, -100],
+      "id": "code-empty-summary",
+      "name": "Code: Empty Summary"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 100],
+      "id": "split-per-image",
+      "name": "Split: Per Image"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nconst candidates = [item.file_path, ...(item.additionalPaths || [])].filter(Boolean);\n\nlet resolvedPath = null;\nfor (const p of candidates) {\n  try {\n    if (fs.existsSync(p)) { resolvedPath = p; break; }\n  } catch (e) {}\n}\n\nif (!resolvedPath) {\n  console.warn('[image-description-backfill] No readable path for', item.weaviate_uuid);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}\n\ntry {\n  const buf = fs.readFileSync(resolvedPath);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, resolved_path: resolvedPath, image_b64: buf.toString('base64'), _read_ok: true } }];\n} catch (e) {\n  console.warn('[image-description-backfill] Read failed for', resolvedPath, ':', e.message);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 100],
+      "id": "code-resolve-read",
+      "name": "Code: Resolve & Read Image"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-file-readable",
+              "leftValue": "={{ $json._read_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1500, 100],
+      "id": "if-file-readable",
+      "name": "IF: File Readable"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('node');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst item = $input.first().json;\nconsole.warn('[image-description-backfill] Still failed (no readable file):', item.weaviate_uuid);\nreturn [{ json: { result: 'still_failed', reason: 'no_file' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 250],
+      "id": "code-log-still-failed-nofile",
+      "name": "Code: Log Still Failed (No File)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_URL + '/api/generate' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_VISION_MODEL, prompt: 'Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung.', images: [$json.image_b64], stream: false, options: { temperature: 0.3 } }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 0],
+      "id": "http-ollama-vision",
+      "name": "HTTP: Ollama Vision",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-ollama-ok",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2100, 0],
+      "id": "if-ollama-ok",
+      "name": "IF: Ollama OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('node');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\nconsole.warn('[image-description-backfill] Ollama call failed for', weaviate_uuid);\nreturn [{ json: { result: 'still_failed', reason: 'ollama_error' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 150],
+      "id": "code-log-still-failed-ollama",
+      "name": "Code: Log Still Failed (Ollama Error)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\nconst ai_description = (body?.response || '').slice(0, 50000);\nreturn [{ json: { weaviate_uuid, ai_description } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, -150],
+      "id": "code-extract-description",
+      "name": "Code: Extract Description"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://weaviate:8080/v1/objects/Image/' + $json.weaviate_uuid }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { ai_description: $json.ai_description, extraction_failed: false } }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2700, -150],
+      "id": "http-patch-weaviate",
+      "name": "HTTP: PATCH Weaviate",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nconst staticData = $getWorkflowStaticData('node');\nif (statusCode >= 200 && statusCode < 300) {\n  staticData.updated = (staticData.updated || 0) + 1;\n  return [{ json: { result: 'updated' } }];\n} else {\n  staticData.still_failed = (staticData.still_failed || 0) + 1;\n  console.warn('[image-description-backfill] PATCH failed (HTTP', statusCode, ')');\n  return [{ json: { result: 'still_failed', reason: 'patch_failed' } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, -150],
+      "id": "code-log-patch-result",
+      "name": "Code: Log PATCH Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('node');\nconst updated = staticData.updated || 0;\nconst still_failed = staticData.still_failed || 0;\nconst processed = updated + still_failed;\n\nconst axios = require('axios');\nlet remaining = null;\ntry {\n  const gql = `{ Aggregate { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }) { meta { count } } } }`;\n  const r = await axios.post('http://weaviate:8080/v1/graphql', { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  remaining = r.data?.data?.Aggregate?.Image?.[0]?.meta?.count ?? null;\n} catch (e) {\n  console.warn('[image-description-backfill] Remaining count query failed:', e.message);\n}\n\nconst summary = { processed, updated, still_failed, remaining };\nconsole.log('[image-description-backfill] Summary:', JSON.stringify(summary));\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, -100],
+      "id": "code-summary",
+      "name": "Code: Summary"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, -100],
+      "id": "respond-webhook",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook: POST /image-description-backfill": {
+      "main": [
+        [
+          {
+            "node": "Code: Fetch Failed Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Fetch Failed Batch": {
+      "main": [
+        [
+          {
+            "node": "IF: Batch Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Batch Empty": {
+      "main": [
+        [
+          {
+            "node": "Code: Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split: Per Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split: Per Image": {
+      "main": [
+        [
+          {
+            "node": "Code: Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Resolve & Read Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Resolve & Read Image": {
+      "main": [
+        [
+          {
+            "node": "IF: File Readable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: File Readable": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Ollama Vision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Still Failed (No File)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log Still Failed (No File)": {
+      "main": [
+        [
+          {
+            "node": "Split: Per Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Ollama Vision": {
+      "main": [
+        [
+          {
+            "node": "IF: Ollama OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Ollama OK": {
+      "main": [
+        [
+          {
+            "node": "Code: Extract Description",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Still Failed (Ollama Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log Still Failed (Ollama Error)": {
+      "main": [
+        [
+          {
+            "node": "Split: Per Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Extract Description": {
+      "main": [
+        [
+          {
+            "node": "HTTP: PATCH Weaviate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: PATCH Weaviate": {
+      "main": [
+        [
+          {
+            "node": "Code: Log PATCH Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log PATCH Result": {
+      "main": [
+        [
+          {
+            "node": "Split: Per Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 86400
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}
