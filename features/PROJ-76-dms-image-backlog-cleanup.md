@@ -1,6 +1,6 @@
 # PROJ-76: DMS Bild-Backlog-Bereinigung
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-05
 **Last Updated:** 2026-08-05
 
@@ -261,4 +261,16 @@ None block deployment; all are candidates for a future polish pass if desired.
 - **Recommendation:** Deploy
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-08-08
+**n8n instance:** https://n8n.happy-mining.de
+
+Deployed artifacts:
+- `workflows/alice-dms-processor.json` — re-imported/activated (Image sub-workflow `MQTT: Publish Image Done` now sends `inserted: true`)
+- `workflows/alice-dms-thumbnailer-backfill.json` — re-imported/activated (Image collection included, per-collection field-name fix)
+- `workflows/alice-dms-image-description-backfill.json` — new workflow imported and activated (webhook `POST /webhook/alice-dms-image-description-backfill`)
+- `alice-dms-thumbnailer` container — rebuilt with `pillow-heif` + `libheif1` for TIFF/HEIC support, and `OLLAMA_VISION_MODEL` env var added to the `n8n` container
+
+No frontend changes were part of this feature.
+
+Confirmed by user: workflows deployed and operating as expected in production.
