@@ -37,6 +37,8 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL_DMS=${OLLAMA_MODEL_DMS}
+      # PROJ-76: image description backfill (same vision model as dms-extractor-image)
+      - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL}
       - WEAVIATE_URL=${WEAVIATE_URL}
       - HA_URL=${HA_URL}
       - HA_TOKEN=${HA_TOKEN}
