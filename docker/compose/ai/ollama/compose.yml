@@ -5,17 +5,11 @@ services:
     restart: unless-stopped
     networks: [frontend, app_int]
     environment:
-      # ki-server (UID 1031) has no /etc/passwd entry in the container, so
-      # $HOME can't be resolved automatically. /root itself is 0700 root:root
-      # and not traversable by UID 1031, so home must live outside /root.
       - HOME=/home/ollama
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=-1
       - HF_HOME=/data/hf
       - XDG_CACHE_HOME=/data/cache
-    extends:
-      file: ../../automations/nas-volumes.yml
-      service: nas-base
     deploy:
       resources:
         reservations:
@@ -39,17 +33,11 @@ services:
     restart: unless-stopped
     networks: [app_int, frontend]
     environment:
-      # ki-server (UID 1031) has no /etc/passwd entry in the container, so
-      # $HOME can't be resolved automatically. /root itself is 0700 root:root
-      # and not traversable by UID 1031, so home must live outside /root.
       - HOME=/home/ollama
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=-1
       - HF_HOME=/data/hf
       - XDG_CACHE_HOME=/data/cache
-    extends:
-      file: ../../automations/nas-volumes.yml
-      service: nas-base
     deploy:
       resources:
         reservations:
