@@ -125,6 +125,43 @@ const en = {
     userCard: {
       settings: "Settings",
       logout: "Sign out",
+      dashboard: "Dashboard",
+      chat: "Chat",
+    },
+  },
+
+  dashboard: {
+    title: "Dashboard",
+    weaviate: {
+      title: "Weaviate schemas",
+      refreshAria: "Reload schemas",
+      empty: "No schemas found",
+      error: "Weaviate unreachable",
+      records: "{{count}} record",
+      records_other: "{{count}} records",
+    },
+    grafana: {
+      gpuTitle: "GPU metrics",
+      dockerTitle: "Docker & system monitoring",
+      openInNewTab: "Open in new tab",
+      blockedError: "Dashboard could not be embedded.",
+    },
+    n8nRunning: {
+      title: "Running n8n processes",
+      empty: "No processes running",
+      error: "n8n unreachable",
+      moreLink: "+ {{count}} more",
+      startedAt: "Started",
+    },
+    n8nFailed: {
+      title: "Failed n8n processes (7 days)",
+      empty: "No failed processes in the last 7 days",
+      error: "n8n unreachable",
+      moreLink: "+ {{count}} more",
+      failedAt: "Failed",
+    },
+    services: {
+      title: "Services",
     },
   },
 

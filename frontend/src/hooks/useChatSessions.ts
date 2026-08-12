@@ -849,6 +849,36 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     [activeSessionId, isLoading, isStreaming, legacySend, streamingSend]
   );
 
+  // ---------- Send from a fresh session (PROJ-77 Dashboard hand-off) ----------
+  //
+  // Same effect as "New Chat" + immediately sending a message, but avoids the
+  // stale-closure issue of calling createNewSession() then sendMessage() back
+  // to back (setActiveSessionId() is async, so sendMessage()'s activeSessionId
+  // read would still see the previous session). The freshly generated id is
+  // threaded straight into streamingSend/legacySend instead.
+  const sendMessageToNewSession = useCallback(
+    (text: string, source?: string) => {
+      if (!text.trim() || isLoading || isStreaming) return;
+
+      const id = newId();
+      const newSession: SessionMeta = {
+        id,
+        title: "Neuer Chat",
+        updatedAt: new Date(),
+        persisted: false,
+      };
+      setSessions((prev) => [newSession, ...prev]);
+      setActiveSessionId(id);
+
+      if (STREAM_API_URL) {
+        streamingSend(id, text, source);
+      } else {
+        void legacySend(id, text);
+      }
+    },
+    [isLoading, isStreaming, legacySend, streamingSend]
+  );
+
   return {
     sessions,
     sessionsLoaded,
@@ -863,6 +893,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     renameSession,
     deleteSession,
     sendMessage,
+    sendMessageToNewSession,
     stopStreaming,
   };
 }

@@ -38,6 +38,7 @@ Phase 2 transformiert Alice von einem text-basierten in einen vollständigen **S
 | P2       | DMS Thumbnail-Generierung (PROJ-55)              | 2.3   | Planned |
 | P2       | DMS Bildanalyse (PROJ-56)                        | 2.3   | Planned |
 | P2       | DMS Scanner/Processor Backlog-Locking (PROJ-72)  | 2.3   | Planned |
+| P0       | Admin-Dashboard Landing Page (PROJ-77)           | 2.3   | Planned |
 
 ## Success Metrics
 
