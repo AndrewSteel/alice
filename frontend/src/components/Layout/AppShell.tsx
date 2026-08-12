@@ -10,8 +10,7 @@ import { Sidebar } from "@/components/Sidebar/Sidebar";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { InputArea } from "@/components/Chat/InputArea";
 import { VisionPanel } from "@/components/Vision/VisionPanel";
-import { useChatSessions } from "@/hooks/useChatSessions";
-import { useVisionPanel } from "@/hooks/useVisionPanel";
+import { useChatSessionsContext, useVisionPanelContext } from "@/components/Chat/ChatSessionsProvider";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const SWIPE_THRESHOLD = 50;
@@ -21,7 +20,7 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
-  const vision = useVisionPanel();
+  const vision = useVisionPanelContext();
   const isMobile = useIsMobile();
 
   // On mobile, split mode is not allowed — coerce to text or vision
@@ -44,10 +43,7 @@ export function AppShell() {
     deleteSession,
     sendMessage,
     stopStreaming,
-  } = useChatSessions({
-    onVisionResults: vision.setResults,
-    onTextResponse: vision.onTextResponse,
-  });
+  } = useChatSessionsContext();
 
   useEffect(() => {
     if (!sessionsLoaded) return;
