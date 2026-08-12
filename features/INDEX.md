@@ -52,7 +52,8 @@
 | PROJ-74 | 2.3   | DMS Pfad-Auswahlbox — Verzeichnis-Browser für NAS-Ordner statt manueller Texteingabe; nur exakte Pfad-Duplikate blockiert, Sub-/Überordner-Überlappung erlaubt (informativ markiert); Abhängigkeit von PROJ-15                                       | Deployed | [Spec](PROJ-74-dms-folder-path-picker.md)                  | 2026-08-03 |
 | PROJ-75 | 2.3   | Bildersuche und Bilddarstellung — Such-Tool für Weaviate "Image"-Collection (Ort/Inhalt/Recency), Kachel-Anzeige via PROJ-54, granulare Image-Berechtigung, "Alle"-Rückfrage auch für search_documents/search_emails nachgezogen (PROJ-73)          | Deployed | [Spec](PROJ-75-image-search-and-display.md)                | 2026-08-04 |
 | PROJ-76 | 2.3   | DMS Bild-Backlog-Bereinigung — Bugfix: `MQTT: Publish Image Done` setzt kein `inserted`, daher generiert alice-dms-thumbnailer nie Thumbnails für Bilder; TIFF/HEIC-Thumbnail-Support; erweiterter Thumbnail-Backfill; neuer Backfill fehlender `ai_description` (OLLAMA_URL-Ausfall) | Deployed | [Spec](PROJ-76-dms-image-backlog-cleanup.md)            | 2026-08-05 |
+| PROJ-77 | 2.3   | Admin-Dashboard Landing Page — Kachel-basiertes System-Dashboard als Startseite für Admins (Weaviate-Schemas, Grafana, laufende/fehlerhafte n8n-Prozesse), Chat-Eingabe oberhalb, Zugriff auch über Nutzermenü                                                             | Deployed  | [Spec](PROJ-77-admin-dashboard-landing-page.md)          | 2026-08-12 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-77
+## Next Available ID: PROJ-78
