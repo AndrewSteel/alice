@@ -25,7 +25,7 @@ from fastapi.responses import Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, field_validator
 
-from . import ha_path, memory, metrics, streaming
+from . import admin_dashboard, ha_path, memory, metrics, streaming
 from .auth import verify_jwt
 
 # ---------------------------------------------------------------------------
@@ -255,6 +255,34 @@ async def admin_delete_session(
         raise HTTPException(status_code=404, detail="Session nicht gefunden")
 
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# /admin/dashboard — PROJ-77
+# ---------------------------------------------------------------------------
+@app.get("/admin/weaviate/schemas")
+async def admin_weaviate_schemas(jwt_payload: dict = Depends(_require_admin)):
+    try:
+        schemas = await admin_dashboard.get_weaviate_schemas()
+    except admin_dashboard.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"schemas": schemas}
+
+
+@app.get("/admin/n8n/executions/running")
+async def admin_n8n_running_executions(jwt_payload: dict = Depends(_require_admin)):
+    try:
+        return await admin_dashboard.get_running_executions()
+    except admin_dashboard.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/admin/n8n/executions/failed")
+async def admin_n8n_failed_executions(jwt_payload: dict = Depends(_require_admin)):
+    try:
+        return await admin_dashboard.get_failed_executions_7d()
+    except admin_dashboard.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

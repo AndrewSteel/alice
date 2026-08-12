@@ -126,6 +126,43 @@ const de = {
     userCard: {
       settings: "Einstellungen",
       logout: "Abmelden",
+      dashboard: "Dashboard",
+      chat: "Chat",
+    },
+  },
+
+  dashboard: {
+    title: "Dashboard",
+    weaviate: {
+      title: "Weaviate-Schemas",
+      refreshAria: "Schemas neu laden",
+      empty: "Keine Schemas gefunden",
+      error: "Weaviate nicht erreichbar",
+      records: "{{count}} Datensatz",
+      records_other: "{{count}} Datensaetze",
+    },
+    grafana: {
+      gpuTitle: "GPU-Metriken",
+      dockerTitle: "Docker & System Monitoring",
+      openInNewTab: "In neuem Tab oeffnen",
+      blockedError: "Dashboard konnte nicht eingebettet werden.",
+    },
+    n8nRunning: {
+      title: "Laufende n8n-Prozesse",
+      empty: "Keine laufenden Prozesse",
+      error: "n8n nicht erreichbar",
+      moreLink: "+ {{count}} weitere",
+      startedAt: "Gestartet",
+    },
+    n8nFailed: {
+      title: "Fehlerhafte n8n-Prozesse (7 Tage)",
+      empty: "Keine fehlerhaften Prozesse in den letzten 7 Tagen",
+      error: "n8n nicht erreichbar",
+      moreLink: "+ {{count}} weitere",
+      failedAt: "Fehlgeschlagen",
+    },
+    services: {
+      title: "Services",
     },
   },
 

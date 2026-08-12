@@ -15,14 +15,15 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-interface ServiceLink {
+export interface ServiceLink {
   label: string;
   url: string;
   icon: LucideIcon;
   external: boolean;
 }
 
-const SERVICES: ServiceLink[] = [
+// Exported for reuse by the Dashboard's Services tile (PROJ-77 AC-G1).
+export const SERVICES: ServiceLink[] = [
   {
     label: "n8n",
     url: "https://n8n.happy-mining.de",
