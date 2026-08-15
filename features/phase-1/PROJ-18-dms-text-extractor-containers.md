@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-03-11
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-08-15
 
 ## Dependencies
 - Requires: PROJ-17 (DMS Scanner Multi-Queue) — Queues `alice/dms/[pdf,ocr,txt,office]` müssen befüllt werden
@@ -436,6 +436,29 @@ services:
 ```
 
 Neuen NAS-User-Mount hinzufuegen: einzeilige Ergaenzung in `nas-volumes.yml` genuegt -- alle 5 Container uebernehmen ihn automatisch.
+
+### BUG-7: Office-Extraktion schlägt für alle Dokumente fehl — `extraction_failed: true` (Nachbearbeitung 2026-08-15)
+
+**Gemeldet von:** Andreas (Produktions-Review der Redis-Ergebnisse)
+**Severity:** Critical (Kernfunktion des Containers komplett ausgefallen)
+**Status:** FIXED
+
+**Root Cause:**
+`dms-extractor-office` läuft (wie alle Extractor-Container) über `nas-volumes.yml` mit `user: "1031:100"` (NAS-Lese-ACL). Diese UID hat im Container-Image **keinen `/etc/passwd`-Eintrag**. LibreOffice versucht bei jeder Konvertierung, sein User-Profil unter `$HOME/.config/libreoffice` bzw. `$HOME/.cache/dconf` anzulegen; ohne passwd-Eintrag ist `$HOME` nicht sauber auflösbar und LibreOffice bricht mit `Fatal Error: The application cannot be started. User installation could not be completed.` ab — bei **jeder einzelnen Datei**, unabhängig vom Inhalt.
+
+Reproduziert mit Server-Logs (Beispiel):
+```
+"error": "LibreOffice conversion failed (exit 77): ... dconf-CRITICAL **: unable to create directory '/.cache/dconf': Permission denied. ... User installation could not be completed."
+```
+Lokal nachgestellt durch Rebuild des Images und Ausführung mit `--user 1031:100`. Setzen von `HOME=/tmp` allein behebt es nicht zuverlässig (LibreOffice versucht weiterhin `getpwuid()`-basierte Profilauflösung).
+
+**Warum nur `dms-extractor-office` betroffen war:** `dms-extractor-pdf`/`-txt` (Node.js) rufen LibreOffice nie auf; `dms-extractor-ocr` (Tesseract) benötigt kein Home-Profilverzeichnis. Nur der Office-Container ruft `libreoffice --headless` auf und ist daher der einzige, der auf ein schreibbares Home-Profil angewiesen ist.
+
+**Fix:** `convert_with_libreoffice()` in `main.py` übergibt jetzt explizit `-env:UserInstallation=file://<tmp_dir>/loprofile` an den `libreoffice`-Aufruf. Das Profilverzeichnis liegt im ohnehin per Job erzeugten `tempfile.TemporaryDirectory()` (garantiert beschreibbar, wird nach jedem Job automatisch aufgeräumt) und umgeht die `$HOME`/passwd-Auflösung vollständig.
+
+Verifiziert lokal (Docker-Image gebaut, Konvertierung als `--user 1031:100` zweimal sequenziell ausgeführt, jeweils erfolgreich).
+
+**Deploy-Schritt:** `make rebuild s=automations/dms-extractor-office` auf dem Server, danach Redis-Ergebnisse für neu gescannte Office-Dokumente prüfen (`extraction_failed: false`).
 
 ### Deploy-Schritte auf dem Server
 ```bash
