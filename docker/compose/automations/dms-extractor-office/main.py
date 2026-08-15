@@ -118,10 +118,17 @@ def convert_with_libreoffice(file_path: str, output_format: str) -> str:
         tmp_src = os.path.join(tmp_dir, src_name)
         shutil.copy(file_path, tmp_src)
 
-        # Run LibreOffice conversion
+        # Run LibreOffice conversion.
+        # Container runs as NAS-mapped UID 1031 (see nas-volumes.yml) with no
+        # /etc/passwd entry, so LibreOffice cannot resolve a user profile dir
+        # via $HOME/getpwuid and fails every conversion with "User installation
+        # could not be completed". Pointing -env:UserInstallation at a writable
+        # path inside tmp_dir sidesteps that lookup entirely.
+        profile_dir = os.path.join(tmp_dir, "loprofile")
         cmd = [
             "libreoffice",
             "--headless",
+            f"-env:UserInstallation=file://{profile_dir}",
             "--convert-to", output_format,
             "--outdir", tmp_dir,
             tmp_src,
