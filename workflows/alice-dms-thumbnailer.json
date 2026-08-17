@@ -34,7 +34,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  console.log('[alice-dms-thumbnailer] Skipping non-inserted document:', msg.file_path);\n  return [];\n}\n\nif (!msg.weaviate_uuid || !msg.file_path) {\n  console.warn('[alice-dms-thumbnailer] Missing weaviate_uuid or file_path — skipping:', JSON.stringify(msg));\n  return [];\n}\n\nconsole.log('[alice-dms-thumbnailer] Processing:', msg.weaviate_uuid, msg.file_path);\nreturn [{ json: { ...msg } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Parse & Filter\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  logger.info(`[alice-dms-thumbnailer] Skipping non-inserted document: ${msg.file_path}`);\n  return [];\n}\n\nif (!msg.weaviate_uuid || !msg.file_path) {\n  logger.warn(`[alice-dms-thumbnailer] Missing weaviate_uuid or file_path — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\nlogger.info(`[alice-dms-thumbnailer] Processing: ${msg.weaviate_uuid} ${msg.file_path}`);\nreturn [{ json: { ...msg } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -107,7 +107,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst thumbPath = body.thumbnail_path || null;\nconst uuid = body.weaviate_uuid || $('Code: Parse & Filter').first().json.weaviate_uuid;\nconst docType = $('Code: Parse & Filter').first().json.document_type || 'Document';\n\nif (!thumbPath || !uuid) {\n  throw new Error('Missing thumbnail_path or weaviate_uuid in generate response: ' + JSON.stringify(body));\n}\n\nconsole.log('[alice-dms-thumbnailer] Thumbnail generated:', thumbPath);\nreturn [{ json: { thumbnail_path: thumbPath, weaviate_uuid: uuid, document_type: docType } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Extract Thumbnail Path\" } });\nconst resp = $input.first().json;\nconst body = resp.body || resp;\nconst thumbPath = body.thumbnail_path || null;\nconst uuid = body.weaviate_uuid || $('Code: Parse & Filter').first().json.weaviate_uuid;\nconst docType = $('Code: Parse & Filter').first().json.document_type || 'Document';\n\nif (!thumbPath || !uuid) {\n  throw new Error('Missing thumbnail_path or weaviate_uuid in generate response: ' + JSON.stringify(body));\n}\n\nlogger.info(`[alice-dms-thumbnailer] Thumbnail generated: ${thumbPath}`);\nreturn [{ json: { thumbnail_path: thumbPath, weaviate_uuid: uuid, document_type: docType } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -150,7 +150,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nif (statusCode >= 200 && statusCode < 300) {\n  const uuid = $('Code: Extract Thumbnail Path').first().json.weaviate_uuid;\n  console.log('[alice-dms-thumbnailer] Weaviate PATCH OK for UUID:', uuid);\n  return [{ json: { success: true, weaviate_uuid: uuid } }];\n} else {\n  const uuid = $('Code: Extract Thumbnail Path').first().json.weaviate_uuid;\n  console.warn('[alice-dms-thumbnailer] Weaviate PATCH failed (HTTP ' + statusCode + ') for UUID:', uuid);\n  return [{ json: { success: false, weaviate_uuid: uuid, status_code: statusCode } }];\n}"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Log Result\" } });\nconst resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nif (statusCode >= 200 && statusCode < 300) {\n  const uuid = $('Code: Extract Thumbnail Path').first().json.weaviate_uuid;\n  logger.info(`[alice-dms-thumbnailer] Weaviate PATCH OK for UUID: ${uuid}`);\n  return [{ json: { success: true, weaviate_uuid: uuid } }];\n} else {\n  const uuid = $('Code: Extract Thumbnail Path').first().json.weaviate_uuid;\n  logger.warn(`[alice-dms-thumbnailer] Weaviate PATCH failed (HTTP ${statusCode}) for UUID: ${uuid}`);\n  return [{ json: { success: false, weaviate_uuid: uuid, status_code: statusCode } }];\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -160,7 +160,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nconsole.warn('[alice-dms-thumbnailer] Generation failed for:', original.weaviate_uuid, original.file_path, 'Status:', item.statusCode);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path, status_code: item.statusCode } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Log Error\" } });\nconst item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nlogger.warn(`[alice-dms-thumbnailer] Generation failed for: ${original.weaviate_uuid} ${original.file_path} Status: ${item.statusCode}`);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path, status_code: item.statusCode } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
