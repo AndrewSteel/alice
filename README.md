@@ -6,17 +6,17 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 
 ## Development Status
 
-| Phase     | Status      | Description                                                                    |
-| --------- | ----------- | ------------------------------------------------------------------------------ |
-| Phase 0   | ✅ Deployed | Hardware setup, GPU configuration, storage layout                              |
-| Phase 1   | ✅ Deployed | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA                       |
-| Phase 1.2 | ✅ Deployed | HA-first intent routing with semantic matching                                 |
-| Phase 1.5 | ✅ Deployed | JWT authentication, login screen, services sidebar                             |
-| Phase 1.6 | ✅ Deployed | DMS pipeline v2, user management, streaming infrastructure, RS256 auth         |
-| Phase 2.1 | ✅ Deployed | Speech gateway: Whisper STT + Piper TTS, WebApp voice, TTS latency tuning      |
-| Phase 2.2 | ✅ Deployed | HA Voice Integration, Speaker-ID, ESPHome feedback, chat storage & archive     |
-| Phase 2.3 | ✅ Deployed | Mail IMAP integration, Vision-Chat Flip-Cards, DMS thumbnail generation        |
-| Phase 3   | 🗓 Planned  | Display routing (PROJ-45), multi-display output, deeper financial analysis     |
+| Phase     | Status     | Description                                                                |
+| --------- | ---------- | -------------------------------------------------------------------------- |
+| Phase 0   | ✅ Deployed | Hardware setup, GPU configuration, storage layout                          |
+| Phase 1   | ✅ Deployed | Core stack: n8n, Ollama, Weaviate, PostgreSQL, React PWA                   |
+| Phase 1.2 | ✅ Deployed | HA-first intent routing with semantic matching                             |
+| Phase 1.5 | ✅ Deployed | JWT authentication, login screen, services sidebar                         |
+| Phase 1.6 | ✅ Deployed | DMS pipeline v2, user management, streaming infrastructure, RS256 auth     |
+| Phase 2.1 | ✅ Deployed | Speech gateway: Whisper STT + Piper TTS, WebApp voice, TTS latency tuning  |
+| Phase 2.2 | ✅ Deployed | HA Voice Integration, Speaker-ID, ESPHome feedback, chat storage & archive |
+| Phase 2.3 | ✅ Deployed | Mail IMAP integration, Vision-Chat Flip-Cards, DMS thumbnail generation    |
+| Phase 3   | 🗓 Planned  | Display routing (PROJ-45), multi-display output, deeper financial analysis |
 
 ---
 
@@ -68,12 +68,12 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 ### GPU Allocation
 
-| Container                      | GPU      | VRAM     | Purpose                           |
-| ------------------------------ | -------- | -------- | --------------------------------- |
-| Ollama / alice-speech-gateway  | TITAN X  | ~14 GB   | qwen3.5:27b-q4_K_M inference + STT/TTS |
-| wyoming-whisper                | TITAN X  | shared   | Whisper large-v3 STT              |
-| weaviate-transformers          | RTX 3090 | ~1.5 GB  | text2vec embeddings               |
-| weaviate-multi2vec             | RTX 3090 | ~0.8 GB  | CLIP image+text embeddings        |
+| Container                     | GPU      | VRAM    | Purpose                                |
+| ----------------------------- | -------- | ------- | -------------------------------------- |
+| Ollama / alice-speech-gateway | RTX 3090 | ~14 GB  | qwen3.5:27b-q4_K_M inference + STT/TTS |
+| wyoming-whisper               | TITAN X  | shared  | Whisper large-v3 STT                   |
+| weaviate-transformers         | RTX 3090 | ~1.5 GB | text2vec embeddings                    |
+| weaviate-multi2vec            | RTX 3090 | ~0.8 GB | CLIP image+text embeddings             |
 
 ### Storage
 
@@ -85,28 +85,28 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 ### Docker Services
 
-| Service                 | Purpose                                                                                      |
-| ----------------------- | -------------------------------------------------------------------------------------------- |
-| `alice-chat-stream`     | Primary chat endpoint: FastAPI/SSE streaming, JWT RS256 verification, vision_results events  |
-| `alice-auth`            | JWT issuance (RS256), bcrypt password verification, OTP email                                |
+| Service                 | Purpose                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `alice-chat-stream`     | Primary chat endpoint: FastAPI/SSE streaming, JWT RS256 verification, vision_results events |
+| `alice-auth`            | JWT issuance (RS256), bcrypt password verification, OTP email                               |
 | `alice-speech-gateway`  | Wyoming + WebSocket speech bridge: Whisper STT, Piper TTS, Speaker-ID embedding             |
-| `alice-ha-sync`         | HA entity sync: conversation-filter, area registry, value placeholder expansion              |
+| `alice-ha-sync`         | HA entity sync: conversation-filter, area registry, value placeholder expansion             |
 | `alice-mail-reader`     | IMAP reader: fetches mail metadata → Weaviate; exposes search API for n8n tools             |
 | `alice-dms-thumbnailer` | DMS thumbnail generation: PDF/Office/image → 400×400 JPEG; serves GET /thumbnail/{uuid}     |
 | `alice-dms-pdf`         | DMS extractor: PDF → plaintext (pdfminer)                                                   |
 | `alice-dms-ocr`         | DMS extractor: scanned PDF/image → plaintext (Tesseract OCR)                                |
 | `alice-dms-office`      | DMS extractor: Office documents → plaintext (LibreOffice headless)                          |
-| `alice-dms-txt`         | DMS extractor: plain text passthrough                                                        |
+| `alice-dms-txt`         | DMS extractor: plain text passthrough                                                       |
 | `n8n`                   | Workflow engine: HA + DMS + mail tools, DMS pipeline, auth/session webhooks                 |
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
-| `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                     |
-| `ollama-titan`          | LLM inference — qwen3.5:27b-q4_K_M (TITAN X GPU)                                           |
+| `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
+| `ollama-titan`          | LLM inference — qwen3.5:27b-q4_K_M (TITAN X GPU)                                            |
 | `ollama-3090`           | Secondary Ollama instance (RTX 3090, e.g. embedding tasks)                                  |
-| `weaviate`              | Vector search                                                                                |
-| `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                   |
-| `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)                                                        |
+| `weaviate`              | Vector search                                                                               |
+| `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                  |
+| `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)                                                       |
 | `postgres`              | Structured data: alice schema, auth sessions, messages, user profiles                       |
-| `redis`                 | DMS state (hash index, queued files), session cache                                          |
+| `redis`                 | DMS state (hash index, queued files), session cache                                         |
 | `mqtt`                  | Event bus (alice/# topics) — DMS pipeline, thumbnail triggers, HA sync                      |
 | `nginx`                 | Reverse proxy, React static files, SSE proxy (buffering disabled)                           |
 
@@ -130,20 +130,20 @@ The system prompt (`memory.build_system_prompt`) always includes the current dat
 
 Workflows live in `workflows/`. The streaming endpoint is `POST /api/stream/chat`; the legacy webhook fallback is `POST /api/webhook/alice`.
 
-| Workflow                          | Trigger                         | Purpose                                               |
-| --------------------------------- | ------------------------------- | ----------------------------------------------------- |
-| `alice-tool-search`               | Workflow call                   | Weaviate hybrid search across all DMS collections     |
-| `alice-mail-tools`                | Workflow call                   | Mail search and retrieval tools for LLM               |
-| `alice-mail-api`                  | Webhook                         | Mail folder management API                            |
-| `alice-mail-sync`                 | Schedule                        | IMAP → Weaviate mail sync                             |
-| `alice-session-api`               | Webhook                         | Session list, detail, and delete endpoints            |
-| `alice-session-cleanup`           | Schedule (daily)                | Purge sessions older than 30 days                     |
-| `alice-dms-scanner`               | Schedule (hourly)               | NAS scan → lifecycle detection → MQTT queues          |
-| `alice-dms-processor`             | Schedule (nightly)              | MQTT queue → LLM classify + extract → Weaviate        |
-| `alice-dms-lifecycle`             | MQTT `alice/dms/lifecycle`      | Duplicate/move events: Weaviate PATCH, no LLM         |
-| `alice-dms-thumbnailer`           | MQTT `alice/dms/done`           | Generate 400×400 thumbnail after DMS import           |
-| `alice-dms-thumbnailer-backfill`  | Webhook POST (manual)           | Generate thumbnails for all existing Weaviate objects |
-| `alice-dms-folder-api`            | Webhook `/webhook/dms/folders`  | Admin CRUD for NAS watched folders                    |
+| Workflow                         | Trigger                        | Purpose                                               |
+| -------------------------------- | ------------------------------ | ----------------------------------------------------- |
+| `alice-tool-search`              | Workflow call                  | Weaviate hybrid search across all DMS collections     |
+| `alice-mail-tools`               | Workflow call                  | Mail search and retrieval tools for LLM               |
+| `alice-mail-api`                 | Webhook                        | Mail folder management API                            |
+| `alice-mail-sync`                | Schedule                       | IMAP → Weaviate mail sync                             |
+| `alice-session-api`              | Webhook                        | Session list, detail, and delete endpoints            |
+| `alice-session-cleanup`          | Schedule (daily)               | Purge sessions older than 30 days                     |
+| `alice-dms-scanner`              | Schedule (hourly)              | NAS scan → lifecycle detection → MQTT queues          |
+| `alice-dms-processor`            | Schedule (nightly)             | MQTT queue → LLM classify + extract → Weaviate        |
+| `alice-dms-lifecycle`            | MQTT `alice/dms/lifecycle`     | Duplicate/move events: Weaviate PATCH, no LLM         |
+| `alice-dms-thumbnailer`          | MQTT `alice/dms/done`          | Generate 400×400 thumbnail after DMS import           |
+| `alice-dms-thumbnailer-backfill` | Webhook POST (manual)          | Generate thumbnails for all existing Weaviate objects |
+| `alice-dms-folder-api`           | Webhook `/webhook/dms/folders` | Admin CRUD for NAS watched folders                    |
 
 ---
 
@@ -175,7 +175,7 @@ alice-dms-thumbnailer (n8n, MQTT-triggered)
     → Weaviate PATCH sets thumbnail_path
 ```
 
-**Weaviate collections:** `Invoice`, `BankStatement`, `BankTransaction`, `Document`, `Email`, `SecuritySettlement`, `Contract`
+**Weaviate collections:** `Invoice`, `BankStatement`, `BankTransaction`, `Document`, `Email`, `SecuritySettlement`, `Contract`, `Image`
 
 **Thumbnail storage:** `/srv/warm/alice/thumbnails/{weaviate_uuid}.jpg` — served via `GET /api/dms/thumbnail/{uuid}` (JWT auth, placeholder on miss)
 
@@ -187,11 +187,11 @@ alice-dms-thumbnailer (n8n, MQTT-triggered)
 
 When a DMS search returns multiple results, `alice-chat-stream` emits a `vision_results` SSE event alongside the normal text stream. The React frontend displays results as interactive **Flip-Cards** in a split-screen layout:
 
-| Mode        | Vision panel | Text panel | Desktop layout     |
-| ----------- | ------------ | ---------- | ------------------ |
+| Mode        | Vision panel | Text panel | Desktop layout      |
+| ----------- | ------------ | ---------- | ------------------- |
 | Text only   | hidden       | full width | default after login |
-| Vision only | full width   | hidden     | after visual query |
-| Split       | 2/3 width    | 1/3 width  | user-toggled       |
+| Vision only | full width   | hidden     | after visual query  |
+| Split       | 2/3 width    | 1/3 width  | user-toggled        |
 
 Each card has three faces: **Front** (thumbnail + metadata), **Back** (Weaviate schema fields), **Summary** (AI-generated summary). On mobile, swipe left/right switches between panels; portrait shows 2 cards/row, landscape 4 cards/row.
 
@@ -221,16 +221,16 @@ Speaker recognition identifies the active user from voice embeddings stored in P
 
 ## Domain Coverage
 
-| Domain          | Status      | Capability                                                                                            |
-| --------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
-| Smart Home      | ✅ Deployed | Lights, climate, covers, locks, media players, switches, vacuum — conversation-exposed entities only  |
-| Documents (DMS) | ✅ Deployed | Invoices, bank statements (+ per-transaction search), contracts, emails, securities; Flip-Card view   |
-| Mail            | ✅ Deployed | IMAP sync → Weaviate; search and retrieve mails via natural language                                  |
-| Memory          | ✅ Deployed | Persistent facts, 30-day conversation history, user preferences                                      |
+| Domain          | Status     | Capability                                                                                             |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| Smart Home      | ✅ Deployed | Lights, climate, covers, locks, media players, switches, vacuum — conversation-exposed entities only   |
+| Documents (DMS) | ✅ Deployed | Invoices, bank statements (+ per-transaction search), contracts, emails, securities; Flip-Card view    |
+| Mail            | ✅ Deployed | IMAP sync → Weaviate; search and retrieve mails via natural language                                   |
+| Memory          | ✅ Deployed | Persistent facts, 30-day conversation history, user preferences                                        |
 | User Management | ✅ Deployed | Admin: create/deactivate/delete users, OTP reset, chat archive; self-service: password, email, profile |
-| Voice           | ✅ Deployed | ESPHome Wyoming satellites, HA Voice devices, browser push-to-talk, Speaker-ID                       |
-| Finances        | ✅ Deployed | Bank transaction search; deeper analysis planned for Phase 3                                          |
-| Display Routing | 🗓 Planned  | Config table (wallpanel/TV/PC), n8n router per display target (PROJ-45)                              |
+| Voice           | ✅ Deployed | ESPHome Wyoming satellites, HA Voice devices, browser push-to-talk, Speaker-ID                         |
+| Finances        | ✅ Deployed | Bank transaction search; deeper analysis planned for Phase 3                                           |
+| Display Routing | 🗓 Planned  | Config table (wallpanel/TV/PC), n8n router per display target (PROJ-45)                                |
 
 ---
 
