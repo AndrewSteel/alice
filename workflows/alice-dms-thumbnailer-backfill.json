@@ -64,7 +64,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const axios = require('axios');\nconst { collections, limit } = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = limit || 100;\n\nconst allDocs = [];\n\nfor (const collection of collections) {\n  let cursor = null;\n  let pageCount = 0;\n\n  while (true) {\n    pageCount++;\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const isImage = collection === 'Image';\n    const pathField = isImage ? 'file_path' : 'filePath';\n    const hashField = isImage ? 'file_hash' : 'fileHash';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { _additional { id } ${pathField} ${hashField} thumbnail_path } } }`;\n\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 30000\n      });\n      if (r.data?.errors) {\n        console.warn('[backfill] GraphQL error for', collection, ':', JSON.stringify(r.data.errors));\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      console.warn('[backfill] Request failed for', collection, ':', e.message);\n      break;\n    }\n\n    if (results.length === 0) break;\n\n    for (const doc of results) {\n      if (!doc.thumbnail_path) {\n        allDocs.push({\n          weaviate_uuid: doc._additional?.id,\n          file_path: doc[pathField] || null,\n          document_type: collection\n        });\n      }\n    }\n\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n\n  const collCount = allDocs.filter(d => d.document_type === collection).length;\n  console.log('[backfill]', collection, ': found', collCount, 'docs without thumbnail');\n}\n\nconsole.log('[backfill] Total docs to process:', allDocs.length);\nreturn allDocs.map(d => ({ json: d }));"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Query Weaviate (no thumbnail)\" } });\nconst axios = require('axios');\nconst { collections, limit } = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = limit || 100;\n\nconst allDocs = [];\n\nfor (const collection of collections) {\n  let cursor = null;\n  let pageCount = 0;\n\n  while (true) {\n    pageCount++;\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const isImage = collection === 'Image';\n    const pathField = isImage ? 'file_path' : 'filePath';\n    const hashField = isImage ? 'file_hash' : 'fileHash';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { _additional { id } ${pathField} ${hashField} thumbnail_path } } }`;\n\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 30000\n      });\n      if (r.data?.errors) {\n        logger.warn(`[backfill] GraphQL error for ${collection}: ${JSON.stringify(r.data.errors)}`);\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      logger.warn(`[backfill] Request failed for ${collection}: ${e.message}`);\n      break;\n    }\n\n    if (results.length === 0) break;\n\n    for (const doc of results) {\n      if (!doc.thumbnail_path) {\n        allDocs.push({\n          weaviate_uuid: doc._additional?.id,\n          file_path: doc[pathField] || null,\n          document_type: collection\n        });\n      }\n    }\n\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n\n  const collCount = allDocs.filter(d => d.document_type === collection).length;\n  logger.info(`[backfill] ${collection}: found ${collCount} docs without thumbnail`);\n}\n\nlogger.info(`[backfill] Total docs to process: ${allDocs.length}`);\nreturn allDocs.map(d => ({ json: d }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -237,7 +237,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Process ALL items, not just first — required for batch backfill\nreturn $input.all().map(item => {\n  const resp = item.json;\n  const statusCode = resp.statusCode || 0;\n  if (statusCode >= 200 && statusCode < 300) {\n    return { json: { result: 'processed' } };\n  } else {\n    console.warn('[backfill] PATCH failed (HTTP', statusCode, ')');\n    return { json: { result: 'failed', reason: 'weaviate_patch_failed' } };\n  }\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log PATCH Result\" } });\n// Process ALL items, not just first — required for batch backfill\nreturn $input.all().map(item => {\n  const resp = item.json;\n  const statusCode = resp.statusCode || 0;\n  if (statusCode >= 200 && statusCode < 300) {\n    return { json: { result: 'processed' } };\n  } else {\n    logger.warn(`[backfill] PATCH failed (HTTP ${statusCode})`);\n    return { json: { result: 'failed', reason: 'weaviate_patch_failed' } };\n  }\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -250,7 +250,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  console.warn('[backfill] Generation failed for UUID:', uuid);\n  return { json: { result: 'failed', uuid, reason: 'generation_failed' } };\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Generation Error\" } });\nreturn $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  logger.warn(`[backfill] Generation failed for UUID: ${uuid}`);\n  return { json: { result: 'failed', uuid, reason: 'generation_failed' } };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -263,7 +263,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  console.warn('[backfill] Skipping doc without file_path:', uuid);\n  return { json: { result: 'skipped', uuid, reason: 'no_file_path' } };\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Skip (no file_path)\" } });\nreturn $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  logger.warn(`[backfill] Skipping doc without file_path: ${uuid}`);\n  return { json: { result: 'skipped', uuid, reason: 'no_file_path' } };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -289,7 +289,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nlet processed = 0, failed = 0, skipped = 0;\nfor (const item of items) {\n  const result = item.json.result;\n  if (result === 'processed') processed++;\n  else if (result === 'failed') failed++;\n  else if (result === 'skipped') skipped++;\n}\nconst summary = { processed, failed, skipped_no_path: skipped, total: items.length };\nconsole.log('[backfill] Summary:', JSON.stringify(summary));\nreturn [{ json: summary }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Summary\" } });\nconst items = $input.all();\nlet processed = 0, failed = 0, skipped = 0;\nfor (const item of items) {\n  const result = item.json.result;\n  if (result === 'processed') processed++;\n  else if (result === 'failed') failed++;\n  else if (result === 'skipped') skipped++;\n}\nconst summary = { processed, failed, skipped_no_path: skipped, total: items.length };\nlogger.info(`[backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-06-24
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-08-17
 
 ## Dependencies
 - Requires: PROJ-29 (BankTransaction Indexing) — `BankTransaction` collection und `parentStatementId`-Verknüpfung müssen existieren
@@ -433,3 +433,7 @@ No changes to `alice-dms-processor.json` in PROJ-44 (the BUG-13 fix was already 
 
 - AC-4 live verification: check `Aggregate { BankTransaction { meta { count } } }` in Weaviate before and after deleting a test bank statement to confirm no orphans remain
 - Low-priority follow-up items (BUG-2, BUG-3, BUG-4) can be addressed in a maintenance pass
+
+## Nachträgliche Änderung (2026-08-17)
+
+**Logging auf winston umgestellt**: Die Code-Nodes in `workflows/alice-dms-lifecycle.json` verwendeten `console.log`/`console.warn`, deren Ausgabe nur im Browser-Log landet und für Post-Incident-Analysen nicht verfügbar ist. Umgestellt auf einen `winston`-Logger pro Node (File-Transport nach `/home/node/.n8n/logs/n8n.log`, `defaultMeta` mit Workflow-/Node-Namen), analog zur PROJ-72-Migration von scanner/path-worker/processor. Reine Logging-Änderung, keine funktionale Änderung. Deployed: 2026-08-17.

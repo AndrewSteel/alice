@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-06-27
-**Last Updated:** 2026-06-27
+**Last Updated:** 2026-08-17
 
 ## Dependencies
 - Requires: PROJ-19 (DMS Processor Workflow) — Thumbnail-Generierung wird nach erfolgreichem Weaviate-Insert ausgelöst; `original_path` und Weaviate-UUID werden benötigt
@@ -250,3 +250,7 @@ curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-bac
 - **Low (vorbestehend, kein Regress):** `startswith(DOCUMENTS_ROOT)` ist ein String-Präfix-Check ohne Pfadtrenner — `/mnt/nasX` würde die Validierung passieren, ist aber nicht gemountet und daher nicht lesbar. Bei Gelegenheit auf `Path.is_relative_to()` umstellen.
 
 **Keine neuen Bugs. PROJ-55 bleibt READY.**
+
+## Nachträgliche Änderung (2026-08-17)
+
+**Logging auf winston umgestellt**: Die Code-Nodes in `workflows/alice-dms-thumbnailer.json` verwendeten `console.log`/`console.warn`, deren Ausgabe nur im Browser-Log landet und für Post-Incident-Analysen nicht verfügbar ist. Umgestellt auf einen `winston`-Logger pro Node (File-Transport nach `/home/node/.n8n/logs/n8n.log`, `defaultMeta` mit Workflow-/Node-Namen), analog zur PROJ-72-Migration von scanner/path-worker/processor. Reine Logging-Änderung, keine funktionale Änderung. Deployed: 2026-08-17.

@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-05
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-17
 
 ## Dependencies
 - Requires: PROJ-55 (DMS Thumbnail-Generierung) — betrifft den bestehenden `alice-dms-thumbnailer`-Workflow, den `alice-dms-thumbnailer`-Container und den bestehenden `alice-dms-thumbnailer-backfill`-Workflow
@@ -272,5 +272,9 @@ Deployed artifacts:
 - `alice-dms-thumbnailer` container — rebuilt with `pillow-heif` + `libheif1` for TIFF/HEIC support, and `OLLAMA_VISION_MODEL` env var added to the `n8n` container
 
 No frontend changes were part of this feature.
+
+## Nachträgliche Änderung (2026-08-17)
+
+**Logging auf winston umgestellt**: Die Code-Nodes in `workflows/alice-dms-thumbnailer-backfill.json` und `workflows/alice-dms-image-description-backfill.json` verwendeten `console.log`/`console.warn`, deren Ausgabe nur im Browser-Log landet und für Post-Incident-Analysen nicht verfügbar ist. Umgestellt auf einen `winston`-Logger pro Node (File-Transport nach `/home/node/.n8n/logs/n8n.log`, `defaultMeta` mit Workflow-/Node-Namen), analog zur PROJ-72-Migration von scanner/path-worker/processor. Das in QA-Bug-Notiz #2 (siehe oben) erwähnte "nur im n8n-Execution-Log sichtbar" gilt damit weiterhin, jetzt aber über die persistente `winston`-Datei statt Browser-Konsole. Reine Logging-Änderung, keine funktionale Änderung. Deployed: 2026-08-17.
 
 Confirmed by user: workflows deployed and operating as expected in production.
