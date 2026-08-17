@@ -1,5 +1,25 @@
 {
   "permissions": {
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Read(**/.env*)",
+      "Read(**/.dev.vars*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/secrets/**)",
+      "Read(**/credentials/**)",
+      "Read(**/.aws/**)",
+      "Read(**/.ssh/**)",
+      "Read(**/config/database.yml)",
+      "Read(**/config/credentials.json)",
+      "Read(**/.npmrc)",
+      "Read(**/.pypirc)",
+      "Edit(**/.env*)",
+      "Edit(**/secrets/**)",
+      "Edit(**/.ssh/**)"
+    ],
     "allow": [
       "Bash(npm install)",
       "Bash(npm install:*)",
@@ -20,7 +40,7 @@
       "Bash(cat:*)",
       "Bash(python3 -c \":*)",
       "mcp__postgres__query",
-      "mcp__n8n-mcp__n8n_*",
+      "mcp__n8n-mcp__*",
       "Bash(npx tsc --noEmit)",
       "Bash(pip3 show *)"
     ]
