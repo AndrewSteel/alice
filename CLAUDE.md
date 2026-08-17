@@ -71,6 +71,14 @@ Docs are in German; code comments and commit messages should be in English.
 
 → **See `README.md`** for architecture, infrastructure, Docker services, n8n workflows, DMS pipeline, and full feature list.
 
+### Language Conventions
+
+- **Product-internal language is English**: container names, frontend code, n8n workflow/node names, database identifiers (tables, columns, etc.), code comments, commit messages.
+- **Frontend must support i18n**: no hardcoded user-facing strings, route them through the i18n layer.
+- **LLM output** (Alice's assistant responses, including any thinking/intermediate output shown to the user) must follow the user's configured language setting, not be hardcoded.
+- **Feature documentation** in `features/PROJ-XX-*.md` is written in German.
+- **Communication between the user and Claude Code** happens in German.
+
 ---
 
 ## Development Commands
@@ -104,6 +112,8 @@ Workflows are stored as JSON in `workflows/`. Don't deploy n8n-workflows directl
 
 Primary chat endpoint: `POST /api/stream/chat` (alice-chat-stream).
 Legacy fallback: `POST /webhook/alice` (alice-chat-handler n8n workflow).
+
+Logging: never use `console.log` in n8n workflows (Code/Function nodes) — it only surfaces in the browser log. Use `winston` instead; the required settings are already present in `docker/compose/automations/n8n/compose.yml`.
 
 ### Docker
 
