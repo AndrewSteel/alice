@@ -32,7 +32,6 @@ Phase 2 transformiert Alice von einem text-basierten in einen vollständigen **S
 | P1       | DMS BankTransaction Lifecycle Cleanup (PROJ-44)  | 2.1   | Planned |
 | P1       | Chat-Protokoll-Speicherung & Titelgenerierung (PROJ-51) | 2.2 | Planned |
 | P1       | Admin-Chatarchiv (PROJ-52)                       | 2.2   | Planned |
-| P2       | Display Registry & Output Router (PROJ-45)       | 2.3   | Roadmap |
 | P2       | Mail IMAP Integration (PROJ-46)                  | 2.3   | Planned |
 | P2       | Vision-Chat: Flip-Card Ergebnisansicht (PROJ-54) | 2.3   | Planned |
 | P2       | DMS Thumbnail-Generierung (PROJ-55)              | 2.3   | Planned |
