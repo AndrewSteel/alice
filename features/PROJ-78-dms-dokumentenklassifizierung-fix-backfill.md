@@ -1,6 +1,6 @@
 # PROJ-78: DMS-Dokumentenklassifizierung — Fix + Backfill Bestand
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-08-18
 **Last Updated:** 2026-08-18
 
@@ -152,7 +152,95 @@ Keine neuen Pakete/Node-Typen nötig. Beide Workflows nutzen ausschließlich ber
 - Die live in n8n angelegte Sub-Workflow-Instanz (`alice-dms-classify-document`, ID `JHyjjKyhcSxPgAv4`) ist inaktiv angelegt (nur damit `alice-dms-processor` und `alice-dms-classification-backfill` sie per ID referenzieren können) — der eigentliche Deploy/Aktivierung aller drei Workflows erfolgt weiterhin manuell durch Andreas.
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-08-18
+**Tester:** QA Engineer (AI)
+**Methode:** Statisches Code-Review + Logik-Trace gegen alle Acceptance Criteria und Edge Cases. Kein Live-Ausführungstest möglich, da `alice-dms-processor` (Produktion) und `alice-dms-classification-backfill` (neu) laut Projektkonvention nicht eigenständig deployt werden dürfen ("Deploy n8n-workflow …" bleibt manueller Schritt von Andreas) und ein Confirm-Lauf gegen die echte Produktions-Weaviate-Instanz irreversible Seiteneffekte hätte. `npm test` / `npm run test:e2e` entfallen — dieses Feature hat keinen Frontend- oder API-Route-Anteil (reine n8n-Workflows + Weaviate-Schema).
+
+### Acceptance Criteria Status
+
+#### AC-1: Fix — laufender Betrieb (`alice-dms-processor`)
+- [x] Prompt enthält unterscheidende Merkmale/Keywords je Dokumenttyp
+- [x] 1. Versuch bleibt deterministisch (temperature 0)
+- [x] Konfidenz wird im selben JSON-Response ermittelt
+- [x] 2. Versuch bei Temperature 0.3 automatisch bei Konfidenz < Schwellwert
+- [x] Höhere Konfidenz gewinnt; bei Gleichstand 2. Versuch
+- [x] Beste Schätzung wird immer gespeichert + Unsicherheits-Flag bei weiterhin niedriger Konfidenz
+- [x] Bestehender Parse-Fehler-Retry bleibt unverändert als separates Sicherheitsnetz erhalten
+- [x] Ordner mit fest hinterlegtem `suggested_type` überspringen die LLM-Klassifizierung weiterhin komplett (Zweig unverändert)
+
+#### AC-2: Backfill — einmaliger Bestands-Lauf
+- [x] Dry-Run (kein `confirm`) klassifiziert alle sechs Collections neu, ohne zu schreiben
+- [x] Dry-Run-Report enthält Dateiname, aktuelle/vorgeschlagene Collection, Konfidenz je Abweichung
+- [x] `confirm=true` migriert: Neuextraktion, Insert Zielcollection, Löschen Altobjekt, Thumbnail-Trigger
+- [x] Batch-/Zeitlimit-Pattern (7200s, Lock-Renewal) vom Processor übernommen
+- [ ] BUG-1: Konvergenz/keine-Duplikate bei erneutem `confirm=true`-Aufruf nicht in jedem Fall garantiert (siehe unten)
+- [x] Fehlgeschlagene Neuextraktionen werden übersprungen, geloggt, gezählt — Gesamtlauf läuft weiter
+- [ ] Nicht unabhängig verifizierbar vor Deployment: „0 tatsächliche Rechnungen mehr in Document-Collection" ist eine Stichprobenprüfung gegen echte Produktionsdaten nach einem realen Confirm-Lauf — kann erst nach Deploy + echtem Lauf geprüft werden.
+
+### Edge Cases Status
+
+#### EC-1: Duplikat nach Collection-Wechsel
+- [ ] BUG-1: Nicht vollständig abgedeckt — siehe Bugs
+
+#### EC-2: BankStatement-Rekategorisierung
+- [x] Cascade-Delete alter `BankTransaction`-Kinder beim Verlassen von BankStatement; Neuextraktion beim Eintritt — korrekt gegenseitig exklusiv (da `proposedType !== doc.class` garantiert)
+
+#### EC-3: Alte UUID-Referenzen
+- [x] Bewusst akzeptiert wie spezifiziert, kein Code nötig
+
+#### EC-4: Ollama nicht erreichbar während Backfill
+- [ ] BUG-2: Kein sauberer Sofort-Abbruch bei komplettem Ollama-Ausfall (siehe unten)
+
+#### EC-5: Genuin mehrdeutige Dokumente
+- [x] Best-Guess + Unsicherheits-Flag, keine Pipeline-Blockade
+
+#### EC-6: Berechtigungswechsel durch Collection-Wechsel
+- [x] Bewusst akzeptiert für MVP wie spezifiziert, kein Code nötig
+
+#### EC-7: Leerer Bestand / keine Abweichungen im Dry-Run
+- [x] Leere Liste im Dry-Run-Report; Confirm-Aufruf ist No-Op
+
+### Security Audit Results
+
+**n8n workflow features:**
+- [x] Keine GraphQL-Injection: alle dynamischen `class`/`textField`-Werte sind statisch/allowlisted, Cursor-IDs stammen von Weaviate selbst; `parentStatementId`-Sanitizing für `BankTransaction`-Cascade-Delete identisch zum bestehenden Muster im Processor
+- [x] `document_type` aus dem Klassifizierungs-Ergebnis ist durch `alice-dms-classify-document` bereits allowlist-validiert, bevor er als Weaviate-Klassenname verwendet wird; `Code: Compare & Handle` validiert zusätzlich selbst gegen `validTypes`
+- [x] Keine Secrets in Logs (Redis-Passwort wird nirgends geloggt, nur interne Hostnamen)
+- [~] Kein Auth-Mechanismus auf dem neuen Webhook (`authentication: none`) — entspricht exakt dem bestehenden Muster von `alice-dms-thumbnailer-backfill` und dem VPN-only-Zugriffsmodell des Projekts; kein neues, durch PROJ-78 eingeführtes Risiko, aber erwähnenswert falls sich das Zugriffsmodell künftig ändert
+- [x] Der neue Sub-Workflow `alice-dms-classify-document` nutzt einen `executeWorkflowTrigger` (kein Webhook) — keine neue externe Angriffsfläche
+
+### Bugs Found
+
+#### BUG-1: Backfill-Confirm garantiert Konvergenz/Duplikatfreiheit nicht bei fehlgeschlagenem Delete
+- **Severity:** High
+- **Datei:** `workflows/alice-dms-classification-backfill.json`, Node `Code: Compare & Handle`
+- **Root Cause:** Die Migration fügt zuerst das neue Objekt in die Zielcollection ein und löscht danach das alte Objekt in der Quellcollection — der Löschaufruf ist per `.catch()` fehlertolerant und bricht die Migration bei Fehlschlag NICHT ab (`_outcome: 'migrated'` wird trotzdem gesetzt). Zusätzlich prüft der Code vor dem Insert nicht, ob in der Zielcollection bereits ein Objekt mit demselben `fileHash` existiert (im Gegensatz zum bestehenden Muster im Processor: `Code: Build Weaviate Query` → `HTTP: Weaviate Search` → `Code: Check Existing Entry` → bedingtes Delete-vor-Insert).
+- **Steps to Reproduce (Failure Scenario):**
+  1. `confirm=true`-Lauf migriert Dokument X von `Document` nach `Invoice`.
+  2. Insert des neuen `Invoice`-Objekts gelingt; der anschließende `DELETE` des alten `Document`-Objekts schlägt fehl (z. B. kurzer Netzwerk-Hänger zu Weaviate).
+  3. Der Fehler wird nur geloggt, `migrated`-Zähler wird trotzdem erhöht.
+  4. Beim nächsten Dry-Run erscheint das alte `Document`-Objekt erneut als Abweichung (es existiert ja weiterhin und wird erneut als `Invoice` klassifiziert).
+  5. Ein erneuter `confirm=true`-Aufruf migriert es ein zweites Mal → zwei `Invoice`-Objekte mit identischem `fileHash` in der Zielcollection.
+  - **Erwartet:** Laut AC „Ein erneuter Aufruf mit `confirm=true` … liefert keine weiteren Abweichungen mehr (Konvergenz, keine Duplikate)" und laut Edge-Case-Vorgabe „bestehende Dedup-Logik (Löschen des alten, Insert des neuen) greift, kein Duplikat".
+  - **Tatsächlich:** Unter dem beschriebenen (realistischen, wenn auch seltenen) Fehlerfall entsteht ein Duplikat, und der Alt-Datensatz bleibt dauerhaft in der falschen Collection liegen.
+- **Priority:** Fix before deployment
+
+#### BUG-2: Kein sauberer Sofort-Abbruch bei komplettem Ollama-Ausfall während des Backfills
+- **Severity:** Medium
+- **Datei:** `workflows/alice-dms-classification-backfill.json` (Code: Time Check / Code: Compare & Handle) und `workflows/alice-dms-classify-document.json`
+- **Root Cause:** Es gibt keinen Health-Check/Circuit-Breaker für Ollama. Bei komplettem Ausfall durchläuft jedes einzelne Dokument weiterhin bis zu vier Timeout-Wartezeiten (2× 120s im Klassifizierungs-Sub-Workflow, bis zu 300s in der Neuextraktion) statt den Lauf sofort zu erkennen und sauber abzubrechen.
+- **Steps to Reproduce:** Ollama-Container stoppen, Backfill mit `confirm=true` und >10 Dokumenten auslösen.
+  - **Erwartet:** Laut Edge Case „Lauf bricht sauber ab (kein Teil-Update einzelner Dokumente), ist beim nächsten Trigger fortsetzbar".
+  - **Tatsächlich:** Der Lauf arbeitet sich langsam (mehrere Minuten pro Dokument) durch die Warteschlange, bis irgendwann das 7200s-Zeitlimit greift — kein sauberer Sofort-Abbruch, unnötig lange Laufzeit und viele „failed"-Einträge statt eines einzigen klaren Abbruchgrunds.
+- **Priority:** Fix before deployment (empfohlen, da einfache Ergänzung: erste Ollama-Anfrage im Time-Check mit kurzem Timeout prüfen und bei Fehlschlag sofort mit `reason: 'ollama_unavailable'` abbrechen)
+
+### Summary
+- **Acceptance Criteria:** 15/17 passed (2 partially — see BUG-1 EC-1/AC-2 convergence criterion; 1 not independently verifiable pre-deployment)
+- **Bugs Found:** 2 total (0 critical, 1 high, 1 medium, 0 low)
+- **Security:** Pass (no new vulnerabilities introduced; webhook auth model matches existing project convention)
+- **Production Ready:** NO
+- **Recommendation:** Fix BUG-1 (target-collection dedup check before insert, or treat delete-failure as `failed` instead of `migrated`) before deployment. BUG-2 recommended but not strictly blocking if Ollama uptime is otherwise reliable in this single-user deployment.
 
 ## Deployment
 _To be added by /deploy_
