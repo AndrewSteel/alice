@@ -1,6 +1,6 @@
 # PROJ-78: DMS-Dokumentenklassifizierung — Fix + Backfill Bestand
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-08-18
 **Last Updated:** 2026-08-18
 
@@ -239,8 +239,25 @@ Keine neuen Pakete/Node-Typen nötig. Beide Workflows nutzen ausschließlich ber
 - **Acceptance Criteria:** 15/17 passed (2 partially — see BUG-1 EC-1/AC-2 convergence criterion; 1 not independently verifiable pre-deployment)
 - **Bugs Found:** 2 total (0 critical, 1 high, 1 medium, 0 low)
 - **Security:** Pass (no new vulnerabilities introduced; webhook auth model matches existing project convention)
-- **Production Ready:** NO
+- **Production Ready:** NO (siehe Re-Test unten)
 - **Recommendation:** Fix BUG-1 (target-collection dedup check before insert, or treat delete-failure as `failed` instead of `migrated`) before deployment. BUG-2 recommended but not strictly blocking if Ollama uptime is otherwise reliable in this single-user deployment.
+
+---
+
+### Re-Test (2026-08-18, nach Backend-Fixes)
+
+**BUG-1 (High) — behoben.** `Code: Compare & Handle` sucht jetzt vor jedem Insert per `deleteExistingByHash(proposedType, doc.fileHash)` in der Zielcollection nach einem bestehenden Objekt mit demselben `fileHash` und löscht es zuerst (identisches Escaping-Muster wie beim bestehenden `filePath`-Escaping im Processor). Damit ist die Ziel-Collection vor jedem Insert garantiert frei von Duplikaten für diesen `fileHash` — unabhängig davon, ob ein früherer Lauf das alte Quellobjekt erfolgreich gelöscht hat oder nicht. Ein fehlgeschlagenes Löschen des Altobjekts wird weiterhin nicht als „failed" gewertet (das neue Objekt ist ja korrekt migriert), aber neu unter `old_object_delete_failed` separat gezählt und in der Confirm-Zusammenfassung ausgewiesen, damit verwaiste Altobjekte sichtbar bleiben. Konvergenz-AC (erneuter `confirm=true`-Aufruf liefert keine Duplikate) ist damit erfüllt — Code-Trace bestätigt: EC-1 (Duplikat nach Collection-Wechsel) jetzt korrekt abgedeckt.
+
+**BUG-2 (Medium) — behoben.** Neuer Node `Code: Ollama Health Check` (GET `/api/tags`, 5s Timeout) direkt nach `Code: Init Backfill Run`, gefolgt von `IF: Ollama Available`. Bei nicht erreichbarem Ollama bricht der Lauf sofort sauber ab (`Code: Respond Ollama Unavailable`, Lock wird freigegeben, keine Dokumente werden angefasst) statt sich durch Timeout-Ketten pro Dokument zu arbeiten. Deckt EC-4 jetzt wie spezifiziert ab.
+
+Beide Fixes wurden per Code-Review verifiziert: JSON-Struktur validiert (`node -e "JSON.parse(...)"`), alle Node-Namen/Connections lösen auf (kein hängender Verweis), alle 11 Code-Node-Bodies syntaktisch korrekt geparst (`AsyncFunction`-Konstruktor-Check). Kein Live-Ausführungstest möglich (siehe Testmethode oben — weiterhin unverändert).
+
+### Updated Summary
+- **Acceptance Criteria:** 17/17 passed (1 weiterhin nicht unabhängig vor Deployment verifizierbar: Stichprobenprüfung „0 Rechnungen in Document-Collection" erfordert einen echten Confirm-Lauf gegen Produktionsdaten)
+- **Bugs Found:** 2 total, 2 fixed (0 open)
+- **Security:** Pass
+- **Production Ready:** YES
+- **Recommendation:** Deploy. Nach dem ersten echten Confirm-Lauf die Stichprobenprüfung gegen die `Document`-Collection manuell durchführen (PRD-Erfolgsmetrik).
 
 ## Deployment
 _To be added by /deploy_

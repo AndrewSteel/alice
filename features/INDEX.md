@@ -16,7 +16,7 @@
 | ID      | Phase | Feature                                                                                                                                   | Status  | Spec | Created    |
 | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ---- | ---------- |
 | PROJ-53 | 3.2   | Mail-Anhang DMS-Import — E-Mail-Anhänge automatisch oder nutzergesteuert in DMS-Pipeline einspeisen; Abhängigkeit von PROJ-46; verschoben aus Phase 4 | Roadmap | —    | 2026-06-24 |
-| PROJ-78 | 3.1   | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (falsch klassifizierte Rechnungen im Document-Schema)                              | In Review | [Spec](PROJ-78-dms-dokumentenklassifizierung-fix-backfill.md) | 2026-08-17 |
+| PROJ-78 | 3.1   | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (falsch klassifizierte Rechnungen im Document-Schema)                              | Approved | [Spec](PROJ-78-dms-dokumentenklassifizierung-fix-backfill.md) | 2026-08-17 |
 | PROJ-79 | 3.1   | DMS-Zusammenfassung Sprachkorrektur — nur Deutsch, Fix + Backfill Bestand                                                                  | Roadmap | —    | 2026-08-17 |
 | PROJ-80 | 3.2   | DMS-Vollständigkeits-Dashboard — Coverage-Übersicht (Pfad-Scan vs. Weaviate/Thumbnail/Geo je Dokument); Abhängigkeit von PROJ-77           | Roadmap | —    | 2026-08-17 |
 | PROJ-81 | 3.2   | Frontend-Übersetzung on-the-fly — deutsche Zusammenfassung → Nutzersprache; Abhängigkeit von PROJ-79                                       | Roadmap | —    | 2026-08-17 |
