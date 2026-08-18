@@ -21,7 +21,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 
 | Priority | Feature                                                                                                          | Sub-Phase | Status  |
 | -------- | ----------------------------------------------------------------------------------------------------------------- | --------- | ------- |
-| P0       | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (PROJ-78)                                                   | 3.1       | Roadmap |
+| P0       | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (PROJ-78)                                                   | 3.1       | Planned |
 | P0       | DMS-Zusammenfassung Sprachkorrektur (Deutsch) — Fix + Backfill Bestand (PROJ-79)                                   | 3.1       | Roadmap |
 | P1       | DMS-Vollständigkeits-Dashboard (PROJ-80)                                                                           | 3.2       | Roadmap |
 | P1       | Frontend-Übersetzung on-the-fly (PROJ-81)                                                                          | 3.2       | Roadmap |
