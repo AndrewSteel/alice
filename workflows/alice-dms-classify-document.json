@@ -1,0 +1,62 @@
+{
+  "name": "alice-dms-classify-document",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-dms-classify-document\n\nShared sub-workflow (PROJ-78): two-attempt document classification with confidence.\nCalled by both alice-dms-processor (nightly) and alice-dms-classification-backfill,\nso the two never drift apart.\n\n**Input**: { plaintext }\n**Output**: { document_type, confidence, uncertain, classification_retried, classification_retry_failed, second_attempt_used }\n\n1st attempt: temperature 0. If confidence < DMS_CLASSIFICATION_CONFIDENCE_THRESHOLD (default 0.7),\n2nd attempt: temperature 0.3, same keyword-extended prompt. Higher confidence wins; ties go to 2nd attempt.\nExisting parse-error retry (same prompt, temp 0) stays as a separate safety net.",
+        "height": 260,
+        "width": 460,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -260],
+      "id": "classify-sticky-v1",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "id": "classify-trigger-v1",
+      "name": "Execute Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst item = $input.first().json;\nconst plaintext = (item.plaintext || '').slice(0, 20000);\nconst validTypes = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\nlet ollamaModel = 'qwen3.5:27b-q4_K_M'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\nlet threshold = 0.7; try { const t = parseFloat($env.DMS_CLASSIFICATION_CONFIDENCE_THRESHOLD); if (!isNaN(t)) threshold = t; } catch(e) {}\n\nconst PROMPT_HEADER = 'You are a document classifier. Analyze the following document text and determine the document type.\\nChoose EXACTLY ONE of the following types, using these distinguishing features as guidance:\\n- Invoice: contains an invoice number, gross/net amount, VAT rate, due date, itemized line items\\n- BankStatement: contains an IBAN, opening/closing balance, a list of individual transactions/bookings, statement period\\n- SecuritySettlement: contains an ISIN, depot number, security name, buy/sell/dividend transaction type, quantity and price\\n- Contract: contains contract parties, sign date, start/end date, notice period, recurring (monthly/annual) cost\\n- Email: has email-style headers (From/To/Subject/Date) and/or a salutation and signature typical of email correspondence\\n- Document: generic correspondence, forms, certificates or notices that do not match any of the above\\n\\nRespond ONLY with a JSON object: {\"document_type\": \"<Type>\", \"confidence\": <0-1>}\\n\"confidence\" is your own certainty that the chosen type is correct, as a number between 0 and 1.\\n\\nDocument text:\\n' + plaintext;\n\nfunction tryParse(responseStr) {\n  const parsed = JSON.parse(responseStr);\n  if (!validTypes.includes(parsed.document_type)) return null;\n  let confidence = parseFloat(parsed.confidence);\n  if (isNaN(confidence)) confidence = 0;\n  confidence = Math.max(0, Math.min(1, confidence));\n  return { document_type: parsed.document_type, confidence };\n}\n\nasync function callOllama(temperature) {\n  const resp = await axios.post('http://ollama-3090:11434/api/generate', {\n    model: ollamaModel,\n    prompt: PROMPT_HEADER,\n    stream: false,\n    format: 'json',\n    options: { temperature, num_predict: 500 }\n  }, { timeout: 120000 });\n  return resp.data.response || '';\n}\n\n// Attempt 1 (temperature 0, deterministic) + existing parse-error retry safety net (same prompt, unchanged behavior)\nlet attempt1 = null;\nlet retried = false;\nlet retryFailed = false;\ntry {\n  const raw1 = await callOllama(0);\n  attempt1 = tryParse(raw1);\n  if (!attempt1) throw new Error('invalid document_type in response');\n} catch(e) {\n  retried = true;\n  try {\n    const raw1b = await callOllama(0);\n    attempt1 = tryParse(raw1b);\n    if (!attempt1) retryFailed = true;\n  } catch(e2) {\n    retryFailed = true;\n  }\n}\nif (!attempt1) attempt1 = { document_type: 'Document', confidence: 0 };\n\n// Attempt 2 (temperature 0.3, same extended prompt) only if attempt1 confidence is below threshold\nlet secondAttemptUsed = false;\nlet winner = attempt1;\nif (attempt1.confidence < threshold) {\n  secondAttemptUsed = true;\n  try {\n    const raw2 = await callOllama(0.3);\n    const attempt2 = tryParse(raw2);\n    // Higher confidence wins; tie goes to the 2nd (informed) attempt\n    if (attempt2 && attempt2.confidence >= attempt1.confidence) {\n      winner = attempt2;\n    }\n  } catch(e) {\n    // 2nd attempt failed outright — keep attempt 1's best guess\n  }\n}\n\nconst uncertain = winner.confidence < threshold;\n\nconst result = { document_type: winner.document_type, confidence: winner.confidence, uncertain: uncertain, classification_retried: retried, classification_retry_failed: retryFailed, second_attempt_used: secondAttemptUsed };\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 0],
+      "id": "classify-code-v1",
+      "name": "Code: Two-Attempt Classification"
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code: Two-Attempt Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 3600
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}

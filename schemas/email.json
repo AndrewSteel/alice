@@ -300,6 +300,32 @@
           "vectorizePropertyName": false
         }
       }
+    },
+    {
+      "name": "classificationConfidence",
+      "description": "LLM self-reported classification confidence (0-1)",
+      "dataType": ["number"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "classificationUncertain",
+      "description": "True if the final classification confidence stayed below the threshold after both attempts",
+      "dataType": ["boolean"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     }
   ]
 }
