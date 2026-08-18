@@ -16,7 +16,8 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | Phase 2.1 | ✅ Deployed | Speech gateway: Whisper STT + Piper TTS, WebApp voice, TTS latency tuning  |
 | Phase 2.2 | ✅ Deployed | HA Voice Integration, Speaker-ID, ESPHome feedback, chat storage & archive |
 | Phase 2.3 | ✅ Deployed | Mail IMAP integration, Vision-Chat Flip-Cards, DMS thumbnail generation    |
-| Phase 3   | 🗓 Planned  | Display routing (PROJ-45), multi-display output, deeper financial analysis |
+| Phase 3   | 🗓 Planned  | DMS quality & coverage (classification/language fixes, completeness dashboard), Timer/Calendar/Tasks/Contacts/Websearch agents, HA variable intents & area context |
+| Phase 4   | 🗓 Planned  | Display routing (PROJ-45), multi-display output, deeper financial analysis (PROJ-59) |
 
 ---
 
@@ -229,7 +230,7 @@ Speaker recognition identifies the active user from voice embeddings stored in P
 | Memory          | ✅ Deployed | Persistent facts, 30-day conversation history, user preferences                                        |
 | User Management | ✅ Deployed | Admin: create/deactivate/delete users, OTP reset, chat archive; self-service: password, email, profile |
 | Voice           | ✅ Deployed | ESPHome Wyoming satellites, HA Voice devices, browser push-to-talk, Speaker-ID                         |
-| Finances        | ✅ Deployed | Bank transaction search; deeper analysis planned for Phase 3                                           |
+| Finances        | ✅ Deployed | Bank transaction search; deeper analysis planned for Phase 4                                           |
 | Display Routing | 🗓 Planned  | Config table (wallpanel/TV/PC), n8n router per display target (PROJ-45)                                |
 
 ---
