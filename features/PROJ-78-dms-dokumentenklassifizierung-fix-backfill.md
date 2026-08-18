@@ -1,6 +1,6 @@
 # PROJ-78: DMS-Dokumentenklassifizierung — Fix + Backfill Bestand
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-08-18
 **Last Updated:** 2026-08-18
 
@@ -135,6 +135,21 @@ Keine neuen Pakete/Node-Typen nötig. Beide Workflows nutzen ausschließlich ber
 ### Bestätigte Annahme
 
 - Konfidenz-Schwellwert: Startwert **0.7**, als Umgebungsvariable konfigurierbar (mit Andreas im Review bestätigt).
+
+## Implementation Notes (Backend)
+
+**Neue/geänderte Workflow-Dateien:**
+- `workflows/alice-dms-classify-document.json` (neu) — gemeinsamer n8n-Sub-Workflow (Execute-Workflow-Trigger) mit der Zwei-Versuche-Klassifizierungslogik (Prompt mit Unterscheidungsmerkmalen je Typ, Konfidenz-Selbstauskunft, 2. Versuch bei Temperature 0.3 unterhalb des Schwellwerts, bestehender Parse-Fehler-Retry bleibt als separates Sicherheitsnetz erhalten). Wird sowohl vom Fix als auch vom Backfill aufgerufen (`Execute Workflow`-Node), damit beide nicht auseinanderlaufen — wie im Tech Design gefordert. Live in n8n angelegt (inaktiv) unter der ID `JHyjjKyhcSxPgAv4`, damit die aufrufenden Workflows per ID referenzieren können (analog zum bestehenden Muster `alice-dms-scanner` → `alice-dms-path-worker`).
+- `workflows/alice-dms-processor.json` (geändert) — Klassifizierungs-Abschnitt ruft jetzt den neuen Sub-Workflow auf (`Execute: Classify Document` ersetzt den bisherigen direkten Ollama-Call; `Code: Map Classify Result` ersetzt `Code: Parse Classify Result`). Neue Redis-Lauf-Statistiken `confidence_low_second_attempt` und `still_uncertain_after_second` ergänzt (Init + beide Final-Log-Varianten). `Code: Build Weaviate Payload` schreibt zusätzlich `classificationConfidence` und `classificationUncertain` in alle sechs klassifizierbaren Collections.
+- `workflows/alice-dms-classification-backfill.json` (neu) — manueller Webhook (`POST /webhook/alice-dms-classification-backfill`), Dry-Run (Standard) vs. `confirm=true`. Teilt sich den Sperrmechanismus (identischer Redis-Lock-Key `alice:dms:processor:lock:run`) mit dem nächtlichen Processor, damit beide nie gleichzeitig um Ollama/TITAN X konkurrieren. Batch-/Zeitlimit-Pattern (7200s, Split-In-Batches + Lock-Renewal) 1:1 vom Processor übernommen. Sonderfall BankStatement (Wechsel in/aus der Collection) regeneriert bzw. löscht verwaiste `BankTransaction`-Kindobjekte. Nutzt den bestehenden Thumbnailer-Endpoint (`alice-dms-thumbnailer:8004/generate`) für die Thumbnail-Neuerzeugung, statt diese neu zu bauen.
+- `schemas/invoice.json`, `bank-statement.json`, `security-settlement.json`, `document.json`, `email.json`, `contract.json` — je zwei neue Properties `classificationConfidence` (number) und `classificationUncertain` (boolean) ergänzt.
+
+**Neue Umgebungsvariable:** `DMS_CLASSIFICATION_CONFIDENCE_THRESHOLD` (Default `0.7`, siehe bestätigte Annahme oben) — wird vom neuen Sub-Workflow `alice-dms-classify-document` gelesen.
+
+**Abweichungen vom Tech Design (bewusste Vereinfachungen):**
+- Die Extraktions-Prompts je Zieltyp (Invoice/BankStatement/…) sind im Backfill-Workflow dupliziert statt über einen weiteren Sub-Workflow geteilt — es handelt sich um statische Prompt-Vorlagen mit geringem Drift-Risiko, anders als die eigentliche Klassifizierungslogik (die *ist* geteilt). Ebenso ist die BankTransaction-Chunk-Extraktion (Phase B) im Backfill als eigenständige, vereinfachte Kopie der Processor-Logik implementiert (ohne die Spezialfälle für „gleicher Parent, erneuter Lauf", da beim Backfill jeder Collection-Wechsel zwangsläufig ein neues Objekt erzeugt).
+- Weaviate-Schema-Änderungen sind nur als Datei im Repo vorbereitet (`schemas/*.json`). Da `scripts/init-weaviate-schema.sh` bestehende Collections überspringt, greifen die zwei neuen Properties bei bereits existierenden Collections erst, wenn entweder Weaviate Auto-Schema aktiv ist (Property wird beim ersten Insert automatisch angelegt) oder vor dem Deploy ein `POST /v1/schema/{Class}/properties`-Aufruf je Collection erfolgt. Für `/deploy` vormerken.
+- Die live in n8n angelegte Sub-Workflow-Instanz (`alice-dms-classify-document`, ID `JHyjjKyhcSxPgAv4`) ist inaktiv angelegt (nur damit `alice-dms-processor` und `alice-dms-classification-backfill` sie per ID referenzieren können) — der eigentliche Deploy/Aktivierung aller drei Workflows erfolgt weiterhin manuell durch Andreas.
 
 ## QA Test Results
 _To be added by /qa_
