@@ -1,0 +1,794 @@
+{
+  "name": "alice-dms-language-backfill",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-dms-language-backfill (PROJ-79)\n\nOne-time/repeatable manual backfill: checks every existing document across all six\nclassifiable Weaviate collections for suspected-English title/summary using the same\nheuristic as alice-dms-language-check, and corrects hits on confirm.\n\n**Trigger**: POST /webhook/alice-dms-language-backfill\n**Dry-run** (no `confirm` param): pure local heuristic check against already-stored\ntitle/summary values \u2014 no Ollama call, no writes. Reports hits (fileName, collection,\nfield, current value).\n**Confirm** (`confirm=true`): for every dry-run hit, re-generates title/summary via the\nshared alice-dms-language-check sub-workflow (same two-attempt German-forced logic as the\nnightly fix) using the stored fullText/content, and PATCHes only title/summary/\nlanguageUncertain on the existing Weaviate object \u2014 no collection change, no insert/delete,\nno thumbnail regeneration (image reference is untouched).\n\n**Locking**: shares the exact same Redis lock key as alice-dms-processor\n(`alice:dms:processor:lock:run`) so it never competes for the Ollama/RTX 3090 resource.\n**Batching**: same wall-clock time-limit pattern as alice-dms-classification-backfill\n(7200s), resumable across multiple invocations/nights.",
+        "height": 340,
+        "width": 560,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -340
+      ],
+      "id": "langbackfill-sticky-v1",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-dms-language-backfill",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "langbackfill-webhook-v1",
+      "name": "Webhook: POST /language-backfill",
+      "webhookId": "alice-dms-language-backfill-v1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-language-backfill\", node: \"Code: Acquire Backfill Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n// Same lock key as alice-dms-processor / alice-dms-classification-backfill \u2014 must never run concurrently (Ollama/RTX 3090 contention).\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 1800000;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false, lockError = false;\ntry {\n  await client.connect();\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  logger.info('[LangBackfill] Lock acquire error: ' + e.message);\n  acquired = false; lockError = true;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { _lock_acquired: acquired, _lock_error: lockError, lock_owner: acquired ? ownerToken : null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ],
+      "id": "langbackfill-acquire-lock-v1",
+      "name": "Code: Acquire Backfill Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-langbackfill-lock-acquired",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        0
+      ],
+      "id": "langbackfill-if-lock-acquired-v1",
+      "name": "IF: Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { mode: 'error', error: 'alice-dms-language-backfill: lock busy \u2014 alice-dms-processor or another backfill run is currently active. Try again later.' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        260
+      ],
+      "id": "langbackfill-respond-busy-v1",
+      "name": "Code: Respond Already Running"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst body = item.body || {};\nconst query = item.query || {};\nconst confirmRaw = body.confirm !== undefined ? body.confirm : query.confirm;\nconst CONFIRM = confirmRaw === true || confirmRaw === 'true';\n\n// title only exists in schema for Document/Contract (same restriction as alice-dms-processor's extraction prompt)\nconst COLLECTIONS = [\n  { class: 'Invoice', textField: 'fullText', hasTitle: false },\n  { class: 'BankStatement', textField: 'fullText', hasTitle: false },\n  { class: 'Document', textField: 'fullText', hasTitle: true },\n  { class: 'Email', textField: 'content', hasTitle: false },\n  { class: 'SecuritySettlement', textField: 'fullText', hasTitle: false },\n  { class: 'Contract', textField: 'fullText', hasTitle: true }\n];\n\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:dms:language-backfill:run:start_time', Date.now().toString());\n  await client.del('alice:dms:language-backfill:run:stats');\n  await client.del('alice:dms:language-backfill:run:hits');\n  await client.hSet('alice:dms:language-backfill:run:stats', { checked: '0', hits_found: '0', corrected: '0', failed: '0', still_uncertain: '0' });\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { confirm: CONFIRM, collections: COLLECTIONS, MAX_RUNTIME_SECONDS: 7200 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        0
+      ],
+      "id": "langbackfill-init-v1",
+      "name": "Code: Init Backfill Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const axios = require('axios');\nconst trigger = $input.first().json;\n// Dry-run never calls Ollama (pure heuristic) \u2014 health check only matters for confirm runs.\nif (!trigger.confirm) {\n  return [{ json: { ...trigger, _ollama_ok: true } }];\n}\nlet ollamaOk = false;\ntry {\n  await axios.get('http://ollama-3090:11434/api/tags', { timeout: 5000 });\n  ollamaOk = true;\n} catch(e) {\n  ollamaOk = false;\n}\nreturn [{ json: { ...trigger, _ollama_ok: ollamaOk } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        0
+      ],
+      "id": "langbackfill-ollama-health-v1",
+      "name": "Code: Ollama Health Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-langbackfill-ollama-available",
+              "leftValue": "={{ $json._ollama_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "langbackfill-if-ollama-available-v1",
+      "name": "IF: Ollama Available"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\ntry { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\nawait client.del('alice:dms:language-backfill:run:start_time').catch(() => {});\nawait client.del('alice:dms:language-backfill:run:stats').catch(() => {});\nawait client.quit().catch(() => {});\n\nconst trigger = $('Code: Init Backfill Run').first().json;\nreturn [{ json: { mode: trigger.confirm ? 'confirm' : 'dry-run', reason: 'ollama_unavailable', error: 'Ollama is not reachable \u2014 aborting cleanly before processing any documents. Retry once Ollama is back up; already-corrected documents are unaffected.' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        260
+      ],
+      "id": "langbackfill-respond-ollama-down-v1",
+      "name": "Code: Respond Ollama Unavailable"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-language-backfill\", node: \"Code: Fetch All Documents\" } });\nconst axios = require('axios');\nconst trigger = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst PAGE = 100;\n\nconst allDocs = [];\nfor (const col of trigger.collections) {\n  let cursor = null;\n  while (true) {\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const titleField = col.hasTitle ? ' title' : '';\n    const gql = `{ Get { ${col.class}(limit: ${PAGE}${cursorClause}) { _additional { id } filePath fileName ${col.textField} summary${titleField} } } }`;\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });\n      if (r.data?.errors) {\n        logger.warn(`[LangBackfill] GraphQL error for ${col.class}: ${JSON.stringify(r.data.errors)}`);\n        break;\n      }\n      results = r.data?.data?.Get?.[col.class] || [];\n    } catch(e) {\n      logger.warn(`[LangBackfill] Request failed for ${col.class}: ${e.message}`);\n      break;\n    }\n    if (results.length === 0) break;\n    for (const doc of results) {\n      allDocs.push({\n        weaviate_id: doc._additional?.id,\n        class: col.class,\n        hasTitle: col.hasTitle,\n        filePath: doc.filePath || null,\n        fileName: doc.fileName || null,\n        fullText: doc[col.textField] || '',\n        summary: doc.summary || '',\n        title: col.hasTitle ? (doc.title || null) : null,\n        confirm: trigger.confirm\n      });\n    }\n    if (results.length < PAGE) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n  logger.info(`[LangBackfill] ${col.class}: fetched ${allDocs.filter(d => d.class === col.class).length} documents`);\n}\n\nlogger.info(`[LangBackfill] Total documents queued for language check: ${allDocs.length}`);\nif (allDocs.length === 0) {\n  return [{ json: { _empty: true } }];\n}\nreturn allDocs.map(d => ({ json: { ...d, _empty: false } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ],
+      "id": "langbackfill-fetch-docs-v1",
+      "name": "Code: Fetch All Documents"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-langbackfill-queue-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        0
+      ],
+      "id": "langbackfill-if-queue-empty-v1",
+      "name": "IF: Queue Empty"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\ntry { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\nawait client.del('alice:dms:language-backfill:run:start_time').catch(() => {});\nawait client.del('alice:dms:language-backfill:run:stats').catch(() => {});\nawait client.quit().catch(() => {});\n\nconst trigger = $('Code: Init Backfill Run').first().json;\nreturn [{ json: { mode: trigger.confirm ? 'confirm' : 'dry-run', total_checked: 0, hits_found: 0, hits: [], message: 'No documents found across any classifiable collection' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        260
+      ],
+      "id": "langbackfill-empty-summary-v1",
+      "name": "Code: Empty Summary"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1960,
+        0
+      ],
+      "id": "langbackfill-split-batches-v1",
+      "name": "Split In Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-language-backfill\", node: \"Code: Time Check\" } });\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:dms:language-backfill:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n  }\n} finally {\n  await client.quit();\n}\n\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RENEW_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end data.last_heartbeat = ARGV[2] redis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3]) return 1`;\nlet lockLost = false;\nconst renewClient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await renewClient.connect();\n  const res = await renewClient.eval(RENEW_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner, new Date().toISOString(), '1800000'] });\n  lockLost = (res !== 1);\n  if (lockLost) logger.info('[LangBackfill] Lock ownership lost - aborting run');\n} catch(e) {\n  lockLost = true;\n} finally {\n  await renewClient.quit().catch(() => {});\n}\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached, _lock_lost: lockLost } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        0
+      ],
+      "id": "langbackfill-time-check-v1",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-langbackfill-time-limit",
+              "leftValue": "={{ $json._time_limit_reached || $json._lock_lost }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2520,
+        0
+      ],
+      "id": "langbackfill-if-time-limit-v1",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-language-backfill\", node: \"Code: Heuristic Check\" } });\nconst redis = require('redis');\nconst doc = $input.first().json;\n\nlet threshold = 0.3; try { const t = parseFloat($env.DMS_LANGUAGE_HEURISTIC_THRESHOLD); if (!isNaN(t)) threshold = t; } catch(e) {}\n\n// Same lightweight local heuristic as alice-dms-language-check \u2014 kept identical so dry-run\n// hits and the fix's own flagging never drift apart (PROJ-79 tech decision).\nconst ENGLISH_MARKERS = new Set(['the','and','of','to','in','for','is','on','with','as','by','at','from','this','that','was','were','are','be','been','has','have','had','it','an','a','or','not','but','which','their','its','if','you','your','we','our','will','would','can','could','should','about','into','than','then','they','he','she','his','her','them','also','all','any','other','more','most','such','no','only','so','when','what','who','how','where']);\nfunction englishRatio(text) {\n  const words = (text || '').toLowerCase().match(/[a-z\u00e4\u00f6\u00fc\u00df]+/g) || [];\n  if (words.length < 6) return null;\n  let hits = 0;\n  for (const w of words) if (ENGLISH_MARKERS.has(w)) hits++;\n  return hits / words.length;\n}\nfunction looksEnglish(text) {\n  const ratio = englishRatio(text);\n  if (ratio === null) return false;\n  return ratio >= threshold;\n}\n\nconst redisClient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: (() => { try { return $env.REDIS_PASSWORD || ''; } catch(e) { return ''; } })() || undefined });\nawait redisClient.connect();\ntry {\n  await redisClient.hIncrBy('alice:dms:language-backfill:run:stats', 'checked', 1);\n} finally {\n  await redisClient.quit();\n}\n\nconst summaryHit = looksEnglish(doc.summary);\nconst titleHit = doc.hasTitle ? looksEnglish(doc.title) : false;\nconst isHit = summaryHit || titleHit;\n\nreturn [{ json: { ...doc, _is_hit: isHit, _summary_hit: summaryHit, _title_hit: titleHit } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        0
+      ],
+      "id": "langbackfill-heuristic-v1",
+      "name": "Code: Heuristic Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-langbackfill-is-hit",
+              "leftValue": "={{ $json._is_hit }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        0
+      ],
+      "id": "langbackfill-if-is-hit-v1",
+      "name": "IF: Is Hit"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { _outcome: 'no_hit' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        260
+      ],
+      "id": "langbackfill-no-hit-v1",
+      "name": "Code: No Hit"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-langbackfill-confirm-mode",
+              "leftValue": "={{ $json.confirm }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3360,
+        0
+      ],
+      "id": "langbackfill-if-confirm-v1",
+      "name": "IF: Confirm Mode"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst doc = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.hIncrBy('alice:dms:language-backfill:run:stats', 'hits_found', 1);\n  // One report entry per affected field (PROJ-79 AC: fileName, collection, betroffenes Feld, aktueller Wert)\n  const entries = [];\n  if (doc._summary_hit) entries.push({ fileName: doc.fileName, filePath: doc.filePath, collection: doc.class, field: 'summary', value: doc.summary });\n  if (doc._title_hit) entries.push({ fileName: doc.fileName, filePath: doc.filePath, collection: doc.class, field: 'title', value: doc.title });\n  for (const entry of entries) {\n    await client.rPush('alice:dms:language-backfill:run:hits', JSON.stringify(entry));\n  }\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _outcome: 'hit_reported', filePath: doc.filePath, class: doc.class } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        260
+      ],
+      "id": "langbackfill-report-hit-v1",
+      "name": "Code: Report Dry-Run Hit"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst doc = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.hIncrBy('alice:dms:language-backfill:run:stats', 'hits_found', 1);\n} finally {\n  await client.quit();\n}\n\nconst docType = doc.class;\nconst plaintext = (doc.fullText || '').slice(0, 20000);\nconst prompts = {\n  'Invoice': `Extract structured data from the following invoice text and respond ONLY with a JSON object with these fields:\\n{\"issuer\": \"Company name\", \"recipient\": \"Recipient\", \"invoiceNumber\": \"No.\", \"invoiceDate\": \"YYYY-MM-DD\", \"dueDate\": \"YYYY-MM-DD\", \"amountGross\": 0.00, \"amountNet\": 0.00, \"vatRate\": 19.0, \"currency\": \"EUR\", \"lineItems\": [], \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n  'BankStatement': `Extract structured data from the following bank statement and respond ONLY with a JSON object with these fields:\\n{\"bankName\": \"Bank name\", \"accountHolder\": \"Name\", \"iban\": \"DEXX...\", \"periodFrom\": \"YYYY-MM-DD\", \"periodTo\": \"YYYY-MM-DD\", \"openingBalance\": 0.00, \"closingBalance\": 0.00, \"currency\": \"EUR\", \"transactions\": [], \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n  'Document': `Extract structured data from the following document and respond ONLY with a JSON object with these fields:\\n{\"title\": \"Title\", \"documentDate\": \"YYYY-MM-DD\", \"sender\": \"Sender\", \"recipient\": \"Recipient\", \"summary\": \"Brief summary\", \"tags\": []}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n  'Email': `Extract structured data from the following email and respond ONLY with a JSON object with these fields:\\n{\"subject\": \"Subject\", \"sender\": \"email@domain.de\", \"recipients\": [], \"date\": \"YYYY-MM-DD\", \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n  'SecuritySettlement': `Extract structured data from the following securities settlement and respond ONLY with a JSON object with these fields:\\n{\"bank\": \"Bank name\", \"depotNumber\": \"Depot No.\", \"transactionDate\": \"YYYY-MM-DD\", \"securityName\": \"Name\", \"isin\": \"ISIN\", \"transactionType\": \"buy\", \"quantity\": 0.0, \"price\": 0.0, \"settlementAmount\": 0.0, \"settlementCurrency\": \"EUR\", \"summary\": \"Brief summary\"}\\nPossible values for transactionType: buy, sell, dividend, distribution. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`,\n  'Contract': `Extract structured data from the following contract and respond ONLY with a JSON object with these fields:\\n{\"contractType\": \"Type\", \"contractPartner\": \"Partner\", \"signDate\": \"YYYY-MM-DD\", \"startDate\": \"YYYY-MM-DD\", \"endDate\": \"YYYY-MM-DD\", \"noticePeriod\": \"3 months\", \"monthlyCost\": 0.0, \"annualCost\": 0.0, \"currency\": \"EUR\", \"summary\": \"Brief summary\"}\\nUse null if a value is not found. Dates always in ISO format YYYY-MM-DD.\\n\\nText:\\n${plaintext}`\n};\nconst GERMAN_DIRECTIVE = '\\n\\nIMPORTANT: Write all text field values (e.g. summary, title) in German, regardless of the language of the source document.';\nconst extractionPrompt = (prompts[docType] || prompts['Document']) + GERMAN_DIRECTIVE;\n\nreturn [{ json: {\n  summary: doc.summary || '',\n  title: doc.hasTitle ? (doc.title || null) : null,\n  extraction_prompt: extractionPrompt,\n  plaintext: doc.fullText || '',\n  _doc: doc\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        -260
+      ],
+      "id": "langbackfill-prep-langcheck-v1",
+      "name": "Code: Prep Language Check Input"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_LANG_CHECK_WORKFLOW_ID",
+          "cachedResultName": "alice-dms-language-check"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3920,
+        -260
+      ],
+      "id": "langbackfill-execute-langcheck-v1",
+      "name": "Execute: Language Check",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-language-backfill\", node: \"Code: Apply Correction\" } });\nconst axios = require('axios');\nconst redis = require('redis');\n\nconst langResult = $input.first().json; // { summary, title, languageUncertain, language_retried, extracted }\nconst doc = $('Code: Prep Language Check Input').first().json._doc;\nconst WEAVIATE_URL = 'http://weaviate:8080';\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\n\nasync function incr(field, by) {\n  try { await client.hIncrBy('alice:dms:language-backfill:run:stats', field, by || 1); } catch(e) {}\n}\n\ntry {\n  const hasResult = langResult && typeof langResult === 'object' && !langResult.error;\n  if (!hasResult) {\n    throw new Error('language_check_failed');\n  }\n\n  const properties = { summary: langResult.summary || doc.summary, languageUncertain: !!langResult.languageUncertain };\n  if (doc.hasTitle && langResult.title !== null && langResult.title !== undefined) {\n    properties.title = langResult.title;\n  }\n\n  // Reuse existing object \u2014 field-only PATCH, no collection change, no insert/delete (PROJ-79: no duplicate-risk\n  // path exists here since the document type never changes).\n  await axios.patch(`${WEAVIATE_URL}/v1/objects/${doc.class}/${doc.weaviate_id}`, { properties }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n\n  await incr('corrected', 1);\n  if (properties.languageUncertain) await incr('still_uncertain', 1);\n\n  return [{ json: { _outcome: 'corrected', filePath: doc.filePath, class: doc.class, languageUncertain: properties.languageUncertain } }];\n} catch(e) {\n  logger.warn('[LangBackfill] Correction failed for ' + (doc.filePath || '') + ' (' + doc.class + '/' + doc.weaviate_id + '): ' + e.message);\n  await incr('failed', 1);\n  return [{ json: { _outcome: 'failed', filePath: doc.filePath, class: doc.class, error: e.message } }];\n} finally {\n  await client.quit().catch(() => {});\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4200,
+        -260
+      ],
+      "id": "langbackfill-apply-correction-v1",
+      "name": "Code: Apply Correction"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-language-backfill\", node: \"Code: Build & Send Summary\" } });\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\n\nconst trigger = $('Code: Init Backfill Run').first().json;\nconst startTimeStr = await client.get('alice:dms:language-backfill:run:start_time');\nconst stats = await client.hGetAll('alice:dms:language-backfill:run:stats');\nconst runtime_seconds = startTimeStr ? Math.floor((Date.now() - parseInt(startTimeStr)) / 1000) : 0;\n\nlet hits = [];\nif (!trigger.confirm) {\n  const raw = await client.lRange('alice:dms:language-backfill:run:hits', 0, -1);\n  hits = raw.map(s => { try { return JSON.parse(s); } catch(e) { return null; } }).filter(Boolean);\n}\n\nawait client.del('alice:dms:language-backfill:run:start_time').catch(() => {});\nawait client.del('alice:dms:language-backfill:run:stats').catch(() => {});\nawait client.del('alice:dms:language-backfill:run:hits').catch(() => {});\n\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\ntry { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\nawait client.quit().catch(() => {});\n\nconst item = $input.first().json || {};\nconst reason = item._lock_lost ? 'lock_lost' : (item._time_limit_reached ? 'time_limit_reached' : 'completed');\n\nconst result = {\n  mode: trigger.confirm ? 'confirm' : 'dry-run',\n  reason,\n  total_checked: parseInt(stats.checked || '0'),\n  hits_found: parseInt(stats.hits_found || '0'),\n  runtime_seconds\n};\nif (trigger.confirm) {\n  result.corrected = parseInt(stats.corrected || '0');\n  result.failed = parseInt(stats.failed || '0');\n  result.still_uncertain = parseInt(stats.still_uncertain || '0');\n} else {\n  result.hits = hits;\n}\nlogger.info(JSON.stringify({ event: 'alice-dms-language-backfill-complete', ...result }));\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2520,
+        260
+      ],
+      "id": "langbackfill-build-summary-v1",
+      "name": "Code: Build & Send Summary"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2800,
+        260
+      ],
+      "id": "langbackfill-respond-v1",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook: POST /language-backfill": {
+      "main": [
+        [
+          {
+            "node": "Code: Acquire Backfill Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Acquire Backfill Lock": {
+      "main": [
+        [
+          {
+            "node": "IF: Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Lock Acquired": {
+      "main": [
+        [
+          {
+            "node": "Code: Init Backfill Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Respond Already Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Respond Already Running": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Init Backfill Run": {
+      "main": [
+        [
+          {
+            "node": "Code: Ollama Health Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Ollama Health Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Ollama Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Ollama Available": {
+      "main": [
+        [
+          {
+            "node": "Code: Fetch All Documents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Respond Ollama Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Respond Ollama Unavailable": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Fetch All Documents": {
+      "main": [
+        [
+          {
+            "node": "IF: Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Queue Empty": {
+      "main": [
+        [
+          {
+            "node": "Code: Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Code: Build & Send Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Time Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Time Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Time Limit Reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [
+          {
+            "node": "Code: Build & Send Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Heuristic Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Heuristic Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Is Hit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is Hit": {
+      "main": [
+        [
+          {
+            "node": "IF: Confirm Mode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: No Hit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: No Hit": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Confirm Mode": {
+      "main": [
+        [
+          {
+            "node": "Code: Prep Language Check Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Report Dry-Run Hit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Report Dry-Run Hit": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Prep Language Check Input": {
+      "main": [
+        [
+          {
+            "node": "Execute: Language Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Language Check": {
+      "main": [
+        [
+          {
+            "node": "Code: Apply Correction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Apply Correction": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build & Send Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 86400
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}
