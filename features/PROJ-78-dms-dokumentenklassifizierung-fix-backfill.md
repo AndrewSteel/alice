@@ -260,4 +260,16 @@ Beide Fixes wurden per Code-Review verifiziert: JSON-Struktur validiert (`node -
 - **Recommendation:** Deploy. Nach dem ersten echten Confirm-Lauf die Stichprobenprüfung gegen die `Document`-Collection manuell durchführen (PRD-Erfolgsmetrik).
 
 ## Deployment
-_To be added by /deploy_
+
+**2026-08-21** — n8n-Workflows von Andreas manuell deployed: `alice-dms-classify-document`, `alice-dms-processor`, `alice-dms-classification-backfill`.
+
+**Weaviate-Schema-Migration:** Claude Code hat aus dieser Sandbox keinen Netzwerkzugriff auf die Produktions-Weaviate-Instanz (`weaviate:8080` ist nur intern im Docker-Netzwerk erreichbar, kein Port-Mapping nach außen). Das Skript `scripts/proj78-add-classification-fields.sh` ist vorbereitet (analog zu `scripts/proj55-add-thumbnail-path.sh`) und ergänzt `classificationConfidence` (number) + `classificationUncertain` (boolean) an den sechs bestehenden Collections `Invoice`, `BankStatement`, `Document`, `Email`, `SecuritySettlement`, `Contract`. Idempotent — bereits vorhandene Properties werden übersprungen.
+
+Ausführen (auf dem Server bzw. mit Netzwerkzugriff auf Weaviate):
+```bash
+./scripts/proj78-add-classification-fields.sh
+# oder mit expliziter URL, falls weaviate:8080 nicht auflösbar ist:
+./scripts/proj78-add-classification-fields.sh http://<weaviate-host>:8080
+```
+
+Status: **Ausstehend** — bitte nach Ausführung bestätigen, dann wird `features/INDEX.md` auf „Deployed" gesetzt.
