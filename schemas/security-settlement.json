@@ -14,7 +14,9 @@
     {
       "name": "transactionType",
       "description": "Type: buy, sell, dividend, distribution, spin-off, split, transfer in, transfer out",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -28,7 +30,9 @@
     {
       "name": "bank",
       "description": "Custodian bank / broker",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "moduleConfig": {
@@ -41,7 +45,9 @@
     {
       "name": "depotNumber",
       "description": "Depot number (masked)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -55,14 +61,18 @@
     {
       "name": "securityName",
       "description": "Name of the security",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true
     },
     {
       "name": "isin",
       "description": "ISIN of the security",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "tokenization": "field",
@@ -76,7 +86,9 @@
     {
       "name": "wkn",
       "description": "WKN of the security",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "tokenization": "field",
@@ -90,7 +102,9 @@
     {
       "name": "ticker",
       "description": "Ticker symbol",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "tokenization": "field",
@@ -104,7 +118,9 @@
     {
       "name": "securityType",
       "description": "Type: stock, ETF, fund, bond, certificate, option",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -118,7 +134,9 @@
     {
       "name": "exchange",
       "description": "Exchange / trading venue",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -131,7 +149,9 @@
     {
       "name": "transactionDate",
       "description": "Date of the transaction",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -144,7 +164,9 @@
     {
       "name": "valueDate",
       "description": "Value date",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -157,7 +179,9 @@
     {
       "name": "quantity",
       "description": "Number of units",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -170,7 +194,9 @@
     {
       "name": "price",
       "description": "Price per unit",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -183,7 +209,9 @@
     {
       "name": "priceCurrency",
       "description": "Currency of the price",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -197,7 +225,9 @@
     {
       "name": "marketValue",
       "description": "Total market value (quantity x price)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -210,7 +240,9 @@
     {
       "name": "commission",
       "description": "Commission / order fee",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -223,7 +255,9 @@
     {
       "name": "fees",
       "description": "Additional fees (exchange, etc.)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -236,7 +270,9 @@
     {
       "name": "totalCosts",
       "description": "Sum of all costs",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -249,7 +285,9 @@
     {
       "name": "settlementAmount",
       "description": "Final settlement amount (debit/credit)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -262,7 +300,9 @@
     {
       "name": "settlementCurrency",
       "description": "Settlement currency",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -276,7 +316,9 @@
     {
       "name": "exchangeRate",
       "description": "Exchange rate for foreign currency",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -289,7 +331,9 @@
     {
       "name": "taxes",
       "description": "Tax details as JSON",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -302,7 +346,9 @@
     {
       "name": "withholdingTax",
       "description": "Withholding tax (on dividends)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -315,7 +361,9 @@
     {
       "name": "capitalGainsTax",
       "description": "Capital gains tax",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -328,7 +376,9 @@
     {
       "name": "solidaritySurcharge",
       "description": "Solidarity surcharge",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -341,7 +391,9 @@
     {
       "name": "churchTax",
       "description": "Church tax",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -354,7 +406,9 @@
     {
       "name": "referenceNumber",
       "description": "Reference / order number",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -368,21 +422,27 @@
     {
       "name": "fullText",
       "description": "Extracted full text",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "summary",
       "description": "AI-generated summary",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fileName",
       "description": "Original file name",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true,
       "moduleConfig": {
@@ -395,7 +455,9 @@
     {
       "name": "filePath",
       "description": "Path to the archived file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -409,7 +471,9 @@
     {
       "name": "fileHash",
       "description": "SHA256 hash of the file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -423,7 +487,9 @@
     {
       "name": "fileType",
       "description": "File type extension (pdf, txt, docx, etc.)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -437,7 +503,9 @@
     {
       "name": "createdBy",
       "description": "User who added the document",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -450,7 +518,9 @@
     {
       "name": "createdAt",
       "description": "Timestamp when recorded in the system",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -463,7 +533,9 @@
     {
       "name": "additionalPaths",
       "description": "Additional known file paths pointing to the same document content (duplicates)",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -476,7 +548,9 @@
     {
       "name": "classificationConfidence",
       "description": "LLM self-reported classification confidence (0-1)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -489,7 +563,9 @@
     {
       "name": "classificationUncertain",
       "description": "True if the final classification confidence stayed below the threshold after both attempts",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -502,8 +578,25 @@
     {
       "name": "languageUncertain",
       "description": "True if title/summary still looked English after the second, stricter German-forced extraction attempt",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "thumbnail_path",
+      "description": "Path to generated thumbnail (set by alice-dms-thumbnailer after done event)",
+      "dataType": [
+        "text"
+      ],
+      "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
         "text2vec-transformers": {

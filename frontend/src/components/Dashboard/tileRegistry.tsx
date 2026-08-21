@@ -3,6 +3,8 @@ import { GrafanaTile } from "./GrafanaTile";
 import { N8nRunningTile } from "./N8nRunningTile";
 import { N8nFailedTile } from "./N8nFailedTile";
 import { ServicesTile } from "./ServicesTile";
+import { DmsCoverageTile } from "./DmsCoverageTile";
+import { DmsQualityWarningsTile } from "./DmsQualityWarningsTile";
 
 /**
  * Central tile registry (PROJ-77 AC-H4/H5). Adding a tile means: create its
@@ -33,4 +35,6 @@ export const DASHBOARD_TILES: { id: string; element: React.ReactNode }[] = [
   { id: "n8n-running", element: <N8nRunningTile /> },
   { id: "n8n-failed", element: <N8nFailedTile /> },
   { id: "services", element: <ServicesTile /> },
+  { id: "dms-coverage", element: <DmsCoverageTile /> },
+  { id: "dms-quality-warnings", element: <DmsQualityWarningsTile /> },
 ];

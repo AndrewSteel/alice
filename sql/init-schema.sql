@@ -567,13 +567,13 @@ CREATE TABLE IF NOT EXISTS alice.user_profiles (
 -- ============================================================
 
 -- NAS folders watched by the DMS scanner workflow
--- sort_order added in migration 012
+-- sort_order added in migration 012; Image added in migration 067
 CREATE TABLE IF NOT EXISTS alice.dms_watched_folders (
     id             SERIAL PRIMARY KEY,
     path           TEXT NOT NULL UNIQUE CHECK (char_length(path) <= 500),
     suggested_type TEXT CHECK (suggested_type IN (
                        'Invoice', 'BankStatement', 'Document', 'Email',
-                       'SecuritySettlement', 'Contract'
+                       'SecuritySettlement', 'Contract', 'Image'
                    )),
     description    TEXT,
     enabled        BOOLEAN NOT NULL DEFAULT true,

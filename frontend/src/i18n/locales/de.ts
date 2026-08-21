@@ -164,6 +164,58 @@ const de = {
     services: {
       title: "Services",
     },
+    dmsCoverage: {
+      title: "DMS-Vollstaendigkeit",
+      refreshAria: "Coverage neu laden",
+      error: "Weaviate nicht erreichbar",
+      redisError: "Redis nicht erreichbar -- Pfad-Scan-Spalte nicht verfuegbar",
+      total: "Gesamt",
+      naValue: "n/a",
+      noData: "keine Daten",
+      columns: {
+        docType: "Dokumenttyp",
+        pathScan: "Pfad-Scan",
+        thumbnail: "Thumbnail",
+        geo: "Geo",
+      },
+      docTypes: {
+        Invoice: "Rechnung",
+        BankStatement: "Kontoauszug",
+        Document: "Dokument",
+        Email: "E-Mail",
+        Contract: "Vertrag",
+        SecuritySettlement: "Wertpapierabrechnung",
+        Image: "Bild",
+      },
+    },
+    dmsQualityWarnings: {
+      title: "DMS-Qualitaets-Warnungen",
+      refreshAria: "Warnungen neu laden",
+      error: "Weaviate nicht erreichbar",
+      empty: "Keine Warnungen",
+      total: "Gesamt",
+      columns: {
+        docType: "Dokumenttyp",
+        classificationUncertain: "Klassifizierung unsicher",
+        languageUncertain: "Sprache unsicher",
+      },
+    },
+    dmsDrilldown: {
+      title: "Betroffene Dokumente",
+      empty: "Keine betroffenen Dokumente",
+      error: "Drilldown konnte nicht geladen werden",
+      columns: {
+        fileName: "Dateiname",
+        filePath: "Pfad",
+        reason: "Grund",
+      },
+      reasons: {
+        missing_thumbnail: "Kein Thumbnail",
+        missing_geo: "Keine Geo-Daten",
+        classification_uncertain: "Klassifizierung unsicher",
+        language_uncertain: "Sprache unsicher",
+      },
+    },
   },
 
   settings: {

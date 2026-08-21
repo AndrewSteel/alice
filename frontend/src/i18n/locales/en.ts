@@ -163,6 +163,58 @@ const en = {
     services: {
       title: "Services",
     },
+    dmsCoverage: {
+      title: "DMS completeness",
+      refreshAria: "Reload coverage",
+      error: "Weaviate unreachable",
+      redisError: "Redis unreachable -- path-scan column unavailable",
+      total: "Total",
+      naValue: "n/a",
+      noData: "no data",
+      columns: {
+        docType: "Document type",
+        pathScan: "Path scan",
+        thumbnail: "Thumbnail",
+        geo: "Geo",
+      },
+      docTypes: {
+        Invoice: "Invoice",
+        BankStatement: "Bank statement",
+        Document: "Document",
+        Email: "Email",
+        Contract: "Contract",
+        SecuritySettlement: "Security settlement",
+        Image: "Image",
+      },
+    },
+    dmsQualityWarnings: {
+      title: "DMS quality warnings",
+      refreshAria: "Reload warnings",
+      error: "Weaviate unreachable",
+      empty: "No warnings",
+      total: "Total",
+      columns: {
+        docType: "Document type",
+        classificationUncertain: "Classification uncertain",
+        languageUncertain: "Language uncertain",
+      },
+    },
+    dmsDrilldown: {
+      title: "Affected documents",
+      empty: "No affected documents",
+      error: "Drilldown could not be loaded",
+      columns: {
+        fileName: "File name",
+        filePath: "Path",
+        reason: "Reason",
+      },
+      reasons: {
+        missing_thumbnail: "Missing thumbnail",
+        missing_geo: "Missing geo data",
+        classification_uncertain: "Classification uncertain",
+        language_uncertain: "Language uncertain",
+      },
+    },
   },
 
   settings: {

@@ -14,14 +14,18 @@
     {
       "name": "title",
       "description": "Title / name of the contract",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true
     },
     {
       "name": "contractType",
       "description": "Type: lease, employment, insurance, mobile, internet, electricity, gas, subscription, purchase, etc.",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -35,7 +39,9 @@
     {
       "name": "contractPartner",
       "description": "Contract partner / provider",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "moduleConfig": {
@@ -48,7 +54,9 @@
     {
       "name": "contractNumber",
       "description": "Contract number / customer number",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "tokenization": "field",
@@ -62,14 +70,18 @@
     {
       "name": "contractSubject",
       "description": "Subject of the contract",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "signDate",
       "description": "Date of contract signing",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -82,7 +94,9 @@
     {
       "name": "startDate",
       "description": "Start of the contract term",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -95,7 +109,9 @@
     {
       "name": "endDate",
       "description": "End of the contract term (or null if indefinite)",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -108,7 +124,9 @@
     {
       "name": "noticePeriod",
       "description": "Notice period in days/months",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -121,7 +139,9 @@
     {
       "name": "nextCancellationDate",
       "description": "Next possible cancellation date",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -134,7 +154,9 @@
     {
       "name": "autoRenewal",
       "description": "Automatic renewal active",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -147,7 +169,9 @@
     {
       "name": "renewalPeriod",
       "description": "Renewal period (e.g. '12 months')",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -160,7 +184,9 @@
     {
       "name": "monthlyCost",
       "description": "Monthly cost",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -173,7 +199,9 @@
     {
       "name": "annualCost",
       "description": "Annual cost",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -186,7 +214,9 @@
     {
       "name": "currency",
       "description": "Currency",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -200,7 +230,9 @@
     {
       "name": "paymentFrequency",
       "description": "Payment frequency: monthly, quarterly, annually, one-time",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -214,7 +246,9 @@
     {
       "name": "paymentMethod",
       "description": "Payment method: direct debit, bank transfer, credit card",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -227,7 +261,9 @@
     {
       "name": "status",
       "description": "Status: active, cancelled, expired, paused",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -241,28 +277,36 @@
     {
       "name": "notes",
       "description": "Personal notes about the contract",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fullText",
       "description": "Extracted full text",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "summary",
       "description": "AI-generated summary",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fileName",
       "description": "Original file name",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true,
       "moduleConfig": {
@@ -275,7 +319,9 @@
     {
       "name": "filePath",
       "description": "Path to the archived file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -289,7 +335,9 @@
     {
       "name": "fileHash",
       "description": "SHA256 hash of the file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -303,7 +351,9 @@
     {
       "name": "fileType",
       "description": "File type extension (pdf, txt, docx, etc.)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -317,7 +367,9 @@
     {
       "name": "createdBy",
       "description": "User who added the document",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -330,7 +382,9 @@
     {
       "name": "createdAt",
       "description": "Timestamp when recorded in the system",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -343,7 +397,9 @@
     {
       "name": "updatedAt",
       "description": "Last update timestamp",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -356,7 +412,9 @@
     {
       "name": "additionalPaths",
       "description": "Additional known file paths pointing to the same document content (duplicates)",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -369,7 +427,9 @@
     {
       "name": "classificationConfidence",
       "description": "LLM self-reported classification confidence (0-1)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -382,7 +442,9 @@
     {
       "name": "classificationUncertain",
       "description": "True if the final classification confidence stayed below the threshold after both attempts",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -395,8 +457,25 @@
     {
       "name": "languageUncertain",
       "description": "True if title/summary still looked English after the second, stricter German-forced extraction attempt",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "thumbnail_path",
+      "description": "Path to generated thumbnail (set by alice-dms-thumbnailer after done event)",
+      "dataType": [
+        "text"
+      ],
+      "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
         "text2vec-transformers": {
