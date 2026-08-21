@@ -350,6 +350,19 @@
           "vectorizePropertyName": false
         }
       }
+    },
+    {
+      "name": "languageUncertain",
+      "description": "True if title/summary still looked English after the second, stricter German-forced extraction attempt",
+      "dataType": ["boolean"],
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     }
   ]
 }
