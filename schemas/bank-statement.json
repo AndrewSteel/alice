@@ -14,7 +14,9 @@
     {
       "name": "bankName",
       "description": "Name of the bank",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "moduleConfig": {
@@ -27,7 +29,9 @@
     {
       "name": "accountNumber",
       "description": "Account number (masked: ****1234)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -41,7 +45,9 @@
     {
       "name": "iban",
       "description": "IBAN (masked)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -55,7 +61,9 @@
     {
       "name": "bic",
       "description": "BIC of the bank",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -69,7 +77,9 @@
     {
       "name": "accountHolder",
       "description": "Name of the account holder",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -82,7 +92,9 @@
     {
       "name": "statementNumber",
       "description": "Statement number",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -95,7 +107,9 @@
     {
       "name": "statementDate",
       "description": "Date of the statement",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -108,7 +122,9 @@
     {
       "name": "periodFrom",
       "description": "Start of the statement period",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -121,7 +137,9 @@
     {
       "name": "periodTo",
       "description": "End of the statement period",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -134,7 +152,9 @@
     {
       "name": "openingBalance",
       "description": "Opening balance",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -147,7 +167,9 @@
     {
       "name": "closingBalance",
       "description": "Closing balance",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -160,7 +182,9 @@
     {
       "name": "currency",
       "description": "Account currency",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -174,7 +198,9 @@
     {
       "name": "transactionCount",
       "description": "Number of transactions in the period",
-      "dataType": ["int"],
+      "dataType": [
+        "int"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -187,7 +213,9 @@
     {
       "name": "totalCredits",
       "description": "Total credits",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -200,7 +228,9 @@
     {
       "name": "totalDebits",
       "description": "Total debits",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -213,28 +243,36 @@
     {
       "name": "transactions",
       "description": "Individual transactions as JSON array",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fullText",
       "description": "Extracted full text",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "summary",
       "description": "AI-generated summary",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fileName",
       "description": "Original file name",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true,
       "moduleConfig": {
@@ -247,7 +285,9 @@
     {
       "name": "filePath",
       "description": "Path to the archived file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -261,7 +301,9 @@
     {
       "name": "fileHash",
       "description": "SHA256 hash of the file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -275,7 +317,9 @@
     {
       "name": "fileType",
       "description": "File type extension (pdf, txt, docx, etc.)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -289,7 +333,9 @@
     {
       "name": "createdBy",
       "description": "User who added the document",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -302,7 +348,9 @@
     {
       "name": "createdAt",
       "description": "Timestamp when recorded in the system",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -315,7 +363,9 @@
     {
       "name": "additionalPaths",
       "description": "Additional known file paths pointing to the same document content (duplicates)",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -328,7 +378,9 @@
     {
       "name": "classificationConfidence",
       "description": "LLM self-reported classification confidence (0-1)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -341,7 +393,9 @@
     {
       "name": "classificationUncertain",
       "description": "True if the final classification confidence stayed below the threshold after both attempts",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -354,8 +408,25 @@
     {
       "name": "languageUncertain",
       "description": "True if title/summary still looked English after the second, stricter German-forced extraction attempt",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "thumbnail_path",
+      "description": "Path to generated thumbnail (set by alice-dms-thumbnailer after done event)",
+      "dataType": [
+        "text"
+      ],
+      "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
         "text2vec-transformers": {

@@ -14,14 +14,18 @@
     {
       "name": "subject",
       "description": "Email subject",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true
     },
     {
       "name": "sender",
       "description": "Sender email address",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "moduleConfig": {
@@ -34,7 +38,9 @@
     {
       "name": "senderName",
       "description": "Sender display name",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "moduleConfig": {
@@ -47,7 +53,9 @@
     {
       "name": "recipients",
       "description": "Recipient email address(es)",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -60,7 +68,9 @@
     {
       "name": "cc",
       "description": "CC recipients",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -73,7 +83,9 @@
     {
       "name": "date",
       "description": "Date and time of the email",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -86,7 +98,9 @@
     {
       "name": "category",
       "description": "Category: business, personal, newsletter, order, support, etc.",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -100,7 +114,9 @@
     {
       "name": "importance",
       "description": "Importance: low, normal, high",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -114,7 +130,9 @@
     {
       "name": "hasAttachments",
       "description": "Has attachments",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -127,7 +145,9 @@
     {
       "name": "attachments",
       "description": "List of attachments",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -140,21 +160,27 @@
     {
       "name": "content",
       "description": "Email body content",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "summary",
       "description": "AI-generated summary",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "threadId",
       "description": "Thread ID for conversation grouping",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -168,7 +194,9 @@
     {
       "name": "messageId",
       "description": "Message-ID of the email",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -182,7 +210,9 @@
     {
       "name": "fileName",
       "description": "Original file name (if stored as .eml)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -195,7 +225,9 @@
     {
       "name": "filePath",
       "description": "Path to the archived file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -209,7 +241,9 @@
     {
       "name": "fileHash",
       "description": "SHA256 hash",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -223,7 +257,9 @@
     {
       "name": "fileType",
       "description": "File type extension (eml, msg, txt, etc.)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -237,7 +273,9 @@
     {
       "name": "createdBy",
       "description": "User who archived the email",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -250,7 +288,9 @@
     {
       "name": "createdAt",
       "description": "Timestamp of archival",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -263,7 +303,9 @@
     {
       "name": "additionalPaths",
       "description": "Additional known file paths pointing to the same document content (duplicates)",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -276,7 +318,9 @@
     {
       "name": "mailboxId",
       "description": "IMAP mailbox UUID (alice.imap_mailboxes.id) — used for access control in PROJ-46",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -290,7 +334,9 @@
     {
       "name": "imapUid",
       "description": "IMAP UID of the message (integer as string) — used to fetch the full body on demand",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -304,7 +350,9 @@
     {
       "name": "classificationConfidence",
       "description": "LLM self-reported classification confidence (0-1)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -317,7 +365,9 @@
     {
       "name": "classificationUncertain",
       "description": "True if the final classification confidence stayed below the threshold after both attempts",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -330,8 +380,25 @@
     {
       "name": "languageUncertain",
       "description": "True if title/summary still looked English after the second, stricter German-forced extraction attempt",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "thumbnail_path",
+      "description": "Path to generated thumbnail (set by alice-dms-thumbnailer after done event)",
+      "dataType": [
+        "text"
+      ],
+      "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
         "text2vec-transformers": {

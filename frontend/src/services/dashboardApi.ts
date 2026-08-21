@@ -73,3 +73,88 @@ export async function fetchFailedN8nExecutions(): Promise<N8nExecutionsResponse<
   if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
   return res.json();
 }
+
+// DMS coverage dashboard (PROJ-80) — served by alice-chat-stream's
+// /admin/dms/* endpoints.
+
+export type DmsCoverageStatus = "green" | "yellow" | "red" | "neutral" | "error" | "n/a";
+
+export interface DmsCoverageRow {
+  docType: string;
+  pathScanCount: number | null;
+  weaviateCount: number;
+  pathScanCoveragePct: number | null;
+  pathScanStatus: DmsCoverageStatus;
+  thumbnailCoveragePct: number | null;
+  thumbnailStatus: DmsCoverageStatus;
+  geoCoveragePct: number | null;
+  geoStatus: DmsCoverageStatus;
+}
+
+export interface DmsCoverageResponse {
+  rows: DmsCoverageRow[];
+  totals: DmsCoverageRow;
+  redisError: string | null;
+}
+
+export interface DmsQualityWarningsRow {
+  docType: string;
+  classificationUncertainCount: number;
+  languageUncertainCount: number;
+}
+
+export interface DmsQualityWarningsResponse {
+  rows: DmsQualityWarningsRow[];
+  totals: DmsQualityWarningsRow;
+}
+
+export interface DmsDrilldownRow {
+  fileName: string;
+  filePath: string;
+  reason: string;
+}
+
+export type DmsDrilldownDimension = "thumbnail" | "geo" | "classificationUncertain" | "languageUncertain";
+
+export async function fetchDmsCoverage(): Promise<DmsCoverageResponse> {
+  if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${STREAM_API_URL}/admin/dms/coverage`, { method: "GET" });
+  } catch {
+    throw new Error("Netzwerkfehler -- DMS-Coverage konnte nicht geladen werden.");
+  }
+  if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
+  return res.json();
+}
+
+export async function fetchDmsQualityWarnings(): Promise<DmsQualityWarningsResponse> {
+  if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${STREAM_API_URL}/admin/dms/quality-warnings`, { method: "GET" });
+  } catch {
+    throw new Error("Netzwerkfehler -- Qualitaets-Warnungen konnten nicht geladen werden.");
+  }
+  if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
+  return res.json();
+}
+
+export async function fetchDmsDrilldown(
+  docType: string,
+  dimension: DmsDrilldownDimension,
+): Promise<DmsDrilldownRow[]> {
+  if (!STREAM_API_URL) throw new Error("STREAM_API_URL nicht konfiguriert");
+  const params = new URLSearchParams({ doc_type: docType, dimension });
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${STREAM_API_URL}/admin/dms/drilldown?${params.toString()}`, {
+      method: "GET",
+    });
+  } catch {
+    throw new Error("Netzwerkfehler -- Drilldown konnte nicht geladen werden.");
+  }
+  if (!res.ok) throw new Error(`Serverfehler (${res.status})`);
+  const data = await res.json();
+  return data.rows ?? [];
+}

@@ -14,7 +14,9 @@
     {
       "name": "invoiceNumber",
       "description": "Invoice number from the issuer",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "tokenization": "field",
@@ -28,7 +30,9 @@
     {
       "name": "issuer",
       "description": "Name of the invoice issuer / company",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": true,
       "moduleConfig": {
@@ -41,7 +45,9 @@
     {
       "name": "recipient",
       "description": "Invoice recipient",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -54,7 +60,9 @@
     {
       "name": "invoiceDate",
       "description": "Date of the invoice",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -67,7 +75,9 @@
     {
       "name": "dueDate",
       "description": "Payment due date",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -80,7 +90,9 @@
     {
       "name": "amountNet",
       "description": "Net amount",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -93,7 +105,9 @@
     {
       "name": "amountGross",
       "description": "Gross amount",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -106,7 +120,9 @@
     {
       "name": "vatRate",
       "description": "VAT rate in percent",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -119,7 +135,9 @@
     {
       "name": "vatAmount",
       "description": "VAT amount",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -132,7 +150,9 @@
     {
       "name": "currency",
       "description": "Currency (default: EUR)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -146,7 +166,9 @@
     {
       "name": "category",
       "description": "Category: energy, hardware, software, insurance, telecom, household, etc.",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -160,7 +182,9 @@
     {
       "name": "paymentStatus",
       "description": "Status: open, paid, cancelled",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -174,7 +198,9 @@
     {
       "name": "paymentDate",
       "description": "Date of payment (if paid)",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -187,28 +213,36 @@
     {
       "name": "lineItems",
       "description": "Invoice line items as JSON string",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fullText",
       "description": "Extracted full text of the document",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "summary",
       "description": "AI-generated summary",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true
     },
     {
       "name": "fileName",
       "description": "Original file name",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": false,
       "indexSearchable": true,
       "moduleConfig": {
@@ -221,7 +255,9 @@
     {
       "name": "filePath",
       "description": "Path to the archived file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -235,7 +271,9 @@
     {
       "name": "fileHash",
       "description": "SHA256 hash of the file",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -249,7 +287,9 @@
     {
       "name": "fileType",
       "description": "File type extension (pdf, txt, docx, etc.)",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "tokenization": "field",
@@ -263,7 +303,9 @@
     {
       "name": "createdBy",
       "description": "User who added the document",
-      "dataType": ["text"],
+      "dataType": [
+        "text"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -276,7 +318,9 @@
     {
       "name": "createdAt",
       "description": "Timestamp when recorded in the system",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -289,7 +333,9 @@
     {
       "name": "updatedAt",
       "description": "Last update timestamp",
-      "dataType": ["date"],
+      "dataType": [
+        "date"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -302,7 +348,9 @@
     {
       "name": "additionalPaths",
       "description": "Additional known file paths pointing to the same document content (duplicates)",
-      "dataType": ["text[]"],
+      "dataType": [
+        "text[]"
+      ],
       "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
@@ -315,7 +363,9 @@
     {
       "name": "classificationConfidence",
       "description": "LLM self-reported classification confidence (0-1)",
-      "dataType": ["number"],
+      "dataType": [
+        "number"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -328,7 +378,9 @@
     {
       "name": "classificationUncertain",
       "description": "True if the final classification confidence stayed below the threshold after both attempts",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
@@ -341,8 +393,25 @@
     {
       "name": "languageUncertain",
       "description": "True if title/summary still looked English after the second, stricter German-forced extraction attempt",
-      "dataType": ["boolean"],
+      "dataType": [
+        "boolean"
+      ],
       "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "thumbnail_path",
+      "description": "Path to generated thumbnail (set by alice-dms-thumbnailer after done event)",
+      "dataType": [
+        "text"
+      ],
+      "indexFilterable": false,
       "indexSearchable": false,
       "moduleConfig": {
         "text2vec-transformers": {

@@ -286,6 +286,40 @@ async def admin_n8n_failed_executions(jwt_payload: dict = Depends(_require_admin
 
 
 # ---------------------------------------------------------------------------
+# /admin/dms — PROJ-80
+# ---------------------------------------------------------------------------
+@app.get("/admin/dms/coverage")
+async def admin_dms_coverage(jwt_payload: dict = Depends(_require_admin)):
+    try:
+        return await admin_dashboard.get_dms_coverage()
+    except admin_dashboard.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/admin/dms/quality-warnings")
+async def admin_dms_quality_warnings(jwt_payload: dict = Depends(_require_admin)):
+    try:
+        return await admin_dashboard.get_dms_quality_warnings()
+    except admin_dashboard.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/admin/dms/drilldown")
+async def admin_dms_drilldown(
+    doc_type: str,
+    dimension: str,
+    jwt_payload: dict = Depends(_require_admin),
+):
+    try:
+        rows = await admin_dashboard.get_dms_drilldown(doc_type, dimension)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except admin_dashboard.UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"rows": rows}
+
+
+# ---------------------------------------------------------------------------
 # /stream/chat
 # ---------------------------------------------------------------------------
 @app.post("/stream/chat")
