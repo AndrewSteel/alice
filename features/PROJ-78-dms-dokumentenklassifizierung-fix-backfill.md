@@ -1,8 +1,8 @@
 # PROJ-78: DMS-Dokumentenklassifizierung — Fix + Backfill Bestand
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-18
-**Last Updated:** 2026-08-18
+**Last Updated:** 2026-08-21
 
 ## Dependencies
 - None (voraussetzungsfrei)
@@ -272,4 +272,4 @@ Ausführen (auf dem Server bzw. mit Netzwerkzugriff auf Weaviate):
 ./scripts/proj78-add-classification-fields.sh http://<weaviate-host>:8080
 ```
 
-Status: **Ausstehend** — bitte nach Ausführung bestätigen, dann wird `features/INDEX.md` auf „Deployed" gesetzt.
+Status: **Abgeschlossen** — von Andreas ausgeführt, Properties erfolgreich an allen sechs Collections ergänzt.
