@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-22
 
@@ -88,7 +88,64 @@ Zusätzlich schließt PROJ-53 eine bei PROJ-80 entdeckte Lücke: Mail-Objekte in
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### E) Workflow Architecture
+
+PROJ-53 hat keine UI-Komponente. Es erweitert zwei bestehende Bausteine (`alice-mail-sync`-Workflow, `alice-mail-reader`-Service) und fügt einen neuen manuell auslösbaren Backfill-Workflow hinzu.
+
+#### Baustein 1: Neuer HTTP-Endpunkt in `alice-mail-reader`
+
+Der Service kennt Mails bisher nur als Metadaten (`/fetch`) oder Volltext (`/body`) — es gibt keinen Weg, die rohen Bytes eines einzelnen Anhangs zu bekommen. Neuer Endpunkt `POST /attachment`:
+
+- **Eingabe:** Mailbox-Zugangsdaten (wie bei `/body`), IMAP-UID der Mail, Index des gewünschten Anhangs innerhalb der Mail
+- **Verhalten:** Lädt die Mail erneut per IMAP (gleiches Muster wie `/body`), läuft die MIME-Teile ab, extrahiert genau den Anhang am angegebenen Index
+- **Ausgabe:** Dateiname, MIME-Typ, Größe, Anhang-Inhalt Base64-kodiert
+- Die eigentliche Datei wird **nicht** vom `alice-mail-reader`-Container geschrieben — er liefert nur Bytes zurück. Das Schreiben auf die NAS-Freigabe passiert im aufrufenden n8n-Workflow, der bereits Zugriff auf `/mnt/nas/ai` hat.
+
+#### Baustein 2: Erweiterung von `alice-mail-sync` (Laufzeit-Pfad)
+
+Nach dem bestehenden Schritt "Process + Classify + Store Emails" (Wichtig/Werbung/Social-Media/Spam-Kategorisierung + Weaviate-Insert) kommt pro neu gespeicherter Mail mit Anhängen ein zusätzlicher Verarbeitungsblock:
+
+1. **Anhang-Vorfilter:** Nur Anhänge mit unterstützter Dateiendung (bestehende `SUPPORTED_EXTENSIONS`-Liste) werden betrachtet; offensichtlicher Bild-Datenmüll (Bildformate < 20 KB) wird ohne Klassifizierung übersprungen.
+2. **Einzel-Klassifizierung je Anhang:** Für jeden verbleibenden Anhang ein LLM-Aufruf (Ollama, gleiches Zwei-Versuch-Muster wie in der bestehenden DMS-Dokumentenklassifizierung) mit Mail-Betreff, Body-Vorschau, Dateiname und extrahiertem Textinhalt/-vorschau des Anhangs als Kontext. Ergebnis: eines der fünf Schemata oder "nicht eindeutig" → Rückfall auf `Document`.
+3. **Anhang-Abruf:** Für jeden klassifizierten Anhang ein Aufruf an den neuen `alice-mail-reader`-Endpunkt `/attachment`, um die Bytes zu laden.
+4. **Ablage:** Datei wird unter `/mnt/nas/ai/<Schema>/` gespeichert, Dateiname nach Muster `<Mail-Datum>_<Absender-Kurzform>_<Original-Dateiname>`, mit Kollisions-Suffix `_X` bei exaktem Namenskonflikt im Zielordner. Fehlt der Zielordner, wird er beim ersten Lauf angelegt.
+5. **Fehlerverhalten:** Schlägt Klassifizierung (Ollama nicht erreichbar) oder Ablage (Zielordner nicht beschreibbar) fehl, wird der betroffene Anhang übersprungen und geloggt; die Mail selbst gilt bereits als indexiert (bestehende Message-ID-Dedup), es gibt also keinen automatischen Retry im nächsten Zyklus.
+
+Ab hier übernimmt die bestehende, unveränderte DMS-Pipeline (Scanner → Processor → Klassifizierung/Weaviate → Thumbnailer) — vorausgesetzt, der Admin hat den Zielordner in `alice.dms_watched_folders` eingetragen.
+
+Zusätzlich publiziert `alice-mail-sync` nach jedem erfolgreichen Weaviate-Insert eines `Email`-Objekts das MQTT-Topic `alice/dms/done` (mit `weaviate_uuid`, `document_type: Email`, `file_type` als Text-Typ), damit `alice-dms-thumbnailer` — unverändert, über den bestehenden TXT/MD-Renderpfad — ein Vorschaubild aus Betreff + Body-Anfang erzeugt. Das ist die in PROJ-80 entdeckte Lücke: Bisher passiert dieser Publish-Schritt schlicht nicht.
+
+#### Baustein 3: Neuer Workflow `alice-mail-attachment-backfill`
+
+Analog zu `alice-dms-thumbnailer-backfill` — manuell per Webhook ausgelöst:
+
+- **Trigger:** Webhook `POST /attachment-backfill`
+- **Ablauf:** Listet alle `Email`-Objekte in Weaviate mit mindestens einem Eintrag in `attachments`, für die noch kein Anhang-Import erfolgt ist → verarbeitet Postfächer/Mails batchweise → kontaktiert je betroffener Mail erneut `alice-mail-reader` (IMAP) → nutzt dieselbe Klassifizierungs- und Ablagelogik wie der Laufzeit-Pfad (Schritt 1–4 oben)
+- **Fortschritt:** `{ processed, imported, skipped_no_match, failed, remaining }` im n8n-Execution-Log
+- **Fehlerverhalten:** Nicht erreichbare Postfächer (IMAP-Fehler, gelöschtes Postfach, geändertes Passwort) werden übersprungen und geloggt; Backfill läuft mit den übrigen Postfächern weiter
+- **Wiederholbarkeit:** Bereits importierte Anhänge (nachvollziehbar über Mail-Message-ID + Anhang-Index) werden bei einem erneuten Lauf nicht erneut heruntergeladen
+
+Da PROJ-53 keinen neuen Persistenzmechanismus einführt (siehe Spec, Technical Requirements), muss der Backfill-Workflow den "bereits importiert"-Zustand aus vorhandenen Daten ableiten (z.B. Abgleich vorhandener Dateien im Zielordner anhand des generierten Dateinamensmusters) statt aus einer neuen Tracking-Tabelle.
+
+### Datenmodell (fachlich)
+
+Kein neues Datenbankschema. Betroffene bestehende Strukturen:
+
+- **Dateisystem** `/mnt/nas/ai/<Invoice|BankStatement|Document|Contract|SecuritySettlement>/`: neue Ablageziele, angelegt beim ersten Bedarf
+- **`alice.dms_watched_folders`**: Admin trägt die neuen Ordner manuell ein (kein automatischer Eintrag durch PROJ-53)
+- **Weaviate `Email`-Collection**: keine Schemaänderung; PROJ-53 nutzt das bereits vorhandene `attachments`-Feld nur lesend, um zu bestimmen, welche Mails Anhänge haben
+
+### Tech-Entscheidungen (Begründung)
+
+- **Erweiterung von `alice-mail-sync` statt neuer eigenständiger Workflow für den Laufzeit-Pfad:** Die Anhang-Verarbeitung hängt direkt am "neue Mail gefunden"-Ereignis, das bereits in `alice-mail-sync` existiert. Ein separater Workflow bräuchte einen eigenen Trigger-Mechanismus und würde die Message-ID-Dedup duplizieren.
+- **Neuer `/attachment`-Endpoint statt Erweiterung von `/fetch`:** Anhang-Bytes werden nur für tatsächlich DMS-relevante Anhänge einzeln benötigt (nach Vorfilter + Klassifizierung). Sie in jede `/fetch`-Antwort einzubetten würde die Antwortgröße für alle Mails aufblähen, auch wenn kein Import stattfindet, und den bestehenden `/fetch`-Contract für andere Aufrufer (z.B. `alice-mail-tools`) verändern.
+- **Eigenständiger Backfill-Workflow statt Wiederverwendung des Laufzeit-Pfads:** Gleiches Muster wie `alice-dms-thumbnailer-backfill` — Backfill braucht eigene Paginierung/Batch-Steuerung über bereits indexierte Weaviate-Objekte statt über neu ankommende IMAP-UIDs.
+- **Kollisionserkennung über Dateinamen statt neuer Tracking-Tabelle:** Konsistent mit der bestehenden Projektentscheidung, keine neue Persistenzschicht einzuführen; das deterministische Dateinamensmuster macht sowohl Laufzeit-Dedup als auch Backfill-Wiederholbarkeit ohne zusätzlichen State möglich.
+
+### Dependencies (Pakete)
+
+Keine neuen Pakete — `alice-mail-reader` nutzt bereits `imaplib`/`email` (Python Standard Library) für MIME-Parsing; `alice-mail-sync` nutzt bereits `axios` und Node.js `fs` (analog `alice-dms-path-worker`) für Datei-Ablage.
 
 ## QA Test Results
 _To be added by /qa_

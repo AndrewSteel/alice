@@ -5,7 +5,7 @@ services:
   nas-base:
     user: "1031:100" # ki-server NAS account — read ACL on all shares below
     volumes:
-      - /mnt/nas/ai:/mnt/nas/ai:ro
+      - /mnt/nas/ai:/mnt/nas/ai:rw
       - /mnt/nas/andreas:/mnt/nas/andreas:ro
       - /mnt/nas/lilly:/mnt/nas/lilly:ro
       - /mnt/nas/family:/mnt/nas/family:ro
