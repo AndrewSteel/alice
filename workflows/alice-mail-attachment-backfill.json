@@ -1,0 +1,543 @@
+{
+  "name": "alice-mail-attachment-backfill",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-mail-attachment-backfill\n\nPROJ-53: imports attachments of already-indexed Weaviate `Email` objects into\nthe DMS target folders under /mnt/nas/ai/<Schema>/.\n\n**Trigger**: POST /webhook/alice-mail-attachment-backfill\n**Already-imported detection**: deterministic filename pattern\n`<YYYY-MM-DD>_<sender-shortform>_<original-name>` (+ `_N`) in any of the five\nschema folders — no tracking table (per Tech-Entscheidungen).\n**Progress**: { processed, imported, skipped_no_match, failed, remaining }\n**Lock**: shares `alice:dms:processor:lock:run` with alice-dms-processor.\n**Safe to re-run**: already-present files are skipped, so runs are resumable.\nUnreachable mailboxes (IMAP error / deleted / changed password) are skipped + logged.",
+        "height": 300,
+        "width": 480,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -340
+      ],
+      "id": "mbf-sticky",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-mail-attachment-backfill",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "mbf-webhook",
+      "name": "Webhook: POST /attachment-backfill",
+      "webhookId": "alice-mail-attachment-backfill-v1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Acquire Backfill Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n// Same lock key as alice-dms-processor — the two must never run concurrently (Ollama/TITAN X contention).\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 1800000;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false, lockError = false;\ntry {\n  await client.connect();\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  logger.info('[MailBackfill] Lock acquire error: ' + e.message);\n  acquired = false; lockError = true;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { _lock_acquired: acquired, _lock_error: lockError, lock_owner: acquired ? ownerToken : null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ],
+      "id": "mbf-lock",
+      "name": "Code: Acquire Backfill Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-mail-backfill-lock",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        0
+      ],
+      "id": "mbf-if-lock",
+      "name": "IF: Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { reason: 'lock_busy', error: 'alice-mail-attachment-backfill: lock busy - alice-dms-processor or another backfill run is currently active. Try again later.' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        180
+      ],
+      "id": "mbf-busy",
+      "name": "Code: Respond Already Running"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:mail:backfill:run:start_time', Date.now().toString());\n  await client.del('alice:mail:backfill:run:stats');\n  await client.del('alice:mail:backfill:mailboxes');\n  await client.hSet('alice:mail:backfill:run:stats', { processed: '0', imported: '0', skipped_no_match: '0', failed: '0' });\n} finally {\n  await client.quit();\n}\nreturn [{ json: { MAX_RUNTIME_SECONDS: 7200 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        -100
+      ],
+      "id": "mbf-init",
+      "name": "Code: Init Backfill Run"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text, imap_host, imap_port, imap_username, password_enc, ssl_enabled FROM alice.imap_mailboxes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1200,
+        -100
+      ],
+      "id": "mbf-pg-mailboxes",
+      "name": "PG: Load Mailboxes",
+      "credentials": {
+        "postgres": {
+          "id": "2YBtxcocRMLQuAdF",
+          "name": "pg-alice"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Cache Mailboxes\" } });\nconst redis = require('redis');\n\n// Cache IMAP connection data (incl. the already-encrypted password) per mailbox id,\n// so the per-mail import node can resolve credentials without re-querying Postgres.\n// password_enc stays encrypted end-to-end; only alice-mail-reader can decrypt it.\nconst rows = $input.all().map(i => i.json).filter(r => r && r.id);\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  for (const r of rows) {\n    await client.hSet('alice:mail:backfill:mailboxes', String(r.id), JSON.stringify({\n      imap_host: r.imap_host,\n      imap_port: r.imap_port,\n      imap_username: r.imap_username,\n      password_enc: r.password_enc,\n      ssl_enabled: r.ssl_enabled\n    }));\n  }\n  await client.expire('alice:mail:backfill:mailboxes', 86400);\n} finally {\n  await client.quit().catch(() => {});\n}\n\nlogger.info(`[MailBackfill] Cached credentials for ${rows.length} mailbox(es)`);\nreturn [{ json: { mailboxes_cached: rows.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        -100
+      ],
+      "id": "mbf-cache",
+      "name": "Code: Cache Mailboxes"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Fetch Mails With Attachments\" } });\nconst axios = require('axios');\nconst fs = require('fs');\nconst path = require('path');\n\n// PROJ-53 backfill: list all Email objects that have attachments, then drop the\n// ones whose attachments are already on disk. \"Already imported\" is derived from\n// the deterministic filename pattern only - no tracking table (Tech-Entscheidungen).\nconst trigger = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst PAGE = 100;\nconst NAS_AI_ROOT = '/mnt/nas/ai';\nconst SUPPORTED_EXTENSIONS = new Set(['.pdf','.txt','.md','.docx','.doc','.xlsx','.xls','.odt','.ods','.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff']);\nconst IMAGE_EXTENSIONS = new Set(['.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff']);\nconst IMAGE_JUNK_MAX_BYTES = 20480;\nconst SCHEMAS = ['Invoice','BankStatement','Document','Contract','SecuritySettlement'];\n\nfunction shortenSender(sender) {\n  const raw = String(sender || '');\n  const angle = raw.match(/<([^>]+)>/);\n  const addr = angle ? angle[1] : raw;\n  const local = addr.includes('@') ? addr.split('@')[0] : addr;\n  const cleaned = local.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');\n  return (cleaned || 'unknown').slice(0, 40);\n}\nfunction mailDateStamp(dateStr) {\n  const d = new Date(dateStr);\n  if (isNaN(d.getTime())) return 'unknown-date';\n  return d.toISOString().slice(0, 10);\n}\nfunction sanitizeFilename(name) {\n  return String(name || 'attachment').replace(/[/\\\\]/g, '_').replace(/[\\x00-\\x1f]/g, '').replace(/^\\.+/, '').trim() || 'attachment';\n}\nfunction buildBaseFilename(mailDate, sender, originalName) {\n  return `${mailDateStamp(mailDate)}_${shortenSender(sender)}_${sanitizeFilename(originalName)}`;\n}\n// A base name counts as imported if the exact name OR any _N variant exists in\n// ANY of the five schema folders (we cannot know which type it was classified as).\nfunction alreadyOnDisk(baseName) {\n  const ext = path.extname(baseName);\n  const stem = ext ? baseName.slice(0, -ext.length) : baseName;\n  for (const schema of SCHEMAS) {\n    const dir = path.join(NAS_AI_ROOT, schema);\n    if (fs.existsSync(path.join(dir, baseName))) return true;\n    for (let i = 1; i <= 20; i++) {\n      if (fs.existsSync(path.join(dir, `${stem}_${i}${ext}`))) return true;\n    }\n  }\n  return false;\n}\n// Same prefilter as the runtime path: junk/unsupported attachments are never\n// imported, so a mail consisting only of those must count as done, not pending.\nfunction isImportCandidate(att) {\n  const ext = path.extname(att.name || '').toLowerCase();\n  if (!SUPPORTED_EXTENSIONS.has(ext)) return false;\n  const isImage = IMAGE_EXTENSIONS.has(ext) || String(att.mime_type || '').startsWith('image/');\n  if (isImage && Number(att.size_bytes || 0) < IMAGE_JUNK_MAX_BYTES) return false;\n  return true;\n}\n// Weaviate stores attachments as display strings: \"name.pdf (mime/type, 1234 bytes)\"\nfunction parseAttachmentString(s) {\n  const m = String(s || '').match(/^(.*)\\s+\\(([^,]+),\\s*(\\d+)\\s*bytes\\)\\s*$/);\n  if (!m) return { name: String(s || '').trim(), mime_type: '', size_bytes: 0 };\n  return { name: m[1].trim(), mime_type: m[2].trim(), size_bytes: parseInt(m[3], 10) };\n}\n\nconst pending = [];\nlet totalWithAttachments = 0;\nlet skippedAlreadyImported = 0;\n\nlet cursor = null;\nwhile (true) {\n  const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n  const gql = `{ Get { Email(limit: ${PAGE}${cursorClause}) { _additional { id } messageId mailboxId imapUid subject sender date attachments hasAttachments } } }`;\n  let results;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });\n    if (r.data?.errors) {\n      logger.warn(`[MailBackfill] GraphQL error: ${JSON.stringify(r.data.errors)}`);\n      break;\n    }\n    results = r.data?.data?.Get?.Email || [];\n  } catch(e) {\n    logger.warn(`[MailBackfill] Weaviate request failed: ${e.message}`);\n    break;\n  }\n  if (results.length === 0) break;\n\n  for (const doc of results) {\n    const rawAtt = doc.attachments || [];\n    if (rawAtt.length === 0) continue;\n    totalWithAttachments++;\n\n    const parsed = rawAtt.map(parseAttachmentString);\n    // Keep original indices - /attachment addresses attachments by absolute index.\n    const candidates = parsed\n      .map((a, idx) => ({ ...a, attachment_index: idx }))\n      .filter(a => isImportCandidate(a));\n\n    if (candidates.length === 0) { skippedAlreadyImported++; continue; }\n\n    const missing = candidates.filter(a => !alreadyOnDisk(buildBaseFilename(doc.date, doc.sender, a.name)));\n    if (missing.length === 0) { skippedAlreadyImported++; continue; }\n\n    pending.push({\n      weaviate_id: doc._additional?.id,\n      mailboxId: doc.mailboxId || '',\n      imapUid: doc.imapUid || '',\n      messageId: doc.messageId || '',\n      subject: doc.subject || '',\n      sender: doc.sender || '',\n      date: doc.date || '',\n      pendingAttachments: missing\n    });\n  }\n\n  if (results.length < PAGE) break;\n  cursor = results[results.length - 1]?._additional?.id;\n  if (!cursor) break;\n}\n\nlogger.info(`[MailBackfill] Mails with attachments: ${totalWithAttachments}, already imported/nothing to do: ${skippedAlreadyImported}, pending: ${pending.length}`);\n\nif (pending.length === 0) {\n  return [{ json: { _empty: true } }];\n}\nreturn pending.map(p => ({ json: { ...p, _empty: false, _total_pending: pending.length } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        -100
+      ],
+      "id": "mbf-fetch",
+      "name": "Code: Fetch Mails With Attachments"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-mail-backfill-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2100,
+        -100
+      ],
+      "id": "mbf-if-empty",
+      "name": "IF: Queue Empty"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\ntry { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\nawait client.del('alice:mail:backfill:run:start_time').catch(() => {});\nawait client.del('alice:mail:backfill:run:stats').catch(() => {});\nawait client.del('alice:mail:backfill:mailboxes').catch(() => {});\nawait client.quit().catch(() => {});\n\nreturn [{ json: { reason: 'completed', processed: 0, imported: 0, skipped_no_match: 0, failed: 0, remaining: 0, message: 'No mails with pending attachment imports found' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -260
+      ],
+      "id": "mbf-empty",
+      "name": "Code: Empty Summary"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2400,
+        60
+      ],
+      "id": "mbf-split",
+      "name": "Split In Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Time Check\" } });\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:backfill:run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= 7200;\n  }\n} finally {\n  await client.quit();\n}\n\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RENEW_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end data.last_heartbeat = ARGV[2] redis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3]) return 1`;\nlet lockLost = false;\nconst renewClient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await renewClient.connect();\n  const res = await renewClient.eval(RENEW_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner, new Date().toISOString(), '1800000'] });\n  lockLost = (res !== 1);\n  if (lockLost) logger.info('[MailBackfill] Lock ownership lost - aborting run');\n} catch(e) {\n  lockLost = true;\n} finally {\n  await renewClient.quit().catch(() => {});\n}\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached, _lock_lost: lockLost } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        160
+      ],
+      "id": "mbf-time",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-mail-backfill-time",
+              "leftValue": "={{ $json._time_limit_reached || $json._lock_lost }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3000,
+        160
+      ],
+      "id": "mbf-if-time",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Import Mail Attachments\" } });\nconst axios = require('axios');\nconst redis = require('redis');\nconst fs = require('fs');\nconst path = require('path');\n\n// PROJ-53 backfill: same prefilter -> classify -> fetch -> write logic as the\n// runtime path in alice-mail-sync. Mailbox IMAP credentials are resolved from\n// alice.imap_mailboxes (same source alice-mail-sync uses), cached per run.\nconst mail = $('Code: Time Check').first().json;\n\nconst PLAINTEXT_EXTENSIONS = new Set(['.txt','.md']);\nconst VALID_SCHEMAS = ['Invoice','BankStatement','Document','Contract','SecuritySettlement'];\nconst NAS_AI_ROOT = '/mnt/nas/ai';\nconst MAIL_READER_URL = 'http://alice-mail-reader:8007';\nconst OLLAMA_URL = 'http://ollama-3090:11434';\nlet ollamaModel = 'qwen3.5:27b-q4_K_M'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3.5:27b-q4_K_M'; } catch(e) {}\n\nfunction shortenSender(sender) {\n  const raw = String(sender || '');\n  const angle = raw.match(/<([^>]+)>/);\n  const addr = angle ? angle[1] : raw;\n  const local = addr.includes('@') ? addr.split('@')[0] : addr;\n  const cleaned = local.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');\n  return (cleaned || 'unknown').slice(0, 40);\n}\nfunction mailDateStamp(dateStr) {\n  const d = new Date(dateStr);\n  if (isNaN(d.getTime())) return 'unknown-date';\n  return d.toISOString().slice(0, 10);\n}\nfunction sanitizeFilename(name) {\n  return String(name || 'attachment').replace(/[/\\\\]/g, '_').replace(/[\\x00-\\x1f]/g, '').replace(/^\\.+/, '').trim() || 'attachment';\n}\nfunction buildBaseFilename(mailDate, sender, originalName) {\n  return `${mailDateStamp(mailDate)}_${shortenSender(sender)}_${sanitizeFilename(originalName)}`;\n}\nfunction resolveCollision(targetDir, baseName) {\n  const ext = path.extname(baseName);\n  const stem = ext ? baseName.slice(0, -ext.length) : baseName;\n  if (!fs.existsSync(path.join(targetDir, baseName))) return baseName;\n  for (let i = 1; i < 1000; i++) {\n    const candidate = `${stem}_${i}${ext}`;\n    if (!fs.existsSync(path.join(targetDir, candidate))) return candidate;\n  }\n  return `${stem}_${Date.now()}${ext}`;\n}\nfunction buildClassificationPrompt(m, attName, textPreview) {\n  return 'You are a document classifier for attachments of an email.\\n' +\n    'Classify the attachment into EXACTLY ONE of the following types:\\n' +\n    '- Invoice: invoice number, gross/net amount, VAT rate, due date, line items\\n' +\n    '- BankStatement: IBAN, opening/closing balance, list of bookings, statement period\\n' +\n    '- SecuritySettlement: ISIN, depot number, security name, buy/sell/dividend, quantity and price\\n' +\n    '- Contract: contract parties, sign date, start/end date, notice period, recurring cost\\n' +\n    '- Document: generic correspondence, forms, certificates or notices that match none of the above\\n' +\n    'If you cannot decide, use \"unclear\".\\n\\n' +\n    'Email subject: ' + (m.subject || '') + '\\n' +\n    'Email sender: ' + (m.sender || '') + '\\n' +\n    'Email body preview: ' + String(m.body_preview || '').slice(0, 1000) + '\\n' +\n    'Attachment filename: ' + attName + '\\n' +\n    'Attachment text preview: ' + (textPreview ? String(textPreview).slice(0, 4000) : '(no extractable text - classify from filename and email context)') + '\\n\\n' +\n    'Respond ONLY with a JSON object: {\"document_type\": \"<Type|unclear>\", \"confidence\": <0-1>}';\n}\nfunction parseClassification(responseStr) {\n  const parsed = JSON.parse(responseStr);\n  const t = parsed.document_type;\n  let confidence = parseFloat(parsed.confidence);\n  if (isNaN(confidence)) confidence = 0;\n  confidence = Math.max(0, Math.min(1, confidence));\n  if (t === 'unclear') return { document_type: 'unclear', confidence };\n  if (!VALID_SCHEMAS.includes(t)) return null;\n  return { document_type: t, confidence };\n}\nasync function callOllama(prompt, temperature) {\n  const resp = await axios.post(`${OLLAMA_URL}/api/generate`, {\n    model: ollamaModel, prompt, stream: false, format: 'json',\n    options: { temperature, num_predict: 300 }\n  }, { timeout: 120000 });\n  return resp.data.response || '';\n}\nasync function classifyAttachment(m, attName, textPreview) {\n  const prompt = buildClassificationPrompt(m, attName, textPreview);\n  let result = null;\n  let ollamaReachable = false;\n  try {\n    const raw = await callOllama(prompt, 0);\n    ollamaReachable = true;\n    result = parseClassification(raw);\n  } catch(e) { if (e instanceof SyntaxError) ollamaReachable = true; }\n  if (!result) {\n    try {\n      const raw2 = await callOllama(prompt, 0.3);\n      ollamaReachable = true;\n      result = parseClassification(raw2);\n    } catch(e) { if (e instanceof SyntaxError) ollamaReachable = true; }\n  }\n  if (!ollamaReachable) return null;\n  if (!result || result.document_type === 'unclear') return { document_type: 'Document', confidence: result ? result.confidence : 0, fallback: true };\n  return { ...result, fallback: false };\n}\n\nlet imported = 0, failed = 0, skipped = 0;\nlet mailboxUnreachable = false;\n\n// Resolve IMAP credentials for this mail's mailbox from the run-scoped cache that\n// \"Code: Cache Mailboxes\" built from alice.imap_mailboxes at the start of the run.\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet mailbox = null;\ntry {\n  await client.connect();\n  const raw = await client.hGet('alice:mail:backfill:mailboxes', String(mail.mailboxId));\n  if (raw) mailbox = JSON.parse(raw);\n} catch(e) {\n  logger.warn(`[MailBackfill] Mailbox lookup failed for ${mail.mailboxId}: ${e.message}`);\n} finally {\n  await client.quit().catch(() => {});\n}\n\nif (!mailbox) {\n  logger.warn(`[MailBackfill] Mailbox ${mail.mailboxId} not found/unavailable - skipping mail ${mail.weaviate_id}`);\n  return [{ json: { result: 'mailbox_unreachable', imported: 0, failed: 0, skipped: (mail.pendingAttachments || []).length, weaviate_id: mail.weaviate_id } }];\n}\n\nfor (const att of (mail.pendingAttachments || [])) {\n  try {\n    const ext = path.extname(att.name || '').toLowerCase();\n\n    let attData = null;\n    try {\n      const r = await axios.post(`${MAIL_READER_URL}/attachment`, {\n        host: mailbox.imap_host, port: mailbox.imap_port, ssl: mailbox.ssl_enabled,\n        username: mailbox.imap_username, password_enc: mailbox.password_enc,\n        folder: 'INBOX', uid: String(mail.imapUid), attachment_index: att.attachment_index\n      }, { timeout: 120000 });\n      attData = r.data;\n    } catch(e) {\n      // IMAP unreachable / deleted mailbox / changed password: skip + log, keep going.\n      const status = e.response?.status;\n      if (status === 400 || !e.response) {\n        mailboxUnreachable = true;\n        logger.warn(`[MailBackfill] IMAP unreachable for mailbox ${mail.mailboxId} (uid=${mail.imapUid}): ${e.message}`);\n        skipped++;\n        break;\n      }\n      logger.warn(`[MailBackfill] Attachment fetch failed (uid=${mail.imapUid} idx=${att.attachment_index}): ${e.message}`);\n      failed++;\n      continue;\n    }\n    if (!attData || !attData.content_base64) {\n      logger.warn(`[MailBackfill] Attachment not found (uid=${mail.imapUid} idx=${att.attachment_index})`);\n      failed++;\n      continue;\n    }\n    const buffer = Buffer.from(attData.content_base64, 'base64');\n\n    let textPreview = '';\n    if (PLAINTEXT_EXTENSIONS.has(ext)) {\n      try { textPreview = buffer.toString('utf8').slice(0, 4000); } catch(e) { textPreview = ''; }\n    }\n\n    const classification = await classifyAttachment(mail, att.name, textPreview);\n    if (!classification) {\n      logger.warn(`[MailBackfill] Classification skipped, Ollama unreachable (uid=${mail.imapUid} file=${att.name})`);\n      failed++;\n      continue;\n    }\n\n    const targetDir = path.join(NAS_AI_ROOT, classification.document_type);\n    try {\n      fs.mkdirSync(targetDir, { recursive: true });\n    } catch(e) {\n      logger.warn(`[MailBackfill] Target folder not creatable (${targetDir}): ${e.message}`);\n      failed++;\n      continue;\n    }\n\n    const baseName = buildBaseFilename(mail.date, mail.sender, att.name);\n    const finalName = resolveCollision(targetDir, baseName);\n    const finalPath = path.join(targetDir, finalName);\n    try {\n      fs.writeFileSync(finalPath, buffer);\n    } catch(e) {\n      logger.warn(`[MailBackfill] Write failed (${finalPath}): ${e.message}`);\n      failed++;\n      continue;\n    }\n\n    imported++;\n    logger.info(`[MailBackfill] Imported: ${finalPath} (type=${classification.document_type}, confidence=${classification.confidence}, fallback=${classification.fallback})`);\n  } catch(e) {\n    logger.warn(`[MailBackfill] Unhandled error (uid=${mail.imapUid}): ${e.message}`);\n    failed++;\n  }\n}\n\nconst result = mailboxUnreachable ? 'mailbox_unreachable' : (imported > 0 ? 'imported' : (failed > 0 ? 'failed' : 'skipped_no_match'));\nreturn [{ json: { result, imported, failed, skipped, weaviate_id: mail.weaviate_id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        260
+      ],
+      "id": "mbf-import",
+      "name": "Code: Import Mail Attachments",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Track Progress\" } });\nconst redis = require('redis');\n\n// Per-mail progress accounting. Emits the spec-mandated progress shape\n// { processed, imported, skipped_no_match, failed, remaining } to the execution log.\nconst res = $input.first().json;\nconst mail = $('Code: Time Check').first().json;\nconst totalPending = mail._total_pending || 0;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\nlet stats = {};\ntry {\n  await client.hIncrBy('alice:mail:backfill:run:stats', 'processed', 1);\n  if (res.imported > 0) await client.hIncrBy('alice:mail:backfill:run:stats', 'imported', res.imported);\n  if (res.failed > 0) await client.hIncrBy('alice:mail:backfill:run:stats', 'failed', res.failed);\n  if (res.result === 'skipped_no_match' || res.result === 'mailbox_unreachable') {\n    await client.hIncrBy('alice:mail:backfill:run:stats', 'skipped_no_match', 1);\n  }\n  stats = await client.hGetAll('alice:mail:backfill:run:stats');\n} finally {\n  await client.quit().catch(() => {});\n}\n\nconst processed = parseInt(stats.processed || '0');\nconst progress = {\n  processed,\n  imported: parseInt(stats.imported || '0'),\n  skipped_no_match: parseInt(stats.skipped_no_match || '0'),\n  failed: parseInt(stats.failed || '0'),\n  remaining: Math.max(0, totalPending - processed)\n};\nlogger.info(`[MailBackfill] Progress: ${JSON.stringify(progress)}`);\nreturn [{ json: { ...res, ...progress } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        260
+      ],
+      "id": "mbf-track",
+      "name": "Code: Track Progress"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-backfill\", node: \"Code: Build Summary\" } });\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\n\nconst startTimeStr = await client.get('alice:mail:backfill:run:start_time');\nconst stats = await client.hGetAll('alice:mail:backfill:run:stats');\nconst runtime_seconds = startTimeStr ? Math.floor((Date.now() - parseInt(startTimeStr)) / 1000) : 0;\n\nawait client.del('alice:mail:backfill:run:start_time').catch(() => {});\nawait client.del('alice:mail:backfill:run:stats').catch(() => {});\nawait client.del('alice:mail:backfill:mailboxes').catch(() => {});\n\n// Release the shared DMS processor lock\nconst owner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\nconst RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\ntry { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\nawait client.quit().catch(() => {});\n\nconst item = $input.first().json || {};\nconst reason = item._lock_lost ? 'lock_lost' : (item._time_limit_reached ? 'time_limit_reached' : 'completed');\n\nconst processed = parseInt(stats.processed || '0');\nconst result = {\n  reason,\n  processed,\n  imported: parseInt(stats.imported || '0'),\n  skipped_no_match: parseInt(stats.skipped_no_match || '0'),\n  failed: parseInt(stats.failed || '0'),\n  remaining: 0,\n  runtime_seconds\n};\nlogger.info(JSON.stringify({ event: 'alice-mail-attachment-backfill-complete', ...result }));\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        60
+      ],
+      "id": "mbf-summary",
+      "name": "Code: Build Summary"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3600,
+        -100
+      ],
+      "id": "mbf-respond",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook: POST /attachment-backfill": {
+      "main": [
+        [
+          {
+            "node": "Code: Acquire Backfill Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Acquire Backfill Lock": {
+      "main": [
+        [
+          {
+            "node": "IF: Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Lock Acquired": {
+      "main": [
+        [
+          {
+            "node": "Code: Init Backfill Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Respond Already Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Respond Already Running": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Init Backfill Run": {
+      "main": [
+        [
+          {
+            "node": "PG: Load Mailboxes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: Load Mailboxes": {
+      "main": [
+        [
+          {
+            "node": "Code: Cache Mailboxes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Cache Mailboxes": {
+      "main": [
+        [
+          {
+            "node": "Code: Fetch Mails With Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Fetch Mails With Attachments": {
+      "main": [
+        [
+          {
+            "node": "IF: Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Queue Empty": {
+      "main": [
+        [
+          {
+            "node": "Code: Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Time Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Time Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Time Limit Reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Import Mail Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Import Mail Attachments": {
+      "main": [
+        [
+          {
+            "node": "Code: Track Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Track Progress": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 86400
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}

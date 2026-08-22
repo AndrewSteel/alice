@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-22
 
@@ -146,6 +146,50 @@ Kein neues Datenbankschema. Betroffene bestehende Strukturen:
 ### Dependencies (Pakete)
 
 Keine neuen Pakete — `alice-mail-reader` nutzt bereits `imaplib`/`email` (Python Standard Library) für MIME-Parsing; `alice-mail-sync` nutzt bereits `axios` und Node.js `fs` (analog `alice-dms-path-worker`) für Datei-Ablage.
+
+### Implementation Notes (Backend, 2026-08-22)
+
+Umgesetzt wurden alle drei Bausteine. Backend-only — PROJ-53 hat keine UI-Komponente, daher keine API-Routes/Frontend/Vitest-Schritte.
+
+**Baustein 1 — `alice-mail-reader` (`docker/compose/automations/alice-mail-reader/app.py`)**
+
+- Neuer Endpunkt `POST /attachment` (Eingabe wie `/body` + `attachment_index`), Ausgabe `{ filename, mime_type, size_bytes, content_base64 }`. 404 `{"error": "Anhang nicht gefunden"}` bei unbekanntem Index, `imaplib.IMAP4.error` → 400, generisch → 500 + `log.exception` (identisch zum Stil von `/body`).
+- **Abweichung (Refactoring):** Das MIME-Part-Walking wurde in einen gemeinsamen Generator `_walk_attachment_parts()` extrahiert, den jetzt sowohl `_get_attachments()` (für `/fetch`) als auch `/attachment` nutzen. Grund: `attachment_index` muss garantiert denselben Part treffen, den `/fetch` an derselben Position gemeldet hat — zwei getrennte Walk-Implementierungen könnten auseinanderlaufen. `/fetch` und `/body` behalten ihren Contract unverändert.
+- Modul-Docstring-Endpunktliste ergänzt.
+
+**Baustein 2 — `alice-mail-sync` (`workflows/alice-mail-sync.json`)**
+
+- `Process + Classify + Store Emails` gibt jetzt zusätzlich `storedEmails[]` zurück (nur tatsächlich neu in Weaviate eingefügte Mails, inkl. `weaviate_uuid` aus der Insert-Response, Anhang-Metadaten und Body-Preview). Bestehende Felder (`processed`, `wichtig`, `maxUid`) unverändert — `PG: Update Sync Status` und der Notification-Zweig laufen wie bisher.
+- Neuer Code-Node `Code: Import Attachments`: Vorfilter (`SUPPORTED_EXTENSIONS` exakt aus `alice-dms-path-worker`; Bild-Müll = Bild-MIME/-Endung **und** < 20480 Bytes → stilles Überspringen ohne Klassifizierung/Fehler-Log) → Klassifizierung → `/attachment`-Abruf → Ablage unter `/mnt/nas/ai/<Schema>/`, Zielordner via `fs.mkdirSync(recursive)`. Dateiname `<YYYY-MM-DD>_<Absender-Kurzform>_<Original>`, `_N` nur bei echter Kollision (Suffix vor der Endung). Fehler bei Klassifizierung/Abruf/Schreiben → nur dieser Anhang wird übersprungen und geloggt, Schleife läuft weiter.
+- **Abweichung (MQTT pro Mail):** Der MQTT-Node kann nicht aus einem Code-Node heraus aufgerufen werden. Statt eines Split-Nodes gibt `Code: Split Stored Emails` ein Item pro gespeicherter Mail zurück; n8n führt den nachgelagerten `MQTT: Publish Email Done` dadurch einmal pro Item aus. Das entspricht dem etablierten Muster aus `alice-dms-processor` (`Code: Process Image Item` → `IF: Image Is New` → `MQTT: Publish Image Done`). Payload: `{ weaviate_uuid, document_type: 'Email', file_type: 'txt', inserted: true, timestamp }`, qos 1, Credential `mqtt-alice`. Mails ohne UUID werden ausgefiltert.
+- Der Anhang-Zweig hängt als **erster** Ausgang an `Process + Classify + Store Emails`; der Notification-/Status-Zweig ist unverändert der zweite Ausgang, sodass der Mailbox-Loop weiterläuft.
+
+**Baustein 3 — `alice-mail-attachment-backfill` (`workflows/alice-mail-attachment-backfill.json`, neu)**
+
+- Struktur 1:1 nach `alice-dms-classification-backfill`: Webhook `POST /alice-mail-attachment-backfill` → Lock-Acquire (**derselbe** Key `alice:dms:processor:lock:run` wie `alice-dms-processor`, damit nie parallel zum Processor auf der GPU klassifiziert wird) → Init → Mailbox-Credentials laden → Weaviate-Query → `Split In Batches` mit Time-Check/Lock-Renew → Import → Progress → Summary → Respond.
+- "Bereits importiert" wird ohne Tracking-Tabelle aus dem deterministischen Dateinamen abgeleitet: existiert der Basisname (oder eine `_1…_20`-Variante) in **einem** der fünf Schema-Ordner, gilt der Anhang als erledigt. Mails, deren Anhänge alle nur Bild-Müll/nicht unterstützt sind, zählen ebenfalls als erledigt — sonst wären sie dauerhaft "pending".
+- Anhang-Metadaten stehen in Weaviate nur als Anzeige-String (`name (mime, N bytes)`); der Backfill parst diesen zurück und behält den **ursprünglichen Index**, da `/attachment` per Absolutindex adressiert.
+- Mailbox-Credentials kommen aus `alice.imap_mailboxes` (dieselbe Quelle wie `alice-mail-sync`), werden einmal pro Lauf in einen Redis-Hash gelegt und pro Mail daraus gelesen. `password_enc` bleibt durchgehend verschlüsselt — entschlüsseln kann nur `alice-mail-reader`.
+- Nicht erreichbare Mailbox (IMAP-Fehler/gelöscht/Passwort geändert) → Mail wird übersprungen und geloggt, Lauf geht mit den übrigen weiter. Fortschritts-Log `{ processed, imported, skipped_no_match, failed, remaining }`.
+
+**Abweichung — Text-Extraktion für Nicht-Plaintext-Anhänge (wichtig für Review)**
+
+Der Tech-Design-Punkt "extrahierter Textinhalt/-vorschau des Anhangs" ist nur für `.txt`/`.md` vollständig umgesetzt (direktes UTF-8-Dekodieren der Bytes). Für PDF/DOCX/XLSX/Bilder gibt es **keinen** wiederverwendbaren synchronen Extraktor: `dms-extractor-pdf|office|ocr|image` sind MQTT/Redis-getriebene Worker, die Dateipfade aus einer Queue lesen und Plaintext asynchron nach Redis schreiben — kein HTTP-Endpunkt, den ein Code-Node synchron aufrufen könnte. Da die Spec explizit keine neue Infrastruktur will, klassifiziert das LLM diese Typen aus **Dateiname + Mail-Betreff + Absender + Body-Preview**; der Prompt weist das Modell mit `(no extractable text - classify from filename and email context)` ausdrücklich darauf hin. Praktische Folge: bei nichtssagenden Dateinamen (z.B. `Anhang.pdf` ohne Kontext im Betreff) ist die Trefferquote schlechter als bei der DMS-Klassifizierung nach Volltext-Extraktion — der `Document`-Fallback fängt das ab, und die nachgelagerte DMS-Pipeline klassifiziert die Datei nach dem Scan ohnehin noch einmal anhand des extrahierten Volltexts. Eine echte Verbesserung würde einen synchronen Extraktor-Endpunkt erfordern (eigenes Feature).
+
+**Weitere Abweichungen / Hinweise**
+
+- Klassifizierung nutzt das Zwei-Versuch-Muster aus PROJ-78 (temp 0, dann temp 0.3) *inline* statt via `Execute: Classify Document`-Sub-Workflow. Grund: Das Sub-Workflow nimmt nur `{ plaintext }` entgegen und kennt die Typen `Email`/`BankTransaction`, die als Anhang-Ziel unzulässig sind; PROJ-53 braucht Mail-Kontext + Dateiname im Prompt und nur die fünf erlaubten Schemata. Der Sub-Workflow-Contract wurde bewusst nicht geändert, um `alice-dms-processor` und `alice-dms-classification-backfill` nicht zu beeinflussen.
+- Unterscheidung "Ollama nicht erreichbar" (→ kein Import, `failed`) vs. "LLM antwortet, aber unklar" (→ `Document`-Fallback, Import) ist implementiert, wie in Spec/Edge Cases gefordert.
+- Dateinamen werden saniert (Pfadtrenner/Steuerzeichen/führende Punkte), sodass ein bösartiger Anhangname nicht aus dem Zielordner ausbrechen kann.
+- `nas-volumes.yml` gewährt `nas-base` bereits `rw` auf `/mnt/nas/ai`, und der n8n-Container erbt das per `extends` — keine Compose-Änderung nötig. `fs`/`path` sind über `NODE_FUNCTION_ALLOW_BUILTIN` freigegeben.
+
+**Verifikation**
+
+- `app.py`: Syntax-Check + Test, der beweist, dass `attachment_index` bei einer echten Multipart-Mail exakt den Anhang trifft, den `/fetch` an derselben Position meldet (inkl. 404 bei Index out of range).
+- Anhang-Logik (Vorfilter inkl. 20-KB-Grenzfälle, Absender-Kurzform, Datumsstempel, Kollisions-Suffix gegen ein echtes Dateisystem, Klassifizierungs-Parsing, Pfad-Traversal): 32 Assertions, alle grün.
+- Round-Trip-Test des Weaviate-Anhang-Strings (auch bei Klammern im Dateinamen).
+- Beide Workflow-JSONs strukturell validiert: gültiges JSON, eindeutige Node-Namen/IDs, alle Connection-Referenzen und `$('Node')`-Referenzen existieren, keine verwaisten Nodes, alle Code-Nodes syntaktisch gültig, kein `console.log`, Credentials auf Postgres-/MQTT-Nodes gesetzt, nur erlaubte `require`-Module.
+- **Nicht verifiziert:** kein Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS. Die `mcp__n8n-mcp__*`-Tools waren in dieser Session nicht verfügbar, daher wurde statt `n8n_validate_workflow` die oben beschriebene strukturelle Eigenvalidierung genutzt. Deployment erfolgt manuell durch den Admin.
 
 ## QA Test Results
 _To be added by /qa_

@@ -8,6 +8,7 @@ Endpoints:
   POST /test           — test IMAP login (accepts password_enc)
   POST /fetch          — fetch emails since a given IMAP UID, returns metadata + body preview
   POST /body           — fetch full body of a single email by UID
+  POST /attachment     — fetch raw bytes of a single attachment by UID + attachment index
 
 Passwords are encrypted with AES-256-CBC. The key is derived from MAIL_ENC_KEY (env).
 Plaintext passwords never leave this container.
@@ -15,6 +16,7 @@ Plaintext passwords never leave this container.
 
 from __future__ import annotations
 
+import base64
 import email as email_lib
 from email.header import decode_header
 import hashlib
@@ -111,8 +113,13 @@ def _get_full_body(msg) -> str:
     return html_body or plain_body
 
 
-def _get_attachments(msg) -> list[dict]:
-    attachments = []
+def _walk_attachment_parts(msg):
+    """Yield (filename, part) for every attachment MIME part, in stable order.
+
+    Single source of truth for attachment ordering: both the metadata list in
+    /fetch and the index-based lookup in /attachment walk via this helper, so
+    an attachment_index always refers to the same part.
+    """
     for part in msg.walk():
         if part.get_content_maintype() == "multipart":
             continue
@@ -121,6 +128,12 @@ def _get_attachments(msg) -> list[dict]:
         filename = _decode_header(part.get_filename())
         if not filename:
             continue
+        yield filename, part
+
+
+def _get_attachments(msg) -> list[dict]:
+    attachments = []
+    for filename, part in _walk_attachment_parts(msg):
         payload = part.get_payload(decode=True)
         attachments.append({
             "name": filename,
@@ -275,6 +288,63 @@ def fetch_body():
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         log.exception("fetch_body failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/attachment", methods=["POST"])
+def fetch_attachment():
+    """Return the raw bytes of a single attachment (PROJ-53).
+
+    Same connection fields as /body, plus attachment_index — a 0-based index
+    into the attachment list produced by /fetch for the same UID.
+    """
+    data = request.json or {}
+    uid = str(data.get("uid", ""))
+    folder = data.get("folder", "INBOX")
+
+    if not uid:
+        return jsonify({"error": "uid required"}), 400
+
+    try:
+        attachment_index = int(data.get("attachment_index", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "attachment_index muss eine Zahl sein"}), 400
+
+    if attachment_index < 0:
+        return jsonify({"error": "Anhang nicht gefunden"}), 404
+
+    try:
+        password = _decrypt_password(data["password_enc"])
+        imap = _connect(data)
+        imap.login(data["username"], password)
+        imap.select(folder, readonly=True)
+
+        typ, msg_data = imap.uid("fetch", uid.encode(), "(RFC822)")
+        if typ != "OK" or not msg_data or msg_data[0] is None:
+            imap.logout()
+            return jsonify({"error": "E-Mail nicht gefunden"}), 404
+
+        raw = msg_data[0][1]
+        msg = email_lib.message_from_bytes(raw)
+        imap.logout()
+
+        for idx, (filename, part) in enumerate(_walk_attachment_parts(msg)):
+            if idx != attachment_index:
+                continue
+            payload = part.get_payload(decode=True) or b""
+            return jsonify({
+                "filename": filename,
+                "mime_type": part.get_content_type(),
+                "size_bytes": len(payload),
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+            })
+
+        return jsonify({"error": "Anhang nicht gefunden"}), 404
+
+    except imaplib.IMAP4.error as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        log.exception("fetch_attachment failed")
         return jsonify({"error": str(exc)}), 500
 
 
