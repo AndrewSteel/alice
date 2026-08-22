@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-22
 
@@ -224,7 +224,7 @@ Zur Wahl von 50 MB: Eine projektweite Reject-Obergrenze existiert nicht. `alice-
 **Tested:** 2026-08-22
 **Tester:** QA Engineer (AI)
 **Test method:** Static/logic review + isolated Node.js re-execution of extracted Code-Node helpers. **Keine Live-Ausführung** — kein Zugriff auf n8n/IMAP/Ollama/Weaviate/NAS in dieser Umgebung. Alle Kriterien, die eine echte Pipeline-Ausführung erfordern, sind als `NOT VERIFIABLE` markiert und müssen beim Deployment nachgeprüft werden.
-**Commit under test:** `63636f8`
+**Commit under test:** `63636f8` (Erstprüfung) → **`99fb7c2` (Nachprüfung der Fixes für BUG-2/BUG-3, siehe Abschnitt "Re-Test").**
 
 ### Acceptance Criteria Status
 
@@ -322,6 +322,7 @@ Zur Wahl von 50 MB: Eine projektweite Reject-Obergrenze existiert nicht. `alice-
 - **Priority:** Nice to have (Verhalten hier dokumentiert, wie in der Aufgabenstellung gefordert)
 
 #### BUG-2: `alreadyOnDisk()` erzeugt False-Positive-Dedup — Anhänge werden im Backfill nie importiert
+- **Status:** **BEHOBEN in `99fb7c2` — verifiziert** (siehe Abschnitt "Re-Test")
 - **Severity:** Medium
 - **Root Cause:** `alreadyOnDisk(baseName)` prüft `baseName` **und** alle Varianten `_1`…`_20` in **allen fünf** Schema-Ordnern und gibt bei **irgendeinem** Treffer `true` zurück. Der Basisname enthält aber nur `<Datum>_<Absender-Kurzform>_<Dateiname>` — **keine** Message-ID und **keinen** Anhang-Index. Damit kollidieren fachlich verschiedene Anhänge auf demselben Schlüssel.
 - **Tatsächliches Verhalten (re-verifiziert in Node):**
@@ -333,6 +334,7 @@ Zur Wahl von 50 MB: Eine projektweite Reject-Obergrenze existiert nicht. `alice-
 - **Priority:** Fix before deployment
 
 #### BUG-3: Kein Größenlimit — großer Anhang kann den n8n-Prozess sprengen
+- **Status:** **BEHOBEN in `99fb7c2` — verifiziert** (siehe Abschnitt "Re-Test")
 - **Severity:** Medium
 - **Root Cause:** Der komplette Anhang wird als Base64-String über HTTP geladen und im Speicher gehalten: `attData.content_base64` → `Buffer.from(..., 'base64')`. Zusätzlich hält `alice-mail-reader` die gesamte RFC822-Mail via `email_lib.message_from_bytes(raw)` im RAM.
 - **Tatsächliches Verhalten:** Für einen 100-MB-Anhang liegen gleichzeitig vor: ~133 MB Base64-String (JS) + ~100 MB Buffer + JSON-Parse-Overhead in n8n, plus ~100 MB+ im Python-Container. Bei mehreren großen Anhängen droht OOM des n8n-Containers — was **den gesamten Sync-Zyklus** und alle anderen Workflows trifft, nicht nur diesen Anhang.
@@ -354,6 +356,7 @@ Zur Wahl von 50 MB: Eine projektweite Reject-Obergrenze existiert nicht. `alice-
 - **Priority:** Fix in next sprint
 
 #### BUG-6: Implementation Notes beschreiben die Branch-Reihenfolge falsch
+- **Status:** **BEHOBEN in `99fb7c2` (Doku-Korrektur) — verifiziert.** Die Notes sagen jetzt korrekt, dass beide Zweige am selben Ausgang (Index 0) hängen und der Import vor dem Status-Reset läuft. Deckt sich mit dem geprüften `connections`-JSON. Kein Verhaltens-Change.
 - **Severity:** Low
 - **Root Cause:** Die Notes behaupten, der Anhang-Zweig hänge als "**erster Ausgang**" und der Notification-Zweig als "zweiter Ausgang" an `Process + Classify + Store Emails`. Tatsächlich liegen **beide** auf **Output-Index 0** als parallele Zweige.
 - **Tatsächliches Verhalten:** n8n arbeitet parallele Zweige desselben Outputs sequenziell in Listenreihenfolge ab. `Code: Import Attachments` steht **vor** `Notify: Passthrough` → der gesamte Anhang-Import (pro Anhang bis zu 120 s Fetch + 2×120 s Ollama) läuft, **bevor** `PG: Update Sync Status` den `syncing`-Status zurücksetzt und die Mailbox-Schleife weiterläuft. Bei einer Mail mit mehreren großen Anhängen kann eine Mailbox dadurch sehr lange auf `syncing` stehen und den Minuten-Trigger blockieren (`IF: Free to Run?`).
@@ -387,13 +390,59 @@ Diese in der Aufgabenstellung vermuteten Fehlerklassen wurden gezielt gesucht un
 - `require`-Module auf `winston, axios, fs, path, redis, crypto` beschränkt.
 - Der vom Implementer erwähnte Validierungs-Skript liegt weder im Commit noch im Working Tree — die Prüfungen wurden hier unabhängig neu aufgesetzt.
 
-### Summary
+---
 
-- **Acceptance Criteria:** 22/26 PASS, 3 PARTIAL (AC-2.5, AC-4.5, EC-Backfill), 2 NOT VERIFIABLE (AC-5.2, AC-5.3 — benötigen Live-Deployment), 0 harte FAILs
-- **Bugs Found:** 6 total (0 critical, 0 high, 2 medium, 4 low)
-- **Security:** **Pass** — Path Traversal wirksam neutralisiert (10 Payloads verifiziert), keine Credentials in Logs, `password_enc` durchgängig verschlüsselt, `/attachment` mit sauberer Input-Validierung. Ein bekanntes, projektweit bestehendes Webhook-Auth-Thema notiert (kein PROJ-53-Regress).
-- **Production Ready:** **NO — NOT READY**
-- **Recommendation:** BUG-2 (stiller Import-Ausfall im Backfill durch False-Positive-Dedup) und BUG-3 (kein Größenlimit → OOM-Risiko für den gesamten n8n-Container) vor dem Deployment beheben. Beide sind eng begrenzt und in einem kurzen Dev-Durchlauf lösbar. BUG-1/4/5/6 können bewusst akzeptiert werden; BUG-6 sollte mindestens als Doku-Korrektur nachgezogen werden. Die Kern-Laufzeitlogik (Prefilter, Klassifizierung, Ablage, Kollision, Fehlerisolation, MQTT-Trigger) ist solide und erfüllt die Spec.
+## Re-Test der Fixes (Commit `99fb7c2`, 2026-08-22)
+
+Geprüft wurde ausschließlich der Diff `63636f8..99fb7c2` (2 Workflow-Nodes + Doku; `app.py` unverändert). Die Fix-Logik wurde **aus den ausgelieferten Node-JSONs mechanisch extrahiert** (nicht abgetippt) und gegen ein **echtes Dateisystem** ausgeführt, inklusive des ebenfalls ausgelieferten `resolveCollision()`-Writers, um vollständige Backfill-Läufe zu simulieren.
+
+### BUG-2 — Re-Test: **BEHOBEN**
+
+`alreadyOnDisk()` (Boolean, Deckel bei `_20`) ist ersetzt durch `countOnDisk()` (zählt den zusammenhängenden `base`+`_1.._N`-Lauf bis zur ersten Lücke, **ohne Deckel**) plus einen zweiten Pass, der alle Anhänge mit gleichem Basisnamen **über alle Mails hinweg** poolt: die ersten `countOnDisk(base)` Ansprüche gelten als erfüllt, jeder weitere bleibt pending. Logik unabhängig nachvollzogen — die Beschreibung des Entwicklers deckt sich mit dem ausgelieferten Code.
+
+Alle drei ursprünglichen Repro-Szenarien re-ausgeführt, jeweils über **mehrere aufeinanderfolgende Läufe**:
+
+| Szenario | Ergebnis |
+| --- | --- |
+| (a) Zwei gleichnamige Anhänge in **einer** Mail (EC-9) | **PASS** — Lauf 1 importiert **beide** (`R.pdf` + `R_1.pdf`), Lauf 2 importiert nichts. Vorher: zweiter Anhang wurde nie importiert |
+| (b) Zwei **verschiedene** Mails, gleicher Absender/Datum/Dateiname | **PASS** — Lauf 1 importiert beide, Lauf 2 importiert nichts, exakt 2 Dateien auf Platte. Vorher: zweite Mail dauerhaft übersprungen |
+| (b2) Wiederaufnahme nach Teil-Lauf (1 von 2 bereits importiert) | **PASS** — genau der **eine** fehlende Anhang wird nachgeholt, kein Doppel-Import |
+| (c) 25 Mails, Dateien jenseits des alten `_20`-Deckels | **PASS** — Lauf 1 importiert alle 25, Lauf 2 importiert **nichts**. Vorher: ab `_21` bei jedem Lauf Duplikate |
+| (d) Gleicher Basisname in **unterschiedlichen** Schema-Ordnern | **PASS** — vorhandene Datei in `Invoice/` wird mitgezählt, nur der fehlende zweite Anhang importiert |
+
+**Kein Doppel-Import und kein False-Positive-Skip in allen Szenarien.** Idempotenz bestätigt: Wiederholungsläufe schreiben konsistent 0 Dateien.
+
+**Neuer Nebenbefund (Low, nicht blockierend) — BUG-7:** `countOnDisk()` setzt einen **lückenlosen** `_N`-Lauf voraus (Kommentar im Code weist korrekt darauf hin). Löscht ein Admin manuell eine Datei aus der Mitte (z.B. `_1` bleibt weg, `_2` existiert), zählt die Funktion nur bis zur Lücke. Verifiziert: der nächste Lauf füllt die Lücke wieder auf (2 Schreibvorgänge), **konvergiert danach aber auf 0** und **überschreibt bzw. löscht keine vorhandene Datei** (`resolveCollision()` nimmt immer den ersten freien Slot). Effekt ist also begrenzt und selbstheilend, keine unbegrenzte Duplikat-Vermehrung. Auslösbar nur durch manuelles Eingreifen des Admins — genau der Fall, den PROJ-21/22 ohnehin abdeckt. Als Doku-Hinweis notiert, kein Handlungsbedarf vor Deployment.
+
+### BUG-3 — Re-Test: **BEHOBEN**
+
+`ATTACHMENT_MAX_BYTES = 52428800` (50 MB) ist in **allen drei** geforderten Stellen deklariert und durchgesetzt:
+
+| Ort | Durchsetzung | Log bei Skip |
+| --- | --- | --- |
+| `alice-mail-sync` / `Code: Import Attachments` (Laufzeit-Prefilter) | `if (size > ATTACHMENT_MAX_BYTES) return { keep:false, reason:'too_large' }` | **ja** (`logger.warn`, inkl. uid/Dateiname/Größe), eigener Zähler `skipped_too_large` in `attachmentStats` |
+| `alice-mail-attachment-backfill` / `Code: Fetch Mails With Attachments` (Kandidaten-Scan) | `if (size > ATTACHMENT_MAX_BYTES) return false` in `isImportCandidate()` | nein (Kandidat gilt als "nichts zu tun" — konsistent mit der Behandlung von Junk/Unsupported an dieser Stelle; der Importer loggt) |
+| `alice-mail-attachment-backfill` / `Code: Import Mail Attachments` (Importer) | `if (Number(att.size_bytes \|\| 0) > ATTACHMENT_MAX_BYTES) { … continue; }` | **ja** (`logger.warn`) |
+
+- **Prüfung erfolgt vor dem Netzwerkaufruf:** Positionsanalyse im ausgelieferten Code bestätigt die Reihenfolge Prefilter → `continue` → `POST /attachment` → Klassifizierung. Ein übergroßer Anhang löst **keinen** Base64-Roundtrip aus. Im Backfill-Importer steht die Prüfung ebenfalls vor dem `/attachment`-Aufruf.
+- **Nicht stillschweigend verworfen:** Zwei der drei Stellen loggen explizit; im Laufzeitpfad zusätzlich als eigenes Feld in der Statistik sichtbar. Bewusst lauter behandelt als Bild-Müll, weil hier ein potenziell relevantes Dokument abgelehnt wird.
+- **AC-2.2/AC-2.3 nicht beschädigt** — 12 Prefilter-Fälle inkl. Grenzwerten re-ausgeführt, alle PASS: Allowlist greift weiterhin zuerst (`.exe`/`.mkv` → `unsupported_extension`, auch bei riesiger Größe, also kein verschwendeter Check), Bild-Müll-Grenze unverändert (20479 → Skip, 20480 → Import), Größen-Grenze sauber (52428800 → Import, 52428801 → Skip), `image/*`-MIME mit Dokument-Endung weiterhin als Junk erkannt, fehlendes `size_bytes` → `0` → kein Fehlverhalten.
+
+### Regressions-Spot-Check `57d5bc6..99fb7c2`
+
+- **Umfang:** nur `workflows/alice-mail-sync.json` (1 Node), `workflows/alice-mail-attachment-backfill.json` (2 Nodes), `features/PROJ-53-*.md`. **Keine** Änderung an `app.py`, an anderen Workflows oder an Compose-/SQL-Dateien.
+- **Keine Nodes hinzugefügt/entfernt**, `connections` in **beiden** Workflows **byte-identisch** unverändert → Graph-Topologie und der in AC-5.1 geprüfte MQTT-Pfad unberührt.
+- `Process + Classify + Store Emails`, `Code: Split Stored Emails`, MQTT-Node und der gesamte Notification-/Status-Zweig **unverändert** → AC-3.6/AC-5.1 (MQTT nur für echte Neu-Inserts) weiterhin gültig.
+- **Sicherheit unverändert:** `sanitizeFilename()`/`shortenSender()` vom Fix **nicht angefasst**; 10 Path-Traversal-Payloads erneut ausgeführt — kein Ausbruch aus `/mnt/nas/ai/<Schema>/`. Keine Credentials in den neuen Log-Zeilen (geloggt werden nur uid, Dateiname, Größe). Kein neuer `require`.
+- **Statische Checks erneut grün:** beide JSONs valide, eindeutige Node-Namen/IDs, keine dangling Connection- oder `$('Node')`-Referenzen, alle 15 Code-Nodes `node --check` OK, 0 `console.log`.
+
+### Summary (nach Re-Test)
+
+- **Acceptance Criteria:** 24/26 PASS, 2 NOT VERIFIABLE (AC-5.2, AC-5.3 — benötigen Live-Deployment), 0 FAILs. AC-4.5 (Backfill-Resumability) und EC-9/EC-10 sind durch den BUG-2-Fix von PARTIAL auf **PASS** gehoben; AC-2.5 bleibt als bewusst akzeptierte, begründete Abweichung (BUG-4) dokumentiert.
+- **Bugs:** 7 total (0 critical, 0 high, **0 offene medium**, 7 low/behoben) — BUG-2, BUG-3, BUG-6 **behoben und verifiziert**; BUG-1, BUG-4, BUG-5, BUG-7 offen, alle Low und bewusst akzeptiert.
+- **Security:** **Pass** (unverändert, nach dem Fix erneut geprüft).
+- **Production Ready:** **YES — READY**
+- **Recommendation:** **Deploy.** Beide Medium-Bugs sind sauber und ursachengerecht behoben — der BUG-2-Fix adressiert die eigentliche Ursache (fehlende Mail-Identität im Dedup-Schlüssel) durch globalen Abgleich, statt nur den Symptom-Deckel `_20` hochzusetzen, und behält dabei das von AC-3.2/EC-9 vorgeschriebene Dateinamensmuster bei. Verbleibende Low-Bugs (BUG-1 Crash-Sicherheit, BUG-4 fehlende Binär-Textextraktion, BUG-5 duplizierte Konstanten, BUG-7 Lücken-Annahme) blockieren das Deployment nicht und können als Folgearbeit eingeplant werden.
 
 **Hinweis für den Deploy-Schritt:** AC-5.2/5.3 (Thumbnail-Rendering für Mail-Objekte) konnten statisch nicht verifiziert werden und müssen nach dem Deployment gegen den laufenden `alice-dms-thumbnailer` geprüft werden.
 
