@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-22
 
@@ -192,7 +192,182 @@ Der Tech-Design-Punkt "extrahierter Textinhalt/-vorschau des Anhangs" ist nur f�
 - **Nicht verifiziert:** kein Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS. Die `mcp__n8n-mcp__*`-Tools waren in dieser Session nicht verfügbar, daher wurde statt `n8n_validate_workflow` die oben beschriebene strukturelle Eigenvalidierung genutzt. Deployment erfolgt manuell durch den Admin.
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-08-22
+**Tester:** QA Engineer (AI)
+**Test method:** Static/logic review + isolated Node.js re-execution of extracted Code-Node helpers. **Keine Live-Ausführung** — kein Zugriff auf n8n/IMAP/Ollama/Weaviate/NAS in dieser Umgebung. Alle Kriterien, die eine echte Pipeline-Ausführung erfordern, sind als `NOT VERIFIABLE` markiert und müssen beim Deployment nachgeprüft werden.
+**Commit under test:** `63636f8`
+
+### Acceptance Criteria Status
+
+#### AC-1: Zielordner-Struktur
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 1.1 | Fester Unterordner je Schema in `/mnt/nas/ai/` | PASS | `Code: Import Attachments`: `NAS_AI_ROOT='/mnt/nas/ai'`, `VALID_SCHEMAS=['Invoice','BankStatement','Document','Contract','SecuritySettlement']`, `targetDir = path.join(NAS_AI_ROOT, classification.document_type)` |
+| 1.2 | Fehlender Ordner wird automatisch angelegt | PASS | `fs.mkdirSync(targetDir, { recursive: true })` in beiden Import-Nodes, Fehler → `failed++` + Log statt Abbruch |
+| 1.3 | Kein automatischer `dms_watched_folders`-Eintrag | PASS | Keine Postgres-Writes auf `dms_watched_folders` in beiden Workflows (nur `SELECT` auf `alice.imap_mailboxes` im Backfill) |
+
+#### AC-2: Anhang-Erkennung & Klassifizierung
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 2.1 | Zusätzlicher Klassifizierungsschritt, unabhängig von PROJ-46-Kategorie | PASS | Neuer Node `Code: Import Attachments` hängt an `Process + Classify + Store Emails`; `category` wird im Import-Pfad nirgends gelesen |
+| 2.2 | Nur Endungen aus `SUPPORTED_EXTENSIONS` | PASS | `prefilterAttachment()`: `if (!SUPPORTED_EXTENSIONS.has(ext)) return { keep:false, reason:'unsupported_extension' }`. Liste stimmt mit `alice-dms-path-worker` überein. **Einschränkung siehe BUG-5** (Liste dupliziert, nicht zentral) |
+| 2.3 | Bild-Datenmüll < 20 KB ohne Klassifizierungsversuch übersprungen | PASS | `prefilterAttachment()` läuft als **erste** Anweisung im `try`-Block, vor `/attachment`-Fetch und vor `classifyAttachment()`. Prüft **beides**: `(IMAGE_EXTENSIONS.has(ext) \|\| mime.startsWith('image/')) && size_bytes < 20480` |
+| 2.4 | Jeder Anhang **einzeln** vom LLM klassifiziert | PASS | `for (let idx=0; idx<attachments.length; idx++)` → ein `classifyAttachment()`-Aufruf je Anhang |
+| 2.5 | Eingabe: Betreff + Body-Preview + Dateiname + Textinhalt | **PARTIAL** | `buildClassificationPrompt()` liefert Subject/Sender/Body-Preview/Filename. Echter Anhangstext nur für `.txt`/`.md` — siehe BUG-4 (dokumentierte Abweichung) |
+| 2.6 | Zuordnung zu einem der 5 Schemata oder "nicht eindeutig" | PASS | `parseClassification()` akzeptiert nur `VALID_SCHEMAS` + `'unclear'`; alles andere → `null` |
+| 2.7 | Nicht eindeutig → Fallback `Document` | PASS | `classifyAttachment()`: `if (!result \|\| result.document_type === 'unclear') return { document_type:'Document', fallback:true }` |
+| 2.8 | Mehrere Anhänge unterschiedlicher Zuordnung → je eigener Zielordner | PASS | `targetDir` wird **pro Anhang** innerhalb der Schleife aus dessen eigener `classification` gebildet |
+
+#### AC-3: Datei-Ablage
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 3.1 | Anhang wird per `alice-mail-reader` live nachgeladen | PASS | `axios.post('http://alice-mail-reader:8007/attachment', {...})` mit `uid` + `attachment_index` |
+| 3.2 | Dateiname `<YYYY-MM-DD>_<Absender-Kurzform>_<Original>` | PASS | `buildBaseFilename()` = `mailDateStamp()` + `shortenSender()` + `sanitizeFilename()`. Ungültiges Datum → `unknown-date`; leerer Absender → `unknown` |
+| 3.3 | Kollisions-Suffix `_X` nur bei echter Kollision | PASS | `resolveCollision()` gibt `baseName` unverändert zurück, wenn keine Datei existiert. Re-Test: 5× gleicher Name → `Anhang.pdf, Anhang_1.pdf, Anhang_2.pdf, Anhang_3.pdf, Anhang_4.pdf`, keine Überschreibung, Suffix vor der Endung. Schleife endet bei 1000, danach `_<Date.now()>` → **kein Endlosloop** |
+| 3.4 | Import unabhängig von der Mail-Kategorie | PASS | Siehe 2.1 — kein Kategorie-Filter im Import-Zweig |
+| 3.5 | Nachgelagerte DMS-Pipeline unverändert | PASS | Keine Änderungen an `alice-dms-processor` / `alice-dms-scanner` / `alice-dms-thumbnailer` im Commit (`git show 63636f8 --stat`: nur `app.py`, 2 Workflows, 2 Doku-Dateien) |
+| 3.6 | Erneuter Sync-Lauf → keine doppelte Ablage | PASS | `storedEmails.push()` steht **nach** `if (alreadyExists) continue;` und **nach** dem erfolgreichen Weaviate-Insert → bereits indexierte Mails erreichen den Import-Zweig nicht. Zusätzlich BUG-2 beachten |
+
+#### AC-4: Backfill
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 4.1 | Manuell auslösbarer Workflow existiert | PASS | `workflows/alice-mail-attachment-backfill.json`, Webhook `POST /alice-mail-attachment-backfill`, `responseMode: responseNode` |
+| 4.2 | Listet `Email`-Objekte mit Anhängen ohne bisherigen Import | PASS (mit BUG-2) | `Code: Fetch Mails With Attachments`: GraphQL-Paginierung à 100, `rawAtt.length === 0 → continue`, dann `alreadyOnDisk()`-Filter |
+| 4.3 | Pro Mail erneut IMAP via `alice-mail-reader` | PASS | `Code: Import Mail Attachments` → `/attachment` mit `mailbox.*` aus dem Redis-Cache |
+| 4.4 | Dieselbe Klassifizierungs-/Ablage-Logik | PASS (mit BUG-5) | Helper-Funktionen sind byte-identisch dupliziert (`shortenSender`, `mailDateStamp`, `sanitizeFilename`, `buildBaseFilename`, `resolveCollision`, `buildClassificationPrompt`, `parseClassification`, `classifyAttachment`) — verhaltensgleich, aber per Copy-Paste |
+| 4.5 | Batches, unterbrechbar/neustartbar ohne Doppel-Import | **PARTIAL** | `Split In Batches` + Time-Check (7200 s) + Lock-Renew vorhanden. Resumability ist aber **nur approximativ** — siehe BUG-1 und BUG-2 |
+| 4.6 | Fortschritts-Log `{processed, imported, skipped_no_match, failed, remaining}` | PASS | `Code: Track Progress` loggt exakt diese 5 Felder via winston; Redis-Hash `alice:mail:backfill:run:stats` |
+| 4.7 | Nicht erreichbare Mailbox → überspringen + loggen, Lauf geht weiter | PASS | Fehlender Redis-Eintrag → `result:'mailbox_unreachable'`, Return statt Throw. Im Fetch-Catch: `status===400 \|\| !e.response` → `mailboxUnreachable=true; break` (nur diese Mail), Workflow läuft über `Track Progress` → `Split In Batches` weiter |
+
+#### AC-5: Mail-Thumbnails
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 5.1 | MQTT `alice/dms/done` nach jedem erfolgreichen Weaviate-Insert | PASS | `Code: Split Stored Emails` → `IF: Has Stored Emails` → `MQTT: Publish Email Done`, Topic `alice/dms/done`, qos 1, Payload `{weaviate_uuid, document_type:'Email', file_type:'txt', inserted:true, timestamp}`. Feuert **nur für echte Neu-Inserts** (siehe 3.6) und nur bei vorhandener UUID (`.filter(m => m.weaviate_uuid)`) |
+| 5.2 | Thumbnailer verarbeitet Mails über bestehende TXT/MD-Regel | NOT VERIFIABLE | `file_type:'txt'` ist plausibel gesetzt, aber `alice-dms-thumbnailer` wurde nicht ausgeführt. Beim Deployment prüfen |
+| 5.3 | Bestehende Mails ohne Thumbnail via `alice-dms-thumbnailer-backfill` | NOT VERIFIABLE | Kein Code in diesem Commit; hängt an 5.2 |
+
+### Edge Cases Status
+
+| # | Edge Case | Status | Anmerkung |
+|---|-----------|--------|-----------|
+| EC-1 | Mail ohne Anhang | PASS | `if (attachments.length === 0) continue;` |
+| EC-2 | Anhang an der 20-KB-Grenze | PASS | `< 20480` — exakt 20480 Bytes wird importiert. Als akzeptiertes Risiko in der Spec dokumentiert |
+| EC-3 | Ollama down während Klassifizierung | PASS | `classifyAttachment()` gibt `null` zurück, wenn beide Versuche mit Nicht-`SyntaxError` fehlschlagen → `failed++`, kein Blind-Import |
+| EC-4 | Zielordner nicht beschreibbar | PASS | `mkdirSync`- und `writeFileSync`-Fehler separat gefangen → `failed++` + Log, Schleife läuft weiter |
+| EC-5 | Ordner nicht in `dms_watched_folders` | PASS | Kein Code-Pfad; Datei liegt auf NAS |
+| EC-6 | Datei verschoben (PROJ-21/22) | PASS | Nicht berührt |
+| EC-7 | Sehr großer Anhang | **RISIKO** | Kein Größenlimit — siehe BUG-3 (Memory/Base64) |
+| EC-8 | Mail ohne Body-Text | PASS | `String(mail.body_preview \|\| '')` |
+| EC-9 | Zwei gleichnamige Anhänge in derselben Mail | PASS (Laufzeit) / **FAIL (Backfill)** | Laufzeit korrekt (`_1`). Backfill: siehe BUG-2 |
+| EC-10 | Backfill nach Teil-Lauf | **PARTIAL** | Siehe BUG-1/BUG-2 |
+
+### Security Audit Results
+
+**n8n workflow features:**
+- [x] **Path Traversal neutralisiert** — `sanitizeFilename()` ersetzt `/` und `\`, entfernt `\x00-\x1f`, strippt führende Punkte. Verifiziert mit 10 Angriffs-Payloads (`../../etc/cron.d/evil`, `....//....//etc/x.pdf`, `..%2f..%2f`, NUL-Byte, `..`): **kein einziger Fall verlässt `/mnt/nas/ai/<Schema>/`** (`path.resolve(full).startsWith(dir + sep)` in allen Fällen `true`).
+- [x] **Absender-Feld nicht ausbrechbar** — `shortenSender()` whitelistet `[A-Za-z0-9._-]`, `/` und `\` sind ausgeschlossen; `../../../root@evil` → `..-..-..-root`.
+- [x] **Schema-Segment nicht angreifbar** — `classification.document_type` stammt aus `parseClassification()`, das gegen `VALID_SCHEMAS` prüft; ein halluziniertes LLM-Ergebnis kann keinen beliebigen Pfad erzeugen.
+- [x] **Keine Credentials in Logs** — Alle `logger.*`-Aufrufe in beiden Workflows geprüft: kein `password`, `password_enc` oder `passwordEnc` in einem Log-String. `Code: Cache Mailboxes` loggt nur `rows.length`.
+- [x] **`password_enc` bleibt Ende-zu-Ende verschlüsselt** — `Prepare Mailbox Data` reicht `passwordEnc` unverändert durch; Backfill cached `password_enc` verschlüsselt in Redis. Kein neuer Klartext-Pfad; Entschlüsselung nur in `alice-mail-reader._decrypt_password()`.
+- [x] **`/attachment` nutzt denselben Credential-Flow wie `/body`** — identische Zeilen `_decrypt_password(data["password_enc"])` → `_connect(data)` → `imap.login(...)`, `readonly=True`. Keine Abweichung.
+- [x] **Input-Validierung `/attachment`** — `attachment_index` via `int()` in `try/except (TypeError, ValueError)` → 400 statt 500; negativer Index → 404; fehlende `uid` → 400; Index out of range → 404. Posture entspricht `/body`. Kein unbehandelter Crash.
+- [x] **Keine `console.log`** — `grep -c console.log` = 0 in beiden Workflow-JSONs (CLAUDE.md-konform, winston durchgängig).
+- [x] **Nur erlaubte `require`-Module** — `winston, axios, fs, path, redis, crypto`.
+- [ ] **INFO (kein PROJ-53-Regress): Webhook ohne Authentifizierung** — `Webhook: POST /alice-mail-attachment-backfill` hat `authentication: "none"`. Identisch zu `alice-dms-classification-backfill`, `alice-dms-thumbnailer-backfill`, `alice-dms-language-backfill` → **bestehende Projektkonvention** (VPN-only-Zugang). Kein neuer Regress durch PROJ-53, aber: der Endpunkt triggert GPU-Last und IMAP-Verbindungen und ist damit ein DoS-Hebel für jeden, der im VPN ist. Als bekanntes Projekt-Risiko notiert, nicht als PROJ-53-Bug gewertet.
+
+**Ergebnis:** Keine PROJ-53-spezifische Sicherheitslücke gefunden. Der in der Task besonders hervorgehobene Path-Traversal-Vektor über Anhangnamen/Absender ist wirksam neutralisiert.
+
+### Bugs Found
+
+#### BUG-1: Backfill-Dedup ist nicht crash-sicher (Write-then-Verify-Lücke)
+- **Severity:** Low
+- **Root Cause:** `alreadyOnDisk()` leitet den Import-Status ausschließlich aus der Existenz der Zieldatei ab. Zwischen `fs.writeFileSync()` und dem nächsten Lauf gibt es keinen Commit-Punkt — das ist bei Ableitung aus dem Dateisystem systembedingt.
+- **Tatsächliches Verhalten:** `fs.writeFileSync()` ist nicht atomar. Bricht n8n **während** des Schreibvorgangs ab, bleibt eine **abgeschnittene Datei** liegen. Der nächste Backfill-Lauf sieht den Dateinamen, wertet den Anhang als "erledigt" und importiert ihn **nie erneut** → stiller Datenverlust (unvollständige Datei im DMS). Wird der Lauf **vor** dem Write abgebrochen, ist das Verhalten korrekt (erneuter Import).
+- **Steps to Reproduce:** 1. Backfill starten. 2. n8n-Container während eines `writeFileSync` eines großen Anhangs killen. 3. Backfill erneut starten. 4. Erwartet: Anhang wird vollständig neu geschrieben. 5. Tatsächlich: Anhang gilt als importiert, Torso-Datei bleibt.
+- **Bewertung:** Die Spec verlangt Resumability "ohne bereits importierte Anhänge erneut abzulegen" — das ist erfüllt. Absolute Crash-Sicherheit wird **nicht** verlangt. Mitigierbar durch Write-to-temp + `fs.renameSync()` (atomar innerhalb desselben Dateisystems).
+- **Priority:** Nice to have (Verhalten hier dokumentiert, wie in der Aufgabenstellung gefordert)
+
+#### BUG-2: `alreadyOnDisk()` erzeugt False-Positive-Dedup — Anhänge werden im Backfill nie importiert
+- **Severity:** Medium
+- **Root Cause:** `alreadyOnDisk(baseName)` prüft `baseName` **und** alle Varianten `_1`…`_20` in **allen fünf** Schema-Ordnern und gibt bei **irgendeinem** Treffer `true` zurück. Der Basisname enthält aber nur `<Datum>_<Absender-Kurzform>_<Dateiname>` — **keine** Message-ID und **keinen** Anhang-Index. Damit kollidieren fachlich verschiedene Anhänge auf demselben Schlüssel.
+- **Tatsächliches Verhalten (re-verifiziert in Node):**
+  - **(a) Gleichnamige Geschwister-Anhänge:** Eine Mail mit zwei Anhängen `R.pdf` erzeugt zwei Kandidaten mit **identischem** `baseName`. Existiert `R.pdf` bereits, liefert `alreadyOnDisk()` für **beide** `true` → der zweite Anhang wird **nie** importiert. Widerspricht EC-9 und AC-4.4 (Kollisions-Suffix soll auch im Backfill greifen).
+  - **(b) Mail-übergreifende Falsch-Dedup:** Zwei **verschiedene** Mails desselben Absenders am selben Tag mit gleichem Anhangnamen (z. B. Tagesabrechnungen `Rechnung.pdf`) → die zweite Mail gilt als erledigt, ihr Anhang wird nie importiert.
+  - **(c) Deckel bei `_20`:** Ab der 21. Kollision greift die Prüfung nicht mehr; `resolveCollision()` zählt aber bis 999 → ab `_21` wird bei jedem Lauf erneut importiert (**Duplikate**, gegenläufig zu (a)/(b)).
+- **Steps to Reproduce:** 1. Mail von `absender@x.de` vom 2026-01-01 mit zwei Anhängen `Rechnung.pdf`. 2. Backfill laufen lassen. 3. Erwartet: `2026-01-01_absender_Rechnung.pdf` **und** `..._Rechnung_1.pdf`. 4. Tatsächlich: nur die erste Datei; der zweite Anhang wird dauerhaft als importiert gewertet.
+- **Bewertung:** Kein Datenverlust im Quellsystem (Mail bleibt im Postfach), aber ein **stiller, dauerhafter Import-Ausfall**, den kein Log meldet — die Mail wird als `skippedAlreadyImported` gezählt. Sauber lösbar, indem Message-ID + `attachment_index` in den Dateinamen einfließen oder der Filter pro Kandidat die bereits in **diesem** Lauf belegten Namen mitzählt.
+- **Priority:** Fix before deployment
+
+#### BUG-3: Kein Größenlimit — großer Anhang kann den n8n-Prozess sprengen
+- **Severity:** Medium
+- **Root Cause:** Der komplette Anhang wird als Base64-String über HTTP geladen und im Speicher gehalten: `attData.content_base64` → `Buffer.from(..., 'base64')`. Zusätzlich hält `alice-mail-reader` die gesamte RFC822-Mail via `email_lib.message_from_bytes(raw)` im RAM.
+- **Tatsächliches Verhalten:** Für einen 100-MB-Anhang liegen gleichzeitig vor: ~133 MB Base64-String (JS) + ~100 MB Buffer + JSON-Parse-Overhead in n8n, plus ~100 MB+ im Python-Container. Bei mehreren großen Anhängen droht OOM des n8n-Containers — was **den gesamten Sync-Zyklus** und alle anderen Workflows trifft, nicht nur diesen Anhang.
+- **Steps to Reproduce:** 1. Mail mit sehr großem PDF-Anhang (z. B. 200 MB Scan) an ein überwachtes Postfach. 2. Sync abwarten. 3. Erwartet: Import oder kontrolliertes Überspringen. 4. Tatsächlich: potenzieller OOM/Heap-Abbruch des n8n-Prozesses.
+- **Bewertung:** EC-7 sagt explizit "kein Größenlimit für den Import selbst" und verweist auf bestehendes Pipeline-Verhalten — die **nachgelagerte** Pipeline arbeitet aber dateibasiert, nicht über einen Base64-Roundtrip durch n8n. Der Speicherpfad ist neu in PROJ-53 und damit nicht durch das bestehende Verhalten abgedeckt. Empfehlung: Obergrenze (z. B. 50 MB) im Prefilter anhand des bereits vorliegenden `size_bytes` — kostet keinen zusätzlichen Fetch.
+- **Priority:** Fix before deployment
+
+#### BUG-4: Keine echte Textextraktion für PDF/DOCX/XLSX/Bilder (dokumentierte Abweichung)
+- **Severity:** Low
+- **Root Cause:** Nur `.txt`/`.md` werden dekodiert (`PLAINTEXT_EXTENSIONS`). Für alle Binärtypen bleibt `textPreview` leer, der Prompt erhält `(no extractable text - classify from filename and email context)`.
+- **Tatsächliches Verhalten:** AC-2.5 verlangt "extrahierbarer Textinhalt/-vorschau des jeweiligen Anhangs". Für den praktisch wichtigsten Fall (PDF-Rechnungen) wird ausschließlich aus Dateiname + Mail-Kontext klassifiziert. Bei nichtssagenden Namen (`Anhang.pdf`) sinkt die Trefferquote spürbar; der `Document`-Fallback greift.
+- **Bewertung der Begründung:** **Nachvollziehbar und korrekt.** Verifiziert, dass `dms-extractor-*` MQTT/Redis-Queue-Worker ohne synchronen HTTP-Endpunkt sind; die Spec schließt neue Infrastruktur aus. Fachliche Auswirkung ist begrenzt, weil die nachgelagerte DMS-Pipeline die Datei nach dem Scan ohnehin anhand des extrahierten Volltexts erneut klassifiziert — der Zielordner ist also nur die **Erst**einsortierung.
+- **Priority:** Nice to have (eigenes Folge-Feature: synchroner Extraktor-Endpunkt)
+
+#### BUG-5: `SUPPORTED_EXTENSIONS` und Helper dreifach dupliziert
+- **Severity:** Low
+- **Root Cause:** Die Allowlist steht wörtlich in `alice-dms-path-worker`, `Code: Import Attachments` und `Code: Fetch Mails With Attachments`; sieben Helper-Funktionen sind zwischen Laufzeit- und Backfill-Node kopiert.
+- **Tatsächliches Verhalten:** AC-2.2 fordert "die Liste bleibt zentral erweiterbar" — sie ist **nicht** zentral. Eine neue Endung muss an drei Stellen gepflegt werden; wird eine vergessen, divergieren Laufzeit-Prefilter und Backfill-Kandidatenermittlung (Anhänge würden dauerhaft als "nichts zu tun" gewertet). Aktuell sind alle Kopien **identisch** — kein akuter Fehler, nur Wartungsrisiko.
+- **Priority:** Fix in next sprint
+
+#### BUG-6: Implementation Notes beschreiben die Branch-Reihenfolge falsch
+- **Severity:** Low
+- **Root Cause:** Die Notes behaupten, der Anhang-Zweig hänge als "**erster Ausgang**" und der Notification-Zweig als "zweiter Ausgang" an `Process + Classify + Store Emails`. Tatsächlich liegen **beide** auf **Output-Index 0** als parallele Zweige.
+- **Tatsächliches Verhalten:** n8n arbeitet parallele Zweige desselben Outputs sequenziell in Listenreihenfolge ab. `Code: Import Attachments` steht **vor** `Notify: Passthrough` → der gesamte Anhang-Import (pro Anhang bis zu 120 s Fetch + 2×120 s Ollama) läuft, **bevor** `PG: Update Sync Status` den `syncing`-Status zurücksetzt und die Mailbox-Schleife weiterläuft. Bei einer Mail mit mehreren großen Anhängen kann eine Mailbox dadurch sehr lange auf `syncing` stehen und den Minuten-Trigger blockieren (`IF: Free to Run?`).
+- **Bewertung:** Funktional kein Fehler (kein Datenverlust, `onError: continueRegularOutput` verhindert Blockade durch Exceptions), aber ein Durchsatz-/Latenz-Risiko und eine **sachlich falsche Beschreibung** in der Doku, die einen Reviewer in die Irre führt.
+- **Priority:** Fix in next sprint (Doku korrigieren; ggf. Zweig-Reihenfolge tauschen, damit der Status-Zweig zuerst läuft)
+
+### Explizit geprüft und **nicht** bestätigt (Negativbefunde)
+
+Diese in der Aufgabenstellung vermuteten Fehlerklassen wurden gezielt gesucht und liegen **nicht** vor:
+
+- **Off-by-one zwischen `_get_attachments()` und `/attachment`:** Kein Fehler. Der Diff belegt echte Vereinheitlichung: `_get_attachments()` besteht nur noch aus `for filename, part in _walk_attachment_parts(msg)`, `/attachment` nutzt `enumerate(_walk_attachment_parts(msg))`. **Eine** Filterkette (`multipart`-Skip, `Content-Disposition is None`-Skip, leerer Dateiname-Skip), damit garantiert identische Reihenfolge. Auch der n8n-seitige Index passt: `idx` ist der Laufindex über das **ungefilterte** `mail.attachments`-Array aus `/fetch`; Prefilter-Skips nutzen `continue` und verschieben `idx` nicht. Der Backfill hält den Absolutindex ebenfalls korrekt (`.map((a, idx) => ({...a, attachment_index: idx}))` **vor** `.filter(...)`).
+- **Kollisions-Endlosloop / Überschreiben:** Kein Fehler (siehe AC-3.3, re-verifiziert).
+- **Bild-Müll-Check nach der Klassifizierung / nur ein Kriterium:** Kein Fehler — Prefilter läuft vor Fetch und Klassifizierung und prüft Typ **und** Größe (siehe AC-2.3).
+- **MQTT feuert unkonditional:** Kein Fehler — `storedEmails` enthält ausschließlich echte Neu-Inserts (nach Dedup-`continue`, nach erfolgreichem `axios.post`), zusätzlich `.filter(m => m.weaviate_uuid)`.
+- **Fehlende Error-Isolation:** Kein Fehler — jede Anhang-Iteration ist in `try/catch` gekapselt, alle drei Risiko-Schritte (Fetch, mkdir, write) haben eigene `try/catch` mit `continue`; der äußere `catch` fängt alles Übrige. Zusätzlich `onError: continueRegularOutput` auf `Code: Import Attachments` und `MQTT: Publish Email Done`.
+- **`/attachment` crasht bei ungültigem Input:** Kein Fehler (siehe Security Audit).
+- **`console.log` in Code-Nodes:** Kein Fehler — 0 Treffer.
+
+### Regression Check
+
+- `git diff 4f44e5b 63636f8 -- workflows/alice-mail-sync.json`: **rein additiv.** Keine Nodes entfernt, 4 hinzugefügt. Einzige Änderung an bestehendem Code: `Process + Classify + Store Emails` gibt zusätzlich `storedEmails` zurück. Message-ID-Dedup, Ollama-Kategorisierung, Weaviate-Insert-Objekt sowie `processed`/`wichtig`/`maxUid` sind **unverändert** → `PG: Update Sync Status` und der Notification-Zweig arbeiten wie bisher. Übrige Diff-Zeilen sind reine Positions-Neuformatierung.
+- `/fetch` und `/body` in `app.py`: Contracts unverändert; `_get_attachments()` liefert identische Struktur.
+- Kein Eingriff in `alice-dms-processor`, `alice-dms-scanner`, `alice-dms-thumbnailer` oder das `Execute: Classify Document`-Sub-Workflow (bewusste Entscheidung, korrekt begründet).
+
+### Static Checks
+
+- Beide Workflow-JSONs: **gültiges JSON**, eindeutige Node-Namen und IDs.
+- Connections: **keine** dangling Source-/Target-Referenzen; alle `$('Node')`-Referenzen existieren; einziger Node ohne Inbound ist ein `stickyNote` (unkritisch).
+- Alle **15** Code-Nodes: `node --check` (in async-Wrapper wegen Top-Level-`await`) **grün**.
+- `app.py`: `python3 -m py_compile` **grün**.
+- `require`-Module auf `winston, axios, fs, path, redis, crypto` beschränkt.
+- Der vom Implementer erwähnte Validierungs-Skript liegt weder im Commit noch im Working Tree — die Prüfungen wurden hier unabhängig neu aufgesetzt.
+
+### Summary
+
+- **Acceptance Criteria:** 22/26 PASS, 3 PARTIAL (AC-2.5, AC-4.5, EC-Backfill), 2 NOT VERIFIABLE (AC-5.2, AC-5.3 — benötigen Live-Deployment), 0 harte FAILs
+- **Bugs Found:** 6 total (0 critical, 0 high, 2 medium, 4 low)
+- **Security:** **Pass** — Path Traversal wirksam neutralisiert (10 Payloads verifiziert), keine Credentials in Logs, `password_enc` durchgängig verschlüsselt, `/attachment` mit sauberer Input-Validierung. Ein bekanntes, projektweit bestehendes Webhook-Auth-Thema notiert (kein PROJ-53-Regress).
+- **Production Ready:** **NO — NOT READY**
+- **Recommendation:** BUG-2 (stiller Import-Ausfall im Backfill durch False-Positive-Dedup) und BUG-3 (kein Größenlimit → OOM-Risiko für den gesamten n8n-Container) vor dem Deployment beheben. Beide sind eng begrenzt und in einem kurzen Dev-Durchlauf lösbar. BUG-1/4/5/6 können bewusst akzeptiert werden; BUG-6 sollte mindestens als Doku-Korrektur nachgezogen werden. Die Kern-Laufzeitlogik (Prefilter, Klassifizierung, Ablage, Kollision, Fehlerisolation, MQTT-Trigger) ist solide und erfüllt die Spec.
+
+**Hinweis für den Deploy-Schritt:** AC-5.2/5.3 (Thumbnail-Rendering für Mail-Objekte) konnten statisch nicht verifiziert werden und müssen nach dem Deployment gegen den laufenden `alice-dms-thumbnailer` geprüft werden.
 
 ## Deployment
 _To be added by /deploy_
