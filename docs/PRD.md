@@ -25,7 +25,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P0       | DMS-Zusammenfassung Sprachkorrektur (Deutsch) — Fix + Backfill Bestand (PROJ-79)                                   | 3.1       | Deployed |
 | P1       | DMS-Vollständigkeits-Dashboard (PROJ-80)                                                                           | 3.2       | Deployed |
 | P1       | Frontend-Übersetzung on-the-fly (PROJ-81)                                                                          | 3.2       | Roadmap |
-| P2       | Mail-Anhang DMS-Import (PROJ-53, verschoben aus Phase 4)                                                           | 3.2       | Roadmap |
+| P2       | Mail-Anhang DMS-Import (PROJ-53, verschoben aus Phase 4)                                                           | 3.2       | Planned |
 | P1       | HA-MCP-Server-Evaluierung — Spike (PROJ-82)                                                                        | 3.3       | Roadmap |
 | P1       | HA-Agent variable Intents — Prozent, Mengen, Listen-Einträge (PROJ-83)                                             | 3.3       | Roadmap |
 | P1       | HA-Agent Area-Context-Weitergabe (PROJ-84)                                                                         | 3.3       | Roadmap |
