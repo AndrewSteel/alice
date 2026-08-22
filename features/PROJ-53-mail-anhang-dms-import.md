@@ -162,7 +162,7 @@ Umgesetzt wurden alle drei Bausteine. Backend-only — PROJ-53 hat keine UI-Komp
 - `Process + Classify + Store Emails` gibt jetzt zusätzlich `storedEmails[]` zurück (nur tatsächlich neu in Weaviate eingefügte Mails, inkl. `weaviate_uuid` aus der Insert-Response, Anhang-Metadaten und Body-Preview). Bestehende Felder (`processed`, `wichtig`, `maxUid`) unverändert — `PG: Update Sync Status` und der Notification-Zweig laufen wie bisher.
 - Neuer Code-Node `Code: Import Attachments`: Vorfilter (`SUPPORTED_EXTENSIONS` exakt aus `alice-dms-path-worker`; Bild-Müll = Bild-MIME/-Endung **und** < 20480 Bytes → stilles Überspringen ohne Klassifizierung/Fehler-Log) → Klassifizierung → `/attachment`-Abruf → Ablage unter `/mnt/nas/ai/<Schema>/`, Zielordner via `fs.mkdirSync(recursive)`. Dateiname `<YYYY-MM-DD>_<Absender-Kurzform>_<Original>`, `_N` nur bei echter Kollision (Suffix vor der Endung). Fehler bei Klassifizierung/Abruf/Schreiben → nur dieser Anhang wird übersprungen und geloggt, Schleife läuft weiter.
 - **Abweichung (MQTT pro Mail):** Der MQTT-Node kann nicht aus einem Code-Node heraus aufgerufen werden. Statt eines Split-Nodes gibt `Code: Split Stored Emails` ein Item pro gespeicherter Mail zurück; n8n führt den nachgelagerten `MQTT: Publish Email Done` dadurch einmal pro Item aus. Das entspricht dem etablierten Muster aus `alice-dms-processor` (`Code: Process Image Item` → `IF: Image Is New` → `MQTT: Publish Image Done`). Payload: `{ weaviate_uuid, document_type: 'Email', file_type: 'txt', inserted: true, timestamp }`, qos 1, Credential `mqtt-alice`. Mails ohne UUID werden ausgefiltert.
-- Der Anhang-Zweig hängt als **erster** Ausgang an `Process + Classify + Store Emails`; der Notification-/Status-Zweig ist unverändert der zweite Ausgang, sodass der Mailbox-Loop weiterläuft.
+- Der Anhang-Zweig und der Notification-/Status-Zweig hängen **beide am selben Ausgang (Index 0)** von `Process + Classify + Store Emails` als parallele Zweige. n8n arbeitet parallele Zweige desselben Outputs sequenziell in Listenreihenfolge ab, und `Code: Import Attachments` steht in dieser Liste **vor** `Notify: Passthrough` — der Anhang-Import läuft also **vor** dem Status-Reset durch `PG: Update Sync Status`. Bei mehreren großen Anhängen kann eine Mailbox dadurch länger auf `syncing` stehen. (Korrigiert nach QA-BUG-6: eine frühere Fassung dieser Notiz sprach fälschlich von "erstem"/"zweitem Ausgang".)
 
 **Baustein 3 — `alice-mail-attachment-backfill` (`workflows/alice-mail-attachment-backfill.json`, neu)**
 
@@ -190,6 +190,34 @@ Der Tech-Design-Punkt "extrahierter Textinhalt/-vorschau des Anhangs" ist nur f�
 - Round-Trip-Test des Weaviate-Anhang-Strings (auch bei Klammern im Dateinamen).
 - Beide Workflow-JSONs strukturell validiert: gültiges JSON, eindeutige Node-Namen/IDs, alle Connection-Referenzen und `$('Node')`-Referenzen existieren, keine verwaisten Nodes, alle Code-Nodes syntaktisch gültig, kein `console.log`, Credentials auf Postgres-/MQTT-Nodes gesetzt, nur erlaubte `require`-Module.
 - **Nicht verifiziert:** kein Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS. Die `mcp__n8n-mcp__*`-Tools waren in dieser Session nicht verfügbar, daher wurde statt `n8n_validate_workflow` die oben beschriebene strukturelle Eigenvalidierung genutzt. Deployment erfolgt manuell durch den Admin.
+
+### Bugfixes nach QA-Runde 1 (2026-08-22)
+
+Behoben wurden die beiden Medium-Bugs aus dem QA-Bericht zu Commit `63636f8`. BUG-1/4/5 bleiben bewusst offen (als Nice-to-have bzw. Folge-Feature bewertet), BUG-6 war ein Doku-Fehler und ist oben korrigiert.
+
+**BUG-2 — False-Positive-Dedup im Backfill (`Code: Fetch Mails With Attachments`)**
+
+Die alte `alreadyOnDisk(baseName)`-Prüfung war ein Boolean pro Mail: existiert der Basisname oder eine `_1…_20`-Variante irgendwo, galt der Anhang als erledigt. Da der Basisname weder Message-ID noch Anhang-Index enthält, kollidierten fachlich verschiedene Anhänge auf demselben Schlüssel.
+
+Ersetzt durch eine **zählende, global abgeglichene** Logik:
+
+1. `countOnDisk(baseName)` zählt, **wie viele** Dateien zu einem Basisnamen existieren (exakter Name + zusammenhängender `_1.._N`-Lauf) statt nur "mindestens eine". Die Suche läuft bis zur ersten Lücke und hat **keinen Deckel mehr** — der alte Stopp bei `_20` stand im Widerspruch zu `resolveCollision()`, das bis 999 zählt (BUG-2c: ab `_21` wurde bei jedem Lauf erneut importiert).
+2. Der Abgleich passiert nicht mehr pro Mail, sondern in einem **zweiten Pass über alle Mails gemeinsam**: Alle Anhänge, die auf denselben Basisnamen abbilden, werden gepoolt; die ersten `countOnDisk(base)` Ansprüche gelten als erfüllt, jeder weitere bleibt pending. Genau diese "überzähligen" Ansprüche schreibt `resolveCollision()` anschließend als `_N`.
+
+Der Node ist dafür in zwei Phasen geteilt (Pass 1 sammelt alle Kandidaten-Mails, Pass 2 gleicht ab und baut die Pending-Liste). Warum global statt pro Mail: Der Basisname trägt keine Mail-Identität, deshalb teilen sich zwei verschiedene Mails desselben Absenders vom selben Tag mit gleichem Anhangnamen einen Schlüssel — beurteilt man jede Mail isoliert, sieht die zweite immer schon erledigt aus (BUG-2b). Der Dateiname selbst bleibt unverändert, weil AC-3.2 und EC-9 das Muster `<Datum>_<Absender>_<Original>` bzw. das nackte `_1`-Suffix exakt vorschreiben — eine Message-ID im Dateinamen hätte diese Kriterien verletzt. Sortierung nach (Mail-Reihenfolge, `attachment_index`) hält Wiederholungsläufe reproduzierbar.
+
+**BUG-3 — Kein Größenlimit vor dem Base64-Roundtrip**
+
+Neue Obergrenze `ATTACHMENT_MAX_BYTES = 52428800` (50 MB), geprüft im bestehenden Vorfilter anhand des bereits aus `/fetch` vorliegenden `size_bytes` — also **bevor** `/attachment` überhaupt aufgerufen wird, ohne Zusatz-Request. Greift an drei Stellen: Laufzeit-Vorfilter (`prefilterAttachment`, neuer Grund `too_large`), Backfill-Kandidatenermittlung (`isImportCandidate`) und als zweite Absicherung im Backfill-Import-Node, dessen Kandidatenliste aus einem anderen Node stammt.
+
+Zur Wahl von 50 MB: Eine projektweite Reject-Obergrenze existiert nicht. `alice-dms-path-worker` kennt nur `file_size > 104857600` (100 MB) und stuft solche Dateien lediglich auf `priority: 'low'` herunter, lehnt sie also nicht ab — als Limit nicht übertragbar, weil die DMS-Pipeline **dateibasiert** arbeitet. Der PROJ-53-Pfad ist dagegen neu und speicherbasiert: Ein Anhang liegt gleichzeitig als Base64-String (~1,33×) **und** als Buffer im n8n-Heap, zusätzlich als komplette RFC822-Mail im Python-Container. Da n8n von allen Workflows geteilt wird, träfe ein OOM nicht nur diesen Import. 50 MB deckt reale Rechnungen/Kontoauszüge/Scans ab und hält den Spitzenbedarf pro Anhang im dreistelligen MB-Bereich. Anders als Bild-Müll wird ein zu großer Anhang **geloggt** (`skipped_too_large` in den Stats), weil es sich um ein potenziell relevantes Dokument handelt, das bewusst abgelehnt wird — der Admin soll das sehen. Abweichung zu EC-7 ("kein Größenlimit für den Import selbst"): bewusst, da EC-7 auf das dateibasierte Verhalten der nachgelagerten Pipeline verweist, das für diesen Speicherpfad nicht gilt.
+
+**Verifikation der Fixes**
+
+- 23 Assertions gegen ein echtes Dateisystem für die neue Dedup-Logik (alle drei BUG-2-Teilfälle, Idempotenz über drei aufeinanderfolgende Läufe, gemischte Basisnamen, Reihenfolge-Erhalt, Lücken-Erkennung).
+- 11 Assertions gegen den **tatsächlich im Workflow-JSON eingebetteten** Code: Die Helper und der Reconcile-Block wurden aus `alice-mail-attachment-backfill.json` extrahiert und mit QA's Repro-Schritten ausgeführt (u.a. QA-Szenario "zwei `Rechnung.pdf` in einer Mail" → erwartet `…Rechnung.pdf` + `…Rechnung_1.pdf`, tatsächlich genau das; Wiederholungslauf ohne Neuschreiben; 25 Dateien jenseits des alten `_20`-Deckels ohne Duplikat).
+- 8 Assertions für das Größenlimit inkl. Grenzwerte (exakt 50 MB akzeptiert, +1 Byte abgelehnt, QA's 200-MB-Szenario abgelehnt, Prüfreihenfolge gegenüber `image_junk`/`unsupported_extension` erhalten).
+- Bestehende 32 Assertions und der `/attachment`-Indextest erneut grün (keine Regression); beide Workflows erneut strukturell validiert (0 Fehler).
 
 ## QA Test Results
 
