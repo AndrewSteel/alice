@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-23
+**Last Updated:** 2026-08-23 (QA Iteration 2)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -572,6 +572,171 @@ Für die *reinen* Helper (`routeByExtension`, `fetchPdfText`) ließ sich der Cop
 1. `alice-mail-reader` muss **neu gebaut** werden (`docker compose build`), nicht nur neu gestartet — `pypdf` ist eine neue Abhängigkeit.
 2. Backfill zuerst **ohne** `confirm` aufrufen, um die Kandidatenzahl zu sehen; erst danach mit `{"confirm": true}`.
 3. `/mnt/nas/ai/Video/` und `/mnt/nas/ai/Audio/` werden automatisch angelegt, sind aber **kein** Weaviate-Schema — vor Aufnahme in `alice.dms_watched_folders` das Verhalten der nachgelagerten Pipeline prüfen (siehe Edge Case oben).
+
+---
+
+## QA Test Results — Iteration 2 (2026-08-23)
+
+**Tested:** 2026-08-23
+**Tester:** QA Engineer (AI)
+**Commit under test:** `5b2259e` (Diff-Basis: `a010f8f` = Stand vor Iteration 2)
+**Scope:** ausschließlich die vier Iteration-2-Ergänzungen (Dry-Run, `/attachment-text`, Extension-Routing, PDF-Volltext) + Regression gegen die in Iteration 1 bereits abgenommene Logik.
+**Test method:** Statisch/Logik-Review + **isolierte Re-Ausführung des tatsächlich ausgelieferten Codes**. Die Code-Node-Helper wurden **mechanisch** aus den Workflow-JSONs extrahiert (nicht abgetippt); der Kandidaten-Scan-Node wurde **als Ganzes** ausgeführt (nur `axios`/Weaviate gemockt, `NAS_AI_ROOT` auf ein echtes Temp-Dateisystem gezeigt). `app.py` wurde mit `pypdf==5.1.0` in einem venv gegen **real erzeugte PDFs** (reportlab) getestet. **Keine Live-Ausführung** gegen n8n/IMAP/Ollama/Weaviate/NAS — solche Kriterien sind als `NOT VERIFIABLE` markiert.
+
+**Testumfang gesamt: 467 Assertions, 0 Fehler** (61 Routing/Schema-Gating, 232 Parität der drei Konstanten-Kopien, 30 Dry-Run-Parität, 82 Iteration-1-Regression, 53 `/attachment-text`, 9 Lock-Semantik + statische Checks).
+
+### Acceptance Criteria Status — neue/geänderte Bereiche
+
+#### AC-1: Zielordner-Struktur (Erweiterung Video/Audio)
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 1.1 | `Video/` + `Audio/` zusätzlich zu den fünf Schemata | PASS | `VALID_TARGET_FOLDERS = new Set([...VALID_SCHEMAS,'Video','Audio'])` in **beiden** Import-Nodes; Größe 7 verifiziert |
+| 1.2 | Fehlende Ordner werden automatisch angelegt | PASS | Video/Audio laufen über **denselben** `fs.mkdirSync(targetDir,{recursive:true})`-Pfad wie die Schema-Ordner — kein Sonderfall, kein zweiter Code-Pfad |
+
+#### AC-2: Extension-Routing (der kritische Bereich)
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 2.a | Reihenfolge (a) unsupported → reject | PASS | `prefilterAttachment()` prüft `SUPPORTED_EXTENSIONS` als **erste** Anweisung; `.exe` wird auch bei 999 MB als `unsupported_extension` abgelehnt (kein verschwendeter Folgecheck) |
+| 2.b | (b) Bild-Müll < 20 KB → stilles Skip | PASS | Grenzwerte unverändert re-verifiziert: 20479 → `image_junk`, 20480 → Import. `image/*`-MIME mit Dokument-Endung weiterhin als Junk erkannt |
+| 2.c | (c) Bild/Video/Audio → Direkt-Routing, **kein** LLM-Aufruf | PASS | `routeByExtension()` liefert für alle 7 Bild-, 5 Video-, 5 Audio-Endungen `Document`/`Video`/`Audio`; im Code liegt der `if (targetFolder)`-Zweig **vor** `classifyAttachment()` — der LLM-Aufruf ist für diese Typen unerreichbar |
+| 2.d | (d) PDF/DOCX/XLSX/ODT/ODS/TXT/MD → LLM-Klassifizierung | PASS | `routeByExtension()` gibt für alle 9 Dokument-Endungen `null` zurück → Klassifizierungszweig |
+| 2.e | Exact-Match statt Substring | PASS | Gezielt geprüft: `'mp4'` (ohne Punkt), `'.mp4x'` und `'.MP4'` (roh) matchen **nicht**; `Set.has()` ist exakt, kein `includes()`/Regex. Aufrufer lowercased korrekt via `path.extname(...).toLowerCase()` |
+| 2.f | Doppel-Endungen nicht fehlgeroutet | PASS | `invoice.pdf.mp4` → `Video` (korrekt: `path.extname` nimmt nur die **letzte** Endung, die Datei *ist* ein MP4); `video.mp4.pdf` → LLM-Klassifizierung. Kein `.docx`, das als Audio/Video durchrutscht — alle 26 Endungen einzeln geprüft |
+| 2.g | 20-KB-Müllgrenze gilt **nicht** für Video/Audio | PASS | Kleines `.mp4`/`.mp3` (100 Bytes) wird importiert — die Grenze ist bildspezifisch, wie im Tech Design gefordert |
+| 2.h | Video/Audio in `SUPPORTED_EXTENSIONS` | PASS | Alle 10 Medien-Endungen in beiden Listen vorhanden (26 Endungen gesamt) |
+
+#### AC-2.5 / PDF-Volltext in der Klassifizierung
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 2.5a | PDF-Volltext fließt in den Prompt | PASS | `fetchPdfText()` → `POST /attachment-text`, Ergebnis ersetzt den `(no extractable text …)`-Platzhalter. **BUG-4 aus Iteration 1 ist für PDF damit geschlossen** |
+| 2.5b | TXT/MD unverändert direkt dekodiert | PASS | `PLAINTEXT_EXTENSIONS`-Zweig unverändert |
+| 2.5c | Office ohne Volltext (bewusst, PROJ-91) | PASS (dokumentierte Abweichung) | DOCX/XLSX/ODT/ODS fallen weiterhin auf Dateiname+Kontext zurück — spec-konform |
+| 2.5d | Fehler bei Extraktion → Fallback statt Abbruch | PASS | `fetchPdfText()` fängt **jeden** Fehler → `''` → bestehender Prompt-Fallback. Endpoint liefert für Nicht-PDF/Fehler `200` + leerer Text, löst also nicht einmal den catch-Zweig aus |
+| 2.5e | Prompt-Längenbegrenzung greift | PASS | `.slice(0, 4000)` im Prompt **plus** `PLAINTEXT_MAX_CHARS = 50000` serverseitig — doppelt gedeckelt |
+
+#### AC-4.x: Backfill Dry-Run
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 4.d1 | Dry-Run ist **Standard** (ohne `confirm`) | PASS | `Code: Init Backfill Run`: `CONFIRM = confirmRaw === true \|\| confirmRaw === 'true'` — Default false. Coercion akzeptiert Body **und** Query, Boolean **und** String |
+| 4.d2 | Kein `/attachment`-Call, kein `writeFileSync`, kein `mkdirSync` im Dry-Run | PASS | Kontrollfluss selbst nachvollzogen: Im Kandidaten-Scan-Node existiert **überhaupt kein** `writeFileSync`/`mkdirSync`/`/attachment`-Aufruf (grep = 0 Treffer). Einziger Netzwerkaufruf ist Weaviate-GraphQL (Zeile 105); `fs` wird ausschließlich lesend via `existsSync()` genutzt. Der `return` mit `_dry_run` steht **vor** jedem Import-Zweig. Zusätzlich empirisch: Dry-Run gegen ein leeres Temp-Verzeichnis erzeugt **0 Dateien/0 Verzeichnisse** |
+| 4.d3 | **`candidates_found` ist exakt der Umfang des echten Laufs** | PASS | **Gezielt geprüft (Kernrisiko):** Der Zählwert stammt aus **derselben** Pass-1/Pass-2-Kandidatenlogik wie der bestätigte Lauf — es gibt keinen divergenten/approximativen Zweig; der `if (!CONFIRM)`-Return sitzt **hinter** dem vollständigen Reconcile. Empirisch über 8 Szenarien bestätigt: `candidates_found` (Dry-Run) == Summe der `pendingAttachments` (confirmed) in **allen** Fällen, ebenso `pending_mails` == Anzahl Mail-Items. Getestet u.a.: gemischte Typen (3 von 6 Anhängen), EC-9-Geschwister (2), Teil-Import (1 von 2 verbleibend), bereits importiertes Video/Audio (0), mailübergreifend gleicher Basisname (2), nur-Müll-Mail (0) |
+| 4.d4 | Response-Form `{ candidates_found, dry_run: true }` | PASS | `Code: Empty Summary` liefert `{ dry_run:true, candidates_found, pending_mails, message }` |
+| 4.d5 | Beliebig wiederholbar, kein hängender Lock | PASS | Dry-Run läuft über `IF: Queue Empty` → `Code: Empty Summary`, wo die **owner-geprüfte Lua-Freigabe** auf `alice:dms:processor:lock:run` liegt + Redis-Cleanup. Zwei aufeinanderfolgende Dry-Runs simuliert: beide acquire+release sauber. Zusätzlich `PX: 1800000` als TTL-Backstop. Zwei identische Dry-Runs liefern identische Zahlen |
+| 4.d6 | Kein `IF: Confirm Mode`-Node (Abweichung) | PASS (Abweichung akzeptabel) | Graph-Topologie ist **unverändert** (`connections` im Diff nicht angefasst) — die Abweichung vermeidet tatsächlich die duplizierte Lock-Freigabe, die der Implementer als Grund nennt. Verdrahtung verifiziert: `_empty:true` trifft die True-Branch von `IF: Queue Empty` |
+| 4.d7 | `SCHEMAS` (countOnDisk) um Video/Audio erweitert | PASS | **Explizit gejagt (Drift-Risiko):** `SCHEMAS` enthält alle 7 Ordner; automatisiert geprüft, dass **jeder** Ordner aus `VALID_TARGET_FOLDERS` in `SCHEMAS` vorkommt. Empirisch: bereits importiertes `.mp4`/`.mp3` wird als erledigt erkannt (0 Kandidaten) → **kein** Endlos-Re-Import |
+
+#### AC-5: `VALID_SCHEMAS` unangetastet
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 5.v1 | `VALID_SCHEMAS` enthält **kein** Video/Audio | PASS | In beiden Import-Nodes exakt die 5 DMS-Schemata, byte-identisch zwischen Laufzeit und Backfill |
+| 5.v2 | LLM kann Video/Audio nicht zurückgeben | PASS | `parseClassification('{"document_type":"Video"}')` → `null`, ebenso `Audio`, `Email`, `BankTransaction` |
+| 5.v3 | Zielordner-Gate an **jeder** Schreibstelle erweitert | PASS | `if (!VALID_TARGET_FOLDERS.has(targetFolder))` steht in **beiden** Import-Nodes unmittelbar vor `mkdirSync`/`writeFileSync` — Defence-in-Depth intakt |
+
+### Duplizierungs-Audit (die vom Implementer selbst gemeldete Risikostelle)
+
+Gezielt auf Drift zwischen den drei Fundstellen geprüft — **232 Assertions, 0 Abweichungen**:
+
+| Konstante / Helper | Laufzeit (`alice-mail-sync`) | Backfill Kandidaten-Scan | Backfill Import | Ergebnis |
+|---|---|---|---|---|
+| `SUPPORTED_EXTENSIONS` (26) | ✔ | ✔ | (n/a — nutzt Kandidatenliste) | **identisch** |
+| `IMAGE/VIDEO/AUDIO_EXTENSIONS` | ✔ | ✔ (nur IMAGE) | ✔ | **identisch** |
+| `ATTACHMENT_MAX_BYTES` / `IMAGE_JUNK_MAX_BYTES` | ✔ | ✔ | ✔ | **identisch** |
+| `VALID_SCHEMAS` / `VALID_TARGET_FOLDERS` | ✔ | (n/a) | ✔ | **identisch** |
+| `SCHEMAS` (countOnDisk-Ordner) | (n/a) | ✔ 7 Ordner | (n/a) | **korrekt erweitert** |
+| `routeByExtension()` | ✔ | (n/a) | ✔ | **verhaltensgleich** für alle 26 Endungen + 4 MIME-Varianten |
+| Prefilter-Entscheidung | `prefilterAttachment()` | `isImportCandidate()` | Größencheck | **übereinstimmend** über 162 Endung×Größe-Kombinationen |
+
+Die vom Implementer befürchtete Drift ist in dieser Iteration **nicht** eingetreten. Das Wartungsrisiko bleibt aber real (siehe BUG-5, hochgestuft).
+
+### Regression Check (`a010f8f` → `5b2259e`)
+
+- **Diff-Umfang:** `Dockerfile` (1 Zeile), `app.py` (+153/-32), 2 Workflow-JSONs, `INDEX.md`, Spec. Keine Änderung an anderen Workflows, Compose- oder SQL-Dateien.
+- **Workflow-JSONs:** geändert wurden **ausschließlich** `jsCode`-Werte + eine Sticky Note (Text/Höhe). **`connections` in beiden Workflows unverändert** → Graph-Topologie, MQTT-Pfad (AC-5.1) und der Notification-/Status-Zweig unberührt. Keine Nodes hinzugefügt/entfernt (19 bzw. 18).
+- **Iteration-1-Logik re-ausgeführt (82 Assertions, alle grün):**
+  - `sanitizeFilename()` / `shortenSender()` / `buildBaseFilename()` — **unverändert**, 10 Path-Traversal-Payloads × 3 Zielordner (inkl. der neuen `Video/`, `Audio/`) × 2 Nodes: **kein einziger Ausbruch** aus `/mnt/nas/ai/<Ordner>/`.
+  - `resolveCollision()` — **unverändert**, gegen echtes Dateisystem: 5× gleicher Name → `…Anhang.pdf, _1, _2, _3, _4`, kein Überschreiben, Suffix vor der Endung; gleiches Verhalten für `.mp4` in `Video/`. Laufzeit- und Backfill-Variante verhaltensgleich.
+  - BUG-2-Fix (`countOnDisk` + globaler Zweit-Pass) — **intakt und jetzt auf 7 Ordner erweitert**: Teil-Import holt genau den fehlenden Anhang nach, mailübergreifend gleicher Basisname wird nicht falsch dedupliziert, EC-9-Geschwister beide importiert.
+  - BUG-3-Fix (50-MB-Limit) — **intakt**: Grenzwerte 52428800 → Import / 52428801 → Skip an allen drei Stellen; Prüfung weiterhin **vor** dem Netzwerkaufruf.
+  - Fehler-Isolation pro Anhang (`try/catch` + `continue`) und MQTT-Publish nur bei echtem Neu-Insert — **unverändert**.
+- **`app.py`:** `/attachment`-Contract nach dem `_fetch_attachment_part()`-Refactoring **unverändert** — 4 Felder, Byte-Round-Trip über Base64 verlustfrei, 400/404-Verhalten identisch. `/fetch`, `/body`, `/test`, `/encrypt` nicht angefasst.
+- **Statische Checks erneut grün:** beide JSONs valide, eindeutige Node-Namen/IDs, keine dangling Connection-/`$('Node')`-Referenzen, alle Code-Nodes `node --check` OK, **0 `console.log`**, `require` beschränkt auf `axios, redis, winston, crypto, fs, path`; `app.py` `py_compile` OK.
+
+### Security Audit — Iteration 2
+
+- [x] **`/attachment-text` nutzt exakt denselben Credential-Flow** — kein eigener Entschlüsselungspfad: Der Endpoint enthält **kein** `_decrypt_password` und **kein** `imap.login`, sondern ruft ausschließlich den gemeinsamen Helper `_fetch_attachment_part()` (Zeile 187) auf, der wie `/attachment` `_decrypt_password(data["password_enc"])` → `_connect()` → `login()` mit `readonly=True` ausführt und sauber ausloggt. Die übrigen drei `_decrypt_password`-Aufrufe gehören zu den unveränderten PROJ-46-Endpunkten (`/test`, `/fetch`, `/body`). **Kein neuer Klartext-Passwort-Pfad.**
+- [x] **Kein Credential-/Pfad-Leak in der Response** — Response-Keys sind **exakt** `{text, page_count, truncated, status}`; mit Testwerten `password_enc="ENCSECRET"`, `host="mail.secret.de"`, `username="user@x"` erscheint **keiner** dieser Werte (und kein `/app`-/`/mnt`-Pfad) in der Antwort. Fehlerfälle liefern leeren Text statt Stacktrace.
+- [x] **Kein Leak in den Logs** — `log.warning("PDF extraction failed for %s: %s", filename, exc)` loggt nur Dateiname + pypdf-Fehlertext, keine Credentials. Workflow-seitig loggt `fetchPdfText()` nur `uid`/`idx`/`e.message`.
+- [x] **`pypdf` führt keine Injection-/Pfad-Risiken ein** — Eingabe ist ein **In-Memory-Puffer** (`PdfReader(io.BytesIO(payload))`), kein Dateipfad; es wird nichts auf Platte geschrieben und kein Subprozess gestartet. Rückgabe ist reiner extrahierter Text als JSON. Ein einzelner defekter Page-Parse ist gekapselt und verliert nicht den Rest des Dokuments.
+- [x] **Kein 4xx/5xx-Fehlpfad, der den n8n-HTTP-Node in den Error-Zweig zwingt** — Nicht-PDF und Extraktionsfehler liefern nachweislich **HTTP 200** (5 Fallgruppen getestet, inkl. korruptes und leeres PDF).
+- [x] **Zielordner-Segment weiterhin nicht angreifbar** — `Video`/`Audio` stammen aus einer festen Endungs-Allowlist, nicht aus LLM- oder Nutzereingabe; `VALID_TARGET_FOLDERS`-Gate vor jedem Schreibzugriff.
+- [x] **Path-Traversal für die neuen Ordner mitgeprüft** — 10 Payloads auch in `Video/`/`Audio/`-Dateinamen: kein Ausbruch.
+- [x] **Speicher-Risiko (BUG-3) nicht reintroduziert** — `/attachment-text` gibt **keine** Rohbytes zurück (Antwort ≤ ~50 KB Text, unabhängig von der PDF-Größe). Der 50-MB-Check greift **vor** jedem `/attachment-text`-Aufruf (Prefilter → `continue` steht in beiden Nodes **vor** `fetchPdfText()`), ein übergroßes PDF erreicht `pypdf` über diesen Workflow also nie. Siehe BUG-8 für die verbleibende theoretische Lücke bei Direktaufruf.
+- [ ] **INFO (unverändert, kein Regress): Webhook ohne Authentifizierung** — Projektkonvention (VPN-only), identisch zu allen anderen Backfill-Workflows. Der Dry-Run **entschärft** dieses Risiko sogar, da ein versehentlicher Aufruf jetzt folgenlos ist.
+
+**Ergebnis:** Keine neue Sicherheitslücke durch Iteration 2.
+
+### Bugs Found — Iteration 2
+
+Keine neuen Critical/High/Medium-Bugs. Zwei Low-Befunde:
+
+#### BUG-8: `/attachment-text` hat keine eigene Größenobergrenze (Defence-in-Depth-Lücke)
+- **Severity:** Low
+- **Root Cause:** `ATTACHMENT_MAX_BYTES` existiert nur workflow-seitig (n8n). `app.py` kennt keine Obergrenze; `_extract_pdf_text()` lädt das PDF komplett via `PdfReader(io.BytesIO(payload))` in den Speicher.
+- **Tatsächliches Verhalten:** Über die **PROJ-53-Workflows nicht auslösbar** — der 50-MB-Prefilter greift nachweislich vor jedem `/attachment-text`-Aufruf (verifiziert in beiden Nodes). Ein **direkter** Aufruf des Endpoints (VPN-intern, Webhook/Service ohne Auth) mit der UID eines 200-MB-PDFs würde die Mail jedoch vollständig in den Speicher des `alice-mail-reader`-Containers laden. Betroffen wäre nur dieser Container (2 gunicorn-Worker), nicht der geteilte n8n-Prozess — der eigentliche BUG-3-Schadensfall ist damit **nicht** reintroduziert.
+- **Steps to Reproduce:** 1. `POST /attachment-text` direkt (nicht über den Workflow) mit UID einer Mail mit sehr großem PDF-Anhang. 2. Erwartet: kontrollierte Ablehnung. 3. Tatsächlich: vollständiger RFC822-Fetch + pypdf-Parse im Speicher.
+- **Bewertung:** Reine Defence-in-Depth-Lücke; der reale Aufrufpfad ist abgesichert. Analog `/attachment` (hatte in Iteration 1 dieselbe Eigenschaft und wurde als akzeptabel bewertet). Mitigierbar durch ein `len(payload)`-Limit im gemeinsamen Helper.
+- **Priority:** Nice to have
+
+#### BUG-9: Dry-Run schreibt trotzdem den Mailbox-Credential-Cache nach Redis
+- **Severity:** Low (kosmetisch)
+- **Root Cause:** `Code: Cache Mailboxes` liegt im Graphen **vor** `Code: Fetch Mails With Attachments` und läuft daher auch im Dry-Run.
+- **Tatsächliches Verhalten:** Ein Dry-Run legt kurzzeitig `alice:mail:backfill:mailboxes` an (Passwörter bleiben dabei **verschlüsselt**, `password_enc` unverändert). `Code: Empty Summary` löscht den Key auf dem Weg nach draußen wieder — es bleibt **kein** Residuum. Es findet **keine** IMAP-Verbindung statt; die Spec-Zusage "keine IMAP-Verbindung, kein NAS-Write" ist eingehalten.
+- **Bewertung:** Streng genommen ist der Dry-Run damit nicht 100 % seiteneffektfrei, praktisch aber folgenlos (verschlüsselte Daten, sofort wieder gelöscht, TTL 86400 s als Backstop). Nur relevant, falls jemand "Dry-Run schreibt nichts" wörtlich als Audit-Zusage liest.
+- **Priority:** Nice to have (ggf. nur dokumentieren)
+
+#### BUG-5 (aus Iteration 1): Hochstufung Low → **Medium** empfohlen
+- **Status:** weiterhin **offen**, in dieser Iteration **nicht** schadenswirksam geworden (alle drei Kopien nachweislich synchron).
+- **Begründung der Hochstufung:** Der Implementer hat selbst gemeldet, dass Iteration 2 die Allowlist an drei Stellen **gleichzeitig** ändern musste und dass `fetchPdfText()` bewusst **nicht** byte-identisch ist (Laufzeit liest `ctx.host`/`ctx.passwordEnc`, Backfill `mailbox.imap_host`/`mailbox.password_enc`). Das ist bestätigt. Der Fehlerfall wäre **still**: Ein vergessener Kandidaten-Scan hätte Video/Audio dauerhaft als "nichts zu tun" gewertet (kein Log) bzw. bei fehlendem `SCHEMAS`-Eintrag jeden Lauf Duplikate erzeugt. Beides wurde diesmal vermieden — die Wahrscheinlichkeit steigt aber mit jeder weiteren Iteration.
+- **Priority:** Fix in next sprint (vor einer dritten Iteration mit weiteren Formaten) — **kein Deployment-Blocker**
+
+### Nicht bestätigte Verdachtsmomente (Negativbefunde)
+
+Gezielt gesucht, **nicht** vorhanden:
+
+- **Dry-Run zählt falsch (über-/unterzählt):** Kein Fehler. Identische Kandidatenlogik, empirisch über 8 Szenarien gegen den confirmed-Pfad abgeglichen.
+- **Dry-Run löst doch IMAP/NAS-Zugriff aus:** Kein Fehler. Im Scan-Node existiert kein einziger `/attachment`-, `mkdirSync`- oder `writeFileSync`-Aufruf.
+- **Substring-Bug im Extension-Match:** Kein Fehler — `Set.has()`, exakte Treffer; `'mp4'`, `'.mp4x'` matchen nicht.
+- **Doppel-Endung `invoice.pdf.mp4` fehlgeroutet:** Kein Fehler im Sinne einer Fehlklassifizierung — `path.extname` liefert `.mp4`, die Datei ist ein MP4 und gehört nach `Video/`.
+- **`.docx` versehentlich als Audio/Video geroutet:** Kein Fehler — alle 26 Endungen einzeln geprüft, alle 9 Dokumenttypen gehen in die LLM-Klassifizierung.
+- **Video/Audio in `VALID_SCHEMAS` durchgesickert:** Kein Fehler — beide Listen sauber getrennt, LLM kann Video/Audio nicht liefern.
+- **`SCHEMAS`-Drift (2 von 3 Stellen erweitert):** Kein Fehler — alle drei Stellen konsistent.
+- **Hängender Lock nach Dry-Run:** Kein Fehler — owner-geprüfte Freigabe im Dry-Run-Pfad, TTL als Backstop, zwei Läufe hintereinander sauber.
+- **`/attachment-text` bricht den n8n-Error-Zweig:** Kein Fehler — 200 in allen Nicht-PDF-/Fehlerfällen.
+- **Regression an `resolveCollision`/`sanitizeFilename`/`countOnDisk`:** Kein Fehler — unverändert, re-ausgeführt.
+
+### Nicht verifizierbar in dieser Umgebung
+
+| # | Kriterium | Grund |
+|---|-----------|-------|
+| NV-1 | `pypdf` installiert im **Alpine**-Image | `pypdf==5.1.0` steht korrekt in der `pip install`-Zeile des `Dockerfile` (reines py3-none-any-Wheel, Alpine-tauglich) und wurde lokal im venv gegen echte PDFs getestet — der **Image-Build** steht aus. `alice-mail-reader` muss **neu gebaut** werden (`docker compose build`), ein Restart genügt nicht |
+| NV-2 | Ende-zu-Ende-Lauf gegen IMAP/Ollama/Weaviate/NAS | Kein Zugriff in dieser Umgebung |
+| NV-3 | AC-5.2 / AC-5.3 (Mail-Thumbnail-Rendering) | Unverändert offen aus Iteration 1 |
+| NV-4 | Reale PDF-Klassifizierungsqualität | Hängt vom LLM ab; der Volltext erreicht den Prompt nachweislich |
+
+### Summary — Iteration 2
+
+- **Acceptance Criteria (neu/geändert):** **25/25 PASS**, 0 FAIL. Alle vier Ergänzungen sind vollständig und korrekt umgesetzt.
+- **Kernrisiken der Aufgabenstellung:** alle vier gezielt geprüft und **entkräftet** — Dry-Run-Zählung ist exakt (nicht divergent), Extension-Routing-Reihenfolge stimmt (kein LLM-Aufruf für Medien, kein Dokument im falschen Ordner), keine `SUPPORTED_EXTENSIONS`/`SCHEMAS`-Drift, `VALID_SCHEMAS` unangetastet.
+- **Regression:** **keine.** Iteration-1-Logik (BUG-2-Dedup, BUG-3-Limit, Pfad-Sanitisierung, Kollisions-Suffix, Fehler-Isolation, MQTT-nur-bei-Neu-Insert) unverändert und re-verifiziert; `connections` beider Workflows byte-identisch.
+- **Bugs:** 2 neue (BUG-8, BUG-9 — beide **Low**, beide über den realen Aufrufpfad nicht auslösbar) + Empfehlung, BUG-5 auf Medium hochzustufen (Wartungsschuld, kein Funktionsfehler). **0 Critical, 0 High, 0 blockierende Medium.**
+- **Security:** **Pass.** Kein neuer Credential-Pfad, kein Leak in Response/Logs, `pypdf` arbeitet rein In-Memory ohne Pfad-/Subprozess-Risiko.
+- **Production Ready:** **YES — READY**
+- **Recommendation:** **Deploy** — mit der zwingenden Voraussetzung, dass `alice-mail-reader` **neu gebaut** wird (NV-1); ohne `pypdf` im Image schlägt jeder `/attachment-text`-Aufruf fehl. Das degradiert zwar nur (leerer Text → Fallback auf Dateiname+Kontext, also Iteration-1-Verhalten) und bricht den Import nicht, würde aber den Hauptzweck von Iteration 2 stillschweigend aushebeln. Nach dem Deploy: Backfill zuerst **ohne** `confirm` aufrufen und die Kandidatenzahl prüfen; danach AC-5.2/5.3 gegen den laufenden Thumbnailer verifizieren.
 
 ## Deployment
 _To be added by /deploy_
