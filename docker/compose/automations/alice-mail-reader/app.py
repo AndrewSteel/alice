@@ -9,6 +9,7 @@ Endpoints:
   POST /fetch          — fetch emails since a given IMAP UID, returns metadata + body preview
   POST /body           — fetch full body of a single email by UID
   POST /attachment     — fetch raw bytes of a single attachment by UID + attachment index
+  POST /attachment-text — extract plaintext from a single PDF attachment by UID + index
 
 Passwords are encrypted with AES-256-CBC. The key is derived from MAIL_ENC_KEY (env).
 Plaintext passwords never leave this container.
@@ -21,6 +22,7 @@ import email as email_lib
 from email.header import decode_header
 import hashlib
 import imaplib
+import io
 import logging
 import os
 from datetime import datetime
@@ -28,12 +30,17 @@ from datetime import datetime
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from flask import Flask, request, jsonify
+from pypdf import PdfReader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alice-mail-reader")
 
 app = Flask(__name__)
 MAX_EMAILS_PER_FETCH = 50
+
+# Mirrors dms-extractor-pdf's PLAINTEXT_MAX_CHARS so both extraction paths feed
+# downstream consumers the same maximum amount of text.
+PLAINTEXT_MAX_CHARS = 50000
 
 
 def _get_key() -> bytes:
@@ -141,6 +148,61 @@ def _get_attachments(msg) -> list[dict]:
             "size_bytes": len(payload) if payload else 0,
         })
     return attachments
+
+
+def _is_pdf(filename: str, mime_type: str) -> bool:
+    return filename.lower().endswith(".pdf") or mime_type.lower() == "application/pdf"
+
+
+def _extract_pdf_text(payload: bytes) -> tuple[str, int, bool]:
+    """Extract plaintext from PDF bytes. Returns (text, page_count, truncated).
+
+    Same contract as dms-extractor-pdf (pdf-parse + PLAINTEXT_MAX_CHARS cap),
+    but synchronous and in-process instead of via MQTT/Redis.
+    """
+    reader = PdfReader(io.BytesIO(payload))
+    page_count = len(reader.pages)
+    parts = []
+    for page in reader.pages:
+        try:
+            parts.append(page.extract_text() or "")
+        except Exception:
+            # A single broken page must not lose the text of all the others.
+            parts.append("")
+    text = "\n".join(parts)
+    truncated = len(text) > PLAINTEXT_MAX_CHARS
+    if truncated:
+        text = text[:PLAINTEXT_MAX_CHARS]
+    return text, page_count, truncated
+
+
+def _fetch_attachment_part(data: dict, uid: str, attachment_index: int):
+    """Fetch one attachment by absolute index. Returns (filename, mime, payload).
+
+    Raises LookupError when the mail or the index does not exist. Shared by
+    /attachment and /attachment-text so both address the exact same MIME part
+    that /fetch reported at that position.
+    """
+    folder = data.get("folder", "INBOX")
+    password = _decrypt_password(data["password_enc"])
+    imap = _connect(data)
+    imap.login(data["username"], password)
+    imap.select(folder, readonly=True)
+
+    typ, msg_data = imap.uid("fetch", uid.encode(), "(RFC822)")
+    if typ != "OK" or not msg_data or msg_data[0] is None:
+        imap.logout()
+        raise LookupError("E-Mail nicht gefunden")
+
+    raw = msg_data[0][1]
+    msg = email_lib.message_from_bytes(raw)
+    imap.logout()
+
+    for idx, (filename, part) in enumerate(_walk_attachment_parts(msg)):
+        if idx == attachment_index:
+            return filename, part.get_content_type(), (part.get_payload(decode=True) or b"")
+
+    raise LookupError("Anhang nicht gefunden")
 
 
 def _connect(data: dict):
@@ -300,7 +362,6 @@ def fetch_attachment():
     """
     data = request.json or {}
     uid = str(data.get("uid", ""))
-    folder = data.get("folder", "INBOX")
 
     if not uid:
         return jsonify({"error": "uid required"}), 400
@@ -314,37 +375,85 @@ def fetch_attachment():
         return jsonify({"error": "Anhang nicht gefunden"}), 404
 
     try:
-        password = _decrypt_password(data["password_enc"])
-        imap = _connect(data)
-        imap.login(data["username"], password)
-        imap.select(folder, readonly=True)
+        filename, mime_type, payload = _fetch_attachment_part(data, uid, attachment_index)
+        return jsonify({
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": len(payload),
+            "content_base64": base64.b64encode(payload).decode("ascii"),
+        })
 
-        typ, msg_data = imap.uid("fetch", uid.encode(), "(RFC822)")
-        if typ != "OK" or not msg_data or msg_data[0] is None:
-            imap.logout()
-            return jsonify({"error": "E-Mail nicht gefunden"}), 404
-
-        raw = msg_data[0][1]
-        msg = email_lib.message_from_bytes(raw)
-        imap.logout()
-
-        for idx, (filename, part) in enumerate(_walk_attachment_parts(msg)):
-            if idx != attachment_index:
-                continue
-            payload = part.get_payload(decode=True) or b""
-            return jsonify({
-                "filename": filename,
-                "mime_type": part.get_content_type(),
-                "size_bytes": len(payload),
-                "content_base64": base64.b64encode(payload).decode("ascii"),
-            })
-
-        return jsonify({"error": "Anhang nicht gefunden"}), 404
-
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
     except imaplib.IMAP4.error as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         log.exception("fetch_attachment failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/attachment-text", methods=["POST"])
+def fetch_attachment_text():
+    """Return the extracted plaintext of a single PDF attachment (PROJ-53 iteration 2).
+
+    Same input fields as /attachment. Used by the classification step of
+    alice-mail-sync / alice-mail-attachment-backfill, which cannot run pdf-parse
+    itself (n8n Code nodes only allow axios/redis/winston + crypto/fs/path).
+
+    Non-PDF attachments and extraction failures return an empty text with a
+    status field instead of an error, so the caller can fall back to
+    filename + email context classification (same as for Office formats).
+    """
+    data = request.json or {}
+    uid = str(data.get("uid", ""))
+
+    if not uid:
+        return jsonify({"error": "uid required"}), 400
+
+    try:
+        attachment_index = int(data.get("attachment_index", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "attachment_index muss eine Zahl sein"}), 400
+
+    if attachment_index < 0:
+        return jsonify({"error": "Anhang nicht gefunden"}), 404
+
+    try:
+        filename, mime_type, payload = _fetch_attachment_part(data, uid, attachment_index)
+
+        if not _is_pdf(filename, mime_type):
+            return jsonify({
+                "text": "",
+                "page_count": 0,
+                "truncated": False,
+                "status": "not_a_pdf",
+            })
+
+        try:
+            text, page_count, truncated = _extract_pdf_text(payload)
+        except Exception as exc:
+            # Encrypted / malformed / image-only PDFs must not fail the caller.
+            log.warning("PDF extraction failed for %s: %s", filename, exc)
+            return jsonify({
+                "text": "",
+                "page_count": 0,
+                "truncated": False,
+                "status": "extraction_failed",
+            })
+
+        return jsonify({
+            "text": text,
+            "page_count": page_count,
+            "truncated": truncated,
+            "status": "ok",
+        })
+
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except imaplib.IMAP4.error as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        log.exception("fetch_attachment_text failed")
         return jsonify({"error": str(exc)}), 500
 
 
