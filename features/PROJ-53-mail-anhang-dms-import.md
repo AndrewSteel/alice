@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-23
 
@@ -514,6 +514,64 @@ Der Workflow bekommt denselben `confirm`-Mechanismus wie `alice-dms-language-bac
 - **`confirm`-Parameter statt separatem Preview-Endpoint:** Konsistent mit dem bereits etablierten Muster aus `alice-dms-language-backfill` — ein Parameter statt zweier Routen hält den Webhook-Contract einfach und macht das Verhalten für den Admin vorhersehbar (derselbe Aufruf, nur ein Flag unterscheidet Vorschau von Ausführung).
 
 **Nächste Schritte:** `/backend` für die Umsetzung der vier obigen Ergänzungen, dann erneut `/qa`.
+
+### Implementation Notes (Iteration 2, Backend, 2026-08-23)
+
+Alle vier Ergänzungen umgesetzt. Backend-only, kein Deployment (erfolgt manuell durch den Admin).
+
+**1. `alice-mail-reader`: neuer Endpunkt `POST /attachment-text`**
+
+- Datei: `docker/compose/automations/alice-mail-reader/app.py`. Eingabe identisch zu `/attachment` (Mailbox-Credentials, `uid`, `attachment_index`). Ausgabe `{ text, page_count, truncated, status }` mit `status ∈ {ok, not_a_pdf, extraction_failed}`.
+- **Nicht-PDF und Extraktionsfehler werfen keinen Fehler**, sondern liefern `200` mit leerem `text` + Statusfeld — der Workflow fällt dann wie bei Office-Formaten auf Dateiname+Mail-Kontext zurück. Nur echte Input-/IMAP-Fehler geben weiterhin 400/404/500 zurück (gleiche Posture wie `/attachment`).
+- `PLAINTEXT_MAX_CHARS = 50000` wurde 1:1 aus `dms-extractor-pdf/main.js` übernommen, inkl. Truncation-Verhalten (`truncated`-Flag).
+- **Refactoring:** Das IMAP-Fetch + MIME-Walk aus `/attachment` wurde in den gemeinsamen Helper `_fetch_attachment_part()` extrahiert, den jetzt beide Endpunkte nutzen (aufbauend auf `_walk_attachment_parts()` aus Iteration 1). Damit adressieren `/attachment` und `/attachment-text` garantiert denselben MIME-Part. Der `/attachment`-Contract ist unverändert (per Test abgesichert).
+- Modul-Docstring-Endpunktliste ergänzt.
+
+**PDF-Bibliothek: `pypdf==5.1.0`**
+
+Gewählt statt `pdfplumber`, weil `alice-mail-reader` auf `python:3.12-alpine` läuft: `pypdf` ist ein reines Python-Wheel (`pypdf-5.1.0-py3-none-any.whl`, verifiziert per `pip download`) und installiert auf Alpine/musl ohne Compiler. `pdfplumber` zieht `pdfminer.six` **und `Pillow`** nach; Pillow hat für musl keine vorgebauten Wheels und bräuchte Build-Deps (`gcc`, `zlib-dev`, `jpeg-dev`, …) im Image — deutlich größeres Image und längere Builds für reine Textextraktion. Funktional entspricht `pypdf.PdfReader(...).pages[i].extract_text()` dem, was `pdf-parse` im Node-Extraktor liefert (Volltext + Seitenzahl). Dependency steht in der `pip install`-Zeile des `Dockerfile` (dieser Service hat keine `requirements.txt` — Abhängigkeiten sind dort inline gepflegt, Konvention beibehalten).
+
+**2. Extension-Routing (beide Workflows)**
+
+- `SUPPORTED_EXTENSIONS` in **beiden** Workflows um Video (`.mp4 .mov .avi .mkv .webm`) und Audio (`.mp3 .wav .m4a .ogg .flac`) erweitert, klar als PROJ-53-spezifische Ergänzung kommentiert (**nicht** Teil der geteilten DMS-Allowlist aus `alice-dms-path-worker`).
+- Neuer Helper `routeByExtension(ext, mime)` → `'Document'` (Bild, unverändert) / `'Video'` / `'Audio'` / `null` (= LLM-Klassifizierung). Läuft **nach** dem Bild-Müll-Check (<20 KB) und **vor** jedem LLM-Aufruf. Video/Audio unterliegen bewusst **nicht** der 20-KB-Müll-Grenze (die ist bildspezifisch).
+- **Neue Konstante `VALID_TARGET_FOLDERS`** (= 5 Schemata + `Video` + `Audio`) gattet den finalen Zielordner. `VALID_SCHEMAS` bleibt **exakt** die fünf DMS-Schemata, weil es auch die LLM-Antwort validiert — verifiziert, dass das LLM `Video`/`Audio` nicht zurückgeben kann.
+- `Video/` und `Audio/` werden über denselben `fs.mkdirSync(targetDir, { recursive: true })`-Pfad angelegt wie die fünf Schema-Ordner (gemeinsamer Code-Pfad, kein Sonderfall).
+- **Verifiziert statt angenommen:** Kollisions-Suffix, Dateinamensmuster und Pfad-Sanitisierung aus Iteration 1 funktionieren für Video/Audio unverändert (gegen echtes Dateisystem getestet, inkl. Path-Traversal-Payloads in Video-Dateinamen).
+
+**3. PDF-Volltext in der Klassifizierung (beide Workflows)**
+
+Im Klassifizierungszweig ruft jetzt für `.pdf` ein neuer Helper `fetchPdfText()` den Endpunkt `/attachment-text` auf und übergibt das Ergebnis an den bestehenden Prompt (ersetzt den `(no extractable text …)`-Platzhalter **nur für PDF**). TXT/MD behalten die direkte Dekodierung, DOCX/XLSX/ODT/ODS bleiben bei Dateiname+Kontext (PROJ-91). Jeder Fehler → `''` → bestehender Fallback.
+
+**Abweichung (ehrlich): zwei IMAP-Roundtrips pro PDF.** Der Tech-Design-Punkt "nutzt intern denselben MIME-Walk" ist auf Service-Ebene erfüllt (gemeinsamer Helper `_fetch_attachment_part()`), **nicht** aber im Sinne eines einzigen IMAP-Abrufs: Der Workflow ruft für ein PDF erst `/attachment` (Bytes) und dann `/attachment-text` (Text) auf — zwei getrennte HTTP-Requests, jeder mit eigenem IMAP-Login und eigenem RFC822-Fetch. Ursache: Beide Endpunkte sind zustandslos und der n8n-Code-Node kann die bereits geladenen Bytes nicht an den Extraktor zurückgeben, ohne sie erneut (base64) hochzuladen. Für ein PDF wird die Mail also zweimal vom IMAP-Server geladen. Bewusst so belassen, weil die Alternativen schlechter sind: Bytes zurück an den Service posten würde den Base64-Roundtrip **verdoppeln** (genau der Speicherpfad, den BUG-3 begrenzt hat), ein serverseitiger Cache würde die von der Spec ausgeschlossene neue Persistenzschicht einführen. Praktische Kosten: ein zusätzlicher IMAP-Fetch pro **PDF**-Anhang (nicht pro Anhang) — Bild/Video/Audio rufen `/attachment-text` gar nicht auf.
+
+**4. Dry-Run im Backfill**
+
+- `Code: Init Backfill Run` liest `body.confirm`/`query.confirm` mit **wörtlich derselben** Coercion wie `alice-dms-language-backfill` (verifiziert per String-Vergleich gegen den Referenz-Node) und gibt `confirm` weiter.
+- `Code: Fetch Mails With Attachments` liest das Flag via `$('Code: Init Backfill Run')` (der direkte Input ist `Code: Cache Mailboxes`, das `confirm` nicht führt) und zählt die Kandidaten. Ohne `confirm: true` endet der Node vor dem Import-Zweig und liefert `{ _empty: true, _dry_run: true, candidates_found, pending_mails }`.
+- **Abweichung von der Vorlage (bewusst):** Statt eines separaten `IF: Confirm Mode`-Nodes wie in `alice-dms-language-backfill` nutzt der Dry-Run den **bestehenden** `IF: Queue Empty` → `Code: Empty Summary`-Pfad (`_empty: true`). Grund: Dort liegt bereits die Lock-Freigabe + Redis-Cleanup; ein zusätzlicher Zweig hätte diese Logik dupliziert oder (bei falscher Verdrahtung) den geteilten Processor-Lock hängen lassen. `Code: Empty Summary` unterscheidet die beiden Fälle am `_dry_run`-Flag und antwortet mit `{ dry_run: true, candidates_found, pending_mails, message }`. Die Graph-Topologie ist damit **unverändert** — kein neuer Node, keine neue Connection. Verifiziert: Lock wird auch im Dry-Run freigegeben, und der Kandidaten-Scan-Node macht **keinen** `/attachment`-Aufruf, kein `writeFileSync` und kein `mkdirSync` (einziger Netzwerkaufruf: Weaviate-GraphQL).
+- `SCHEMAS` in `Code: Fetch Mails With Attachments` musste um `Video`/`Audio` erweitert werden: Diese Liste steuert `countOnDisk()` und damit die "bereits importiert"-Erkennung. Ohne die Erweiterung wäre **jeder Video-/Audio-Anhang bei jedem Backfill-Lauf erneut importiert** worden (Duplikate). Das ist bewusst eine andere Liste als `VALID_SCHEMAS`.
+
+**Hält das Duplizierungs-Muster aus Iteration 1? — Teilweise, mit konkretem Drift-Risiko**
+
+Für die *reinen* Helper (`routeByExtension`, `fetchPdfText`) ließ sich der Copy-Paste-Ansatz sauber fortführen; ein automatisierter Vergleich beweist, dass Laufzeit- und Backfill-Pfad für alle geprüften Endungen **identisch** routen. Zwei Stellen zeigen aber, dass das Muster nicht mehr trägt:
+
+1. `fetchPdfText()` ist **nicht** byte-identisch: Der Laufzeitpfad liest Credentials aus `ctx` (`ctx.host`, `ctx.passwordEnc`), der Backfill aus dem Redis-Mailbox-Cache (`mailbox.imap_host`, `mailbox.password_enc`). Gleiche Logik, unterschiedliche Feldnamen — genau die Art Divergenz, die ein späterer Copy-Paste-Fix übersieht.
+2. Die Endungs-Allowlist steht jetzt an **drei** Stellen im Feature (Laufzeit-Import, Backfill-Import, Backfill-Kandidaten-Scan) plus im `alice-dms-path-worker`. Bei dieser Iteration musste `SUPPORTED_EXTENSIONS` an drei Stellen **gleichzeitig** korrekt erweitert werden; wäre der Kandidaten-Scan vergessen worden, hätte der Backfill Video/Audio dauerhaft als "nichts zu tun" gewertet — ein stiller Ausfall ohne Log. Das ist die in Iteration 1 als BUG-5 (Low) notierte Wartungsschuld, die durch iteration 2 spürbar teurer geworden ist. **Empfehlung:** BUG-5 hochstufen und die Allowlist + Routing-Helper in ein Sub-Workflow oder einen kleinen Shared-Service ziehen, bevor eine dritte Iteration weitere Formate ergänzt.
+
+**Verifikation**
+
+- `app.py`: `py_compile` grün; **27 Assertions** gegen den echten Endpunkt-Code mit einem real erzeugten PDF (Volltext über 2 Seiten, `page_count`, Truncation exakt bei 50000, `not_a_pdf`, `extraction_failed` bei korruptem PDF, 400/404-Inputfälle) — plus Nachweis, dass der `/attachment`-Contract (4 Felder, Byte-Round-Trip) nach dem Refactoring unverändert ist.
+- **62 Assertions** gegen den **tatsächlich im Workflow-JSON eingebetteten** Code (mechanisch extrahiert, nicht abgetippt): Routing aller Video-/Audio-/Bild-/Text-Endungen, `VALID_SCHEMAS` unverändert + LLM kann Video/Audio nicht zurückgeben, Prefilter-Grenzwerte (20 KB / 50 MB) unverändert, Kollisions-Suffix und Path-Traversal für Video/Audio gegen echtes Dateisystem, Laufzeit-/Backfill-Parität.
+- Beide Workflow-JSONs strukturell validiert: gültiges JSON, eindeutige Node-Namen/IDs, alle Connection- und `$('Node')`-Referenzen auflösbar, keine verwaisten Nodes, alle 15 Code-Nodes `node --check` grün, **0 `console.log`**, Credentials auf allen Postgres-/MQTT-Nodes, nur erlaubte `require`-Module (`axios, redis, winston, crypto, fs, path`).
+- Diff-Disziplin: In beiden JSONs haben sich ausschließlich die geänderten `jsCode`-Zeilen (und die Sticky Note) geändert — keine Reformatierung, keine Topologie-Änderung (per Round-Trip-Vergleich abgesichert).
+- **Nicht verifizierbar in dieser Umgebung:** kein Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS; `pypdf` wurde lokal in einem venv getestet, **nicht** im Alpine-Image (Image-Build steht aus — beim Deploy muss `alice-mail-reader` neu gebaut werden, sonst fehlt `pypdf`). Die `mcp__n8n-mcp__*`-Tools waren auch in dieser Session nicht verfügbar, daher erneut strukturelle Eigenvalidierung statt `n8n_validate_workflow`.
+
+**Deployment-Hinweise für den Admin**
+
+1. `alice-mail-reader` muss **neu gebaut** werden (`docker compose build`), nicht nur neu gestartet — `pypdf` ist eine neue Abhängigkeit.
+2. Backfill zuerst **ohne** `confirm` aufrufen, um die Kandidatenzahl zu sehen; erst danach mit `{"confirm": true}`.
+3. `/mnt/nas/ai/Video/` und `/mnt/nas/ai/Audio/` werden automatisch angelegt, sind aber **kein** Weaviate-Schema — vor Aufnahme in `alice.dms_watched_folders` das Verhalten der nachgelagerten Pipeline prüfen (siehe Edge Case oben).
 
 ## Deployment
 _To be added by /deploy_
