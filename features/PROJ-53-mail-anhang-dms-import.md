@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-23 (QA Iteration 2)
 
