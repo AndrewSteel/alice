@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-23 (Bugfix nach Produktivtest: confirm-Parameter im Backfill unerreichbar)
+**Last Updated:** 2026-08-23 (QA-Nachprüfung des confirm-Bugfix per Graph-Trace bestanden — Approved)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -778,6 +778,166 @@ Gezielt gesucht, **nicht** vorhanden:
 - **Security:** **Pass.** Kein neuer Credential-Pfad, kein Leak in Response/Logs, `pypdf` arbeitet rein In-Memory ohne Pfad-/Subprozess-Risiko.
 - **Production Ready:** **YES — READY**
 - **Recommendation:** **Deploy** — mit der zwingenden Voraussetzung, dass `alice-mail-reader` **neu gebaut** wird (NV-1); ohne `pypdf` im Image schlägt jeder `/attachment-text`-Aufruf fehl. Das degradiert zwar nur (leerer Text → Fallback auf Dateiname+Kontext, also Iteration-1-Verhalten) und bricht den Import nicht, würde aber den Hauptzweck von Iteration 2 stillschweigend aushebeln. Nach dem Deploy: Backfill zuerst **ohne** `confirm` aufrufen und die Kandidatenzahl prüfen; danach AC-5.2/5.3 gegen den laufenden Thumbnailer verifizieren.
+
+---
+
+## QA Test Results — Bugfix-Nachprüfung `confirm`-Parameter (2026-08-23)
+
+**Tested:** 2026-08-23
+**Tester:** QA Engineer (AI)
+**Commit under test:** `8581996` (Diff-Basis: `b1c47cc` = Stand der als Approved abgenommenen Iteration 2)
+**Scope:** Gezielte Nachprüfung des Produktivfehlers "Backfill lief trotz `{"confirm": true}` im Dry-Run" + `MAX_RUNTIME_SECONDS`-Totkonfiguration + eng gefasster Regressionscheck. **Kein** vollständiger Feature-Review (Iteration 1+2 sind abgenommen).
+
+### Methodik: Graph-Trace statt isoliertem Funktionstest (der eigentliche Lernpunkt)
+
+Dieser Durchlauf verwendet bewusst eine **andere Methodik** als die vorherige Prüfung, weil **genau die Methodik der Iteration-2-QA den Bug durchgelassen hat**: Iteration 2 hat die `confirm`-Auswertung isoliert getestet, indem sie dem extrahierten Node-Code ein **handgefüttertes** `$input.first().json = { body: { confirm: true } }` untergeschoben hat. Unter dieser Annahme war die Coercion-Logik tatsächlich korrekt — der Test war grün, der Node in Produktion trotzdem kaputt. Der Fehler saß **nicht in der Funktion, sondern in der Annahme über ihren Input**: Der reale Vorgänger-Node liefert diesen Input nie. Ein isolierter Funktionstest kann diese Fehlerklasse **prinzipiell nicht** finden, weil er den Input selbst erfindet.
+
+Konsequenz für diesen Durchlauf — der Ausführungspfad wurde **nicht angenommen, sondern abgeleitet und ausgeführt**:
+
+1. **Pfadableitung aus dem `connections`-JSON** (DFS vom Trigger-Node, unabhängig in Python und JS re-implementiert) statt aus der Beschreibung des Entwicklers oder aus dem Node-Layout.
+2. **Ausführung des tatsächlich ausgelieferten Node-Codes** entlang dieses Pfads, in korrekter Reihenfolge, mit n8n-getreuer Semantik: `$input` liefert **ausschließlich** die Items des direkten Graph-Vorgängers; `$('X')` liefert die Run-Daten des Nodes X aus **dieser** Ausführung. Nur `redis`/`winston` sind gemockt (In-Memory-Store), der Payload-Fluss ist echt.
+3. **IF-Node aus seiner ausgelieferten Condition ausgewertet** (`={{ $json._lock_acquired }}` strict boolean equals `true`), nicht als angenommener Durchreicher.
+
+**Abgeleiteter Pfad (aus `connections`, nicht angenommen) — genau ein Pfad Webhook → Init:**
+
+```text
+Webhook: POST /attachment-backfill
+  --[out 0]--> Code: Acquire Backfill Lock
+  --[out 0]--> IF: Lock Acquired
+  --[out 0]--> Code: Init Backfill Run
+```
+
+Damit ist die im Fix-Commit behauptete Topologie **unabhängig bestätigt**. `Code: Init Backfill Run` hängt an der **True**-Branch (Output-Index 0) von `IF: Lock Acquired`.
+
+**Testumfang: 37 Assertions Graph-Trace (0 Fehler)** + 4 Assertions Payload-/Trigger-Audit + statische Checks.
+
+### Verifikation des Node-Namens-Lookups (Silent-Failure-Risiko)
+
+Ein getippfehlerter Node-Name in `$('…')` ist die naheliegendste Art, wie dieser Fix selbst hätte fehlschlagen können. Gezielt geprüft:
+
+| # | Prüfung | Status | Nachweis |
+|---|---------|--------|----------|
+| N-1 | Referenzierter Name stimmt **exakt** mit dem Webhook-Node überein | PASS | Aus dem Code extrahiert: `$('Webhook: POST /attachment-backfill')`; Zeichen-für-Zeichen-Vergleich gegen `nodes[].name` → identisch (inkl. Leerzeichen und `/`) |
+| N-2 | Alle `$('Node')`-Referenzen **beider** Workflows lösen auf | PASS | 8 Referenzen im Backfill, alle vorhanden; 0 dangling. In `alice-mail-sync` ebenfalls 0 dangling |
+| N-3 | Referenzierter Node ist **Vorfahr** im Graphen (nicht nur existent) | PASS | Ancestor-Berechnung über die invertierten `connections`: `Webhook…` ist Vorfahr von `Init`; `Init`+`Lock` sind Vorfahren von `Time Check`; `Init` ist Vorfahr von `Fetch Mails` — alle Lookups sind zur Laufzeit garantiert befüllt |
+| N-4 | Ein falscher Name würde **laut** scheitern, nicht still | PASS | Simuliert: Lookup ohne Run-Daten wirft (`No run data for …`) → n8n bricht den Node ab. Kein stilles `undefined` — der Fix kann nicht unbemerkt wirkungslos werden |
+| N-5 | `Init` liest den Payload **nicht mehr** über `$input` | PASS | Nach Entfernen aller Kommentare/Blockkommentare: **0** `$input`-Vorkommen im ausführbaren Code des Nodes (die zwei Treffer im Rohtext stehen ausschließlich im erklärenden Kommentar) |
+
+### Root-Cause-Reproduktion (Punkt 2 der Aufgabe)
+
+Der Lock-Node wurde **ausgeführt**, nicht gelesen:
+
+- `Code: Acquire Backfill Lock` liest `$input` an keiner Stelle und gibt ein frisch konstruiertes Item zurück. Tatsächlicher Output-Key-Satz aus der Ausführung: **`["_lock_acquired","_lock_error","lock_owner"]`** — `body`/`query`/`headers` sind **nachweislich `undefined`**. Root Cause reproduziert.
+- `IF: Lock Acquired` reicht dieses Item bei erfolgreichem Acquire unverändert über Output 0 weiter (aus der ausgelieferten Condition ausgewertet). Es findet **kein** Merge des Webhook-Payloads statt.
+- An der Stelle, an der `Code: Init Backfill Run` läuft, löst `$('Webhook: POST /attachment-backfill').first().json` auf die **Original-Webhook-Items** auf — `body.confirm` ist intakt. Bestätigt: Es ist genuin der Webhook-Payload, nicht das Lock-Item.
+- **Gegenprobe mit dem Pre-Fix-Code** auf **demselben** Trace: liefert `confirm=false`. Der Produktionsbug ist damit auf diesem Trace reproduziert **und** der Fix auf demselben Trace als wirksam belegt — nicht nur behauptet.
+
+### `confirm`-Parsing: alle Szenarien über den vollen Pfad (Punkt 3)
+
+Jede Zeile ist ein **vollständiger** Durchlauf Webhook → Lock → IF → Init mit ausgeführtem Node-Code, keine Direktaufrufe der Coercion.
+
+| # | Aufruf | Erwartet | Tatsächlich | Status |
+|---|--------|----------|-------------|--------|
+| C-1 | **`POST {"confirm": true}`** (exakte Produktions-Repro) | `confirm: true` | **`{"confirm":true,"MAX_RUNTIME_SECONDS":7200}`** | **PASS** — der gemeldete Fehler ist behoben |
+| C-2 | Kein Body, keine Query (`body:{}`, `query:{}`) | `false` (Dry-Run bleibt Default) | `false` | PASS |
+| C-3 | `body`/`query` im Payload gar nicht vorhanden | `false` | `false` | PASS — kein Crash trotz fehlender Felder (`item.body \|\| {}`) |
+| C-4 | `?confirm=true` als **Query-Parameter** | `true` | `true` | PASS |
+| C-5 | `{"confirm": "true"}` als **String** | `true` | `true` | PASS |
+| C-6 | `{"confirm": true}` als **Boolean** | `true` | `true` | PASS |
+| C-7 | `{"confirm": false}` explizit | `false` | `false` | PASS |
+| C-8 | `{"confirm": "false"}` als String | `false` | `false` | PASS |
+| C-9 | `{"confirm": 1}` (numerisch) | `false` | `false` | PASS — strikte Coercion, kein Truthy-Fallstrick |
+| C-10 | Body `confirm:false` + Query `confirm:true` | `false` (Body gewinnt) | `false` | PASS — Präzedenz wie im Referenz-Workflow |
+
+**Der Default kippt nicht:** In allen vier Fällen ohne expliziten `true`-Wert (C-2, C-3, C-7, C-8, C-9) bleibt `confirm=false` — die Sicherheitszusage "ohne `confirm` passiert nichts" ist intakt.
+
+### `MAX_RUNTIME_SECONDS` (Punkt 4)
+
+`Code: Time Check` wurde ebenfalls **ausgeführt**, mit `Split In Batches` als direktem Input (so wie im Graphen) und `$('Code: Init Backfill Run')` aus den echten Run-Daten des vorangegangenen Init-Laufs.
+
+| # | Szenario | Erwartet | Tatsächlich | Status |
+|---|----------|----------|-------------|--------|
+| M-1 | Kein Override → Init emittiert Default | `7200` | `7200` | PASS |
+| M-2 | Default 7200, 1000 s Laufzeit | `_time_limit_reached: false` | `false` | PASS |
+| M-3 | Default 7200, 7300 s Laufzeit | `true` | `true` | PASS — Default greift weiterhin korrekt |
+| M-4 | `max_runtime_seconds: 180` im Body → Init | `180` | `180` | PASS |
+| M-5 | **Override 180, 1000 s Laufzeit** | `true` | `true` | **PASS — Beweis, dass `Time Check` den Wert wirklich konsumiert.** Mit dem alten hartkodierten `7200` wäre hier `false` herausgekommen |
+| M-6 | Override 180, 100 s Laufzeit | `false` | `false` | PASS |
+| M-7 | `?max_runtime_seconds=300` als Query-String | `300` | `300` | PASS |
+| M-8 | Müll-Overrides `"abc"`, `0`, `-5`, `""` | Fallback `7200` | jeweils `7200` | PASS (4 Assertions) — `parseInt`+`>0`-Guard hält |
+
+Die tote Konfiguration ist damit real behoben, nicht nur umgeschrieben.
+
+### Downstream-Konsumenten (Punkt 5)
+
+| # | Prüfung | Status | Nachweis |
+|---|---------|--------|----------|
+| D-1 | Output-**Shape** von `Init` unverändert | PASS | Ausgeführter Output-Key-Satz ist exakt `["MAX_RUNTIME_SECONDS","confirm"]` — dieselben zwei Felder wie vor dem Fix, keine Umbenennung, kein Zusatzfeld |
+| D-2 | `confirm` ist weiterhin **Boolean** | PASS | `typeof === 'boolean'` in allen 10 Szenarien; `Fetch` vergleicht mit `=== true`, ein String hätte still zu Dry-Run geführt |
+| D-3 | `Code: Fetch Mails With Attachments` liest korrekt | PASS | Node-Code **unverändert** (Hash-Vergleich `b1c47cc` vs. `8581996`): `$('Code: Init Backfill Run').first().json.confirm === true`. Der Konsumenten-Ausdruck wurde gegen die echten Init-Run-Daten ausgewertet → `true` bei bestätigtem Lauf, `false` bei Dry-Run |
+| D-4 | `Init` bleibt einziger Payload-Leser | PASS | Audit über **alle** Nodes beider Workflows (kommentarbereinigt): `Code: Init Backfill Run` ist die **einzige** Stelle, die `.body`/`.query` liest |
+
+### Regression (Punkt 6) — Diff `b1c47cc..8581996`
+
+- **Diff-Umfang:** `features/INDEX.md` (1 Zeile), Spec (+42/-1), `workflows/alice-mail-attachment-backfill.json` (**+2/-2**). **Keine** Änderung an `alice-mail-sync.json`, `app.py`, `Dockerfile`, Compose- oder SQL-Dateien. Der Fix ist so eng gefasst wie im Commit beschrieben.
+- **Node-für-Node-Vergleich** des Backfill-Workflows (`jsCode`-Vergleich aller 10 Code-Nodes gegen `b1c47cc`): geändert sind **exakt** `Code: Init Backfill Run` und `Code: Time Check`. Die übrigen 8 (`Acquire Backfill Lock`, `Respond Already Running`, `Cache Mailboxes`, `Fetch Mails With Attachments`, `Empty Summary`, `Import Mail Attachments`, `Track Progress`, `Build Summary`) sind **byte-identisch**.
+- **`connections` beider Workflows byte-identisch**, Node-Anzahl (18 bzw. 19) und Node-Namen unverändert → Graph-Topologie nicht angefasst, MQTT-Pfad (AC-5.1) und Notification-/Status-Zweig unberührt.
+- **Iteration-1/2-Logik nicht angetastet** (diff-gescopte Prüfung, keine Wiederholung der 467-Assertion-Suite — der Diff berührt keine dieser Funktionen): `countOnDisk`/globaler Zweit-Pass (BUG-2-Fix), `resolveCollision`, `sanitizeFilename`/`shortenSender` (Path-Traversal), `ATTACHMENT_MAX_BYTES = 52428800` (BUG-3-Fix), `routeByExtension`, `VALID_TARGET_FOLDERS`, `fetchPdfText`/`/attachment-text` — alle in **unveränderten** Nodes und im HEAD-Stand unverändert vorhanden.
+- **Statische Checks grün:** beide JSONs valide, eindeutige Node-Namen/IDs, 0 dangling Connection-/`$('Node')`-Referenzen, alle **15** Code-Nodes `node --check` OK, **0 `console.log`**, `require` weiterhin auf `axios, crypto, fs, path, redis, winston` beschränkt.
+- **Security:** unverändert. Der Fix ändert nur, **woher** ein bereits zuvor gelesener Parameter stammt; keine neue Eingabe, kein neuer Schreibpfad, kein neuer Credential-Fluss, keine neue Log-Zeile mit Nutzerdaten. Der Webhook bleibt ohne Auth (bekannte Projektkonvention, VPN-only) — durch den **jetzt tatsächlich wirksamen** Dry-Run-Default ist ein versehentlicher Aufruf sogar folgenloser als vorher.
+
+### Sanity-Check `alice-mail-sync` (Punkt 7) — nicht betroffen
+
+| # | Prüfung | Status | Nachweis |
+|---|---------|--------|----------|
+| S-1 | Kein Webhook-Trigger | PASS | Einziger Trigger ist `Schedule: Every Minute` (`n8n-nodes-base.scheduleTrigger`); **kein** Node vom Typ `n8n-nodes-base.webhook` → es existiert gar kein Webhook-Payload, der verloren gehen könnte |
+| S-2 | Kein Node liest `body`/`query` | PASS | Audit über alle 19 Nodes (kommentarbereinigt): 0 Treffer |
+| S-3 | `$input`-Konsumenten lesen einen echten Vorgänger-Output | PASS | Die drei `$input`-Nutzer geprüft: `Notify: Passthrough` und `Code: Import Attachments` hängen beide an `Process + Classify + Store Emails` (das `{processed, wichtig, maxUid, storedEmails}` liefert — genau was sie lesen); `Code: Split Stored Emails` hängt an `Code: Import Attachments`. **Kein** payload-verwerfender Node dazwischen |
+| S-4 | Alle `$('Node')`-Referenzen lösen auf | PASS | 0 dangling |
+
+**Ergebnis:** Die Fehlerklasse ist in `alice-mail-sync` **nicht anwendbar** — bestätigt, nicht angenommen.
+
+### Bugs Found
+
+**Keine neuen Bugs in PROJ-53.** Der gemeldete Produktivfehler ist behoben; es sind keine neuen Critical/High/Medium-Befunde entstanden.
+
+#### BUG-10 (behoben, verifiziert): `confirm`-Parameter im Backfill dauerhaft wirkungslos
+- **Status:** **BEHOBEN in `8581996` — per Graph-Trace verifiziert**
+- **Severity:** **High** (nachträglich eingestuft) — der Import war über den Webhook **überhaupt nicht auslösbar**; das Hauptfeature des Backfills war in Produktion unerreichbar, und der Fehler war stumm (kein Log, plausibel aussehende Dry-Run-Antwort).
+- **Root Cause:** `Code: Init Backfill Run` las den Payload über `$input`, obwohl der Graph-Vorgänger `Code: Acquire Backfill Lock` ein neues Item ohne `body`/`query` zurückgibt.
+- **Repro (verifiziert):** `POST /alice-mail-attachment-backfill` mit `{"confirm": true}` → vor dem Fix `confirm=false` (Dry-Run), nach dem Fix `confirm=true`.
+- **Warum von QA-Iteration 2 übersehen:** isolierter Funktionstest mit handgefüttertem Input — siehe Methodik-Abschnitt oben. **Prozess-Lehre: Bei Nodes, die Trigger-Payload auswerten, ist der Ausführungspfad aus `connections` abzuleiten und mitzuführen; ein Funktionstest allein ist nicht ausreichend.**
+
+#### BUG-11 (behoben, verifiziert): `MAX_RUNTIME_SECONDS` war tote Konfiguration
+- **Status:** **BEHOBEN in `8581996` — verifiziert** (M-1 bis M-8)
+- **Severity:** Low — kein Fehlverhalten im Regelbetrieb (der hartkodierte Wert entsprach dem Default), aber eine stille Falle: ein Verstellen des Werts blieb wirkungslos, was beim Debugging in die Irre führt.
+
+#### BUG-12 (offen, **außerhalb PROJ-53**): dieselbe Fehlerklasse in zwei fremden Backfill-Workflows
+- **Severity:** Medium (in den betroffenen Features, nicht in PROJ-53)
+- **Befund:** Der Audit wurde über **alle 10 Webhook-Workflows** ausgeführt (Payload-Quelle jeweils durch Passthrough-Nodes wie `IF` hindurch bis zum ersten datenerzeugenden Node zurückverfolgt). Betroffen sind **zwei**:
+  - `alice-dms-language-backfill` → `Code: Init Backfill Run` (bereits als **PROJ-92** auf der Roadmap erfasst)
+  - `alice-dms-classification-backfill` → `Code: Init Backfill Run` (**vom Fix-Commit noch nicht genannt** — der Commit stufte diesen Workflow als "wertet keinen Webhook-Payload aus" ein; der Trace zeigt, dass er es doch tut und dieselbe Vorgänger-Konstellation hat)
+  - Nicht betroffen: `alice-dms-thumbnailer-backfill`, `alice-dms-image-description-backfill` (Payload-Quelle ist ein HTTP-Node, der den Payload nicht verwirft), `alice-dms-folder-api`, `alice-mail-api`, `alice-mail-tools`, `alice-session-api`, `alice-tool-search`.
+- **Empfehlung:** PROJ-92 um `alice-dms-classification-backfill` erweitern. **Kein PROJ-53-Blocker** — beide Workflows sind hier nicht angefasst worden.
+
+### Nicht verifizierbar in dieser Umgebung
+
+| # | Kriterium | Grund |
+|---|-----------|-------|
+| NV-1 | Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS | Kein Zugriff. Der Graph-Trace bildet die n8n-Semantik (`$input` = direkter Vorgänger, `$('X')` = Run-Daten) nach, ersetzt aber keinen Produktivlauf. `redis`/`winston` sind gemockt — der Payload-Fluss selbst ist echt |
+| NV-2 | `mcp__n8n-mcp__*`-Validierung | Tools in dieser Session nicht verfügbar; erneut strukturelle Eigenvalidierung |
+| NV-3 | AC-5.2 / AC-5.3 (Mail-Thumbnail-Rendering) | Unverändert offen aus Iteration 1/2 |
+| NV-4 | `pypdf` im Alpine-Image (NV-1 aus Iteration 2) | Unverändert offen — `alice-mail-reader` muss beim Deploy **neu gebaut** werden |
+
+### Summary — Bugfix-Nachprüfung
+
+- **Graph-Trace durchgeführt:** ja. Pfad `Webhook → Lock → IF(true) → Init` aus dem `connections`-JSON **abgeleitet** (genau ein Pfad) und der ausgelieferte Node-Code entlang dieses Pfads ausgeführt.
+- **Produktions-Repro:** `POST {"confirm": true}` liefert jetzt `confirm: true`. Pre-Fix-Code auf demselben Trace liefert `false` — Fehler reproduziert **und** Behebung belegt.
+- **Ergebnis:** **37/37 Graph-Trace-Assertions grün**, 10/10 `confirm`-Szenarien korrekt, 11/11 `MAX_RUNTIME_SECONDS`-Assertions korrekt, Downstream-Konsument unbeeinflusst, Regression auf 2 Nodes begrenzt und `connections` unverändert.
+- **Bugs:** BUG-10 (High) und BUG-11 (Low) **behoben und verifiziert**; BUG-12 betrifft **fremde** Workflows (PROJ-92 erweitern). **0 offene Critical/High/Medium in PROJ-53.**
+- **Security:** **Pass** — keine Änderung der Angriffsfläche.
+- **Production Ready:** **YES — READY**
+- **Recommendation:** **Approved.** Deploy-Voraussetzungen aus Iteration 2 bleiben bestehen: `alice-mail-reader` **neu bauen** (`pypdf`), Backfill zuerst **ohne** `confirm` aufrufen (dieser Default ist jetzt nachweislich der einzige Weg, der nichts tut — und `confirm: true` ist nachweislich der Weg, der importiert), danach AC-5.2/5.3 gegen den laufenden Thumbnailer prüfen.
 
 ## Deployment
 _To be added by /deploy_
