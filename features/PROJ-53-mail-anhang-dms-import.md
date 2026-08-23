@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Approved
+## Status: Planned
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-23
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -29,16 +29,20 @@ Zusätzlich schließt PROJ-53 eine bei PROJ-80 entdeckte Lücke: Mail-Objekte in
 ## Acceptance Criteria
 
 ### Zielordner-Struktur
-- [ ] Für jedes der fünf relevanten DMS-Schemata existiert ein fester Unterordner in `/mnt/nas/ai/`, benannt nach dem Weaviate-Klassennamen: `Invoice/`, `BankStatement/`, `Document/`, `Contract/`, `SecuritySettlement/`
+- [ ] Für jedes der relevanten DMS-Schemata existiert ein fester Unterordner in `/mnt/nas/ai/`, benannt nach dem Weaviate-Klassennamen: `Invoice/`, `BankStatement/`, `Document/`, `Contract/`, `SecuritySettlement/`, sowie zusätzlich `Video/` und `Audio/` für extensionbasiert geroutete Medien (siehe unten)
 - [ ] Fehlt einer dieser Ordner beim ersten Sync-Lauf, wird er automatisch angelegt
 - [ ] Die Ordner sind reine Ablageziele der Mail-Pipeline; die Aufnahme in `alice.dms_watched_folders` (inkl. Zuordnung zum passenden deutschen `suggested_type`-Wert) erfolgt manuell durch den Admin — kein automatischer DB-Eintrag durch PROJ-53
 
 ### Anhang-Erkennung & Klassifizierung (Erweiterung von `alice-mail-sync`)
 - [ ] Für jede neu indexierte Mail mit mindestens einem Anhang wird ein zusätzlicher Klassifizierungsschritt ausgeführt, unabhängig von der bestehenden Wichtig/Werbung/Social-Media/Spam-Kategorisierung aus PROJ-46
-- [ ] Nur Anhänge mit einer Dateiendung aus der bestehenden `SUPPORTED_EXTENSIONS`-Allowlist (PROJ-16/55, aktuell u.a. PDF, DOCX, XLSX, ODT, ODS, TXT, MD, JPG, JPEG, PNG, WEBP, HEIC, TIF, TIFF) werden berücksichtigt; die Liste bleibt zentral erweiterbar
+- [ ] Nur Anhänge mit einer Dateiendung aus der `SUPPORTED_EXTENSIONS`-Allowlist werden berücksichtigt; die Liste bleibt zentral erweiterbar
 - [ ] Offensichtlicher Bild-Datenmüll (typische E-Mail-Signatur-Icons/Logos: Bildformate < 20 KB) wird ohne Klassifizierungsversuch übersprungen — kein Import
-- [ ] Jeder verbleibende Anhang wird **einzeln** vom LLM (Ollama/qwen3) klassifiziert — Eingabe: Mail-Betreff + Body-Preview als Kontext, plus Dateiname und extrahierbarer Textinhalt/-vorschau des jeweiligen Anhangs
-- [ ] Das LLM ordnet jeden Anhang einem der fünf Schemata zu (Invoice, BankStatement, Document, Contract, SecuritySettlement) oder markiert ihn als nicht eindeutig zuordenbar
+- [ ] **Bild-, Video- und Audio-Anhänge (jenseits der 20-KB-Müll-Grenze) werden rein anhand der Dateiendung geroutet — kein LLM-Aufruf.** Bilder (JPG, JPEG, PNG, WEBP, HEIC, TIF, TIFF) → `Document/` (unverändert, wie bisher); neu: Video-Endungen (u.a. MP4, MOV, AVI, MKV, WEBM) → `Video/`; Audio-Endungen (u.a. MP3, WAV, M4A, OGG, FLAC) → `Audio/`. Für diese Formate ist eine inhaltliche Prüfung nicht erforderlich und nicht vorgesehen.
+- [ ] Für Text-basierte DMS-Kandidaten (PDF, DOCX, XLSX, ODT, ODS, TXT, MD) wird jeder verbleibende Anhang **einzeln** vom LLM (Ollama/qwen3) klassifiziert — Eingabe: Mail-Betreff + Body-Preview als Kontext, plus Dateiname und extrahierter Textinhalt des jeweiligen Anhangs:
+  - **PDF**: Volltext wird synchron im Workflow extrahiert (gleiche Technik wie `dms-extractor-pdf`, `pdf-parse`, aber ohne Umweg über MQTT/Redis) und vollständig (bis zur bestehenden Prompt-Längenbegrenzung) an den Klassifizierungs-Prompt übergeben — nicht nur ein Textextrakt/Preview.
+  - **DOCX/XLSX/ODT/ODS**: Es gibt (noch) keinen synchronen Extraktor für Office-Formate (`dms-extractor-office` läuft asynchron über LibreOffice headless). Diese Anhänge werden bis auf Weiteres nur anhand von Dateiname + Mail-Betreff + Absender + Body-Preview klassifiziert (kein Volltext) — bewusste Einschränkung, siehe PROJ-91 für die geplante Schließung dieser Lücke.
+  - **TXT/MD**: Volltext wird wie bisher direkt dekodiert und übergeben.
+- [ ] Das LLM ordnet jeden Text-Anhang einem der fünf Schemata zu (Invoice, BankStatement, Document, Contract, SecuritySettlement) oder markiert ihn als nicht eindeutig zuordenbar
 - [ ] Nicht eindeutig zuordenbare Anhänge (aber kein gefilterter Bild-Datenmüll) fallen auf `Document` zurück (konsistent mit dem bestehenden Unsicherheits-Verhalten des DMS-Processors, siehe PROJ-78)
 - [ ] Eine Mail mit mehreren Anhängen unterschiedlicher Zuordnung speichert jeden Anhang unabhängig im für ihn passenden Zielordner
 
@@ -52,6 +56,7 @@ Zusätzlich schließt PROJ-53 eine bei PROJ-80 entdeckte Lücke: Mail-Objekte in
 
 ### Backfill für bereits indexierte Mails
 - [ ] Ein manuell auslösbarer n8n-Workflow `alice-mail-attachment-backfill` existiert (analog `alice-dms-thumbnailer-backfill`)
+- [ ] **Der Backfill hat einen Vorschau-Modus (Dry-Run) als Standardverhalten** — analog zum `confirm`-Parameter aus `alice-dms-language-backfill`: Ohne `confirm: true` im Request-Body (bzw. Query-Parameter) werden Kandidaten ermittelt und gezählt, aber **keine** IMAP-Anhänge abgerufen und **keine** Dateien auf dem NAS geschrieben — die Response liefert nur die Anzahl der Kandidaten (`{ candidates_found, dry_run: true }`). Erst ein Aufruf mit `confirm: true` (bzw. `?confirm=true`) führt den Import tatsächlich aus.
 - [ ] Backfill listet alle bereits in Weaviate indexierten `Email`-Objekte mit mindestens einem Eintrag in `attachments` auf, für die noch kein Anhang-Import stattgefunden hat
 - [ ] Pro betroffener Mail wird die zugehörige Mailbox erneut per `alice-mail-reader` (IMAP) kontaktiert, um die Original-Anhänge nachzuladen
 - [ ] Backfill nutzt dieselbe Klassifizierungs- und Ablage-Logik (inkl. Bild-Müll-Filter, Kollisions-Suffix) wie der Laufzeit-Pfad in `alice-mail-sync`
@@ -76,13 +81,16 @@ Zusätzlich schließt PROJ-53 eine bei PROJ-80 entdeckte Lücke: Mail-Objekte in
 - **Mail-Objekt ohne extrahierbaren Body-Text** (z.B. reine HTML-Mail ohne Preview): Mail-Thumbnail zeigt nur den Betreff, analog zum bestehenden Verhalten bei sehr kurzen TXT/MD-Dateien.
 - **Zwei gleichnamige Anhänge in derselben Mail** (z.B. zwei Dateien namens `Anhang.pdf`): Der zweite erhält automatisch den Kollisions-Suffix `_1` vor der Dateiendung; der erste bleibt ohne Suffix.
 - **Backfill läuft nach einem vorherigen Teil-Lauf erneut**: Bereits erfolgreich importierte Anhänge (per Mail-Message-ID + Anhang-Index nachvollziehbar) werden nicht erneut heruntergeladen oder gespeichert; nur Mails ohne bisherigen Import-Versuch werden berücksichtigt.
+- **Video-/Audio-Anhänge**: `Video/` und `Audio/` sind reine Ablageordner auf der AI-Freigabe, **kein** Weaviate-Schema (anders als Invoice/BankStatement/Document/Contract/SecuritySettitlement). Nimmt der Admin diese Ordner in `alice.dms_watched_folders` auf, laufen sie durch den generischen DMS-Scanner, aber ohne ein passendes Klassifizierungsschema landen sie dort nach bestehendem DMS-Verhalten (siehe PROJ-16) vermutlich im `Document`-Fallback oder werden vom Scanner ignoriert, je nach aktueller Handhabung nicht unterstützter Medientypen — PROJ-53 selbst greift hier nicht ein, das Ablageverhalten der nachgelagerten Pipeline für diese zwei neuen Ordner ist vom Admin zu prüfen, bevor er sie einträgt.
+- **Backfill-Dry-Run ohne `confirm`**: Ein Aufruf ohne den `confirm`-Parameter verändert nichts (keine IMAP-Verbindung, kein NAS-Write) und ist beliebig oft wiederholbar, um die Anzahl betroffener Mails vorab zu sehen.
 
 ## Technical Requirements (optional)
 
 - Kein neues NAS-Mount/keine neue Berechtigung nötig — die Schreibrechte auf `/mnt/nas/ai` sind bereits vorbereitet (siehe Dependencies).
-- Wiederverwendung bestehender Bausteine: `alice-mail-reader` (Attachment-Abruf), `SUPPORTED_EXTENSIONS`-Allowlist (PROJ-16), LLM-Klassifizierungsmuster analog PROJ-78, `alice-dms-thumbnailer` TXT/MD-Renderpfad (PROJ-55).
+- Wiederverwendung bestehender Bausteine: `alice-mail-reader` (Attachment-Abruf), `SUPPORTED_EXTENSIONS`-Allowlist (PROJ-16, für diesen Workflow um Video-/Audio-Endungen erweitert), LLM-Klassifizierungsmuster analog PROJ-78, `alice-dms-thumbnailer` TXT/MD-Renderpfad (PROJ-55), PDF-Textextraktion analog `dms-extractor-pdf` (`pdf-parse`), aber synchron statt über MQTT/Redis.
 - Kein neuer n8n-Workflow zwingend erforderlich — Erweiterung von `alice-mail-sync` (neuer Klassifizierungs- + Speicher-Schritt pro Anhang, plus MQTT-Publish für Thumbnails) ist der naheliegende Ansatz; endgültige Workflow-Aufteilung obliegt `/architecture`.
 - Kein neues Caching, keine neue Persistenzschicht — Ablage direkt auf dem NAS-Dateisystem, alles Weitere läuft über bestehende DMS-Pipeline-Zustände (Redis, Weaviate).
+- Office-Formate (DOCX/XLSX/ODT/ODS) bleiben ohne Volltext-Klassifizierung, da kein synchroner Extraktor existiert (siehe PROJ-91 für die geplante Schließung dieser Lücke) — kein neuer HTTP-Wrapper-Service wird im Rahmen von PROJ-53 gebaut.
 
 ---
 <!-- Sections below are added by subsequent skills -->
@@ -445,6 +453,21 @@ Alle drei ursprünglichen Repro-Szenarien re-ausgeführt, jeweils über **mehrer
 - **Recommendation:** **Deploy.** Beide Medium-Bugs sind sauber und ursachengerecht behoben — der BUG-2-Fix adressiert die eigentliche Ursache (fehlende Mail-Identität im Dedup-Schlüssel) durch globalen Abgleich, statt nur den Symptom-Deckel `_20` hochzusetzen, und behält dabei das von AC-3.2/EC-9 vorgeschriebene Dateinamensmuster bei. Verbleibende Low-Bugs (BUG-1 Crash-Sicherheit, BUG-4 fehlende Binär-Textextraktion, BUG-5 duplizierte Konstanten, BUG-7 Lücken-Annahme) blockieren das Deployment nicht und können als Folgearbeit eingeplant werden.
 
 **Hinweis für den Deploy-Schritt:** AC-5.2/5.3 (Thumbnail-Rendering für Mail-Objekte) konnten statisch nicht verifiziert werden und müssen nach dem Deployment gegen den laufenden `alice-dms-thumbnailer` geprüft werden.
+
+---
+
+## Iteration 2 — Refine nach Produktiv-Feedback (2026-08-23)
+
+Der obige Tech-Design-/Implementation-/QA-Block (bis hier) bezieht sich auf **Iteration 1** (Commits `63636f8`…`c5e87c7`). Nach dem manuellen Deploy und einem ersten Backfill-Testlauf hat Andreas vier Lücken gemeldet, die die Spec jetzt oben (Acceptance Criteria, Edge Cases, Technical Requirements) ergänzt:
+
+1. **Kein Dry-Run im Backfill** — der erste Aufruf hat produktiv Daten verarbeitet, weil (anders als bei anderen Backfill-Workflows, siehe `alice-dms-language-backfill`s `confirm`-Parameter/`IF: Confirm Mode`) kein Vorschau-Modus existierte.
+2. **Alle Text-Anhänge landeten in `Document`** — Ursache: die in Iteration 1 bewusst dokumentierte Abweichung (BUG-4), dass nur `.txt`/`.md` Volltext ans LLM bekommen, PDF/DOCX nur Dateiname+Mail-Kontext. Für PDF wird das jetzt durch synchrone Volltextextraktion (`pdf-parse`, analog `dms-extractor-pdf`, aber ohne MQTT/Redis-Umweg) behoben. Office-Formate bleiben bewusst ohne Volltext (kein synchroner Extraktor verfügbar) — siehe PROJ-91 als Folge-Feature.
+3. **Bilder landeten ebenfalls in `Document`, statt extensionbasiert geroutet zu werden** — jetzt explizit spezifiziert: Bild/Video/Audio ohne LLM-Aufruf, rein nach Dateiendung.
+4. **Neu:** `Video/`- und `Audio/`-Zielordner, `SUPPORTED_EXTENSIONS` für diesen Workflow entsprechend erweitert.
+
+Die 10 bereits fehlklassifizierten Dateien unter `/mnt/nas/ai/Document/` aus dem ungeplanten Live-Backfill-Lauf sind **nicht** in Weaviate registriert (der Ordner war zum Zeitpunkt des Laufs nicht in `alice.dms_watched_folders` eingetragen — geprüft per Direktabfrage). Andreas verschiebt sie manuell; keine Reklassifizierung in Weaviate nötig.
+
+**Nächste Schritte:** `/architecture` für die vier obigen Ergänzungen, dann `/backend`, dann erneut `/qa`.
 
 ## Deployment
 _To be added by /deploy_
