@@ -15,7 +15,7 @@
 
 | ID      | Phase | Feature                                                                                                                                   | Status  | Spec | Created    |
 | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ---- | ---------- |
-| PROJ-53 | 3.2   | Mail-Anhang DMS-Import — E-Mail-Anhänge automatisch in DMS-Pipeline einspeisen + Mail-Thumbnails; Abhängigkeit von PROJ-46; verschoben aus Phase 4 | Approved | [Spec](PROJ-53-mail-anhang-dms-import.md) | 2026-06-24 |
+| PROJ-53 | 3.2   | Mail-Anhang DMS-Import — E-Mail-Anhänge automatisch in DMS-Pipeline einspeisen + Mail-Thumbnails; Abhängigkeit von PROJ-46; verschoben aus Phase 4 | In Review | [Spec](PROJ-53-mail-anhang-dms-import.md) | 2026-06-24 |
 | PROJ-78 | 3.1   | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (falsch klassifizierte Rechnungen im Document-Schema)                              | Deployed | [Spec](PROJ-78-dms-dokumentenklassifizierung-fix-backfill.md) | 2026-08-17 |
 | PROJ-79 | 3.1   | DMS-Zusammenfassung Sprachkorrektur — nur Deutsch, Fix + Backfill Bestand                                                                  | Deployed | [Spec](PROJ-79-dms-zusammenfassung-sprachkorrektur.md) | 2026-08-17 |
 | PROJ-80 | 3.2   | DMS-Vollständigkeits-Dashboard — Coverage-Übersicht (Pfad-Scan vs. Weaviate/Thumbnail/Geo je Dokument); Abhängigkeit von PROJ-77           | Deployed | [Spec](PROJ-80-dms-vollstaendigkeits-dashboard.md) | 2026-08-17 |
@@ -30,7 +30,8 @@
 | PROJ-89 | 3.4   | Kontakte-Agent — Settings-Tab „Kontakte" (mehrere Google-Kontaktbücher pro User) + Chat-CRUD; Abhängigkeit von PROJ-86                     | Roadmap | —    | 2026-08-17 |
 | PROJ-90 | 3.4   | Websearch-Agent — Plan → begrenzter Such-Loop → qualifiziertes Ergebnis, hartes Loop-Limit                                                  | Roadmap | —    | 2026-08-17 |
 | PROJ-91 | 3.2   | Synchroner Office-Textextraktor — HTTP-Wrapper (z.B. markitdown) für DOCX/XLSX/ODT/ODS als Ersatz/Ergänzung zu `dms-extractor-office`; schließt Volltext-Klassifizierungslücke aus PROJ-53 | Roadmap | —    | 2026-08-23 |
+| PROJ-92 | 3.1   | Bug-Verdacht: `confirm`-Parameter in `alice-dms-language-backfill` vermutlich wirkungslos — bei der PROJ-53-Entwicklung entdeckt: `Code: Init Backfill Run` liest `$input.first().json.body`, aber ein vorgeschalteter Lock-Node (`Code: Acquire Backfill Lock`, gleiches Muster wie in `alice-mail-attachment-backfill`) gibt ein neues Item ohne `body`/`query` zurück und verwirft damit den Original-Webhook-Payload. Falls bestätigt: Der Confirm-Gate-Zweig war seit Einführung nie über den Webhook erreichbar, der Workflow lief vermutlich immer im Dry-Run. Verifikation + Fix ausstehend. | Roadmap | —    | 2026-08-23 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-92
+## Next Available ID: PROJ-93
