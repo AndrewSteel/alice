@@ -567,6 +567,47 @@ Für die *reinen* Helper (`routeByExtension`, `fetchPdfText`) ließ sich der Cop
 - Diff-Disziplin: In beiden JSONs haben sich ausschließlich die geänderten `jsCode`-Zeilen (und die Sticky Note) geändert — keine Reformatierung, keine Topologie-Änderung (per Round-Trip-Vergleich abgesichert).
 - **Nicht verifizierbar in dieser Umgebung:** kein Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS; `pypdf` wurde lokal in einem venv getestet, **nicht** im Alpine-Image (Image-Build steht aus — beim Deploy muss `alice-mail-reader` neu gebaut werden, sonst fehlt `pypdf`). Die `mcp__n8n-mcp__*`-Tools waren auch in dieser Session nicht verfügbar, daher erneut strukturelle Eigenvalidierung statt `n8n_validate_workflow`.
 
+#### Bugfix nach Produktiv-Test (2026-08-23): Dry-Run-Gate war wirkungslos
+
+**Symptom (vom User in Produktion gefunden):** Aufruf des Webhooks mit `{"confirm": true}` im JSON-Body führte trotzdem zum Dry-Run. Der n8n-Webhook-Node zeigte `body: {confirm: true}` korrekt an, aber `Code: Init Backfill Run` gab `{"confirm": false, …}` aus.
+
+**Root Cause:** `Code: Init Backfill Run` las den Payload über `$input.first().json`. Der reale Graph ist aber:
+
+```text
+Webhook: POST /attachment-backfill → Code: Acquire Backfill Lock → IF: Lock Acquired → Code: Init Backfill Run
+```
+
+`Code: Acquire Backfill Lock` gibt ein **neu konstruiertes** Objekt zurück (`return [{ json: { _lock_acquired, _lock_error, lock_owner } }]`) und liest `$input` überhaupt nicht — der Webhook-Payload (`body`, `query`, `headers`) wird an dieser Stelle **verworfen**. Bei `Code: Init Backfill Run` war `$input.first().json.body` daher immer `undefined`, `confirmRaw` immer `undefined` und `CONFIRM` **konstant `false`** — unabhängig vom Aufruf. Das Dry-Run-Gate war damit nicht nur fehlerhaft, sondern machte den Import über den Webhook **unerreichbar**.
+
+**Fix:** `Code: Init Backfill Run` liest den Original-Payload jetzt per Node-Namen statt über `$input`:
+
+```js
+const item = $('Webhook: POST /attachment-backfill').first().json;
+```
+
+Ein Kommentar im Node hält fest, warum `$input` hier nicht verwendet werden darf. Der Lock-Node bleibt bewusst unverändert (siehe unten).
+
+**Warum der Lock-Node den Payload nicht durchreicht (Design-Entscheidung):** Geprüft wurde, ob stattdessen `Code: Acquire Backfill Lock` den Webhook-Payload mergen sollte. Dagegen spricht: `alice-dms-language-backfill` — die Vorlage, aus der das `confirm`-Muster stammt — hat einen **strukturell identischen** Lock-Node, der den Payload ebenfalls verwirft. Ein Merge nur in diesem Workflow würde von der etablierten Konvention abweichen; der Lookup per Node-Namen ist die minimale, lokal begründete Korrektur und ändert die Graph-Topologie nicht.
+
+> **Hinweis außerhalb des PROJ-53-Scopes:** `alice-dms-language-backfill` hat denselben latenten Fehler — auch dort liest `Code: Init Backfill Run` `body`/`query` über `$input`, obwohl der vorgeschaltete Lock-Node den Payload verwirft. Dessen `confirm`-Parameter dürfte damit ebenfalls dauerhaft `false` sein. **Nicht** im Rahmen von PROJ-53 geändert (fremder Workflow), aber als eigener Bug zu erfassen. `alice-dms-classification-backfill` und `alice-dms-thumbnailer-backfill` werten keinen Webhook-Payload aus und sind nicht betroffen.
+
+**Audit auf dieselbe Fehlerklasse in diesem Workflow (alle Nodes geprüft):**
+
+- `Code: Init Backfill Run` war die **einzige** Stelle, die `body`/`query` liest — kein weiterer Node greift auf den Webhook-Payload zu.
+- Nachgelagerte Konsumenten sind nicht betroffen: `Code: Fetch Mails With Attachments` liest `$('Code: Init Backfill Run').first().json.confirm` (per Node-Namen, korrekt) und greift **nicht** selbst auf `body`/`query` zu — verifiziert.
+
+**Zusätzlicher Befund: `MAX_RUNTIME_SECONDS` war eine tote Konfiguration.** `Code: Init Backfill Run` gab das Feld aus, aber `Code: Time Check` hatte den Wert `7200` **hartkodiert** und ignorierte es vollständig. Ein Verstellen des Werts (wie vom User zum Testen versucht) hatte deshalb keinerlei Wirkung auf das tatsächliche Timeout — eine stille Falle. Behoben: `Code: Time Check` liest den Wert jetzt per `$('Code: Init Backfill Run')`, und `Init` akzeptiert einen optionalen Override `max_runtime_seconds` (Body oder Query, gleiche Quelle wie `confirm`) mit Fallback auf 7200.
+
+**Verifikation (Lehre aus dem Fehler: kein isoliertes Funktionstesten mehr)**
+
+Der Bug entstand, weil Iteration 2 die `confirm`-Auswertung nur **isoliert mit handgefüttertem Input** geprüft hat — so kann nicht auffallen, dass der Upstream-Node den Payload zerstört. Deshalb jetzt ein **Graph-Trace-Test** (`test_graph_trace.js`), der:
+
+1. den Ausführungspfad **aus dem `connections`-JSON ableitet** (nicht aus einer Annahme) und bestätigt, dass Init über Lock + IF erreicht wird,
+2. den **tatsächlich ausgelieferten Node-Code** von `Code: Acquire Backfill Lock`, `Code: Init Backfill Run` und `Code: Time Check` mit n8n-getreuer `$input`/`$('Node')`-Semantik nacheinander ausführt,
+3. den Produktionsfall `POST {"confirm": true}` nachstellt.
+
+Ergebnis (18 Assertions, alle grün): Der Lock-Node-Output enthält nachweislich nur `["_lock_acquired","_lock_error","lock_owner"]` (Root Cause reproduziert), der **alte** Code liefert auf genau diesem Trace `confirm=false` (Produktionsbug reproduziert), der **neue** Code liefert `confirm=true`. Zusätzlich abgedeckt: Dry-Run als Default ohne Parameter, `?confirm=true` per Query, `confirm:"true"` als String, `confirm:false`, sowie der `MAX_RUNTIME_SECONDS`-Override inkl. Nachweis, dass `Code: Time Check` ihn nun wirklich konsumiert (180 s greift bei 1000 s Laufzeit, 7200 s nicht). Die 62 Assertions der Routing-/Prefilter-Suite und die strukturelle Validierung beider Workflows laufen unverändert grün.
+
 **Deployment-Hinweise für den Admin**
 
 1. `alice-mail-reader` muss **neu gebaut** werden (`docker compose build`), nicht nur neu gestartet — `pypdf` ist eine neue Abhängigkeit.
