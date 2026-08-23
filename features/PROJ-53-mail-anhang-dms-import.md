@@ -467,7 +467,53 @@ Der obige Tech-Design-/Implementation-/QA-Block (bis hier) bezieht sich auf **It
 
 Die 10 bereits fehlklassifizierten Dateien unter `/mnt/nas/ai/Document/` aus dem ungeplanten Live-Backfill-Lauf sind **nicht** in Weaviate registriert (der Ordner war zum Zeitpunkt des Laufs nicht in `alice.dms_watched_folders` eingetragen — geprüft per Direktabfrage). Andreas verschiebt sie manuell; keine Reklassifizierung in Weaviate nötig.
 
-**Nächste Schritte:** `/architecture` für die vier obigen Ergänzungen, dann `/backend`, dann erneut `/qa`.
+### Tech Design Iteration 2 (Solution Architect, 2026-08-23)
+
+Ergänzung zum bestehenden Tech Design (Bausteine 1–3 oben bleiben in ihrer Grundstruktur bestehen). Vier Änderungen:
+
+#### Ergänzung zu Baustein 1 (`alice-mail-reader`): PDF-Textextraktion
+
+n8n-Code-Nodes dürfen aktuell nur `axios`, `redis`, `winston` (extern) sowie `crypto`, `fs`, `path` (Node-Builtins) nutzen (`NODE_FUNCTION_ALLOW_EXTERNAL`/`_BUILTIN` in `docker/compose/automations/n8n/compose.yml`). `pdf-parse` steht nicht auf dieser Liste, und diese projektweite Konfiguration für ein einzelnes Feature zu erweitern hätte einen Neustart des gemeinsam genutzten n8n-Containers zur Folge — zu großer Blast Radius für eine Feature-lokale Anforderung.
+
+Stattdessen bekommt `alice-mail-reader` einen neuen Endpunkt `POST /attachment-text`:
+
+- **Eingabe:** Dieselben Felder wie `/attachment` (Mailbox-Zugangsdaten, IMAP-UID, Anhang-Index)
+- **Verhalten:** Lädt den Anhang wie `/attachment` (nutzt intern denselben MIME-Walk), erkennt PDF anhand der Dateiendung/des MIME-Typs, extrahiert Volltext mit derselben Technik wie `dms-extractor-pdf` (`pdf-parse`), synchron im gleichen Request — kein MQTT/Redis-Umweg
+- **Ausgabe:** `{ text, page_count, truncated }`. Für Nicht-PDF-Anhänge (bzw. Extraktionsfehler) liefert der Endpunkt einen leeren Text mit entsprechendem Statusfeld, statt einen Fehler zu werfen — der aufrufende Workflow fällt dann auf Dateiname+Mail-Kontext zurück, wie es für Office-Formate ohnehin bereits vorgesehen ist
+- Grund für die Ergänzung *in* `alice-mail-reader` statt eines neuen Service: Die Anhang-Bytes liegen dort durch `/attachment` schon vor; ein separater Service müsste sie erneut per IMAP laden oder durch den n8n-Workflow durchgereicht bekommen — beides unnötiger Umweg
+
+#### Ergänzung zu Baustein 2 (`alice-mail-sync`): Extension-Routing vor Klassifizierung
+
+Der bestehende Anhang-Vorfilter (Schritt 1 in Baustein 2) bekommt eine zusätzliche Weiche, **vor** dem LLM-Klassifizierungsschritt:
+
+1. Extension prüfen gegen die (für diesen Workflow erweiterte) `SUPPORTED_EXTENSIONS`-Liste — neu: Video-Endungen (MP4, MOV, AVI, MKV, WEBM) und Audio-Endungen (MP3, WAV, M4A, OGG, FLAC) kommen hinzu
+2. Bild-Datenmüll-Check (< 20 KB) wie bisher, unverändert
+3. **Neu:** Ist der Anhang ein Bild (jenseits der Müll-Grenze), Video oder Audio → direkt `Document/` (Bild, unverändertes Verhalten) bzw. `Video/`/`Audio/` (neu) als Zielordner setzen, **kein** LLM-Aufruf, weiter zu Abruf+Ablage (Schritte 3–4 in Baustein 2)
+4. Nur PDF/DOCX/XLSX/ODT/ODS/TXT/MD durchlaufen weiterhin die LLM-Klassifizierung (Schritt 2 in Baustein 2)
+
+Für PDF ruft der Klassifizierungsschritt jetzt zusätzlich `POST /attachment-text` auf `alice-mail-reader` auf und übergibt den vollständigen extrahierten Text (statt bisher nichts) an den Klassifizierungs-Prompt. Für TXT/MD bleibt es bei der direkten Dekodierung (unverändert). Für DOCX/XLSX/ODT/ODS bleibt es bei Dateiname+Mail-Kontext ohne Volltext (siehe PROJ-91).
+
+#### Ergänzung zu Baustein 3 (`alice-mail-attachment-backfill`): Dry-Run
+
+Der Workflow bekommt denselben `confirm`-Mechanismus wie `alice-dms-language-backfill`:
+
+- Request-Body/Query-Parameter `confirm` (boolean) wird zu Beginn gelesen
+- Ohne `confirm: true`: Kandidaten werden wie gewohnt ermittelt und gezählt, aber der Import-Zweig (IMAP-Abruf, Klassifizierung, NAS-Write) wird übersprungen; Response liefert `{ candidates_found, dry_run: true }`
+- Mit `confirm: true`: bisheriges Verhalten (tatsächlicher Import)
+- Dieselbe Umsetzung wie Extension-Routing (siehe oben) gilt auch im Backfill-Pfad, da er dieselbe Klassifizierungs-/Ablagelogik dupliziert (siehe Tech-Entscheidungen unten zur Konsistenzpflicht zwischen Laufzeit- und Backfill-Pfad)
+
+### Datenmodell (fachlich) — Ergänzung Iteration 2
+
+- **Dateisystem** `/mnt/nas/ai/Video/` und `/mnt/nas/ai/Audio/`: neue Ablageziele, angelegt beim ersten Bedarf, analog den bestehenden fünf Schema-Ordnern. Anders als diese entsprechen sie **keinem** Weaviate-Schema (siehe Edge Case "Video-/Audio-Anhänge" oben) — reine Dateisystem-Ablage ohne DMS-Klassifizierungsanspruch.
+
+### Tech-Entscheidungen (Begründung) — Ergänzung Iteration 2
+
+- **`/attachment-text` als eigener Endpoint statt `/attachment` zu erweitern:** `/attachment` wird für alle unterstützten Dateitypen aufgerufen (auch Bild/Video/Audio, die keine Textextraktion brauchen) und von der Ablage-Logik konsumiert. Ein eigener Endpoint hält den Attachment-Abruf-Contract unverändert und macht die Textextraktion optional/on-demand, nur für den Klassifizierungsschritt.
+- **Kein Vision-Modell-Einsatz für PDF-Klassifizierung:** `pdf-parse`-Volltext an das bestehende Text-Klassifizierungsmodell ist deutlich günstiger und schneller als ein Vision-Call (z.B. `qwen3.5:27b-q4_K_M`, aktuell nur für Bildbeschreibung/OCR-Pfade genutzt) und deckt den Regelfall (textbasierte PDF-Rechnungen/Kontoauszüge) ab. Gescannte Bild-PDFs ohne Textebene bleiben ein bekanntes Restrisiko (führen zu leerem Text → Fallback auf Dateiname+Mail-Kontext, analog Office-Formaten) — Verbesserung dafür wäre ein eigenes Folge-Feature (OCR-Pfad, analog `dms-extractor-ocr`), nicht Teil von PROJ-53.
+- **Office-Formate bleiben ohne Volltext-Extraktion in PROJ-53:** `dms-extractor-office` nutzt LibreOffice headless (Subprocess, mehrere Sekunden Laufzeit) — nicht sinnvoll 1:1 synchron in `alice-mail-reader` nachzubauen, ohne die Kaltstart-/Ressourcenkosten des DMS-Pipeline-Containers zu duplizieren. Auf die Roadmap gesetzt als PROJ-91 (z.B. `markitdown`-basierter HTTP-Wrapper), der sowohl PROJ-53 als auch potenziell `dms-extractor-office` selbst ablösen könnte — bewusst nicht Teil dieses Zyklus, um PROJ-53 nicht mit einer neuen, noch nicht produktionserprobten Abhängigkeit zu belasten.
+- **`confirm`-Parameter statt separatem Preview-Endpoint:** Konsistent mit dem bereits etablierten Muster aus `alice-dms-language-backfill` — ein Parameter statt zweier Routen hält den Webhook-Contract einfach und macht das Verhalten für den Admin vorhersehbar (derselbe Aufruf, nur ein Flag unterscheidet Vorschau von Ausführung).
+
+**Nächste Schritte:** `/backend` für die Umsetzung der vier obigen Ergänzungen, dann erneut `/qa`.
 
 ## Deployment
 _To be added by /deploy_
