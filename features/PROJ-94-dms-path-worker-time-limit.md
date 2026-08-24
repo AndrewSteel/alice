@@ -1,6 +1,6 @@
 # PROJ-94: DMS Path-Worker Zeitlimit
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-08-24
 **Last Updated:** 2026-08-24
 
@@ -46,7 +46,40 @@ In der Praxis wurden bereits Läufe von >10 Stunden beobachtet (z.B. bei sehr gr
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### E) Workflow Architecture
+
+PROJ-94 hat keine UI-Komponente. Es erweitert den bestehenden `alice-dms-path-worker`-Workflow um einen Zeitlimit-Check innerhalb der bereits existierenden Datei-Verarbeitungsschleife — kein neuer Workflow, kein neuer Trigger.
+
+**Einordnung in den bestehenden Ablauf:**
+
+Der Path-Worker läuft aktuell pro Datei in `Loop: Files` durch: `Code: Renew Path Lock` (erneuert den Ordner-Lock) → `IF: Lock Still Held` (bricht bei Lock-Verlust über `Code: Self-Abort on Lock Loss` ab, sonst geht's weiter zur nächsten Datei). Genau an dieser Stelle — parallel zur bestehenden Lock-Prüfung — kommt die neue Zeitlimit-Prüfung hinzu.
+
+**Ablauf:**
+
+1. **Zeit-Check pro Datei-Durchlauf:** Zusätzlich zur bestehenden Lock-Erneuerung wird geprüft, wie viel Zeit seit `alice:dms:scanner:stats:folder:<folder_id>:run_start` (existierender Redis-Wert, wird bereits zu Lauf-Beginn gesetzt) vergangen ist.
+2. **Unter 2 Stunden:** Verarbeitung läuft wie bisher unverändert weiter.
+3. **2 Stunden oder mehr erreicht:** Die Schleife bricht kontrolliert ab — wie beim bestehenden Lock-Verlust-Fall, nur mit einem eigenen Abbruchgrund ("Zeitlimit erreicht" statt "Lock verloren"). Der Ordner-Lock wird sauber freigegeben, der bisherige Fortschritt (Anzahl verarbeiteter Dateien) wird geloggt, die Zusammenfassung am Ende des Laufs zeigt den Abbruchgrund.
+4. **Nächster stündlicher Lauf:** Der Dispatcher (`alice-dms-scanner`) startet wie gewohnt zur nächsten vollen Stunde einen neuen Path-Worker-Lauf für denselben Ordner (sofern der Ordner-Lock zu dem Zeitpunkt frei ist — was er nach dem sauberen Abbruch ist). Noch nicht gescannte Dateien werden dabei automatisch erneut erfasst, da der Scanner unbekannte/neue Dateien bei jedem Durchlauf ohnehin neu bewertet.
+
+**Integrationen:** Nur Redis (Lesen des bereits vorhandenen Zeitstempels) — keine neuen externen Abhängigkeiten.
+
+**Fehlerverhalten:** Ist Redis beim Zeit-Check nicht erreichbar, läuft der Worker unverändert weiter (fail-open) — die bestehende Lock-Verlust-Prüfung bleibt die primäre Absicherung gegen hängende Läufe bei Redis-Ausfall, das Zeitlimit ist eine zusätzliche, aber nicht die einzige Schutzschicht.
+
+### Datenmodell (fachlich)
+
+Kein neues Datenbankschema, kein neuer Redis-Key. Der bereits existierende Wert `alice:dms:scanner:stats:folder:<folder_id>:run_start` (gesetzt beim Laufstart, ein Wert pro aktuell laufendem Ordner-Scan) wird zusätzlich für die Zeitlimit-Berechnung gelesen.
+
+### Tech-Entscheidungen (Begründung)
+
+- **Wiederverwendung des bestehenden `run_start`-Zeitstempels statt eines neuen Keys:** Der Wert existiert bereits pro Ordner-Lauf und wird bereits beim Laufstart gesetzt — ein zweiter, redundanter Zeitstempel wäre unnötiger State.
+- **Zeitlimit-Check an derselben Stelle wie die bestehende Lock-Erneuerung (pro Datei in der Schleife) statt eines separaten globalen Checks:** Konsistent mit dem etablierten Muster aus `alice-dms-processor` (Zeit-Check zwischen Verarbeitungseinheiten, nicht mitten in einer einzelnen Dateiverarbeitung) und nutzt die bereits vorhandene Schleifenstruktur, statt eine parallele zu bauen.
+- **Fail-open bei Redis-Ausfall:** Ein Redis-Problem soll nicht zusätzlich einen laufenden Scan abwürgen — das würde das Robustheitsproblem, das PROJ-94 lösen soll, durch ein neues ersetzen. Die bestehende Lock-Verlust-Prüfung deckt den Fall "Redis nicht erreichbar" bereits ab (der Lock kann dann ohnehin nicht erneuert werden).
+- **2 Stunden als Grenzwert statt 4 Stunden (wie `alice-dms-processor`):** Der Path-Worker läuft stündlich, ein 4h-Limit würde also bis zu drei verpasste reguläre Trigger-Zeitpunkte bedeuten, bevor überhaupt abgebrochen wird — 2h hält die Verzögerung für betroffene Ordner kleiner und reduziert die Restwahrscheinlichkeit einer Überschneidung mit den nightly-Läufen um 02:00 Uhr bei sehr spät gestarteten Scans.
+
+### Dependencies (Pakete)
+
+Keine neuen Pakete — `redis` ist in n8n Code-Nodes bereits erlaubt und wird im Path-Worker bereits für die Lock-Verwaltung genutzt.
 
 ## QA Test Results
 _To be added by /qa_
