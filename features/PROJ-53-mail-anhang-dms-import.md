@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (Iteration 4 deployed — alle vier Iterationen produktiv live)
+**Last Updated:** 2026-08-24 (nightly Attachment-Processor auf 04:00 Uhr verschoben — GPU-Rechenzeit-Trennung von alice-dms-processor)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1559,11 +1559,15 @@ Der neue Nightly-Workflow `alice-mail-attachment-processor` sowie die entspreche
 2. **`/mnt/nas/ai/Image/`** ist in `alice.dms_watched_folders` eingetragen. Die dafür nötige Erweiterung der `suggested_type`-Check-Constraint um den Wert `Image` kam bereits über **PROJ-80** (Migration `sql/migrations/067-dms-watched-folders-image-type.sql`, unabhängig für das DMS-Vollständigkeits-Dashboard eingeführt) — PROJ-53 profitiert davon, ohne selbst eine Migration zu benötigen.
 3. **Beide** Workflows deployed:
    - `alice-mail-sync` (geändert — Anhang-Verarbeitung entfernt, neuer `Code: Enqueue Attachment Jobs`-Zweig)
-   - `alice-mail-attachment-processor` (**neu**, aktiviert, Schedule-Trigger `0 2 * * *`)
+   - `alice-mail-attachment-processor` (**neu**, aktiviert)
 4. `alice-mail-attachment-backfill` unverändert weiter im Einsatz.
 
-**Nach dem Deploy zu prüfen (nächster nightly Lauf, 02:00 Uhr):**
-- Queue wird korrekt abgearbeitet, GPU-Lock (`alice:dms:processor:lock:run`) verhindert Kollision mit `alice-dms-processor`, Anhänge landen in den richtigen Zielordnern inkl. `Image/`.
+**Schedule-Anpassung nach Deploy (2026-08-24):** Der Trigger von `alice-mail-attachment-processor` wurde von der ursprünglich im Tech Design vorgesehenen `0 2 * * *` (identisch zu `alice-dms-processor`) auf **`0 4 * * *`** verschoben. Begründung: Auch wenn beide Workflows dasselbe `OLLAMA_MODEL_DMS`-Modell nutzen (kein Umlade-Overhead), konkurrieren sie bei echt gleichzeitigem Lauf trotzdem um GPU-**Rechenzeit** — mit versetzten Slots hat jeder Workflow ungeteilten Zugriff auf sein volles 2h-Budget statt sich die Kapazität zu teilen.
+
+**Bekanntes Restrisiko der Zeitversetzung:** `alice-dms-processor`s Zeitlimit-Check (`Code: Time Check` → `IF: Time Limit Reached`) sitzt *zwischen* Batches, nicht innerhalb der Verarbeitung eines einzelnen Items. Startet kurz vor Ablauf der 2h-Grenze noch ein einzelnes, ungewöhnlich lange laufendes Item (z.B. eine sehr lange Ollama-Klassifizierung), kann `alice-dms-processor` sein 2h-Budget geringfügig überziehen und den GPU-Lock (`alice:dms:processor:lock:run`) dadurch über 04:00 Uhr hinaus halten. In diesem seltenen Fall greift der bereits in Iteration 4 implementierte GPU-Lock-Schutz (BUG-17-Fix) korrekt: `alice-mail-attachment-processor` überspringt den Lauf sauber (`Code: Log Already Running` → `End: Already Running`, kein Blockieren, kein Datenverlust), die Redis-Queue bleibt erhalten und wird in der nächsten Nacht abgearbeitet. Nutzerentscheidung (2026-08-24): Dieses Verhalten ist akzeptabel, keine engere Absicherung (größerer Zeitpuffer oder Item-internes Zeitlimit bei `alice-dms-processor`) vorgesehen.
+
+**Nach dem Deploy zu prüfen (nächster nightly Lauf, 04:00 Uhr):**
+- Queue wird korrekt abgearbeitet, GPU-Lock verhindert Kollision mit `alice-dms-processor`, Anhänge landen in den richtigen Zielordnern inkl. `Image/`.
 - AC-5.2/5.3 (Mail-Thumbnail-Rendering) bleiben laut QA offen — als eigener Bug in **PROJ-93** getrackt (vorbestehend, nicht PROJ-53-spezifisch, blockiert Deployment nicht).
 
 ### Bekannte Folge-Tickets (außerhalb PROJ-53)
