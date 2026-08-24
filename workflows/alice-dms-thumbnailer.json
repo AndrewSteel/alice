@@ -34,13 +34,74 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Parse & Filter\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  logger.info(`[alice-dms-thumbnailer] Skipping non-inserted document: ${msg.file_path}`);\n  return [];\n}\n\nif (!msg.weaviate_uuid || !msg.file_path) {\n  logger.warn(`[alice-dms-thumbnailer] Missing weaviate_uuid or file_path — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\nlogger.info(`[alice-dms-thumbnailer] Processing: ${msg.weaviate_uuid} ${msg.file_path}`);\nreturn [{ json: { ...msg } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Parse & Filter\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  logger.info(`[alice-dms-thumbnailer] Skipping non-inserted document: ${msg.file_path}`);\n  return [];\n}\n\nif (!msg.weaviate_uuid) {\n  logger.warn(`[alice-dms-thumbnailer] Missing weaviate_uuid — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\n// PROJ-93: Email objects have no NAS file_path (their content lives only in\n// Weaviate) - they get a dedicated text-rendering path instead of the\n// file-based one, so they are exempt from the file_path requirement below.\nconst isEmail = msg.document_type === 'Email';\nif (!isEmail && !msg.file_path) {\n  logger.warn(`[alice-dms-thumbnailer] Missing file_path — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\nlogger.info(`[alice-dms-thumbnailer] Processing: ${msg.weaviate_uuid} ${msg.file_path || '(email, no file_path)'}`);\nreturn [{ json: { ...msg } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [300, 0],
       "id": "code-parse-validate",
       "name": "Code: Parse & Filter"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-is-email",
+              "leftValue": "={{ $json.document_type }}",
+              "rightValue": "Email",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [450, 0],
+      "id": "if-is-email",
+      "name": "IF: Is Email"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://weaviate:8080/v1/objects/Email/' + $json.weaviate_uuid }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, -150],
+      "id": "http-get-email-content",
+      "name": "HTTP: GET Weaviate Email Content",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Merge Mail Text\" } });\nconst resp = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\n\n// PROJ-93: the Email object may have been deleted between the MQTT publish and\n// this lookup (e.g. a concurrent backfill/migration run) - a non-2xx status or\n// a missing body must not crash the workflow, it must fail like any other\n// generate error further down (IF: Generate OK).\nconst statusCode = resp.statusCode;\nconst body = resp.body || {};\nconst props = body.properties || {};\n\nif (!statusCode || statusCode >= 300) {\n  logger.warn(`[alice-dms-thumbnailer] Email object lookup failed for ${original.weaviate_uuid}: status=${statusCode}`);\n}\n\n// Bounded preview text, same spirit as the existing file-based text preview\n// (subject line + a capped slice of the body so a very long email cannot\n// blow up the rendered image).\nconst subject = String(props.subject || '').slice(0, 200);\nconst content = String(props.content || '').slice(0, 2000);\nconst mailText = [subject, content].filter(Boolean).join('\\n\\n');\n\nreturn [{ json: { ...original, _mail_text: mailText, _mail_lookup_ok: statusCode >= 200 && statusCode < 300 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, -150],
+      "id": "code-merge-mail-text",
+      "name": "Code: Merge Mail Text"
     },
     {
       "parameters": {
@@ -57,7 +118,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type || 'Document', file_type: $json.file_type || $json.file_path.split('.').pop().toLowerCase() }) }}",
+        "jsonBody": "={{ $json.document_type === 'Email' ? JSON.stringify({ mail_text: $json._mail_text || '', weaviate_uuid: $json.weaviate_uuid, document_type: 'Email', file_type: 'txt' }) : JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type || 'Document', file_type: $json.file_type || $json.file_path.split('.').pop().toLowerCase() }) }}",
         "options": {
           "timeout": 120000,
           "response": {
@@ -70,7 +131,7 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [600, 0],
+      "position": [1200, 0],
       "id": "http-generate-thumbnail",
       "name": "HTTP: POST /generate",
       "onError": "continueRegularOutput"
@@ -101,7 +162,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [900, 0],
+      "position": [1500, 0],
       "id": "if-generate-ok",
       "name": "IF: Generate OK"
     },
@@ -111,7 +172,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, -100],
+      "position": [1800, -100],
       "id": "code-extract-path",
       "name": "Code: Extract Thumbnail Path"
     },
@@ -143,7 +204,7 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1500, -100],
+      "position": [2100, -100],
       "id": "http-weaviate-patch",
       "name": "HTTP: PATCH Weaviate thumbnail_path",
       "onError": "continueRegularOutput"
@@ -154,17 +215,17 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1800, -100],
+      "position": [2400, -100],
       "id": "code-log-success",
       "name": "Code: Log Result"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Log Error\" } });\nconst item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nlogger.warn(`[alice-dms-thumbnailer] Generation failed for: ${original.weaviate_uuid} ${original.file_path} Status: ${item.statusCode}`);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path, status_code: item.statusCode } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Log Error\" } });\nconst item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nconst locator = original.document_type === 'Email' ? '(email, no file_path)' : original.file_path;\nlogger.warn(`[alice-dms-thumbnailer] Generation failed for: ${original.weaviate_uuid} ${locator} Status: ${item.statusCode}`);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path || null, status_code: item.statusCode } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 100],
+      "position": [1800, 100],
       "id": "code-log-error",
       "name": "Code: Log Error"
     },
@@ -178,7 +239,7 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [1500, 100],
+      "position": [2100, 100],
       "id": "mqtt-publish-error",
       "name": "MQTT: Publish thumb_error",
       "credentials": {
@@ -196,6 +257,22 @@
       ]
     },
     "Code: Parse & Filter": {
+      "main": [
+        [{ "node": "IF: Is Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Is Email": {
+      "main": [
+        [{ "node": "HTTP: GET Weaviate Email Content", "type": "main", "index": 0 }],
+        [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: GET Weaviate Email Content": {
+      "main": [
+        [{ "node": "Code: Merge Mail Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Merge Mail Text": {
       "main": [
         [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }]
       ]

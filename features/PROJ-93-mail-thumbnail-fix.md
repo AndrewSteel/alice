@@ -87,8 +87,45 @@ Kein neues Datenbankschema. Es werden ausschließlich bereits vorhandene Felder 
 
 Keine neuen Pakete. Der Thumbnailer-Service nutzt für den neuen Text-Rendering-Pfad dieselbe bereits vorhandene Bildbibliothek (Pillow), die auch für die bestehende Text-Vorschau (TXT/MD) verwendet wird.
 
+### Implementation Notes (Backend)
+
+**Umgesetzt in:**
+- `workflows/alice-dms-thumbnailer.json` — neuer Mail-Zweig
+- `docker/compose/automations/alice-dms-thumbnailer/app/main.py` — neuer Text-Rendering-Modus
+
+**Workflow-Änderungen:**
+
+- `Code: Parse & Filter`: Nachrichten mit `document_type: 'Email'` sind jetzt von der `file_path`-Pflicht ausgenommen (`weaviate_uuid` bleibt für alle Typen Pflicht).
+- Neuer `IF: Is Email`-Node direkt nach `Code: Parse & Filter`: bei `document_type === 'Email'` geht es über zwei neue Nodes (`HTTP: GET Weaviate Email Content` → `Code: Merge Mail Text`), sonst direkt weiter — beide Zweige münden in denselben `HTTP: POST /generate`-Node.
+- `HTTP: GET Weaviate Email Content`: liest das Email-Objekt per `GET /v1/objects/Email/{uuid}` direkt von Weaviate (REST, kein GraphQL nötig, gleicher Stil wie der bestehende `HTTP: PATCH Weaviate thumbnail_path`-Node).
+- `Code: Merge Mail Text`: baut aus `properties.subject` (max. 200 Zeichen) und `properties.content` (max. 2000 Zeichen) einen zusammengesetzten Vorschautext; fängt einen fehlgeschlagenen Lookup (Objekt gelöscht, Weaviate down) sauber ab, ohne zu crashen — der nachgelagerte `/generate`-Aufruf bekommt dann leeren `mail_text` und scheitert kontrolliert über den bereits bestehenden `IF: Generate OK`-Fehlerpfad.
+- `HTTP: POST /generate`: Payload-Aufbau verzweigt jetzt je nach `document_type` — für Mail wird `mail_text` statt `original_path` gesendet.
+- `Code: Log Error`: zeigt für Mail-Fehlerfälle `(email, no file_path)` statt eines `undefined`-Werts im Log (kosmetische Verbesserung, kein AC).
+
+**Service-Änderungen (`alice-dms-thumbnailer`):**
+
+- `GenerateRequest`: `original_path` ist jetzt optional (`str | None`), neues optionales Feld `mail_text`. Ein neuer `@model_validator(mode="after")` erzwingt: `document_type == 'Email'` → `mail_text` nicht-leer Pflicht; sonst → `original_path` Pflicht (unverändertes Verhalten für alle bisherigen Aufrufer).
+- Neue Hilfsfunktion `_render_text_image(text)`: rendert beliebigen In-Memory-Text als Bild (Refactoring aus dem bestehenden `_render_text_preview`, das jetzt nur noch die Datei liest und an die neue Funktion delegiert — identisches Verhalten für den bestehenden TXT/MD-Pfad).
+- `generate_thumbnail()`: neuer optionaler `mail_text`-Parameter; ist er gesetzt, wird direkt aus Text gerendert (kein Datei-Zugriff), sonst unverändertes bisheriges Verhalten.
+- `/generate`-Endpoint: der `src.exists()`-Check wird für `document_type == 'Email'` übersprungen (kein Datei-Pfad vorhanden), sonst unverändert.
+
+**Gefundener und selbst behobener Bug während der Implementierung:** Die erste Fassung des `document_type`/`mail_text`/`original_path`-Cross-Field-Checks nutzte einen `@field_validator("document_type")` mit `info.data` — das schlug fehl, weil Pydantic v2 Felder in Deklarationsreihenfolge validiert und `info.data` beim Erreichen von `document_type` `original_path`/`mail_text` (später deklariert) noch nicht enthält. Live gegen den echten FastAPI-Endpunkt getestet, Fehlschlag beobachtet (`mail_text must not be empty` trotz gesetztem `mail_text`), auf `@model_validator(mode="after")` umgestellt (sieht alle Felder unabhängig von der Deklarationsreihenfolge) und erneut verifiziert.
+
+**Verifikation (eigenständig, mit echtem laufenden FastAPI-Service, kein Mock):**
+
+- `python3 -m py_compile main.py`: syntaktisch valide.
+- **Live-Test gegen die echte FastAPI-App** (`TestClient`, `startup`-Event ausgelöst, echtes Pillow-Rendering, kein Mock): gültige Mail-Anfrage → `200`, Thumbnail-Datei tatsächlich auf der Platte geschrieben (400×400 RGB JPEG, per Pillow nachgeladen und verifiziert), Bildinhalt visuell geprüft (Betreff + Body-Text lesbar gerendert).
+- Fehlende/leere `mail_text` bei `document_type: 'Email'` → `422` (Validierung greift).
+- Fehlender `original_path` bei Nicht-Mail → `422` (Validierung greift, neues Pflichtverhalten für Alt-Aufrufer unverändert).
+- **Regressionstest Path-Traversal** (`/etc/passwd`, `../../etc/passwd`): weiterhin `422` — die bestehende Sicherheitsprüfung ist durch die Optional-Machung von `original_path` nicht geschwächt.
+- **Regressionstest bestehender TXT-Datei-Pfad**: echte Datei auf Platte angelegt, `document_type: 'Document'` mit `original_path` → `200`, Thumbnail erfolgreich erzeugt — bestätigt, dass das Refactoring von `_render_text_preview` das bestehende Verhalten nicht verändert hat.
+- Edge Cases: sehr langer `mail_text` (100.000 Zeichen) → kein Crash, `200` (durch das bestehende `[:2000]`-Slice in `_render_text_image` begrenzt); nur Betreff ohne Body → `200`; `original_path` zusätzlich zu `mail_text` bei Mail mitgegeben (fehlerhafter/inkonsistenter Aufrufer-Fall) → `mail_text` gewinnt, kein Datei-Zugriff, `200` (kein Crash trotz nicht-existentem Pfad).
+- Workflow-JSON: strukturelle Prüfung (eigenständiges Skript) — valide JSON, keine doppelten Node-Namen/-IDs, alle `connections`-Ziele und `$('Node')`-Referenzen lösen auf, kein `console.log`, alle Nodes vom Trigger aus erreichbar (BFS). Alle 5 Code-Nodes bestehen `node --check`.
+
+**Nicht verifizierbar ohne Deploy/echte Weaviate-Instanz:** Verhalten gegen eine echte Weaviate-Instanz (reales `GET /v1/objects/Email/{uuid}`-Response-Format), tatsächliches MQTT-Timing im Live-Workflow, echte Mail-Inhalte mit Sonderzeichen/verschiedenen Sprachen im Rendering.
+
 ---
-_Implementation folgt in /backend._
+_Implementation abgeschlossen._
 
 ## QA Test Results
 _To be added by /qa_
