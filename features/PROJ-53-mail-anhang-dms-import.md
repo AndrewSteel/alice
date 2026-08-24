@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-24 (Iteration 4: Anhang-Verarbeitung entkoppelt von alice-mail-sync — GPU-Ressourcenkonflikt)
 
@@ -1244,6 +1244,61 @@ Deckt weiterhin bereits vor Iteration 4 indexierte Alt-Mails ab (Dateisystem-bas
 Keine neuen Pakete — `redis` ist in n8n Code-Nodes bereits erlaubt (`NODE_FUNCTION_ALLOW_EXTERNAL`) und wird bereits in mehreren bestehenden Workflows verwendet.
 
 **Nächste Schritte:** `/backend` für die Umsetzung (Verschlankung von `alice-mail-sync`, neuer Workflow `alice-mail-attachment-processor`), dann erneut `/qa`.
+
+### Implementation Notes (Iteration 4)
+
+**Umgesetzt am 2026-08-24 (`/backend`). Nicht deployt** — Deployment erfolgt manuell durch den Admin (beide Workflows: `alice-mail-sync` **und** neu `alice-mail-attachment-processor`).
+
+#### Baustein 1: `alice-mail-sync` verschlankt
+
+- **Entfernt:** `Code: Import Attachments` (der komplette Anhang-Block). Der Node wurde **nicht gelöscht, sondern verschoben** — siehe Baustein 2.
+- **Neu:** `Code: Enqueue Attachment Jobs` (`id: s9b-enqueue-attachments`), hängt am selben Output 0 von `Process + Classify + Store Emails`, parallel zu `Notify: Passthrough` — also exakt an der Stelle des entfernten Nodes.
+- Schreibt pro neu gespeicherter Mail **einen** JSON-Eintrag per `rPush` in die Redis-Liste `alice:mail:attachment_queue`, aber nur wenn mindestens ein Anhang den Vorfilter besteht. Eintrag enthält: `mailbox` (mailboxId/host/port/ssl/username/passwordEnc), `uid`, `message_id`, `weaviate_uuid`, `subject`, `sender`, `date`, `body_preview`, `attachments[]` (name/mime_type/size_bytes), `queued_at`.
+- Der Vorfilter (`SUPPORTED_EXTENSIONS` + 50-MB-Limit + <20-KB-Bild-Müll) ist **verbatim** aus `Code: Import Attachments` übernommen (`prefilterAttachment` byte-identisch), damit die Queue nicht mit Anhängen vollläuft, die der Processor ohnehin verwerfen würde.
+
+#### Baustein 2: Neuer Workflow `workflows/alice-mail-attachment-processor.json`
+
+17 Nodes, Struktur analog `alice-dms-processor`:
+
+`Schedule: Nightly 02:00` (`0 2 * * *`) → `Code: Init` → `Code: Fetch Batch` (`lRange`, Items bleiben in der Liste) → `IF: Queue Empty` → `Split In Batches` → `Code: Time Check` → `IF: Time Limit Reached` → `IF: Parse Error` → `Code: Process Queue Item` → `IF: Imported Any` → `MQTT: Publish Attachment Done` → zurück zu `Split In Batches`.
+
+- **`Code: Process Queue Item`** enthält den 1:1 verschobenen Anhang-Code. Nachgewiesen per normalisiertem Diff gegen den alten `Code: Import Attachments`: **98,9 % identisch**; die einzigen Deltas sind der Wegfall der äußeren `for (const mail of storedEmails)`-Schleife (jetzt eine Mail pro Queue-Eintrag) und ein Kommentar-Wort. Alle Funktionsrümpfe (`prefilterAttachment`, `routeByExtension`, `fetchPdfText`, `shortenSender`, `mailDateStamp`, `sanitizeFilename`, `buildBaseFilename`, `resolveCollision`, `buildClassificationPrompt`, `parseClassification`, `callOllama`, `classifyAttachment`) sind unverändert.
+- **Crash-/Zeitlimit-Sicherheit:** `lRem` erfolgt erst *in* `Code: Process Queue Item`, nachdem der Eintrag abgearbeitet wurde. Ein Zeitlimit-Abbruch greift **vor** diesem Node, unverarbeitete Einträge bleiben also erhalten (gleiches Muster wie `alice:dms:plaintext`).
+- **Zeitlimit:** `MAX_RUNTIME_SECONDS = 14400` (4 h) → ein 02:00-Lauf bricht spätestens um 06:00 ab, also vor der Chat-Kernzeit (07:00).
+- **Modell:** `$env.OLLAMA_MODEL_DMS || 'qwen3:14b'` (Iteration-3-Fix). Das Vision-Modell-Literal `qwen3.5:27b-q4_K_M` kommt im neuen Workflow **nicht** vor.
+- **Fehlerverhalten:** unveränderte Pro-Anhang-`try/catch`-Isolation; ein fehlgeschlagener Eintrag wird geloggt und aus der Liste entfernt (kein Auto-Retry), wie im Tech Design festgelegt.
+
+#### Baustein 3: `alice-mail-attachment-backfill` — unverändert
+
+Bestätigt: `git status` weist die Datei als **nicht geändert** aus. Keine Anbindung an die neue Redis-Liste.
+
+#### Abweichungen vom Tech Design (wichtig für QA)
+
+1. **`MQTT: Publish Email Done` bleibt in `alice-mail-sync`** — bewusste Abweichung von der Formulierung "sowie der zugehörige Split-Zweig für den Thumbnail-MQTT-Publish" (Baustein 1). Begründung: Dieser Publish ist laut AC (Zeile 68) und PROJ-80-Lückenschluss der Trigger für das **Thumbnail der Mail selbst** (`document_type: 'Email'`, gerendert aus Betreff + Body) und hat mit Anhängen nichts zu tun. Er feuert für **jede** neu inserierte Mail. Ein Verschieben in den Nightly-Workflow hätte alle Mails **ohne** Anhang dauerhaft ohne Thumbnail gelassen (Regression gegen das in Iteration 1 QA-geprüfte AC-5.1), da der Processor nur Mails mit Anhang sieht. `Code: Split Stored Emails` → `IF: Has Stored Emails` → `MQTT: Publish Email Done` hängen daher jetzt direkt an `Process + Classify + Store Emails` (nur `position` geändert, Parameter/Credentials unverändert).
+2. **Zusätzlicher MQTT-Node im neuen Workflow:** `MQTT: Publish Attachment Done` feuert pro Queue-Eintrag, bei dem mindestens eine Datei tatsächlich neu auf dem NAS geschrieben wurde (`_imported_any`), mit identischem Payload-Format. Damit bleibt der "nur bei echtem Neu-Insert"-Charakter erhalten. *Hinweis für QA:* Ob dieser zweite Publish fachlich erwünscht ist, sollte geprüft werden — die Anhänge selbst bekommen ihr Thumbnail ohnehin über die reguläre DMS-Pipeline (Scanner → Processor → Thumbnailer), dieser Publish bezieht sich auf die `Email`-UUID und ist damit potenziell redundant zum Publish aus Baustein 1.
+3. **`IF: Parse Error` / `Code: Drop Unparseable Item`** sind im Tech Design nicht skizziert, aber nötig, weil `Code: Fetch Batch` (analog `alice-dms-processor`) defekte JSON-Einträge markiert statt zu werfen — sonst bliebe ein unparsebarer Eintrag für immer in der Liste und würde jede Nacht erneut scheitern.
+4. **Attachment-Indizes:** Der Queue-Eintrag trägt das **vollständige** `attachments`-Array (nicht nur die gefilterten), weil `/attachment` per `attachment_index` adressiert. Ein Filtern beim Enqueue hätte die Indizes verschoben und den falschen Anhang geladen. Der Vorfilter entscheidet beim Enqueue also nur *ob* die Mail in die Queue kommt; *welche* Anhänge verarbeitet werden, entscheidet unverändert der Processor.
+5. **Feldname `mailbox`** statt des im Tech Design genannten "Mailbox-ID"-Felds: Es werden die vollständigen Verbindungsdaten benötigt (der Processor hat keinen `Prepare Mailbox Data`-Kontext und liest die Mailbox nicht erneut aus Postgres).
+
+#### Validierung
+
+Strukturell validiert (n8n-mcp im Subagent nicht verfügbar), alle drei Workflows: gültiges JSON, eindeutige Node-Namen/IDs, alle Connection- und `$('Node')`-Referenzen auflösbar, keine verwaisten Nodes, alle Code-Nodes `node --check` grün, **0 `console.log`**, Credentials auf MQTT-/Postgres-Nodes gesetzt, nur erlaubte `require`-Module (`axios, redis, winston, fs, path`).
+
+Zusätzlich per Mock-Harness (Redis/axios/fs/winston gemockt) zur Laufzeit geprüft:
+
+- Enqueue → `lRange` → Process → `lRem` Round-Trip funktioniert; nur Mails mit Kandidat werden eingereiht (Mail mit reinem Signatur-Icon und Mail ohne Anhang werden korrekt übersprungen).
+- Mailbox-Kontext und `weaviate_uuid` überleben den Redis-Round-Trip.
+- PDF → `Invoice/2026-05-04_billing_rechnung.pdf` inkl. korrektem Dateinamensschema.
+- Iteration-2/3-Fixes verifiziert: Bild → `Image/`, Video → `Video/`, Audio → `Audio/`, **0 LLM-Aufrufe** für Medien, 50-MB-Limit greift.
+- Zeitlimit: bei 5 h Laufzeit meldet `Code: Time Check` korrekt `_time_limit_reached: true`.
+- Regressionsnachweis `alice-mail-sync`: alle Mail-Metadaten-Nodes (`Process + Classify + Store Emails`, `Notify: Passthrough`, alle PG-Nodes, `Prepare Mailbox Data`) sind **byte-identisch** zu HEAD; genau ein Node ausgetauscht.
+
+#### Nicht verifizierbar in dieser Umgebung
+
+- Kein Lauf gegen echtes Redis/n8n/IMAP/Ollama/NAS — die Mock-Harness ersetzt keinen Integrationstest.
+- Ob `mistral-small3.2:24b` produktiv besser klassifiziert (Live-Test des Users, nicht Teil dieser Umsetzung).
+- AC-5.2/5.3 (Thumbnail-Rendering für Mail-Objekte) unverändert offen aus Iteration 1–3.
+- Kein Lock-Mechanismus wie in `alice-dms-processor` (`Code: Acquire Processor Lock`) implementiert — bei einem nightly Trigger ohne Overlap-Risiko bewusst weggelassen; falls QA parallele manuelle Läufe abdecken will, wäre das nachzurüsten.
 
 ## Deployment
 _To be added by /deploy_
