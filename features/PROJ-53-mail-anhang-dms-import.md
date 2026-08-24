@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (BUG-16/BUG-17 aus Iteration-4-QA vor Deploy behoben — GPU-Lock ergänzt, redundanter MQTT-Node entfernt; erneute QA-Verifikation ausstehend)
+**Last Updated:** 2026-08-24 (QA-Nachprüfung bestanden — BUG-16/BUG-17 behoben und verifiziert, keine Critical/High-Bugs)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1450,6 +1450,65 @@ Iteration 4 ist eine reine **Architektur-Verschiebung** (minütlich → nightly 
   3. **BUG-15** als Folge-Feature einplanen — ohne diesen Fix bleibt AC-5.2/5.3 (Mail-Thumbnails) dauerhaft unerfüllt, unabhängig von PROJ-53.
   4. Unverändert aus Iteration 3: `OLLAMA_MODEL_DMS` produktiv auf ein Textmodell setzen (BUG-13) und `Image/` in `alice.dms_watched_folders` eintragen.
   5. Deployment umfasst **beide** Workflows: `alice-mail-sync` (geändert) und `alice-mail-attachment-processor` (neu, muss aktiviert werden).
+
+---
+
+## QA-Nachprüfung — BUG-16 / BUG-17 behoben (2026-08-24)
+
+**Tested:** 2026-08-24
+**Tester:** QA Engineer (AI)
+**Commit under test:** `ee1696b` (Fix) gegen den zuvor geprüften Stand `0c92b6d`; Folge-Commit `f4a3bc2` (nur INDEX/Status) mitgeprüft.
+**Test method:** Node-für-Node-Diff `0c92b6d → ee1696b`, eigenständiges Nachlesen des Lock-Musters in `alice-mail-attachment-backfill.json`, Lua-Skript-Vergleich über alle drei Lock-Workflows, **Lock-Simulation gegen echte Redis-`SET NX PX`-/TTL-Semantik** (23/23 Assertions grün) sowie erneuter Lauf der Iteration-4-Mock-Harness gegen den gefixten Stand (**38/38 grün**).
+
+### BUG-17 — GPU-Lock: **BEHOBEN, verifiziert**
+
+| # | Prüfpunkt | Status | Nachweis |
+|---|-----------|--------|----------|
+| 1 | Gleicher Lock-Key wie die anderen Lock-Workflows | PASS | **Eigenständig** aus `alice-mail-attachment-backfill.json` gelesen (nicht aus den Notes übernommen): `LOCK_KEY = 'alice:dms:processor:lock:run'`, `LOCK_TTL_MS = 1800000` — identisch im neuen Node. `Code: Acquire Processor Lock` ist nach Abzug von Kommentaren/Leerzeilen **byte-identisch** zu `Code: Acquire Backfill Lock`; einzige Deltas sind die beiden Logger-Identitätsstrings (`workflow`/`node`-Meta und `[MailAttachmentProcessor]` statt `[MailBackfill]`) |
+| 1b | Release-/Renew-Lua identisch zum Bestand | PASS | Beide Skripte (`RELEASE` mit `DEL`, `RENEW` mit `SET … PX`) sind **byte-identisch in allen drei** Workflows (`alice-dms-processor`, `alice-mail-attachment-backfill`, neu) — 0 abweichende Varianten |
+| 2 | Mutual Exclusion funktioniert real | PASS | Simulation mit echter `SET NX`-Semantik: zweiter Acquirer erhält `nil` → `_lock_acquired: false`, `lock_owner: null` → `IF: Processor Lock Acquired` routet auf `Code: Log Already Running`. Szenario „`alice-dms-processor` und Mail-Processor starten in **derselben** 02:00-Minute": **genau einer** bekommt die GPU |
+| 2b | Fremder Lock nicht löschbar | PASS | Owner-geprüftes Lua: Release mit fremdem Token → `0`, Lock bleibt bestehen; nur der echte Owner löscht (`1`) |
+| 3 | Kein Deadlock nach Crash | PASS | TTL 1800 s ≪ Laufzeitbudget 14400 s. Simulation: Crash nach 10 min → andere weiterhin blockiert; nach 31 min (> 30 min TTL) acquiriert der nächste Lauf **erfolgreich**. Ein abgestürzter Lauf kann die Nacht also nicht blockieren |
+| 3b | Renewal trägt lange gesunde Läufe | PASS | Erneuerung pro Item (`Code: Time Check`): 12 × 25 min = 5 h ohne Ownership-Verlust. Umgekehrt: Lücke > 30 min → `_lock_lost: true` |
+| 3c | Ownership-Verlust bricht sauber ab | PASS | `IF: Time Limit Reached` prüft jetzt `_time_limit_reached \|\| _lock_lost`; ein Lauf, dessen Lock übernommen wurde, bricht ab statt parallel weiter auf der GPU zu rechnen, und löscht den fremden Lock nicht |
+| 4 | Alle vier Exit-Pfade korrekt | PASS | **busy-skip**: kein Release, Queue unangetastet → nächste Nacht holt alles nach. **empty-queue** (`Code: Empty Summary`, neu): released — verhindert, dass eine leere Nacht den Lock bis TTL-Ablauf hält. **Normalabschluss** (`Code: Final Log`) und **Zeitlimit-Abbruch** (`Code: Final Log (Time)`): released. Alle drei Release-Stellen nutzen das owner-geprüfte Lua |
+
+### BUG-16 — redundanter MQTT-Node: **BEHOBEN, verifiziert**
+
+| # | Prüfpunkt | Status | Nachweis |
+|---|-----------|--------|----------|
+| 1 | Node + Credential entfernt | PASS | `MQTT: Publish Attachment Done` und `IF: Imported Any` sind aus `nodes` verschwunden. Der Workflow hat **keinen einzigen** Node mit Credentials mehr (vorher: `mqtt-alice`) |
+| 2 | Keine hängenden Referenzen | PASS | `grep` auf `_imported_any`, `IF: Imported Any`, `Publish Attachment Done`, `mqtt` im gesamten Workflow-JSON: **0 Treffer**. Graph-Validierung: 0 unaufgelöste Connection-/`$('Node')`-Referenzen, 0 verwaiste Nodes |
+| 3 | Direkter Rücksprung zu `Split In Batches` | PASS | Graph-Trace: `Code: Process Queue Item [out0] -> Split In Batches` (vorher über `IF: Imported Any`). `Code: Drop Unparseable Item` ebenfalls unverändert direkt zurück |
+| 4 | `alice-mail-sync` unberührt | PASS | `git diff 0c92b6d ee1696b -- workflows/alice-mail-sync.json` → **0 Zeilen**. `MQTT: Publish Email Done` weiterhin vorhanden, Topic `alice/dms/done`, Credential `mqtt-alice` gesetzt. AC-5.1 unverändert erfüllt |
+
+### Regression der bereits verifizierten Iteration-4-Logik
+
+- **Node-Diff `0c92b6d → ee1696b`:** 5 Nodes neu (Lock/Skip/Empty-Summary), 2 entfernt (BUG-16), 4 Code-Nodes geändert, 4 nur `position`. Eng begrenzt wie angekündigt.
+- **`Code: Process Queue Item`:** Delta ist **ausschließlich** der Wegfall von `_imported_any` aus dem Return (1 Zeile). Prefilter, Extension-Routing, PDF-Text, Klassifizierung, NAS-Write, Kollisions-Suffix und das `lRem` am Ende sind **unverändert** — der 1:1-Code-Move steht weiterhin.
+- **`Code: Drop Unparseable Item`:** nur `_imported_any` aus dem Return entfernt.
+- **`Code: Final Log` / `Final Log (Time)`:** nur der owner-geprüfte Release-Block ergänzt; Statistik-/Logging-Logik unverändert.
+- **Mock-Harness erneut gegen den gefixten Stand: 38/38 grün** — Queue-Crash-Sicherheit (`lRange` liest ohne Entfernen, `lRem` erst nach Verarbeitung), Index-Integrität (`/attachment` trifft idx 2 und 4), Medien-Routing (`Image/`/`Video/`/`Audio/`), 50-MB-Limit, Bild-Müll-Filter, Zeitlimit (3 h → weiter, 4,01 h → Abbruch) und `$env.OLLAMA_MODEL_DMS` unverändert korrekt.
+
+### Static Checks (beide Workflows)
+
+Valides JSON · eindeutige Node-Namen/IDs · 0 unaufgelöste Connection-/`$('Node')`-Referenzen · keine verwaisten Nodes · alle Code-Nodes `node --check` grün · **0 `console.log`** · `require`-Module `axios, crypto, fs, path, redis, winston` — `crypto` ist in `docker/compose/automations/n8n/compose.yml` über `NODE_FUNCTION_ALLOW_BUILTIN=crypto,fs,path` freigegeben und wird bereits von den drei anderen Lock-Workflows genutzt (kein neues Deployment-Risiko).
+
+### Prüfung des Restaurations-Commits `f4a3bc2`
+
+Kein Phantom-Regress: `f4a3bc2` ändert ausschließlich `features/INDEX.md` (PROJ-93-Zeile, `Next Available ID` → PROJ-94, PROJ-53-Status) und den Status-Header des Specs. **Keine** Workflow-JSONs und **kein** inhaltlicher Spec-Abschnitt berührt.
+
+### Security — Nachprüfung
+
+Unverändert ohne Befund. Der Lock führt keinen neuen Credential-Pfad ein (`crypto.randomUUID()` als Owner-Token, kein Secret); `REDIS_PASSWORD` wird wie im Bestand über `$env` gelesen; kein Log enthält Passwörter. Durch den Wegfall des MQTT-Nodes hat der Workflow jetzt **weniger** Credential-Bindungen als zuvor. `passwordEnc` bleibt Ende-zu-Ende verschlüsselt (Harness-Nachweis erneut grün).
+
+### Summary — Nachprüfung
+
+- **BUG-17: behoben und eigenständig verifiziert.** Lock-Key, TTL und beide Lua-Skripte nachweislich identisch zum etablierten Muster; Mutual Exclusion, TTL-Recovery, Renewal, Ownership-Verlust und alle vier Exit-Pfade simulativ bestätigt (23/23). Der neue Workflow ist damit der fünfte, korrekt serialisierte GPU-Konsument.
+- **BUG-16: behoben.** Node, Gate-IF, Credential und Feld restlos entfernt, keine hängenden Referenzen, `alice-mail-sync` nachweislich unberührt.
+- **Keine neuen Bugs.** Keine Critical/High offen. BUG-15 bleibt out of scope und ist als **PROJ-93** separat getrackt. BUG-13 (Modell-`.env`) und BUG-14 (Doku) unverändert als Deployment-/Folgeaufgaben.
+- **Production Ready:** **YES — READY**
+- **Empfehlung:** **Approved.** Verbleibende Deployment-Voraussetzungen: `OLLAMA_MODEL_DMS` auf ein Textmodell setzen (BUG-13), `Image/` in `alice.dms_watched_folders` eintragen, und **beide** Workflows deployen (`alice-mail-sync` geändert, `alice-mail-attachment-processor` neu + aktivieren).
 
 ## Deployment
 _To be added by /deploy_
