@@ -108,7 +108,82 @@ Der vorgeschaltete Lock-Node (`Code: Acquire Backfill Lock`) wurde wie in der Sp
 _Implementation abgeschlossen._
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-08-24
+**Commit under test:** `fc4ed65` (fix(PROJ-92): Read webhook payload by node name in DMS backfill workflows)
+**Scope:** `workflows/alice-dms-language-backfill.json`, `workflows/alice-dms-classification-backfill.json`
+**Tester:** QA Engineer (AI)
+
+### Testmethode
+
+Kein Deploy und kein Live-n8n/Redis in dieser Umgebung — gleiches Vorgehen wie bei PROJ-53/PROJ-94:
+
+1. **Statische Graph-Analyse:** `connections`-Objekt eigenständig traversiert, Node-Parameter direkt aus der JSON gelesen (nicht der Implementer-Beschreibung vertraut).
+2. **Struktureller Alt/Neu-Vergleich:** `fc4ed65~1` vs. `fc4ed65` auf Node-Ebene für beide Dateien.
+3. **Isolierte Re-Execution:** `Code: Init Backfill Run` und `Code: Time Check` aus beiden Workflows extrahiert und der **echte** Node-Code gegen gefaktes `redis`/`winston` und injizierte `$input`/`$()`-Globals ausgeführt (eigenes Skript, unabhängig vom Implementer-Verifikationsskript neu geschrieben).
+4. **Propagations-Trace:** Verfolgt, wie `confirm` und `MAX_RUNTIME_SECONDS` vom Init-Node durch die nachgelagerten Nodes bis zum eigentlichen Gate (`IF: Confirm Mode` bzw. `doc.confirm`-Check in `Code: Compare & Handle`) fließen — nicht nur Init isoliert geprüft.
+
+**Ergebnis: 14/14 Checks bestanden, 0 Critical/High/Medium Bugs, 1 Low-Finding (vorbestehendes Muster, siehe unten).**
+
+### Acceptance Criteria Status
+
+| # | Acceptance Criterion | Status | Nachweis |
+|---|---------------------|--------|----------|
+| AC-1 | `Code: Init Backfill Run` liest Payload per Node-Name statt `$input` (beide Workflows) | **PASS** | Beide Dateien: `$('Webhook: POST /language-backfill')` bzw. `$('Webhook: POST /classification-backfill')` ersetzt `$input.first().json`. Diff-Scoping bestätigt: nur die zwei `jsCode`-Parameter geändert, sonst nichts. |
+| AC-2 | `{"confirm": true}` (Body) → `CONFIRM = true`, tatsächliche Migration statt Dry-Run | **PASS** | Eigene Re-Execution: Body `{confirm: true}` → `CONFIRM: true` in beiden Workflows. Propagations-Trace bestätigt: `Code: Fetch All Documents` kopiert `confirm: trigger.confirm` auf jedes Dokument-Item; `IF: Confirm Mode` (language) und `doc.confirm`-Check in `Code: Compare & Handle` (classification) werten diesen Wert aus — beide erreichen bei `CONFIRM=true` den Migrations-/Korrektur-Pfad. |
+| AC-3 | `confirm` als Query-Parameter gleichwertig zu Body, Body hat Vorrang | **PASS** | Code unverändert in dieser Hinsicht (`body.confirm !== undefined ? body.confirm : query.confirm`), nur die Payload-Quelle wurde korrigiert. Eigene Tests: Query `confirm: 'true'` → `true`; Body-Wert übersteuert bei beiden gesetzt (bestehende Logik, nicht Teil des Fixes, aber durch den Fix jetzt überhaupt erreichbar). |
+| AC-4 | Ohne `confirm`/`confirm: false` bleibt Dry-Run | **PASS** | Eigene Tests: leerer Payload `{}` → `CONFIRM: false` in beiden Workflows. Sicherheitsverhalten (Fail-Closed) unverändert. |
+| AC-5 | `Code: Time Check` liest `MAX_RUNTIME_SECONDS` von Init statt hardcoded | **PASS** | Beide Dateien: `parseInt($('Code: Init Backfill Run').first().json.MAX_RUNTIME_SECONDS, 10)` ersetzt die hardcoded `7200`. Eigener Test: Override `max_runtime_seconds: 60` im Body, `run_start` künstlich 90s in die Vergangenheit gesetzt → `_time_limit_reached: true` bei `maxRuntime=60` (wäre bei weiterhin hardcoded 7200 fälschlich `false` geblieben). |
+| AC-6 | Ohne Override bleibt Zeitlimit bei 7200s | **PASS** | Eigener Test: kein `max_runtime_seconds` im Payload → `MAX_RUNTIME_SECONDS: 7200` in beiden Workflows (Normalfall unverändert). |
+| AC-7 | Lock-Node (`Code: Acquire Backfill Lock`) unverändert | **PASS** | Struktureller Diff `fc4ed65~1` → `fc4ed65`: Lock-Node-Parameter, -Position, -ID in beiden Dateien byte-identisch. Einzige geänderte Nodes: `Code: Init Backfill Run`, `Code: Time Check`. |
+
+**7/7 Acceptance Criteria PASS** (jeweils für beide Workflows geprüft).
+
+### Edge Cases Status
+
+| # | Edge Case | Status | Nachweis |
+|---|-----------|--------|----------|
+| EC-1 | Webhook-Call ganz ohne Body/Query | **PASS** | Eigener Test: `webhookPayload: {}` → `CONFIRM: false`, kein Crash, `MAX_RUNTIME_SECONDS: 7200`. |
+| EC-2 | `confirm` als String `"true"` | **PASS** | Bestehende Logik (`confirmRaw === true \|\| confirmRaw === 'true'`) unverändert und durch den Fix jetzt erreichbar; eigener Test bestätigt `query.confirm: 'true'` → `true`. |
+| EC-3 | `max_runtime_seconds` ungültig (negativ, nicht-numerisch, `0`) | **PASS** (mit Einschränkung, siehe Low-Finding) | Eigene Tests: `-5` → Fallback `7200`; `'3.7abc'` → `parseInt` liefert `3`, das ist `> 0` und wird **nicht** auf 7200 zurückgesetzt (kein Fallback, aber auch kein Crash und kein `0`-Zeitlimit — technisch kein Bug, da AC nur "Fallback bei ungültig/≤0" fordert und `3` ein gültiges Ergebnis von `parseInt` ist). Kein Zeitlimit von `0` in keinem getesteten Fall. |
+| EC-4 | Zwei gleichzeitige Läufe desselben Workflows | **PASS** | Nicht Teil des Fixes, unverändert durch bestehenden Lock-Mechanismus abgedeckt (Lock-Node byte-identisch, siehe AC-7). |
+| EC-5 | Bereits laufender Dry-Run-Prozess zum Zeitpunkt des Fixes | **N/A (nicht automatisiert prüfbar)** | Konzeptionell bestätigt: Dry-Run verändert keine Daten (kein Weaviate-Write-Pfad ohne `doc.confirm`/`CONFIRM`-Gate gefunden), kein Datenverlust durch den Fix möglich. |
+
+**4/4 automatisiert prüfbare Edge Cases PASS, 1 N/A** (konzeptionelle Prüfung, kein Live-Zustand vorhanden).
+
+### Security Audit Results
+
+**n8n workflow features:**
+- [ ] Authentication: `authentication: "none"` auf beiden Webhooks — **vorbestehend, nicht durch PROJ-92 verändert**. Identisch zu `alice-mail-attachment-backfill` (bereits deployed, QA-akzeptiert). VPN-only-Zugang laut CLAUDE.md-Constraint, `callerPolicy: workflowsFromSameOwner`. Kein neuer Befund, außerhalb des PROJ-92-Scopes.
+- [x] Authorization: n/a (kein User-Context, Admin-Only-Tooling wie bei den Schwester-Workflows)
+- [x] Input validation: `max_runtime_seconds` und `confirm` werden defensiv geparst (`parseInt`, `isNaN`-Check), kein Crash bei Fremdwerten getestet (String, verschachtelte Werte, überlange Zahlen)
+- [x] Keine Secrets in den geänderten Code-Pfaden; `winston`-Logging unverändert, kein `console.log`
+
+**Ein Low-Finding (kein Bug, informativ):** Ein extrem großer `max_runtime_seconds`-Wert (z.B. `99999999999999999999999999`) wird von `parseInt` als `1e+26` akzeptiert (`> 0`, kein Fallback) und hebelt das Zeitlimit faktisch aus. Identisches Verhalten besteht bereits im bereits deployten Referenz-Fix `alice-mail-attachment-backfill` (gleiche Validierungslogik übernommen) — kein durch PROJ-92 neu eingeführtes Risiko. Angriffsfläche gering: Webhook ist VPN-only, nur vom gleichen n8n-Owner aufrufbar, und ein Admin, der bereits `confirm:true` sendet, hat ohnehin volle Kontrolle über den Lauf. Kein Handlungsbedarf im Rahmen von PROJ-92; ggf. für ein künftiges Hardening-Ticket über alle drei Backfill-Workflows hinweg vormerken.
+
+**Security: PASS — keine neue Angriffsfläche gegenüber dem bereits akzeptierten Referenzmuster.**
+
+### Bugs Found
+
+**Keine.** Weder Critical, High, Medium noch Low (das Low-Finding oben ist ein vorbestehendes Muster, kein durch PROJ-92 verursachter Bug).
+
+### Regression Check
+
+- Lock-Erwerb/-Freigabe (`Code: Acquire Backfill Lock`, `Code: Respond Already Running`, Release-Pfade in `Code: Respond Ollama Unavailable`/`Code: Empty Summary`/`Code: Build & Send Summary`): unverändert, nicht Teil des Diffs.
+- `Code: Ollama Health Check`, `Code: Fetch All Documents`, `Split In Batches`, `Code: Heuristic Check`/`Execute: Classify Document`, `Code: Compare & Handle`/`Code: Apply Correction`: alle unverändert, nur konsumieren sie jetzt (transitiv über Init) die korrekten `confirm`/`MAX_RUNTIME_SECONDS`-Werte statt der zuvor immer-`false`/immer-`7200`-Konstanten.
+- Kein anderer Workflow referenziert `Code: Init Backfill Run` oder `Code: Time Check` dieser beiden Workflows (Sub-Workflow-Grenzen, `callerPolicy: workflowsFromSameOwner`, keine Cross-Workflow-`$('...')`-Referenzen gefunden).
+
+### Summary
+
+- **Acceptance Criteria:** 7/7 passed
+- **Edge Cases:** 4/4 automatisiert geprüft passed, 1 N/A (konzeptionell bestätigt)
+- **Bugs Found:** 0 total (0 critical, 0 high, 0 medium, 0 low)
+- **Security:** Pass — 1 informatives Low-Finding, vorbestehend und außerhalb des Scopes
+- **Production Ready:** YES
+- **Recommendation:** **READY** — Deploy. Fix folgt exakt dem bereits produktiv bewährten PROJ-53-Muster, Diff ist minimal-invasiv (4 Zeilen je Datei), Lock-Node unangetastet, Propagation von `confirm`/`MAX_RUNTIME_SECONDS` bis zu den tatsächlichen Gates eigenständig nachvollzogen und verifiziert.
+
+## Deployment
+_To be added by /deploy_
 
 ## Deployment
 _To be added by /deploy_
