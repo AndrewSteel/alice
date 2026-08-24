@@ -1,6 +1,6 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: In Progress
 **Created:** 2026-08-22
 **Last Updated:** 2026-08-23 (Zwei Bugs aus Live-Test entdeckt: falsches LLM-Modell, fehlerhaftes Bild-Routing)
 
@@ -967,11 +967,64 @@ Dennoch: Konsistent mit der Ordnerstruktur der übrigen fünf DMS-Schemata (+ `V
 
 ### Ergänzung Acceptance Criteria (Zielordner-Struktur)
 
-- [ ] Zusätzlich zu `Invoice/`, `BankStatement/`, `Document/`, `Contract/`, `SecuritySettlement/`, `Video/`, `Audio/` existiert `/mnt/nas/ai/Image/` als Ablageziel für Bild-Anhänge
-- [ ] Bild-Anhänge (jenseits der 20-KB-Müll-Grenze) werden nach `Image/` geroutet, nicht nach `Document/`
-- [ ] Text-Anhänge (PDF/DOCX/XLSX/ODT/ODS/TXT/MD) werden mit dem korrekten DMS-Textklassifizierungsmodell (`$env.OLLAMA_MODEL_DMS`, Fallback `qwen3:14b`) klassifiziert, nicht mit dem Vision-Modell
+- [x] Zusätzlich zu `Invoice/`, `BankStatement/`, `Document/`, `Contract/`, `SecuritySettlement/`, `Video/`, `Audio/` existiert `/mnt/nas/ai/Image/` als Ablageziel für Bild-Anhänge
+- [x] Bild-Anhänge (jenseits der 20-KB-Müll-Grenze) werden nach `Image/` geroutet, nicht nach `Document/`
+- [x] Text-Anhänge (PDF/DOCX/XLSX/ODT/ODS/TXT/MD) werden mit dem korrekten DMS-Textklassifizierungsmodell (`$env.OLLAMA_MODEL_DMS`, Fallback `qwen3:14b`) klassifiziert, nicht mit dem Vision-Modell
 
 **Nächste Schritte:** `/backend` für beide Fixes, dann erneut `/qa` (inkl. Regressionsprüfung, dass die Änderung des Modell-Fallbacks nicht versehentlich andere Aufrufer/Workflows betrifft, da `OLLAMA_MODEL_DMS` projektweit gesetzt ist).
+
+### Implementation Notes (Iteration 3)
+
+**Bug A — falsches Ollama-Modell (behoben).**
+
+In beiden PROJ-53-Code-Nodes wurde der Fallback-Literal korrigiert:
+
+```js
+- let ollamaModel = 'qwen3.5:27b-q4_K_M'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3.5:27b-q4_K_M'; } catch(e) {}
++ let ollamaModel = 'qwen3.5:27b-q4_K_M'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}
+```
+
+Die Zeile ist jetzt **byte-identisch** mit `alice-dms-classify-document.json` (`Code: Two-Attempt Classification`, PROJ-78). Repo-weite Prüfung vorher: 5 Vorkommen mit `|| 'qwen3:14b'` (`alice-dms-classify-document`, `alice-dms-language-check`, `alice-dms-classification-backfill`, `alice-dms-processor`) gegen 2 Vorkommen mit `|| 'qwen3.5:27b-q4_K_M'` — die beiden Ausreißer waren genau die PROJ-53-Nodes. Nachher: 7/7 einheitlich.
+
+- Betroffen: `alice-mail-sync.json` / `Code: Import Attachments` und `alice-mail-attachment-backfill.json` / `Code: Import Mail Attachments` — **sonst nichts**.
+- Die Env-Variable `OLLAMA_MODEL_DMS` selbst wurde **nicht** angefasst (keine Änderung an `.env`/`.env.example`/Compose). Andere DMS-Workflows sind unberührt (`git diff --stat` = nur die 2 Workflow-Dateien).
+- **Bewusst unverändert gelassen:** der Initialisierungswert `let ollamaModel = 'qwen3.5:27b-q4_K_M'` vor dem `try` ist toter Code (wird im `try` sofort überschrieben; der `catch`-Pfad greift nur, wenn `$env` selbst wirft, dann bliebe der Vision-Modellname stehen). Dieser Schönheitsfehler existiert identisch im Referenz-Workflow `alice-dms-classify-document.json`. Da die Vorgabe war, die Zeile exakt zu kopieren, wurde er nicht "verbessert" — er sollte projektweit in einem eigenen Cleanup adressiert werden, nicht in PROJ-53.
+
+**Bug B — eigener `Image/`-Ordner (behoben).**
+
+`routeByExtension()` gibt für Bilder jetzt `'Image'` statt `'Document'` zurück. Wegen der von Iteration 2 (BUG-5, duplizierte Konstanten) bekannten Dreifach-Duplizierung wurde ein vollständiger Audit gemacht: Referenz war `git show 5b2259e` (Iteration-2-Commit, der `Video`/`Audio` einführte). Ergebnis — die Listen existieren an genau **3 Stellen in 2 Dateien**; `Image` wurde an **allen 3** ergänzt:
+
+| # | Datei | Node | Konstante / Stelle | Änderung |
+|---|-------|------|--------------------|----------|
+| 1 | `alice-mail-sync.json` | `Code: Import Attachments` | `routeByExtension()` + `VALID_TARGET_FOLDERS` | Bild-Branch → `'Image'`; `Image` in Gate-Set |
+| 2 | `alice-mail-attachment-backfill.json` | `Code: Import Mail Attachments` | `routeByExtension()` + `VALID_TARGET_FOLDERS` | identisch zu #1 (Runtime-/Backfill-Parität) |
+| 3 | `alice-mail-attachment-backfill.json` | `Code: Fetch Mails With Attachments` | `SCHEMAS` (Basis von `countOnDisk()`) | `Image` ergänzt |
+
+Stelle #3 ist der von Iteration-2-QA explizit benannte Fallstrick: `countOnDisk()` leitet den Zustand "bereits importiert" aus `SCHEMAS` ab. Ohne `Image` würde der Backfill jeden Bild-Anhang bei **jedem** Lauf erneut als Kandidat einstufen und re-importieren (Duplikate `_1`, `_2`, …), weil er in einem Ordner sucht, in den nicht mehr geschrieben wird.
+
+Weitere geprüfte, aber **nicht** betroffene Stellen:
+
+- `VALID_SCHEMAS` (beide Import-Nodes): bewusst **unverändert** bei den 5 DMS-Schemata. Es validiert die LLM-Antwort (`parseClassification()`); Bilder durchlaufen nie das LLM. Gleiche Begründung wie bei `Video`/`Audio` in Iteration 2. Ein Test stellt sicher, dass `Image` dort nicht einleckt.
+- `SUPPORTED_EXTENSIONS` / `IMAGE_EXTENSIONS`: unverändert — die Bild-Endungen waren seit Iteration 1 enthalten, nur das Ziel ändert sich.
+- Ordner-Anlage: es gibt **keine** separate Bootstrap-/mkdir-Liste. `/mnt/nas/ai/Image/` wird durch das bestehende `fs.mkdirSync(targetDir, { recursive: true })` im Import-Loop beim ersten Bild-Anhang automatisch angelegt — genau wie `Video/`/`Audio/` in Iteration 2. Kein Deploy-Schritt nötig.
+- Repo-weite Suche nach `'Video'`/`/Video/` (JSON, SQL, SH, PY, TS, YML): Treffer nur in den 2 Workflows + diesem Spec. Kein Weaviate-Schema, kein `dms_watched_folders`-Seed, kein Script enthält die Ordnerliste.
+
+**Hinweis zum Zusammenspiel mit dem DMS-Scanner:** `Image/` muss in `alice.dms_watched_folders` aufgenommen werden, damit die Bilder auch indexiert werden (siehe Bug-B-Analyse oben: `alice-dms-path-worker` routet nach Datei-Endung, nicht nach Quellordner, das Weaviate-Ergebnis bleibt also `Image`). Das ist eine **Konfigurations-/Deploy-Aufgabe des Users** (Settings → DMS-Ordner), kein Code-Change.
+
+**Strukturelle Validierung** (n8n-mcp als Subagent nicht verfügbar, daher wie Iteration 1/2 statisch):
+
+- Beide Workflows: valides JSON; `json.dumps(indent=2)`-Roundtrip vor der Änderung byte-identisch → der Diff enthält ausschließlich die beabsichtigten Zeilen (3 geänderte JSON-Zeilen, `git diff --stat`: 2 Dateien, +3/−3).
+- Alle `connections`-Quellen/-Ziele lösen auf gültige Node-Namen auf; alle `$('Node')`-Referenzen in allen Nodes lösen auf (0 Fehler).
+- Alle 16 Code-Nodes beider Workflows: `node --check` grün.
+- 0 `console.log` (winston-Regel eingehalten); Credentials-Prüfung: 0 Warnungen.
+- Verhaltenstest gegen den **ausgelieferten** JSON-Code (Konstanten + `routeByExtension()` aus der Datei extrahiert): **48/48 Assertions grün** (24 pro Workflow) — Bild-Routing per Endung *und* per MIME-Type (inkl. `.heic` ohne MIME und `image/gif` ohne Endung) → `Image`, Video/Audio unverändert, Text-Typen weiterhin `null` (= LLM-Pfad), alle 8 Zielordner vom Gate akzeptiert, Path-Traversal (`Image/../etc`, `..`, `''`) und LLM-Ausreißer (`unclear`, `Email`) vom Gate abgelehnt, `Image`/`Video`/`Audio` nicht in `VALID_SCHEMAS`.
+
+**Nicht verifizierbar in dieser Umgebung** (für `/qa` / Deploy offen):
+
+- `docker/compose/automations/n8n/.env.example` liegt in einem für den Agenten gesperrten Verzeichnis — der tatsächlich gesetzte Wert von `OLLAMA_MODEL_DMS` (laut Analyse `mistral-small3.2:24b`) wurde **nicht** eigenständig gegengelesen. Der Fix ist davon unabhängig: geändert wurde nur der Fallback, falls die Variable fehlt.
+- Kein Live-Ollama-Aufruf: dass das korrekte Modell tatsächlich valides JSON liefert und `confidence>0, fallback=false` erzeugt, muss am laufenden System geprüft werden.
+- Kein NAS-Zugriff: die automatische Anlage von `/mnt/nas/ai/Image/` und die Schreibrechte wurden nicht real getestet.
+- Weiterhin offen aus Iteration 2: `alice-mail-reader` muss wegen `pypdf` neu gebaut werden.
 
 ## Deployment
 _To be added by /deploy_
