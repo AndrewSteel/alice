@@ -2,7 +2,7 @@
 
 ## Status: Approved
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (QA-Nachprüfung bestanden — BUG-16/BUG-17 behoben und verifiziert, keine Critical/High-Bugs)
+**Last Updated:** 2026-08-24 (Deployment-Sektion dokumentiert — Iterationen 1–3 live, Iteration 4 Approved und deploybereit)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1543,4 +1543,32 @@ Fix-Forward auf einem bereits freigegebenen Workflow — **kein neuer Review-Zyk
 **Fazit:** Fix wirkt wie beschrieben, keine neuen Bugs, keine Critical/High. **Verdikt unverändert: Approved.**
 
 ## Deployment
-_To be added by /deploy_
+
+### Iterationen 1–3 (deployed, 2026-08-23/24)
+
+- `alice-mail-reader` (Rebuild wegen `pypdf`), `alice-mail-sync`, `alice-mail-attachment-backfill` deployed und produktiv getestet.
+- Backfill-Dry-Run (`confirm` nicht gesetzt) und tatsächlicher Import (`confirm: true` + `max_runtime_seconds`) live verifiziert — beide funktionieren wie spezifiziert (inkl. des in Iteration 4 (BUG-10-Kontext) behobenen Confirm-Parsing-Bugs).
+- Live-Test deckte zwei reale Probleme auf, die zu Iteration 3 führten: PDF-Klassifizierung griff nicht (falsches Ollama-Modell, PROJ-53-intern gefixt) und Bild-Anhänge landeten in `Document/` statt `Image/` (gefixt, `Image/`-Zielordner ergänzt).
+- Ursache für die PDF-Klassifizierung war letztlich keine reine PROJ-53-Fehlkonfiguration, sondern eine bewusste, hardwarebedingte Ein-Modell-Strategie des Nutzers (GPU kann nicht mehrere Ollama-Modelle gleichzeitig vorhalten) — das führte zu Iteration 4.
+
+### Iteration 4 (Approved, **Deployment noch ausstehend**)
+
+Der neue Nightly-Workflow `alice-mail-attachment-processor` sowie die entsprechend verschlankte Fassung von `alice-mail-sync` sind QA-geprüft und Approved, aber **noch nicht produktiv deployed**. Vor dem Deploy zu erledigen:
+
+1. **`OLLAMA_MODEL_DMS`** in `docker/compose/automations/n8n/.env` auf ein Textmodell setzen (Nutzer-Test bestätigte: `mistral-small3.2:24b` klassifiziert deutlich zuverlässiger als das bisher dort eingetragene Vision-Modell). Da alle DMS-Klassifizierungs-Workflows diese Variable lesen, wirkt die Änderung projektweit — mit Iteration 4 ist das jetzt unkritisch, da der einzige minütlich laufende Konsument (`alice-mail-sync`) keine Klassifizierung mehr selbst durchführt.
+2. **`/mnt/nas/ai/Image/`** in `alice.dms_watched_folders` eintragen (Settings → DMS-Ordner) — sonst werden dort abgelegte Bild-Anhänge physisch korrekt sortiert, aber vom DMS-Scanner nicht erfasst.
+3. **Beide** Workflows importieren/deployen:
+   - `alice-mail-sync` (geändert — Anhang-Verarbeitung entfernt, neuer `Code: Enqueue Attachment Jobs`-Zweig)
+   - `alice-mail-attachment-processor` (**neu** — muss in n8n aktiviert werden, Schedule-Trigger `0 2 * * *`)
+4. `alice-mail-attachment-backfill` bleibt unverändert im Einsatz (kein Re-Deploy nötig, aber unverändert nutzbar).
+
+**Nach dem Deploy zu prüfen:**
+- Erster nightly Lauf (02:00 Uhr) tatsächlich beobachten: Queue wird korrekt abgearbeitet, GPU-Lock (`alice:dms:processor:lock:run`) verhindert Kollision mit `alice-dms-processor`, Anhänge landen in den richtigen Zielordnern inkl. `Image/`.
+- AC-5.2/5.3 (Mail-Thumbnail-Rendering) bleiben laut QA offen — inzwischen als eigener Bug identifiziert und in **PROJ-93** getrackt (vorbestehend, nicht PROJ-53-spezifisch, blockiert Deployment nicht).
+
+### Bekannte Folge-Tickets (außerhalb PROJ-53)
+
+- **PROJ-91**: Synchroner Office-Textextraktor (schließt die verbleibende Volltext-Klassifizierungslücke für DOCX/XLSX/ODT/ODS)
+- **PROJ-92**: Vermuteter `confirm`-Parameter-Bug in `alice-dms-language-backfill` und `alice-dms-classification-backfill` (gleiches Muster wie der in PROJ-53 behobene Bug)
+- **PROJ-93**: Mail-Objekte bekommen nie ein Thumbnail (vorbestehend seit Iteration 1, bei PROJ-53-QA entdeckt)
+- **PROJ-94**: `alice-dms-path-worker` hat kein Zeitlimit (bei PROJ-53-Abschlussprüfung entdeckt, Robustheitsproblem unabhängig vom GPU-Thema)
