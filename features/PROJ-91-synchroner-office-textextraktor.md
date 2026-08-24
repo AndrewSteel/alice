@@ -92,8 +92,45 @@ Kein neues Datenbankschema, keine neue Datenstruktur. Der bestehende Response-Ve
 
 Alle drei ergänzen die bestehende `pip install`-Zeile im `alice-mail-reader`-Dockerfile (kein `requirements.txt` in diesem Service — Konvention beibehalten, siehe PROJ-53).
 
+### Implementation Notes (Backend)
+
+**Umgesetzt in:**
+- `docker/compose/automations/alice-mail-reader/app.py` — `/attachment-text` erweitert
+- `docker/compose/automations/alice-mail-reader/Dockerfile` — drei neue Abhängigkeiten
+- `workflows/alice-mail-attachment-processor.json` — Routing erweitert (1 Zeile geändert)
+- `workflows/alice-mail-attachment-backfill.json` — Routing erweitert (1 Zeile geändert)
+
+**Bibliotheks-Verifikation (vor Implementierung durchgeführt):** `python-docx==1.2.0` und `openpyxl==3.1.5` sind reine Python-Wheels (`py3-none-any`). `odfpy==1.4.1` liefert nur ein sdist, enthält aber laut `setup.py`-Prüfung keine C-Extensions (kein `ext_modules`, keine `.c`/`.pyx`-Dateien) — baut ohne Compiler. Die einzige transitive Sorge war `python-docx`s Abhängigkeit auf `lxml` (historisch C-Extension-lastig): `lxml` liefert ein vorgebautes `musllinux_1_2_x86_64`-Wheel für Python 3.12 — passt zum Alpine-3.24-Base-Image von `alice-mail-reader`. Alle drei Bibliotheken damit ohne Compiler auf Alpine installierbar, wie in der Architektur-Entscheidung vorausgesetzt.
+
+**`app.py`-Änderungen:**
+
+- Neue Konstante `OFFICE_EXTENSIONS = {".docx", ".xlsx", ".odt", ".ods"}` und `_office_format(filename)` — Erkennung ausschließlich per Dateiendung (nicht MIME-Typ, da E-Mail-Clients für Office-Formate inkonsistente MIME-Typen senden; Konvention bereits so in `dms-extractor-office` etabliert).
+- Vier neue Extraktionsfunktionen: `_extract_docx_text` (Absätze via `python-docx`), `_extract_xlsx_text` (Zellinhalte via `openpyxl`, `read_only=True` + `data_only=True`), `_extract_odt_text`/`_extract_ods_text` (via `odfpy`, Absätze bzw. Tabellenzeilen/-zellen).
+- `fetch_attachment_text()` (`/attachment-text`) umstrukturiert: PDF-Zweig unverändert in der Logik (nur von `if not _is_pdf` auf `if _is_pdf` invertiert, um Platz für den neuen Office-Zweig zu schaffen — Verhalten identisch, per Diff-Review bestätigt), neuer Office-Zweig mit gleichem Truncation-Verhalten (`PLAINTEXT_MAX_CHARS`, wiederverwendet) und gleichem Fehlerverhalten (`status: "extraction_failed"`, kein HTTP-Fehler) wie PDF. Neuer Fallback-Zweig für alles andere: `status: "unsupported_format"` (generalisiert von zuvor `"not_a_pdf"` — kein Aufrufer prüft den konkreten String-Wert, nur `text`).
+
+**Workflow-Änderungen (beide identisch):**
+
+- Neues `OFFICE_EXTENSIONS`-Set neben dem bestehenden `PDF_EXTENSIONS`.
+- `fetchPdfText()` → `fetchExtractedText()` umbenannt (Funktionskörper unverändert, nur Name + Kommentar, da die Funktion jetzt PDF und Office bedient).
+- Aufruf-Bedingung erweitert: `PDF_EXTENSIONS.has(ext)` → `PDF_EXTENSIONS.has(ext) || OFFICE_EXTENSIONS.has(ext)`.
+
+**`dms-extractor-office` bewusst nicht angefasst** (spec-konform, siehe Nutzerentscheidung).
+
+**Verifikation (eigenständig, mit echten generierten Dateien):**
+
+- `python3 -m py_compile app.py`: syntaktisch valide.
+- Echte DOCX/XLSX/ODT/ODS-Testdateien mit `python-docx`/`openpyxl`/`odfpy` selbst erzeugt (nicht nur Mocks) und gegen die vier neuen Extraktionsfunktionen ausgeführt: alle vier liefern den erwarteten Text korrekt (inkl. Tab-getrennter Zellen für XLSX/ODS).
+- Format-Erkennung `_office_format()`: Groß-/Kleinschreibung (`.DOCX`, `.ODS`), PDF, Bild, sowie legacy `.doc`/`.xls` (bewusst **nicht** erkannt, da nur OOXML/ODF unterstützt) — alle 8 getesteten Fälle korrekt.
+- Fehlerfälle: korrupte/zufällige Bytes für alle vier Formate → sauberer Python-Exception (`BadZipFile` bzw. Äquivalent), kein stiller Fallback auf leeren Text ohne Fehlerkennzeichnung. Leere Datei (0 Byte) → ebenfalls sauberer Fehler, kein Crash.
+- Truncation: 60.000-Zeichen-DOCX → korrekt bei 50.000 gekappt.
+- XLSX-Formel-Edge-Case (Formel ohne gecachten Wert): liefert leere Zelle statt Formeltext oder Crash — wie in der Spec dokumentiert.
+- **End-to-End-HTTP-Test** (Flask-Testclient, `_fetch_attachment_part` gemockt, um ohne echten IMAP-Server zu testen): alle 4 Office-Formate → `200`, `status: "ok"`, korrekter Text; nicht unterstütztes Format (`.zip`) → `200`, `status: "unsupported_format"`; korrupte `.docx`-Bytes → `200`, `status: "extraction_failed"`; legacy `.doc` → `200`, `status: "unsupported_format"` (kein Fehlrouting in einen Office-Extraktor).
+- JS-Syntaxcheck (`node --check`) für beide geänderten Workflow-Nodes: bestanden. Kein `console.log` eingeführt. Diff-Scoping: je 1 geänderte Zeile pro Workflow-JSON (nur der `jsCode`-Parameter).
+
+**Nicht verifizierbar ohne Deploy/echte IMAP-Verbindung:** Verhalten mit einer echten, aus einem E-Mail-Client verschickten Office-Datei (reale Formatierungs-Eigenheiten, Verschlüsselung durch Absender-Software), tatsächliche Klassifizierungsqualität des LLM mit dem neuen Volltext, reales Timing unter `gunicorn --timeout 60` bei großen Dateien.
+
 ---
-_Implementation folgt in /backend._
+_Implementation abgeschlossen._
 
 ## QA Test Results
 _To be added by /qa_
