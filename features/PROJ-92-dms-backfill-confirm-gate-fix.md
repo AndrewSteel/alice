@@ -84,8 +84,28 @@ Statt des Payloads vom direkten Input (der vom dazwischenliegenden Lock-Node sta
 
 Keine neuen Pakete — `redis` ist in beiden Workflows bereits im Einsatz.
 
+### Implementation Notes (Backend)
+
+**Umgesetzt in:** `workflows/alice-dms-language-backfill.json`, `workflows/alice-dms-classification-backfill.json` (je 4 geänderte Zeilen, keine weiteren Dateien).
+
+**Geänderte Nodes (beide Workflows identisch):**
+
+- **`Code: Init Backfill Run`**: liest den Payload jetzt per `$('Webhook: POST /...')` statt `$input.first().json` — exakt das Muster aus Commit `8581996`. Zusätzlich: liest einen optionalen `max_runtime_seconds` aus Body/Query, validiert ihn (`parseInt`, Fallback 7200 bei `NaN`/`<= 0`) und gibt ihn als `MAX_RUNTIME_SECONDS` statt des bisherigen hardcoded Werts aus.
+- **`Code: Time Check`**: liest `MAX_RUNTIME_SECONDS` jetzt per `$('Code: Init Backfill Run').first().json.MAX_RUNTIME_SECONDS` (mit try/catch-Fallback auf 7200) statt es hardcoded zu berechnen.
+
+Der vorgeschaltete Lock-Node (`Code: Acquire Backfill Lock`) wurde wie in der Spec vorgesehen nicht angefasst.
+
+**Verifikation (Graph-Trace, kein Deploy):**
+
+- JSON valide in beiden Dateien; Diff exakt 4 Zeilen pro Datei (nur die zwei betroffenen `jsCode`-Strings).
+- Beide geänderten Code-Nodes bestehen `node --check` in beiden Workflows.
+- Kein `console.log` eingeführt; alle `$('Node')`-Referenzen lösen auf bestehende Node-Namen auf.
+- Eigenes Verifikationsskript (`verify_proj92.mjs`, nicht ins Repo übernommen) führt den echten gelieferten Node-Code mit gefaktem `redis`/`winston`/`$input`/`$()` aus, analog zum PROJ-53-Testansatz: `confirm: true` (Body) → `CONFIRM=true`; kein Payload → `CONFIRM=false` (Dry-Run-Default bleibt sicher); `confirm: 'true'` als Query-String → `true`; `max_runtime_seconds`-Override propagiert korrekt bis zum tatsächlichen Zeitlimit-Check in `Code: Time Check`; ungültiger Override (negativ) fällt auf 7200 zurück. **10/10 Checks bestanden** (5 pro Workflow).
+
+**Nicht verifizierbar ohne Deploy/n8n-Instanz:** echtes Laufzeitverhalten in n8n (Webhook-Routing, tatsächliche Redis-Instanz), End-to-End-Lauf mit echtem `confirm: true` gegen Weaviate.
+
 ---
-_Implementation folgt in /backend._
+_Implementation abgeschlossen._
 
 ## QA Test Results
 _To be added by /qa_
