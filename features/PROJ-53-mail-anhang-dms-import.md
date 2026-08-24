@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (Iteration 4: Anhang-Verarbeitung entkoppelt von alice-mail-sync — GPU-Ressourcenkonflikt)
+**Last Updated:** 2026-08-24 (QA Iteration 4 bestanden — nightly Attachment-Processor verifiziert, keine Critical/High-Bugs)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1299,6 +1299,121 @@ Zusätzlich per Mock-Harness (Redis/axios/fs/winston gemockt) zur Laufzeit gepr�
 - Ob `mistral-small3.2:24b` produktiv besser klassifiziert (Live-Test des Users, nicht Teil dieser Umsetzung).
 - AC-5.2/5.3 (Thumbnail-Rendering für Mail-Objekte) unverändert offen aus Iteration 1–3.
 - Kein Lock-Mechanismus wie in `alice-dms-processor` (`Code: Acquire Processor Lock`) implementiert — bei einem nightly Trigger ohne Overlap-Risiko bewusst weggelassen; falls QA parallele manuelle Läufe abdecken will, wäre das nachzurüsten.
+
+## QA Test Results — Iteration 4 (2026-08-24)
+
+**Tested:** 2026-08-24
+**Tester:** QA Engineer (AI)
+**Commit under test:** `0c92b6d` ("Decouple attachment processing into nightly workflow")
+**Test method:** Diff-basierte Regressionsanalyse (`git diff 0c92b6d~1 0c92b6d`), Node-für-Node-Strukturvergleich, AST-/Funktionsrumpf-Diff des verschobenen Codes, Graph-Trace beider Workflows sowie eine **Mock-Harness**, die den *echten* JSON-eingebetteten Code der Nodes `Code: Enqueue Attachment Jobs`, `Code: Fetch Batch`, `Code: Process Queue Item`, `Code: Drop Unparseable Item` und `Code: Time Check` gegen gemocktes Redis/axios/fs/winston ausführt (**37/37 Assertions grün**).
+**Keine Live-Ausführung** — kein Zugriff auf n8n/Redis/IMAP/Ollama/Weaviate/NAS.
+
+Iteration 4 ist eine reine **Architektur-Verschiebung** (minütlich → nightly via Redis-Queue), keine Neuentwicklung der Klassifizierungs-/Routing-/Dedup-/Security-Logik. Diese wurde in Iteration 1–3 bereits geprüft; hier wurde daher gezielt verifiziert, dass sie **unverändert** übernommen wurde und dass der neue Trigger-/Queue-Pfad korrekt ist.
+
+### Neue Acceptance Criteria (Iteration 4)
+
+| # | Kriterium | Status | Nachweis |
+|---|-----------|--------|----------|
+| 4.1 | `alice-mail-sync` klassifiziert/speichert Anhänge nicht mehr selbst, sondern enqueued nur | PASS | `Code: Import Attachments` entfernt, `Code: Enqueue Attachment Jobs` (`rPush` auf `alice:mail:attachment_queue`) an derselben Stelle. Kein `axios`/`fs`-Import mehr im Enqueue-Node — nur `redis`/`path`/`winston` |
+| 4.2 | Neuer Workflow nightly `0 2 * * *`, batchweise | PASS | `Schedule: Nightly 02:00` → `cronExpression: 0 2 * * *`; `Code: Fetch Batch` (`lRange`) → `Split In Batches` |
+| 4.3 | Exakt dieselbe Klassifizierungs-/Ablage-/MQTT-Logik | PASS | Funktionsrumpf-Diff: 10/12 Helper **byte-identisch**; `buildClassificationPrompt`/`classifyAttachment` unterscheiden sich nur im Parameter-Namen (`mail`→`m`, nötig gegen Shadowing der äußeren `mail`-Konstante) — semantisch identisch. Innerer Schleifenrumpf nach Whitespace-Normalisierung: **1 Kommentarwort** Unterschied |
+| 4.4 | Nightly nutzt `OLLAMA_MODEL_DMS` | PASS | `let ollamaModel = 'qwen3:14b'; try { ollamaModel = $env.OLLAMA_MODEL_DMS \|\| 'qwen3:14b'; }` — Vision-Literal `qwen3.5:27b-q4_K_M` kommt im neuen Workflow **nicht** vor (Iteration-3-Fix erhalten, Default sogar sauberer als vorher) |
+| 4.5 | Zeitlimit-Schutz analog `alice-dms-processor` | PASS | `MAX_RUNTIME_SECONDS = 14400` (4 h) → Abbruch spätestens 06:00, vor Chat-Kernzeit 07:00. Harness: 3 h → `false`, 4,01 h → `true` |
+| 4.6 | Nicht verarbeitbarer Eintrag wird übersprungen/geloggt, Lauf läuft weiter | PASS | Pro-Anhang-`try/catch` unverändert; `Code: Drop Unparseable Item` für korrupte Einträge; `onError: continueRegularOutput` auf `Code: Process Queue Item` |
+| 4.7 | `alice-mail-attachment-backfill` unverändert | PASS | `git diff 0c92b6d~1 0c92b6d -- workflows/alice-mail-attachment-backfill.json` → **leer** (0 Bytes Diff) |
+| 4.8 | Iteration-2/3-Fixes gelten unverändert | PASS | Harness: Bild >20 KB → `Image/`, PDF → `Invoice/`, 50-MB-Limit greift, Bild-Müll <20 KB ohne LLM verworfen |
+
+### Verdikt zu den 5 selbst gemeldeten Abweichungen
+
+| # | Abweichung | Verdikt | Begründung (eigenständig verifiziert) |
+|---|------------|---------|----------------------------------------|
+| a | `MQTT: Publish Email Done` bleibt in `alice-mail-sync` | **KORREKT — Abweichung war richtig** | Node ist vorhanden und **neu direkt** an `Process + Classify + Store Emails` (Output 0) verdrahtet, nicht mehr hinter dem Anhang-Node. Er feuert für **alle** `storedEmails` (`Code: Split Stored Emails` filtert nur auf `weaviate_uuid`, **nicht** auf Anhänge) und nur für echte Neu-Inserts (`storedEmails.push()` steht nach `if (alreadyExists) continue;` und nach dem erfolgreichen Weaviate-Insert). AC-5.1 (Zeile 68) fordert den Publish nach **jedem** Mail-Insert — die wörtliche Befolgung der Vorgabe hätte alle anhanglosen Mails dauerhaft ohne Thumbnail-Trigger gelassen. Begründung des Implementers **bestätigt** |
+| b | Neuer `MQTT: Publish Attachment Done` | **REDUNDANT + faktisch wirkungslos — siehe BUG-15/BUG-16** | Payload ist `{ weaviate_uuid: <Mail-UUID>, document_type: 'Email', file_type: 'txt', inserted: true }` — also **dieselbe Email-UUID**, die `alice-mail-sync` bereits publiziert hat, **nicht** die der Anhänge. Fachlich inkohärent (Anhänge sind Invoice/Document/Image, keine `Email`-Objekte) und redundant zum Publish aus Baustein 1. Ein Doppel-Processing droht praktisch nicht, weil der Thumbnailer die Nachricht ohnehin verwirft (BUG-15). Kein Datenverlust, kein Security-Impact → **Low** |
+| c | `IF: Parse Error` / `Code: Drop Unparseable Item` | **KORREKT UND WIRKSAM** | Harness mit echtem korruptem Eintrag (`{this is not json`): `Code: Fetch Batch` markiert `_parse_error: true` statt zu werfen (Batch läuft weiter, valider Nachbar-Eintrag wird normal verarbeitet), `Code: Drop Unparseable Item` entfernt genau diesen Eintrag per `lRem` und loggt `warn`. **Kein Endlosloop, kein Batch-Crash.** Sinnvolle Ergänzung, nicht im Design skizziert |
+| d | Volles `attachments`-Array wird gequeued | **KORREKT — Begründung hält stand** | Verifiziert am kritischen Fall: Mail mit idx0=Signatur-Icon (verworfen), idx1=`.exe` (verworfen), idx2=`rechnung.pdf`, idx3=60 MB (verworfen), idx4=Foto. Nach Queue-Round-Trip ruft der Processor `/attachment` **exakt mit idx 2 und 4** auf, und die korrekten Bytes landen in `Invoice/2026-05-04_billing_rechnung.pdf`. Ein Filtern beim Enqueue hätte die Indizes verschoben. Der Prefilter wird beim Dequeue **erneut** angewandt → verworfene Anhänge werden nicht importiert |
+| e | Kein Lock/Mutex im neuen Workflow | **TEILWEISE FALSCH — siehe BUG-17 (Medium)** | Das vom Implementer betrachtete Risiko (**Selbst**-Overlap) besteht tatsächlich nicht: 4 h Budget ≪ 24 h Intervall, Überschreitung ist auf *ein* Item begrenzt. Analysiert wurde aber das **falsche** Risiko. Der Lock `alice:dms:processor:lock:run` existiert nicht gegen Selbst-Overlap, sondern um **GPU-Klassifizierung projektweit zu serialisieren**: `alice-dms-processor`, `alice-dms-classification-backfill`, `alice-dms-language-backfill` und `alice-mail-attachment-backfill` teilen ihn alle. Der neue Processor ist der **fünfte GPU-Konsument und der einzige ohne Lock** — bei **identischem** Trigger `0 2 * * *` wie `alice-dms-processor` (2 h Laufzeit) → bis zu 2 h echte Überschneidung |
+
+### Bugs Found — Iteration 4
+
+#### BUG-15 (Medium, **PRE-EXISTING — nicht durch Iteration 4 verursacht**): `alice-dms-thumbnailer` verwirft alle Mail-Publishes wegen fehlendem `file_path`
+
+- **Severity:** Medium · **Priorität:** hoch für den Nutzen von AC-5, aber **kein Blocker für Iteration 4**
+- **Fund:** `alice-dms-thumbnailer` → `Code: Parse & Filter` enthält den Guard
+  `if (!msg.weaviate_uuid || !msg.file_path) { logger.warn(...); return []; }`
+  Beide `alice/dms/done`-Publishes für Mail-Objekte senden aber **kein** `file_path`: `grep -o "file_path"` liefert **0 Treffer** in `alice-mail-sync.json` *und* in `alice-mail-attachment-processor.json`.
+- **Folge:** Mail-Objekte bekommen **nie** ein Thumbnail. Das erklärt und schließt endgültig das seit Iteration 1 offene **AC-5.2** (bisher „NOT VERIFIABLE") — es ist **FAIL**, nicht ungeprüft. AC-5.1 (Publish erfolgt) bleibt PASS; AC-5.3 hängt an 5.2.
+- **Root Cause:** Design-Lücke aus Iteration 1: der Thumbnailer-Contract ist dateibasiert (er braucht einen Pfad zum Rendern), Mail-Objekte haben aber keine Datei. Der PROJ-80-Lückenschluss hat den Publish ergänzt, ohne den Consumer-Contract zu prüfen.
+- **Nicht durch `0c92b6d` verursacht:** ausdrücklich verifiziert — der Payload ist seit Iteration 1 (`63636f8`) unverändert (`document_type: 'Email', file_type: 'txt', inserted: true`), `alice-dms-thumbnailer.json` wurde in diesem Commit **nicht angefasst** (letzte Änderung: `720d3a4`, weit vor Iteration 4). Iteration 4 hat den Publish nur **umverdrahtet**, nicht inhaltlich geändert.
+- **Fix-Vorschlag (eigenes Feature/Folge-Iteration):** entweder Thumbnailer um einen Mail-Renderpfad ohne `file_path` erweitern (Betreff + Body aus Weaviate lesen), oder im Publish ein synthetisches `file_path` mitgeben. **Nicht im Rahmen von Iteration 4 zu fixen.**
+
+#### BUG-16 (Low, neu in Iteration 4): `MQTT: Publish Attachment Done` publiziert die Mail-UUID mit `document_type: 'Email'`
+
+- **Severity:** Low · **Priorität:** niedrig (Aufräumarbeit)
+- **Repro:** `alice-mail-attachment-processor` → `IF: Imported Any` → `MQTT: Publish Attachment Done`, Payload `{ weaviate_uuid: $json.weaviate_uuid, document_type: 'Email', file_type: 'txt', inserted: true }`. `$json.weaviate_uuid` stammt aus `Code: Process Queue Item` und ist die **Mail-UUID**, nicht die eines Anhangs.
+- **Folge:** Semantisch irreführend (Anhänge sind Invoice/Document/Image, keine `Email`) und redundant zum Publish aus `alice-mail-sync`. **Aktuell wirkungslos**, weil der Thumbnailer die Nachricht mangels `file_path` ohnehin verwirft (BUG-15). Würde BUG-15 gefixt, entstünde ein doppelter Thumbnail-Trigger auf dasselbe Email-Objekt (idempotentes Überschreiben, kein Datenverlust).
+- **Bewertung:** Es handelt sich **nicht** um eine Verhaltensänderung gegenüber dem alten Inline-Code — dort feuerte ebenfalls ein Publish pro Mail mit `document_type: 'Email'`. Insofern konsistent mit dem Bestand, aber die vom Implementer selbst gestellte Frage „ist der nötig?" ist mit **nein, streichbar** zu beantworten.
+- **Kein** Risiko für Doppel-Import/Doppel-Verarbeitung von Anhängen: die Anhänge laufen über Scanner → Processor → Thumbnailer und werden von diesem Publish nicht berührt.
+
+#### BUG-17 (Medium, neu in Iteration 4): Neuer Nightly-Workflow umgeht den projektweiten GPU-Lock bei identischem 02:00-Trigger
+
+- **Severity:** Medium · **Priorität:** vor Deployment beheben empfohlen (1 Node), **kein Critical/High-Blocker**
+- **Repro:** `alice-mail-attachment-processor` startet `0 2 * * *`. `alice-dms-processor` startet **dieselbe Minute** `0 2 * * *`, klassifiziert via Ollama (`HTTP: Ollama Extract`, `Code: BankTransaction Phase B`) und hält dabei `alice:dms:processor:lock:run` (MAX_RUNTIME 2 h). Der neue Workflow acquiriert diesen Lock **nicht** (`grep -c` → **0 Treffer**) und läuft bis zu 4 h.
+- **Root Cause:** Der Implementer bewertete den Lock als Schutz gegen *Selbst*-Overlap (dort zu Recht als unnötig eingestuft). Tatsächlich serialisiert der Lock die **GPU-Nutzung über Workflow-Grenzen hinweg** — genau die Anforderung, wegen der Iteration 4 überhaupt existiert (BUG-13/GPU-Kontention). `alice-mail-attachment-backfill` nutzt denselben Key ausdrücklich „damit nie parallel zum Processor auf der GPU klassifiziert wird" (Implementation Notes Iteration 1); der neue Workflow bricht mit dieser etablierten Konvention.
+- **Folge:** Bis zu 2 h überlappende Ollama-Last aus zwei Nightly-Jobs. Bei einem Modell (`OLLAMA_MODEL_DMS`) für beide entsteht Queueing/Verlangsamung; bei unterschiedlichen Modellen droht genau das GPU-Umlade-Thrashing, das Iteration 4 vermeiden wollte. **Keine** Datenkorruption: die Queues sind disjunkt (`alice:mail:attachment_queue` vs. `alice:dms:plaintext`), es gibt kein Race auf denselben Items.
+- **Fix-Vorschlag:** `Code: Acquire Processor Lock` + `IF: Lock Acquired` aus `alice-mail-attachment-backfill` übernehmen (gleicher Key, Renew im Time-Check, Release am Ende) — oder alternativ den Trigger auf z.B. `0 4 * * *` legen, sodass er nach `alice-dms-processor`s 2-h-Fenster startet. Die Trigger-Variante ist der Ein-Zeilen-Fix, die Lock-Variante die robustere.
+
+**Aus Iteration 3 unverändert offen:** BUG-13 (High) ist **kein Code-Bug in diesem Commit**, sondern eine `.env`-Konfiguration (`OLLAMA_MODEL_DMS` zeigt produktiv auf das Vision-Modell). Iteration 4 adressiert genau diese Ursache architektonisch, indem der Nightly-Lauf ein exklusives Textmodell laden darf — die eigentliche Umstellung bleibt eine Deployment-Aufgabe des Admins. BUG-14 (Low, Doku) unverändert.
+
+### Regression Check (`0c92b6d~1` → `0c92b6d`)
+
+- **Nur 2 Workflow-Dateien berührt:** `alice-mail-sync.json` (+35/−18 Zeilen), `alice-mail-attachment-processor.json` (neu, 514 Zeilen). `alice-mail-attachment-backfill.json`: **0 Bytes Diff** — Anspruch des Implementers bestätigt.
+- **Node-für-Node-Vergleich `alice-mail-sync` (alt vs. neu):** genau **1 Node ersetzt** (`Code: Import Attachments` → `Code: Enqueue Attachment Jobs`), **3 Nodes nur `position` geändert** (`Code: Split Stored Emails`, `IF: Has Stored Emails`, `MQTT: Publish Email Done`). **Alle übrigen 15 Nodes byte-identisch**, inkl. `Process + Classify + Store Emails`, `Prepare Mailbox Data`, `Notify: Passthrough` und sämtlicher PG-Nodes.
+- **Mail-Metadaten-Pfad (Dedup, Kategorisierung, Weaviate-`Email`-Insert) unangetastet** — verifiziert per Byte-Vergleich des `Process + Classify + Store Emails`-Codes, nicht nur per Diff-Zeilenzahl.
+- **Graph-Integrität beider Workflows:** alle Connection-Referenzen und `$('Node')`-Referenzen auflösbar, keine verwaisten Nodes, keine doppelten Namen/IDs.
+
+### Static Checks
+
+| Prüfung | Ergebnis |
+|---------|----------|
+| Valides JSON (beide Dateien) | PASS |
+| Eindeutige Node-Namen und -IDs | PASS |
+| Connection-/`$('Node')`-Referenzen auflösbar | PASS (0 Fehler) |
+| Verwaiste Nodes | keine |
+| `node --check` auf allen Code-Nodes | PASS |
+| `console.log` | **0 Treffer** (winston in allen Nodes) |
+| Erlaubte `require`-Module | nur `axios, redis, fs, path, winston` |
+| Credentials auf MQTT-Nodes | PASS (`mqtt-alice` auf beiden Publishes) |
+| Crash-Safety der Queue (`lRem` erst nach Verarbeitung) | PASS — `lRange` liest ohne zu entfernen; `lRem` steht am **Ende** von `Code: Process Queue Item`; der Zeitlimit-Zweig endet **vor** diesem Node, unverarbeitete Einträge bleiben erhalten |
+| Zeitlimit greift vor Chat-Kernzeit | PASS (02:00 + 4 h = 06:00 < 07:00) |
+
+### Security Audit — Iteration 4
+
+- [x] **Kein neuer Credential-Pfad.** Der einzige neue Datenpfad ist die Redis-Queue. `passwordEnc` wird **verschlüsselt** aus `Prepare Mailbox Data` übernommen, verschlüsselt in Redis abgelegt und verschlüsselt an `/attachment` bzw. `/attachment-text` weitergereicht. Entschlüsselt wird weiterhin ausschließlich in `alice-mail-reader._decrypt_password()`. Harness-Nachweis: der an `/attachment` übergebene Wert ist byte-identisch zum Original-Blob — **keine Klartext-Materialisierung in n8n**.
+- [x] **Keine Credentials in Logs.** Alle winston-Aufrufe des neuen Workflows geprüft: **0** Log-Zeilen enthalten den Password-Blob, **0** enthalten überhaupt das Wort „password". `Code: Drop Unparseable Item` loggt den korrupten Rohstring auf 200 Zeichen gekappt — bei einem korrupten *Mailbox*-Eintrag könnte theoretisch ein Blob-Anfang im Log landen; da der Wert verschlüsselt ist, ist das **kein Klartext-Leak** (Hinweis, kein Bug).
+- [x] **Path Traversal weiterhin neutralisiert.** `sanitizeFilename`, `shortenSender` und der `VALID_TARGET_FOLDERS`-Gate sind **byte-identisch** übernommen (Funktionsrumpf-Diff). Der Zielordner bleibt gegen LLM-Halluzination und bösartige Anhangnamen abgesichert.
+- [x] **Kein neuer Netzwerk-/Auth-Pfad**, keine neuen Env-Variablen, keine DB-Schema-Änderung, keine RLS-/Auth-Berührung. `REDIS_PASSWORD` wird wie in allen Bestands-Workflows über `$env` gelesen.
+- [x] **Queue-Inhalt nicht extern beeinflussbar.** Einträge schreibt ausschließlich `alice-mail-sync`; ein Angreifer müsste bereits Redis-Zugriff haben. Korrupte Einträge führen kontrolliert zum Drop (BUG-15-unabhängig), nicht zu Code-Ausführung — `JSON.parse` in `try/catch`, kein `eval`.
+
+### Nicht verifizierbar in dieser Umgebung
+
+- Kein Lauf gegen echtes n8n/Redis/IMAP/Ollama/Weaviate/NAS — die Mock-Harness ersetzt keinen Integrationstest.
+- Reales n8n-Verhalten bei Schedule-Overlap (die Bewertung zu BUG-17 stützt sich auf die Trigger-Konfiguration und die Laufzeitbudgets, nicht auf einen Live-Test).
+- Ob `mistral-small3.2:24b` produktiv besser klassifiziert (Live-Test des Users).
+
+### Summary — Iteration 4
+
+- **Kernanspruch „1:1-Code-Verschiebung" bestätigt** — nicht übernommen, sondern per Funktionsrumpf-Diff nachgerechnet: 10/12 Helper byte-identisch, die restlichen 2 nur mit umbenanntem Parameter; innerer Schleifenrumpf nach Whitespace-Normalisierung 1 Kommentarwort Unterschied. Iterations-2/3-Fixes (`Image/`-Routing, `$env.OLLAMA_MODEL_DMS`) nachweislich erhalten.
+- **Regression: sauber.** Mail-Metadaten-Pfad byte-identisch, genau 1 Node getauscht, 3 nur verschoben, Backfill 0 Bytes Diff.
+- **Abweichungen a, c, d: korrekt** und eigenständig verifiziert (nicht auf die Notes vertraut). **b: redundant** → BUG-16 (Low). **e: Begründung greift zu kurz** → BUG-17 (Medium).
+- **Neue Bugs:** 1 × Medium neu (BUG-17), 1 × Low neu (BUG-16), 1 × Medium **pre-existing** (BUG-15, seit Iteration 1, klärt AC-5.2 endgültig als FAIL).
+- **Keine neuen Critical/High-Bugs.** Security ohne Befund; kein neuer Credential-Pfad, `passwordEnc` bleibt Ende-zu-Ende verschlüsselt.
+- **Production Ready:** **YES — READY** (per Production-Ready-Regel blockieren nur Critical/High; Medium/Low blockieren nicht).
+- **Empfehlung:** **Approved.** Vor bzw. beim Deployment abzuarbeiten:
+  1. **BUG-17** (empfohlen vor Deploy, ~1 Node): Lock `alice:dms:processor:lock:run` übernehmen **oder** Trigger auf `0 4 * * *` verschieben, damit sich der Lauf nicht mit `alice-dms-processor` überlappt.
+  2. **BUG-16**: `MQTT: Publish Attachment Done` ersatzlos streichen (redundant zum Publish aus `alice-mail-sync`).
+  3. **BUG-15** als Folge-Feature einplanen — ohne diesen Fix bleibt AC-5.2/5.3 (Mail-Thumbnails) dauerhaft unerfüllt, unabhängig von PROJ-53.
+  4. Unverändert aus Iteration 3: `OLLAMA_MODEL_DMS` produktiv auf ein Textmodell setzen (BUG-13) und `Image/` in `alice.dms_watched_folders` eintragen.
+  5. Deployment umfasst **beide** Workflows: `alice-mail-sync` (geändert) und `alice-mail-attachment-processor` (neu, muss aktiviert werden).
 
 ## Deployment
 _To be added by /deploy_

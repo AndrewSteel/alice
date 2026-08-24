@@ -15,7 +15,7 @@
 
 | ID      | Phase | Feature                                                                                                                                   | Status  | Spec | Created    |
 | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ---- | ---------- |
-| PROJ-53 | 3.2   | Mail-Anhang DMS-Import — E-Mail-Anhänge automatisch in DMS-Pipeline einspeisen + Mail-Thumbnails; Abhängigkeit von PROJ-46; verschoben aus Phase 4 | In Progress | [Spec](PROJ-53-mail-anhang-dms-import.md) | 2026-08-24 |
+| PROJ-53 | 3.2   | Mail-Anhang DMS-Import — E-Mail-Anhänge automatisch in DMS-Pipeline einspeisen + Mail-Thumbnails; Abhängigkeit von PROJ-46; verschoben aus Phase 4 | Approved | [Spec](PROJ-53-mail-anhang-dms-import.md) | 2026-08-24 |
 | PROJ-78 | 3.1   | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (falsch klassifizierte Rechnungen im Document-Schema)                              | Deployed | [Spec](PROJ-78-dms-dokumentenklassifizierung-fix-backfill.md) | 2026-08-17 |
 | PROJ-79 | 3.1   | DMS-Zusammenfassung Sprachkorrektur — nur Deutsch, Fix + Backfill Bestand                                                                  | Deployed | [Spec](PROJ-79-dms-zusammenfassung-sprachkorrektur.md) | 2026-08-17 |
 | PROJ-80 | 3.2   | DMS-Vollständigkeits-Dashboard — Coverage-Übersicht (Pfad-Scan vs. Weaviate/Thumbnail/Geo je Dokument); Abhängigkeit von PROJ-77           | Deployed | [Spec](PROJ-80-dms-vollstaendigkeits-dashboard.md) | 2026-08-17 |
