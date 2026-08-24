@@ -1,8 +1,8 @@
 # PROJ-94: DMS Path-Worker Zeitlimit
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-24
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-24 (deployed)
 
 ## Dependencies
 - Betrifft: `alice-dms-path-worker` (Kern der DMS-Scan-Pipeline aus PROJ-16, Deployed) — kein neuer Baustein, reine Robustheits-Ergänzung eines bestehenden Workflows.
@@ -287,4 +287,7 @@ Diff ist exakt so eng geschnitten wie beschrieben.
 - **Recommendation:** **READY** — Deploy. Die Implementierung entspricht Spec und Tech Design; alle vier dokumentierten Abweichungen sind sachlich begründet und korrekt umgesetzt (insbesondere die Lock-Freigabe über den gemeinsamen Release-Pfad statt eines duplizierten Release). Fail-open-Verhalten ist an allen geprüften Fehlerstellen korrekt, inklusive des kritischen Falls „fehlender `run_start`" (kein fehlberechneter Riesen-Elapsed-Wert). Lock-Loss-Pfad ist byte-identisch unverändert. Beim Deploy den obigen Smoke-Test fahren.
 
 ## Deployment
-_To be added by /deploy_
+
+Deployed am 2026-08-24. `alice-dms-path-worker` mit dem neuen 2h-Zeitlimit produktiv live.
+
+**Nach dem Deploy zu prüfen:** Der von QA empfohlene Smoke-Test (`run_start` künstlich in die Vergangenheit setzen, Abbruchverhalten inkl. Lock-Freigabe und `abort_reason: "time_limit_reached"` auf `alice/dms/scanner/path_stats` beobachten) steht noch aus — ein echter >2h-Lauf im Normalbetrieb bestätigt das Verhalten ohnehin beim nächsten Auftreten eines entsprechend großen Ordners.
