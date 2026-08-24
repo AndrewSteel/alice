@@ -1334,6 +1334,17 @@ Entfernt wurden der MQTT-Node **und** `IF: Imported Any` (existierte ausschließ
 - **Kein funktionaler Regress:** Round-Trip (Enqueue → `lRange` → Process → `lRem`) und Medien-Routing/Limits erneut durchlaufen, Ergebnisse identisch zu vor dem Fix (PDF → `Invoice/`, Bild → `Image/`, Video → `Video/`, Audio → `Audio/`, 0 LLM-Calls für Medien, 50-MB-Limit greift).
 - **1:1-Code-Move weiterhin intakt:** Ähnlichkeit des Anhang-Pipeline-Rumpfs zum ursprünglichen `Code: Import Attachments` unverändert **98,9 %**.
 
+#### Nachtrag: Terminierung des Enqueue-Zweigs (2026-08-24)
+
+Vom Nutzer gemeldeter struktureller Lose-Ende-Befund: `Code: Enqueue Attachment Jobs` hatte gar keine Ausgangsverbindung (`{"main": [[]]}`). Funktional war das unkritisch — der `rPush` passiert als Seiteneffekt im Node-Code, die Queue wurde also korrekt befüllt —, aber der Zweig endete im Nichts, während die beiden parallelen Zweige (`Code: Split Stored Emails` → … → `MQTT: Publish Email Done` und `Notify: Passthrough` → … → `PG: Update Sync Status`) sauber terminieren.
+
+Behoben:
+
+- **Neu: `End: Attachment Jobs Enqueued`** (`n8n-nodes-base.noOp`, `id: s9f-end-enqueued`) als sichtbarer Endpunkt, nach der bereits etablierten `End: …`-Konvention (`alice-dms-processor`: `End: Empty Queue`, `End: Time Limit`, `End: Already Running`; `alice-dms-scanner`: `End: No Folders`).
+- **`onError: continueRegularOutput` von `Code: Enqueue Attachment Jobs` entfernt.** Das war die eigentliche Ursache dafür, dass ein Fehler in diesem Zweig unsichtbar geblieben wäre: Ein Throw (z.B. Redis nicht erreichbar beim `connect()`) wurde stillschweigend geschluckt. Ohne das Flag erscheint ein solcher Fehler rot in der n8n-Execution-View. Fehler beim `rPush` **einzelner** Jobs werden weiterhin im Code abgefangen und per winston geloggt (unverändert), und da der Zweig parallel zum Mail-Metadaten-Pfad läuft, kann ein Fehler hier den Metadaten-Pfad (`Notify: Passthrough` → PG-Status) nicht beeinträchtigen.
+- **Sonst nichts geändert:** `jsCode` des Enqueue-Nodes byte-identisch, alle übrigen Nodes und Verbindungen unverändert (verifiziert per Node-für-Node-Diff gegen den Vorgänger-Commit).
+- Die Struktur-Validierung wurde um einen **Dangling-Output-Check** erweitert (nicht-terminale Nodes, deren sämtliche Ausgänge leer sind) — genau die Fehlerklasse, die der bestehende Orphan-Check (nur *eingehende* Kanten) nicht erfasst hatte. Ergebnis: `alice-mail-sync`, `alice-mail-attachment-processor`, `alice-mail-attachment-backfill` und `alice-dms-processor` haben **keine** offenen Ausgänge mehr.
+
 **Weiterhin nicht verifizierbar:** kein Lauf gegen echtes Redis/n8n (die Lock-Simulation bildet Redis-Semantik nach, ersetzt aber keinen Integrationstest — insbesondere echtes n8n-Verhalten bei zeitgleichem Schedule-Feuern zweier Workflows). BUG-15 (pre-existing, Mail-Thumbnail) bleibt bewusst unangetastet und außerhalb dieses Scopes.
 
 ## QA Test Results — Iteration 4 (2026-08-24)

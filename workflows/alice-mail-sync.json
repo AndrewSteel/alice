@@ -345,8 +345,18 @@
         -320
       ],
       "id": "s9b-enqueue-attachments",
-      "name": "Code: Enqueue Attachment Jobs",
-      "onError": "continueRegularOutput"
+      "name": "Code: Enqueue Attachment Jobs"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        -320
+      ],
+      "id": "s9f-end-enqueued",
+      "name": "End: Attachment Jobs Enqueued"
     },
     {
       "parameters": {
@@ -636,7 +646,13 @@
     },
     "Code: Enqueue Attachment Jobs": {
       "main": [
-        []
+        [
+          {
+            "node": "End: Attachment Jobs Enqueued",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
