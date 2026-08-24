@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-23 (Zwei Bugs aus Live-Test entdeckt: falsches LLM-Modell, fehlerhaftes Bild-Routing)
+**Last Updated:** 2026-08-24 (QA Iteration 3: Bild-Routing verifiziert behoben; Modell-Fix greift produktiv nicht — BUG-13 High offen)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1025,6 +1025,140 @@ Weitere geprüfte, aber **nicht** betroffene Stellen:
 - Kein Live-Ollama-Aufruf: dass das korrekte Modell tatsächlich valides JSON liefert und `confidence>0, fallback=false` erzeugt, muss am laufenden System geprüft werden.
 - Kein NAS-Zugriff: die automatische Anlage von `/mnt/nas/ai/Image/` und die Schreibrechte wurden nicht real getestet.
 - Weiterhin offen aus Iteration 2: `alice-mail-reader` muss wegen `pypdf` neu gebaut werden.
+
+## QA Test Results — Iteration 3 (2026-08-24)
+
+Zielgerichtete Nachprüfung der beiden Live-Bugs aus Commit `d2c8912`. Methodik wie in den Vorrunden: statische Analyse + Verhaltenstests gegen den **aus dem JSON extrahierten, ausgelieferten** Code (kein nachgebauter Code), plus eigenständiger Audit statt Übernahme der Implementer-Angaben.
+
+### Bug A — Ollama-Modell für Textklassifizierung
+
+| # | Prüfung | Methode | Ergebnis |
+|---|---------|---------|----------|
+| A-1 | `ollamaModel`-Zeile in `alice-mail-sync` / `Code: Import Attachments` | Zeile aus JSON extrahiert, SHA256-Vergleich | **Pass** — byte-identisch zur Referenz |
+| A-2 | `ollamaModel`-Zeile in `alice-mail-attachment-backfill` / `Code: Import Mail Attachments` | dito | **Pass** — byte-identisch |
+| A-3 | Referenz `alice-dms-classify-document` / `Code: Two-Attempt Classification` | dito | **Pass** — alle 3 Zeilen SHA256 `f54b82980d18961c`, `len(set())==1` |
+| A-4 | Diff-Umfang Bug A | `git diff --word-diff` | **Pass** — genau 1 geänderte Stelle pro Workflow (`'qwen3.5:27b-q4_K_M'` → `'qwen3:14b'` im `||`-Fallback) |
+| A-5 | Repo-weite Behauptung „5 andere Workflows schon korrekt" | eigener `grep -ro` über `workflows/*.json` | **Pass (verifiziert, nicht übernommen)** — `alice-dms-classify-document`, `alice-dms-language-check`, `alice-dms-classification-backfill`, `alice-dms-processor` (2×) nutzen alle `\|\| 'qwen3:14b'`. Jetzt 7/7 einheitlich |
+| A-6 | Env-Variable `OLLAMA_MODEL_DMS` **nicht** angefasst | `git diff --name-only d2c8912~1 d2c8912` | **Pass** — nur 2 Workflows + 2 Doku-Dateien; kein `.env`, kein `compose.yml`, kein `.env.example` |
+| A-7 | Wirksamkeit des Fixes **im Produktivsystem** | Env-Werte gegengelesen + Auflösungslogik ausgeführt | **FAIL → BUG-13** (siehe unten) |
+
+**A-7 im Detail (der eigentliche Befund dieser Runde).** Der Implementer konnte `docker/compose/automations/n8n/.env` nicht lesen (gesperrtes Verzeichnis) und hat den Fix deshalb nur gegen die *Fallback*-Semantik verifiziert. Die tatsächlich gesetzten Werte sind:
+
+```
+docker/compose/automations/n8n/.env:21:OLLAMA_MODEL_DMS=qwen3.5:27b-q4_K_M   <-- Vision-Modell!
+docker/compose/automations/n8n/.env:27:OLLAMA_VISION_MODEL=qwen3.5:27b-q4_K_M
+docker/compose/automations/n8n/.env.example:34:OLLAMA_MODEL_DMS=mistral-small3.2:24b
+```
+
+Die korrigierte Zeile lautet `ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'`. Da `$env.OLLAMA_MODEL_DMS` in Produktion **gesetzt und truthy** ist, greift der `||`-Zweig nie. Ausführung der exakten Zeile:
+
+| `OLLAMA_MODEL_DMS` | aufgelöstes Modell |
+|--------------------|--------------------|
+| `qwen3.5:27b-q4_K_M` (**Produktion**) | `qwen3.5:27b-q4_K_M` — **unverändert das Vision-Modell** |
+| `mistral-small3.2:24b` (`.env.example`) | `mistral-small3.2:24b` |
+| nicht gesetzt / leer | `qwen3:14b` |
+
+Der Code-Fix ist inhaltlich **richtig und soll bleiben** (er beseitigt einen echten Ausreißer und stellt Projekt-Konsistenz her), behebt das vom User gemeldete Symptom aber **nicht**: Die Root Cause liegt eine Ebene tiefer im Env-Wert. `confidence=0, fallback=true` wird nach dem Deploy dieses Fixes unverändert auftreten.
+
+### Bug B — eigener `Image/`-Zielordner
+
+| # | Prüfung | Methode | Ergebnis |
+|---|---------|---------|----------|
+| B-1 | `routeByExtension()` gibt für Bilder `'Image'` zurück (beide Workflows) | Funktionskörper aus JSON extrahiert und ausgeführt | **Pass** — `.jpg/.jpeg/.png/.webp/.heic/.tif/.tiff` → `Image`; auch per MIME (`image/gif`, `image/svg+xml`) ohne passende Endung |
+| B-2 | **Regression** Video/Audio-Branches unberührt | dito | **Pass** — `.mp4/.mov/.avi/.mkv/.webm` → `Video`, `.mp3/.wav/.m4a/.ogg/.flac` → `Audio`, MIME-Varianten ebenso |
+| B-3 | **Regression** Text-Typen weiterhin `null` (= LLM-Pfad) | dito | **Pass** — `.pdf/.docx/.xlsx/.odt/.ods/.txt/.md` → `null`, Unbekanntes → `null` |
+| B-4 | `VALID_TARGET_FOLDERS` enthält `'Image'` in **beiden** Import-Nodes | Konstante aus JSON extrahiert | **Pass** — `new Set([...VALID_SCHEMAS,'Image','Video','Audio'])`, `size===8` |
+| B-5 | `VALID_SCHEMAS` **nicht** angefasst | dito | **Pass** — weiterhin exakt die 5 DMS-Schemata; `Image`/`Video`/`Audio`/`Email` nicht enthalten → für den LLM-Klassifikator unerreichbar |
+| B-6 | **3-Stellen-Audit** (BUG-5-Klasse aus Iteration 2) | siehe Tabelle unten | **Pass — eigenständig verifiziert** |
+| B-7 | `fs.mkdirSync` deckt `/mnt/nas/ai/Image/` ab | Code-Pfad gelesen | **Pass** — `targetDir = path.join(NAS_AI_ROOT, targetFolder)` + `mkdirSync(targetDir,{recursive:true})`; kein Bootstrap-/Allowlist-Vorabanlegen irgendwo |
+| B-8 | Path-Traversal für den neuen Ordnernamen | Gate + `sanitizeFilename` ausgeführt | **Pass** — siehe Security unten |
+
+**B-6: 3-Stellen-Audit — eigenständig nachgeprüft (nicht der Implementer-Tabelle vertraut).** Alle drei Konstanten wurden per Skript direkt aus den ausgelieferten `jsCode`-Feldern extrahiert und wörtlich geprüft:
+
+| # | Datei | Node | Konstante | Extrahierter Ist-Wert | Ergebnis |
+|---|-------|------|-----------|----------------------|----------|
+| 1 | `alice-mail-sync.json` | `Code: Import Attachments` | `VALID_TARGET_FOLDERS` | `new Set([...VALID_SCHEMAS, 'Image', 'Video', 'Audio'])` | `Image` **vorhanden** |
+| 2 | `alice-mail-attachment-backfill.json` | `Code: Import Mail Attachments` | `VALID_TARGET_FOLDERS` | `new Set([...VALID_SCHEMAS, 'Image', 'Video', 'Audio'])` | `Image` **vorhanden** |
+| 3 | `alice-mail-attachment-backfill.json` | `Code: Fetch Mails With Attachments` | `SCHEMAS` (Basis von `countOnDisk()`) | `['Invoice','BankStatement','Document','Contract','SecuritySettlement','Image','Video','Audio']` | `Image` **vorhanden** |
+
+Stelle #3 ist der von Iteration-2-QA benannte Fallstrick (fehlender Ordner ⇒ `countOnDisk()` findet nie etwas ⇒ Endlos-Re-Import mit `_1`, `_2`, …). `countOnDisk()` iteriert nachweislich über genau diese `SCHEMAS`-Liste (`SCHEMAS.some(schema => fs.existsSync(path.join(NAS_AI_ROOT, schema, fileName)))`) — mit `Image` darin ist das Re-Import-Szenario ausgeschlossen. **Kein vierter Duplikationsort gefunden**: repo-weite Suche nach `'Video'`/`Audio` in `workflows/`, `sql/`, `scripts/`, `schemas/` liefert außerhalb dieser 3 Stellen keine Ordnerliste.
+
+**Verhaltenstest gegen den ausgelieferten Code:** **144/144 Assertions grün** (72 pro Workflow) — Bild-Routing per Endung und MIME, Video/Audio-Regression, Text→`null`, alle 8 Zielordner vom Gate akzeptiert, `VALID_SCHEMAS` unverändert bei 5, 15 Gate-Ablehnungsfälle, Pfad-Containment, `sanitizeFilename`.
+
+### Security Audit — Iteration 3
+
+| Vektor | Bewertung |
+|--------|-----------|
+| Path Traversal über neuen Ordnernamen | **Pass** — `Image` ist ein Literal in einer Allowlist-`Set`; der Ordnername stammt nie aus Angreifer-/LLM-Input, sondern aus `routeByExtension()` (Literal) oder aus `classification.document_type`, das gegen `VALID_TARGET_FOLDERS` geprüft wird. `Image/../etc`, `../Image`, `..`, `''`, `Image/`, `image`, `IMAGE`, `/etc/passwd`, `Email`, `unclear`, `null`, `undefined` werden **alle abgelehnt** (15/15) |
+| Dateiname-Injection in `Image/` | **Pass** — `sanitizeFilename()` unverändert; `/` und `\` → `_`, Control-Chars entfernt, führende Punkte gestrippt. `path.join('/mnt/nas/ai','Image',sanitize('../../../etc/passwd'))` bleibt unter `/mnt/nas/ai/Image/` (auch nach `path.resolve`) |
+| LLM-gesteuerte Ordnerwahl | **Pass** — `VALID_SCHEMAS` unverändert; das LLM kann `Image`/`Video`/`Audio` nicht ausgeben und damit kein Medien-Routing erzwingen |
+| Angriffsfläche gesamt | **unverändert** — keine neuen Inputs, Endpunkte, Credentials oder Netzwerkpfade |
+| Secrets im Diff | **Pass** — keine Secrets; `.env`-Dateien nicht angefasst |
+
+### Bugs Found — Iteration 3
+
+| ID | Severity | Titel | Root Cause | Priorität |
+|----|----------|-------|------------|-----------|
+| BUG-13 | **High** | Bug A ist im Produktivsystem **nicht behoben**: DMS-Textklassifizierung nutzt weiterhin das Vision-Modell | `docker/compose/automations/n8n/.env` Zeile 21 setzt `OLLAMA_MODEL_DMS=qwen3.5:27b-q4_K_M` — identisch mit `OLLAMA_VISION_MODEL` (Zeile 27). Der Fix in `d2c8912` korrigiert nur den `||`-Fallback-Literal, der bei gesetzter Variable nie ausgewertet wird. Der Env-Wert weicht zudem von `.env.example` (`mistral-small3.2:24b`) ab | **P1** — Ein-Zeilen-Config-Änderung + n8n-Neustart. Betrifft **alle 6** DMS-Workflows, die `OLLAMA_MODEL_DMS` lesen, nicht nur PROJ-53 |
+| BUG-14 | Low | Edge-Case-Doku (Zeile 84) erwähnt `Image/` nicht und ist für den neuen Ordner irreführend | Der Absatz beschreibt `Video/`/`Audio/` als „reine Ablageordner, **kein** Weaviate-Schema". `Image` verhält sich gegenteilig: `schemas/image.json` existiert (Klasse `Image` mit `ai_description`, EXIF, GPS) und `alice-dms-path-worker` / `Switch: Route by Type` hat einen eigenen `Image`-Output. Wird `Image/` in `dms_watched_folders` aufgenommen, greift eine vollwertige Pipeline — nicht der beschriebene `Document`-Fallback | P3 — Doku-Präzisierung |
+
+**Zu BUG-13, Abgrenzung:** Der Code-Fix aus `d2c8912` ist *korrekt* und soll **nicht** zurückgenommen werden — er beseitigt einen echten Ausreißer (2 von 7 Stellen) und stellt Konsistenz mit PROJ-78 her. Er ist nur **nicht hinreichend**: ohne Korrektur des Env-Werts bleibt das vom User gemeldete Symptom (`confidence=0, fallback=true`) bestehen. Da die Ursache projektweit in der Konfiguration liegt und **alle** DMS-Workflows betrifft, ist die Behebung streng genommen breiter als PROJ-53 — sie ist aber die Voraussetzung dafür, dass PROJ-53s Akzeptanzkriterium „Text-Anhänge werden mit dem korrekten DMS-Textklassifizierungsmodell klassifiziert" erfüllt ist, und blockiert daher die Freigabe.
+
+### Nicht bestätigte Verdachtsmomente (Negativbefunde)
+
+| Verdacht | Befund |
+|----------|--------|
+| Vierte, übersehene Duplikationsstelle der Ordnerliste | **Nicht bestätigt** — genau 3 Stellen, alle korrigiert |
+| `Image` leckt in `VALID_SCHEMAS` und wird LLM-erreichbar | **Nicht bestätigt** — beide Nodes weiterhin bei 5 Schemata |
+| Bild-Routing bricht die 20-KB-Müll-Grenze | **Nicht bestätigt** — `isImage`-Prüfung (`IMAGE_EXTENSIONS` + `image/`-MIME) liegt **vor** dem Routing und ist unverändert; Müllbilder werden weiterhin verworfen, bevor `routeByExtension()` läuft |
+| Fehlender `IMAGE_JUNK`-Check im Backfill-Import-Node ist eine Regression | **Nicht bestätigt** — Vergleich gegen `5b2259e` zeigt: existierte dort schon nicht; die Müllfilterung sitzt bewusst im vorgelagerten Kandidaten-Scan |
+| Weiteres Vision-Modell-Vorkommen in `alice-mail-sync` (`Process + Classify + Store Emails`, `model: 'qwen3.5:27b-q4_K_M'` hartkodiert) ist Teil von Bug A | **Nicht bestätigt als PROJ-53-Regression** — stammt aus Commit `3b94a30` („Model change to qwen3.5"), betrifft die **Mail-Body**-Kategorisierung (PROJ-46), nicht den Anhang-Pfad, und wurde von `d2c8912` nicht berührt. Eigenständig zu bewerten (gleiche Fehlerklasse, andere Feature-Zuständigkeit) |
+| `alice-dms-processor` / `Code: BankTransaction Phase B` nutzt Vision-Modell | **Nicht bestätigt** — identisches Muster, nur auf zwei Zeilen verteilt; Fallback korrekt `qwen3:14b` |
+
+### Regression Check (`d2c8912~1` → `d2c8912`)
+
+| Prüfung | Ergebnis |
+|---------|----------|
+| Diff-Umfang | **Pass** — 4 Dateien: 2 Workflows (**+3/−3 Code-Zeilen**), `INDEX.md`, Spec. Keine `.env`/Compose/SQL/Schema-Änderung |
+| Geänderte JSON-Zeilen | **Pass** — `alice-mail-sync`: 1 Zeile; `alice-mail-attachment-backfill`: 2 Zeilen. Sonst nur Kommentartext |
+| JSON-Validität beider Workflows | **Pass** |
+| Graph-Integrität | **Pass** — `alice-mail-sync` 19 Nodes, `alice-mail-attachment-backfill` 18 Nodes; alle `connections`-Quellen/-Ziele und alle `$('Node')`-Referenzen lösen auf (**0 Fehler**) |
+| JS-Syntax aller Code-Nodes | **Pass** — `node --check` grün für **15/15** Code-Nodes |
+| winston-Regel | **Pass** — 0 `console.log` in beiden Workflows |
+| Dedup (Message-ID / `countOnDisk`) | **Pass** — `countOnDisk()` unverändert, jetzt inkl. `Image`; Pooling-Logik aus Iteration 2 unberührt |
+| Größenlimit (50 MB) + 20-KB-Bildmüll | **Pass** — `ATTACHMENT_MAX_BYTES=52428800`, `IMAGE_JUNK_MAX_BYTES=20480` unverändert an allen Stellen |
+| PDF-Textklassifizierungs-Pfad | **Pass** — `fetchPdfText()` / `PDF_EXTENSIONS` / `PLAINTEXT_EXTENSIONS` unverändert; Text-Typen routen weiterhin in den LLM-Zweig |
+| Dry-Run-Gate | **Pass** — `Code: Init Backfill Run`, `Code: Fetch Mails With Attachments`, `Code: Empty Summary` unverändert |
+| `confirm`-Parameter-Fix (letzte QA-Runde) | **Pass** — `body.confirm !== undefined ? body.confirm : query.confirm` + `=== true \|\| === 'true'` unverändert vorhanden |
+| `MAX_RUNTIME_SECONDS` | **Pass** — Default 7200, Override-Parsing unverändert |
+
+### Edge Case `Image/` noch nicht in `dms_watched_folders`
+
+Bereits als generisches Muster dokumentiert (Edge-Cases Zeile 78): *„Datei liegt auf der AI-Freigabe, wird aber vom DMS-Scanner nicht erkannt, bis der Admin den Ordner aufnimmt — kein Datenverlust, nur verzögerte Verarbeitung."* Verhalten ist **graceful**: Der Import schreibt die Datei unabhängig von `dms_watched_folders`; ein fehlender Eintrag verzögert nur die Indexierung, verursacht keinen Crash und keinen Retry-Loop. `Image/` wird durch `mkdirSync(...,{recursive:true})` beim ersten Bild-Anhang automatisch angelegt. Präzisierung für `Image` speziell siehe BUG-14.
+
+### Nicht verifizierbar in dieser Umgebung
+
+| # | Kriterium | Grund |
+|---|-----------|-------|
+| NV-1 | Lauf gegen echtes n8n/IMAP/Ollama/Weaviate/NAS | Kein Zugriff; Verhaltenstests laufen gegen den extrahierten Node-Code |
+| NV-2 | `mcp__n8n-mcp__*`-Validierung | Tools nicht verfügbar; erneut strukturelle Eigenvalidierung |
+| NV-3 | Reales Anlegen und Schreibrechte von `/mnt/nas/ai/Image/` | Kein NAS-Zugriff |
+| NV-4 | Dass das korrekte Textmodell `confidence>0, fallback=false` liefert | Kein Live-Ollama; zusätzlich durch BUG-13 blockiert |
+| NV-5 | AC-5.2 / AC-5.3 (Mail-Thumbnail-Rendering) | Unverändert offen aus Iteration 1/2 |
+
+### Summary — Iteration 3
+
+- **Bug B: vollständig behoben und eigenständig verifiziert.** 3-Stellen-Audit selbst durchgeführt (nicht übernommen) — `Image` in allen drei Konstanten wörtlich nachgewiesen. 144/144 Verhaltensassertions grün, inkl. Video/Audio- und Text-Regression. Security unverändert.
+- **Bug A: Code-Fix korrekt, Symptom aber nicht behoben.** Die Zeile ist byte-identisch zur PROJ-78-Referenz und der Repo-Survey stimmt (eigenständig nachgeprüft, 7/7 einheitlich). In Produktion ist `OLLAMA_MODEL_DMS` jedoch auf das Vision-Modell gesetzt, wodurch der korrigierte Fallback nie greift → **BUG-13 (High)**.
+- **Regression:** eng begrenzt, +3/−3 Code-Zeilen, 15/15 Code-Nodes syntaktisch valide, Graph 0 Fehler, alle stichprobenartig geprüften Iterations-1/2-Mechaniken intakt.
+- **Offene Bugs:** **1 × High (BUG-13)**, 1 × Low (BUG-14).
+- **Production Ready:** **NO — NOT READY**
+- **Recommendation:** **Nicht Approved.** Status bleibt **In Review**. Blocker ist eine Ein-Zeilen-Config-Änderung, kein Code-Rework:
+  1. `docker/compose/automations/n8n/.env` Zeile 21 auf ein Textmodell setzen (z.B. `OLLAMA_MODEL_DMS=mistral-small3.2:24b` wie in `.env.example`, oder `qwen3:14b`), n8n neu starten, dann einen Anhang-Import live prüfen (`confidence>0`, `fallback=false`). **Achtung:** wirkt auf alle 6 DMS-Workflows — Gegenprobe an PROJ-78-Klassifizierung empfohlen.
+  2. BUG-14: Edge-Case Zeile 84 um `Image` präzisieren (hat im Gegensatz zu `Video`/`Audio` ein echtes Weaviate-Schema).
+  3. Danach: `Image/` in `alice.dms_watched_folders` eintragen (Settings → DMS-Ordner), Deploy-Voraussetzungen aus Iteration 2 bleiben bestehen.
+
+---
 
 ## Deployment
 _To be added by /deploy_
