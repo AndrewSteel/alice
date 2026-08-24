@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Approved
+## Status: In Review
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (BUG-16/BUG-17 aus Iteration-4-QA vor Deploy behoben — GPU-Lock ergänzt, redundanter MQTT-Node entfernt)
+**Last Updated:** 2026-08-24 (BUG-16/BUG-17 aus Iteration-4-QA vor Deploy behoben — GPU-Lock ergänzt, redundanter MQTT-Node entfernt; erneute QA-Verifikation ausstehend)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
