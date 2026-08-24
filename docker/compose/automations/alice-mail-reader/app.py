@@ -9,7 +9,7 @@ Endpoints:
   POST /fetch          — fetch emails since a given IMAP UID, returns metadata + body preview
   POST /body           — fetch full body of a single email by UID
   POST /attachment     — fetch raw bytes of a single attachment by UID + attachment index
-  POST /attachment-text — extract plaintext from a single PDF attachment by UID + index
+  POST /attachment-text — extract plaintext from a single PDF/DOCX/XLSX/ODT/ODS attachment by UID + index
 
 Passwords are encrypted with AES-256-CBC. The key is derived from MAIL_ENC_KEY (env).
 Plaintext passwords never leave this container.
@@ -26,6 +26,14 @@ import io
 import logging
 import os
 from datetime import datetime
+
+import docx
+import openpyxl
+from odf.opendocument import load as odf_load
+from odf.table import Table
+from odf.table import TableCell as OdfTableCell
+from odf.table import TableRow as OdfTableRow
+from odf.text import P as OdfParagraph
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
@@ -152,6 +160,76 @@ def _get_attachments(msg) -> list[dict]:
 
 def _is_pdf(filename: str, mime_type: str) -> bool:
     return filename.lower().endswith(".pdf") or mime_type.lower() == "application/pdf"
+
+
+# PROJ-91: DOCX/XLSX/ODT/ODS extension -> extractor mapping. Detection is by
+# filename extension only (not MIME type) - unlike PDF, the MIME types email
+# clients send for Office formats are inconsistent, while the extension is
+# reliable and is already how dms-extractor-office routes files.
+OFFICE_EXTENSIONS = {".docx", ".xlsx", ".odt", ".ods"}
+
+
+def _office_format(filename: str) -> str | None:
+    name = filename.lower()
+    for ext in OFFICE_EXTENSIONS:
+        if name.endswith(ext):
+            return ext
+    return None
+
+
+def _extract_docx_text(payload: bytes) -> str:
+    document = docx.Document(io.BytesIO(payload))
+    return "\n".join(p.text for p in document.paragraphs)
+
+
+def _extract_xlsx_text(payload: bytes) -> str:
+    # read_only avoids loading the whole workbook into memory; data_only reads
+    # the last-cached formula result instead of the formula text itself.
+    workbook = openpyxl.load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
+    try:
+        lines = []
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows():
+                cells = [str(cell.value) for cell in row if cell.value is not None]
+                if cells:
+                    lines.append("\t".join(cells))
+        return "\n".join(lines)
+    finally:
+        workbook.close()
+
+
+def _extract_odt_text(payload: bytes) -> str:
+    doc = odf_load(io.BytesIO(payload))
+    return "\n".join(str(p) for p in doc.getElementsByType(OdfParagraph))
+
+
+def _extract_ods_text(payload: bytes) -> str:
+    doc = odf_load(io.BytesIO(payload))
+    lines = []
+    for table in doc.getElementsByType(Table):
+        for row in table.getElementsByType(OdfTableRow):
+            cell_texts = []
+            for cell in row.getElementsByType(OdfTableCell):
+                text = "".join(str(p) for p in cell.getElementsByType(OdfParagraph))
+                if text:
+                    cell_texts.append(text)
+            if cell_texts:
+                lines.append("\t".join(cell_texts))
+    return "\n".join(lines)
+
+
+def _extract_office_text(payload: bytes, ext: str) -> str:
+    """Extract plaintext from an Office document. Raises on any parse failure
+    (caller catches and maps to status: extraction_failed, same as PDF)."""
+    if ext == ".docx":
+        return _extract_docx_text(payload)
+    if ext == ".xlsx":
+        return _extract_xlsx_text(payload)
+    if ext == ".odt":
+        return _extract_odt_text(payload)
+    if ext == ".ods":
+        return _extract_ods_text(payload)
+    raise ValueError(f"unsupported office extension: {ext}")
 
 
 def _extract_pdf_text(payload: bytes) -> tuple[str, int, bool]:
@@ -394,15 +472,17 @@ def fetch_attachment():
 
 @app.route("/attachment-text", methods=["POST"])
 def fetch_attachment_text():
-    """Return the extracted plaintext of a single PDF attachment (PROJ-53 iteration 2).
+    """Return the extracted plaintext of a single PDF/DOCX/XLSX/ODT/ODS
+    attachment (PROJ-53 iteration 2, extended by PROJ-91 for Office formats).
 
     Same input fields as /attachment. Used by the classification step of
     alice-mail-sync / alice-mail-attachment-backfill, which cannot run pdf-parse
-    itself (n8n Code nodes only allow axios/redis/winston + crypto/fs/path).
+    or Office parsers itself (n8n Code nodes only allow axios/redis/winston +
+    crypto/fs/path).
 
-    Non-PDF attachments and extraction failures return an empty text with a
-    status field instead of an error, so the caller can fall back to
-    filename + email context classification (same as for Office formats).
+    Unsupported attachment types and extraction failures return an empty text
+    with a status field instead of an error, so the caller can fall back to
+    filename + email context classification.
     """
     data = request.json or {}
     uid = str(data.get("uid", ""))
@@ -421,31 +501,55 @@ def fetch_attachment_text():
     try:
         filename, mime_type, payload = _fetch_attachment_part(data, uid, attachment_index)
 
-        if not _is_pdf(filename, mime_type):
+        if _is_pdf(filename, mime_type):
+            try:
+                text, page_count, truncated = _extract_pdf_text(payload)
+            except Exception as exc:
+                # Encrypted / malformed / image-only PDFs must not fail the caller.
+                log.warning("PDF extraction failed for %s: %s", filename, exc)
+                return jsonify({
+                    "text": "",
+                    "page_count": 0,
+                    "truncated": False,
+                    "status": "extraction_failed",
+                })
+
             return jsonify({
-                "text": "",
-                "page_count": 0,
-                "truncated": False,
-                "status": "not_a_pdf",
+                "text": text,
+                "page_count": page_count,
+                "truncated": truncated,
+                "status": "ok",
             })
 
-        try:
-            text, page_count, truncated = _extract_pdf_text(payload)
-        except Exception as exc:
-            # Encrypted / malformed / image-only PDFs must not fail the caller.
-            log.warning("PDF extraction failed for %s: %s", filename, exc)
+        office_ext = _office_format(filename)
+        if office_ext:
+            try:
+                text = _extract_office_text(payload, office_ext)
+            except Exception as exc:
+                # Password-protected / corrupt / legacy-binary files must not fail the caller.
+                log.warning("Office extraction failed for %s: %s", filename, exc)
+                return jsonify({
+                    "text": "",
+                    "page_count": 0,
+                    "truncated": False,
+                    "status": "extraction_failed",
+                })
+
+            truncated = len(text) > PLAINTEXT_MAX_CHARS
+            if truncated:
+                text = text[:PLAINTEXT_MAX_CHARS]
             return jsonify({
-                "text": "",
+                "text": text,
                 "page_count": 0,
-                "truncated": False,
-                "status": "extraction_failed",
+                "truncated": truncated,
+                "status": "ok",
             })
 
         return jsonify({
-            "text": text,
-            "page_count": page_count,
-            "truncated": truncated,
-            "status": "ok",
+            "text": "",
+            "page_count": 0,
+            "truncated": False,
+            "status": "unsupported_format",
         })
 
     except LookupError as exc:
