@@ -1521,5 +1521,26 @@ Unverändert ohne Befund. Der Lock führt keinen neuen Credential-Pfad ein (`cry
 - **Production Ready:** **YES — READY**
 - **Empfehlung:** **Approved.** Verbleibende Deployment-Voraussetzungen: `OLLAMA_MODEL_DMS` auf ein Textmodell setzen (BUG-13), `Image/` in `alice.dms_watched_folders` eintragen, und **beide** Workflows deployen (`alice-mail-sync` geändert, `alice-mail-attachment-processor` neu + aktivieren).
 
+---
+
+### QA-Nachprüfung — Dangling-Node-Fix (Commit `4af3ca1`, 2026-08-24)
+
+Fix-Forward auf einem bereits freigegebenen Workflow — **kein neuer Review-Zyklus**, Status bleibt **Approved**.
+
+| # | Prüfpunkt | Status | Nachweis |
+|---|-----------|--------|----------|
+| 1 | `End: Attachment Jobs Enqueued` existiert und ist verdrahtet | PASS | Node vorhanden (`n8n-nodes-base.noOp`, `id: s9f-end-enqueued`). Connections-Objekt **selbst gelesen**: `"Code: Enqueue Attachment Jobs": {"main": [[{"node": "End: Attachment Jobs Enqueued", "type": "main", "index": 0}]]}` — vorher `{"main": [[]]}` |
+| 2a | `onError: continueRegularOutput` entfernt | PASS | Node-Keys sind jetzt exakt `id, name, parameters, position, type, typeVersion` — **kein** `onError` mehr. Node-Diff: `onError: continueRegularOutput -> None` |
+| 2b | Interne Fehlerbehandlung weiterhin korrekt gestuft | PASS | Simulation gegen den echten `jsCode` (10/10 Assertions): **Redis nicht erreichbar** (`connect()` außerhalb des `try`) → Node **wirft**, Fehler wird sichtbar statt als Erfolg gemeldet; **einzelner `rPush` schlägt fehl** → Node wirft **nicht**, jeder Fehlschlag wird per `winston.warn` geloggt, `queued` bleibt ehrlich, Schleife läuft weiter; `finally { client.quit() }` schließt die Verbindung in allen Fällen. Genau die gewünschte Trennung: Routine-Hiccup ≠ Node-Fehler, echter Ausfall = Node-Fehler |
+| 2c | Änderung isoliert auf diesen einen Node | PASS | Node-für-Node-Diff `a18f978..4af3ca1`: **1 Node hinzugefügt**, **0 entfernt**, **1 geändert** (nur das `onError`-Attribut; `jsCode` byte-identisch). `Code: Split Stored Emails`, `IF: Has Stored Emails`, `MQTT: Publish Email Done` und `Notify: Passthrough` unverändert; deren `continueOnFail`/`onError`-Flags sind Bestand und wurden nicht angefasst |
+| 3 | Diff eng begrenzt | PASS | `git diff a18f978..4af3ca1` berührt nur `alice-mail-sync.json` (+22/−3) und das Spec-Dokument. Connections-Delta: **genau ein** Eintrag geändert |
+| 4 | Dangling-Output-Check plausibel + Gegenprobe | PASS (mit Hinweis) | Logik ist sinnvoll: nicht-terminale Nodes ohne belegten Ausgang melden, Leaf-Typen (`noOp`, `respondToWebhook`, `mqtt`, `stickyNote`) ausnehmen. **Eigene, unabhängige Implementierung** über alle vier Workflows laufen lassen — `alice-mail-sync`, `alice-mail-attachment-backfill` und `alice-dms-processor`: **0 Befunde** |
+
+**Hinweis aus der Gegenprobe (kein Bug, keine Aktion nötig):** Die eigene Prüfung meldet in `alice-mail-attachment-processor` zusätzlich `Code: Final Log` als Node ohne Ausgangsverbindung. Das ist **funktional korrekt und vollständig** — der Node führt alle terminalen Seiteneffekte selbst aus (owner-geprüfter Lock-Release, `del` der Run-Keys, Abschluss-Log) und ist das echte Ende des „Queue geleert"-Pfads; im Gegensatz zu `alice-dms-processor`, wo der gleichnamige Node zu weiteren Phasen (Image/Geocode) weiterleitet und deshalb dort einen Ausgang braucht. Es bleibt eine rein **kosmetische Inkonsistenz**, weil die drei Schwesterpfade (`Code: Final Log (Time)`, `Code: Empty Summary`, `Code: Log Already Running`) jeweils in einem expliziten `End: …`-Node enden. Optionaler Aufräumpunkt für einen späteren Durchgang, **kein Blocker**.
+
+**Nebenbefund zur Fehlerausbreitung (bekannt, unverändert, kein Blocker):** Da der Enqueue-Node jetzt wirklich werfen kann, ist relevant, dass die drei Zweige an Output 0 von `Process + Classify + Store Emails` laut Iteration-1-Notiz **sequenziell in Listenreihenfolge** abgearbeitet werden und der Enqueue-Zweig **an erster Stelle** steht. Der Weaviate-`Email`-Insert und die Dedup passieren jedoch bereits **upstream innerhalb** von `Process + Classify + Store Emails` und sind damit vor dem Enqueue abgeschlossen — ein Redis-Ausfall kann also **keine** Mail-Metadaten verlieren; im schlimmsten Fall unterbleibt die Anhang-Einreihung (Anhänge werden dann erst über den Backfill erfasst) und `PG: Update Sync Status` läuft ggf. nicht, sodass die Mailbox auf `syncing` stehen bleibt, bis der nächste Zyklus greift. Das ist dasselbe Verhalten wie vor dem Fix bei einem harten Fehler und entspricht der bereits dokumentierten Zweig-Reihenfolge — **neu ist nur, dass der Fehler jetzt sichtbar wird statt still verschluckt zu werden**, was die eigentliche Verbesserung ist.
+
+**Fazit:** Fix wirkt wie beschrieben, keine neuen Bugs, keine Critical/High. **Verdikt unverändert: Approved.**
+
 ## Deployment
 _To be added by /deploy_
