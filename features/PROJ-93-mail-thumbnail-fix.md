@@ -128,7 +128,94 @@ Keine neuen Pakete. Der Thumbnailer-Service nutzt für den neuen Text-Rendering-
 _Implementation abgeschlossen._
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-08-24
+**Commit under test:** `079b055` (fix(PROJ-93): Add mail thumbnail generation without a NAS file path)
+**Scope:** `workflows/alice-dms-thumbnailer.json`, `docker/compose/automations/alice-dms-thumbnailer/app/main.py`
+**Tester:** QA Engineer (AI)
+
+### Testmethode
+
+Kein Deploy, kein Live-n8n/Weaviate in dieser Umgebung. Eigenständige Verifikation, nicht auf die Implementation Notes verlassen:
+
+1. **Unabhängige Graph-Traversierung** des Workflows (eigenes BFS/DFS-Skript über das `connections`-Objekt, nicht die Beschreibung des Implementers).
+2. **Frischer Code-Review** von `GenerateRequest`, `_render_text_image`, `generate_thumbnail`, `/generate` — eigenständig gelesen, nicht nur den Diff überflogen.
+3. **Live-Tests gegen den echten laufenden FastAPI-Service** (`TestClient`, `startup`-Event ausgelöst, echtes Pillow-Rendering) — eigene, teils zusätzliche Testfälle über die des Implementers hinaus (Unicode/RTL/Emoji, Kontrollzeichen/ANSI-Escapes, sehr lange zusammenhängende Zeichenketten ohne Leerzeichen, sehr viele Zeilen).
+4. **Trust-Boundary-Analyse**: geprüft, ob die Lockerung der `file_path`-Pflicht in `Code: Parse & Filter` eine neue Angriffsfläche öffnet.
+5. **Logik-Nachvollzug in Python** der `Code: Merge Mail Text`-JS-Logik für den Weaviate-404-Fall (EC-1), um das dokumentierte Fehlerverhalten tatsächlich zu bestätigen statt nur zu glauben.
+
+### Acceptance Criteria Status
+
+| # | Acceptance Criterion | Status | Nachweis |
+|---|---|---|---|
+| AC-1 | `MQTT: Publish Email Done` löst weiterhin zuverlässig Thumbnail-Generierung aus (keine Regression der Trigger-Kette) | **PASS** | `alice-mail-sync`s `MQTT: Publish Email Done`-Node im Diff nicht angefasst (git diff bestätigt: nur Thumbnailer-Dateien geändert). MQTT-Topic/Payload-Struktur unverändert. |
+| AC-2 | Thumbnailer-Workflow erkennt `document_type: 'Email'` statt zu verwerfen | **PASS** | `Code: Parse & Filter`: `isEmail`-Check exempt von der `file_path`-Pflicht; eigene Graph-Traversierung bestätigt `IF: Is Email` unmittelbar danach mit zwei Ausgängen. |
+| AC-3 | Betreff+Body-Preview wird per Weaviate-Query anhand `weaviate_uuid` geladen (kein Datei-Zugriff) | **PASS** (mit dokumentierter, sachlich begründeter Abweichung) | Implementiert als **REST `GET /v1/objects/Email/{uuid}`** statt GraphQL, wie im Tech Design explizit begründet (einfacher, gleicher Stil wie der bereits bestehende PATCH-Node). Erfüllt den Sinn des AC (kein Datei-Zugriff, Laden per `weaviate_uuid`) vollständig — GraphQL war im Spec-Text als Mittel zum Zweck genannt, nicht als harte Vorgabe. Kein Bug. |
+| AC-4 | Service bekommt Mail-spezifischen Rendering-Pfad ohne Datei-Zugriff | **PASS** | `generate_thumbnail(..., mail_text=...)`: bei gesetztem `mail_text` wird `_render_text_image()` direkt aufgerufen, kein `open()`/Datei-I/O in diesem Zweig (Code-Review bestätigt). `/generate`-Endpoint überspringt `src.exists()` für `document_type == 'Email'`. |
+| AC-5 | Thumbnail wird wie gewohnt gespeichert, `thumbnail_path` im Weaviate-Objekt aktualisiert | **PASS** | `Code: Extract Thumbnail Path` → `HTTP: PATCH Weaviate thumbnail_path` unverändert im Graph nach dem Merge-Punkt — läuft für Mail-Thumbnails identisch zu allen anderen Typen. Live-Test: Thumbnail-Datei tatsächlich auf Platte erzeugt (400×400 RGB JPEG), Response enthält `thumbnail_path`. |
+| AC-6 | Bestehendes Verhalten für andere Dokumenttypen unverändert (keine Regression) | **PASS** | Eigener Live-Regressionstest: echte `.txt`-Datei angelegt, `document_type: 'Document'` mit `original_path` → `200`, Thumbnail erfolgreich erzeugt. Path-Traversal-Schutz (`/etc/passwd`, `../../etc/passwd`) weiterhin aktiv, eigenständig erneut angegriffen und bestätigt blockiert. `_render_text_preview()` delegiert jetzt an `_render_text_image()`, aber mit identischem Datenfluss (Datei lesen → Text → rendern), kein Verhaltensunterschied. |
+| AC-7 | Mail ohne Betreff und Content → sauberer Fehlschlag, kein Crash | **PASS** | Eigener Test: `mail_text: "   "` (nur Whitespace) → `422`, kein Absturz. Zusätzlich verifiziert: fehlendes `mail_text`-Feld ganz → ebenfalls `422`. |
+
+**7/7 Acceptance Criteria PASS.**
+
+### Edge Cases Status
+
+| # | Edge Case | Status | Nachweis |
+|---|---|---|---|
+| EC-1 | Mail-Objekt zwischen Publish und Generierung gelöscht | **PASS** | Eigenständig nachvollzogen (nicht nur behauptet): `Code: Merge Mail Text`-Logik in Python nachgebaut und mit einer simulierten Weaviate-404-Response durchgespielt → `mail_text` wird leerer String → service-seitiger `model_validator` liefert `422` → `IF: Generate OK` routet in den bestehenden Fehlerpfad → `MQTT: Publish thumb_error`. Kein Crash, kein Sonderfall nötig. |
+| EC-2 | Sehr langer Betreff/Content, begrenzt statt unbegrenzt | **PASS** | `Code: Merge Mail Text` kappt `subject` bei 200 und `content` bei 2000 Zeichen; `_render_text_image` kappt zusätzlich nochmal bei 2000 Zeichen (bestehende Konstante). Eigener Live-Test mit 100.000-Zeichen-`mail_text` → `200`, kein Crash, keine spürbare Verzögerung. |
+| EC-3 | Betreff vorhanden, Content leer → Thumbnail zeigt nur Betreff | **PASS** | Eigener Test: `mail_text: "Nur Betreff, kein Body"` → `200`. Durch die `filter(Boolean).join()`-Logik im Merge-Node wird ein leeres `content` korrekt weggelassen, kein doppelter Zeilenumbruch. |
+| EC-4 | Weaviate nicht erreichbar bei Thumbnail-Anfrage | **PASS** | `HTTP: GET Weaviate Email Content` hat `onError: "continueRegularOutput"` — ein Verbindungsfehler erzeugt ein Item mit Fehlerstatus statt den Workflow abzubrechen; `Code: Merge Mail Text` behandelt jeden `statusCode` außerhalb 200–299 identisch zum 404-Fall (EC-1), landet also im selben verifizierten Fehlerpfad. Keine Endlosschleife, keine Blockade nachfolgender Nachrichten (jede MQTT-Nachricht ist eine unabhängige Workflow-Execution). |
+| EC-5 | Sonderzeichen/HTML-Fragmente im Body-Content | **PASS, plus eigene Zusatztests** | Über die Spec hinaus getestet: Unicode/RTL/Emoji (Hebräisch, Chinesisch, Emoji-Sequenzen) → `200`, kein Crash. Kontrollzeichen und ANSI-Escape-Sequenzen (`\x00`, `\x1b[31m...`) → `200`, kein Crash (Pillow rendert sie als Pixel-Text, keine Interpretation). Sehr lange zusammenhängende Zeichenkette ohne Leerzeichen (5000 Zeichen "A") → `200` in 0,03s, kein Hänger im Word-Wrap von `multiline_text`. Sehr viele Zeilen (3000×"line") → `200`, kein Crash. |
+
+**5/5 Edge Cases PASS** (alle eigenständig nachvollzogen, EC-5 mit zusätzlichen selbst gewählten Angriffsvektoren über die Spec hinaus).
+
+### Security Audit Results
+
+**n8n workflow + Docker-Backend-Feature:**
+- [x] **Path Traversal (Regression):** `original_path`-Validierung (`DOCUMENTS_ROOT`-Präfix-Check) unverändert und weiterhin aktiv für Nicht-Mail-Requests — eigenständig erneut mit `/etc/passwd` und `../../etc/passwd` angegriffen, beide weiterhin `422`.
+- [x] **Kein neuer Datei-Schreibzugriff:** Der Mail-Pfad schreibt ausschließlich das generierte Thumbnail unter der bestehenden `THUMB_DIR`-Konvention (`<uuid>.jpg`), liest aber nie eine Datei — kleinere Angriffsfläche als der Datei-Pfad, nicht größer.
+- [x] **Kein Code-Interpretationsrisiko im gerenderten Text:** Body-Preview-Text (potenziell HTML-Fragmente, Kontrollzeichen, ANSI-Escapes) wird ausschließlich als Pixel-Text gezeichnet (`ImageDraw.multiline_text`) — kein HTML-Parser, kein Terminal, keine Codeausführung. Eigenständig mit ANSI-Escape-Sequenzen und Null-Bytes angegriffen, keine Auffälligkeit.
+- [x] **Trust-Boundary MQTT unverändert:** Die Lockerung der `file_path`-Pflicht in `Code: Parse & Filter` öffnet keine neue Angriffsfläche — wer bereits MQTT-Nachrichten auf `alice/dms/done` fälschen kann (Compromise des internen, passwortgeschützten Brokers), konnte vorher schon `file_path`/`document_type` beliebig setzen (inkl. Path-Traversal-Versuchen gegen den bereits bestehenden Datei-Lesepfad und die PATCH-URL-Konstruktion). `weaviate_uuid`-String-Konkatenation in der neuen `HTTP: GET Weaviate Email Content`-URL folgt exakt demselben, bereits akzeptierten Muster wie der bestehende `HTTP: PATCH Weaviate thumbnail_path`-Node — keine neue Instanz eines bestehenden Musters stellt einen neuen Fund dar.
+- [x] **Model-Validator-Sicherheit:** Der service-seitige Pydantic-Validator erzwingt weiterhin serverseitig, dass Mail-Requests nicht-leeren `mail_text` und Nicht-Mail-Requests einen validierten `original_path` haben — kann nicht durch einen manipulierten Payload umgangen werden (unabhängig vom n8n-Workflow erneut direkt gegen den FastAPI-Endpunkt getestet).
+
+**Security: PASS — keine neue Angriffsfläche, bestehende Schutzmechanismen (Path Traversal) unverändert wirksam.**
+
+### Bugs Found
+
+**Keine.** Weder Critical, High, Medium noch Low.
+
+**Anmerkung (kein Bug, positiv vermerkt):** Der Implementer hat während der eigenen Verifikation einen echten Bug in der ersten Fassung des `document_type`/`mail_text`-Cross-Field-Validators gefunden und korrigiert (Pydantic-v2-Feldreihenfolge-Falle bei `field_validator` + `info.data`, behoben durch `model_validator(mode="after")`) — von QA unabhängig nachvollzogen: der finale Code verwendet korrekt `model_validator`, alle Kombinationen (Email mit/ohne `mail_text`, Nicht-Email mit/ohne `original_path`) wurden von QA selbst erneut gegen den echten Endpunkt getestet und verhalten sich korrekt.
+
+### Regression Check
+
+- `alice-mail-sync` (Publisher-Seite): nicht im Diff enthalten, unverändert.
+- Nicht-Mail-Thumbnail-Pfad (PDF/Office/Bild/TXT/MD): `generate_thumbnail()` für `mail_text=None` durchläuft exakt denselben Code wie vor der Änderung (nur der neue `if mail_text is not None:`-Zweig davor, mit `return` vor dem alten Code — keine Vermischung). Live-Regressionstest mit echter Datei bestätigt.
+- `_render_text_preview()` (bestehender Datei-Text-Pfad, TXT/MD): jetzt ein dünner Wrapper um `_render_text_image()`, aber Datenfluss identisch (Datei öffnen → erste 30 Zeilen → an Rendering übergeben). Kein Verhaltensunterschied feststellbar.
+- Bestehender Fehlerpfad (`IF: Generate OK` → `Code: Log Error` → `MQTT: Publish thumb_error`): unverändert, wird jetzt zusätzlich vom Mail-Fehlerfall mitgenutzt statt eines neuen Pfads — Wiederverwendung korrekt, kein neuer/abweichender Error-Payload-Schema.
+- `Code: Log Error`: kosmetische Erweiterung (`(email, no file_path)` statt `undefined` im Log-Text) — keine Verhaltensänderung des Fehlerpfads selbst, nur Log-Lesbarkeit.
+
+### Statische Validierung (Workflow-JSON)
+
+| Check | Ergebnis |
+|---|---|
+| JSON valide | PASS |
+| Doppelte Node-Namen/-IDs | PASS — keine |
+| Alle `connections`-Quellen/-Ziele auflösbar | PASS |
+| Alle `$('Node')`-Referenzen auflösbar | PASS |
+| Alle Nodes vom Trigger aus erreichbar (BFS) | PASS |
+| `console.log` (CLAUDE.md: nur winston) | PASS — 0 Treffer |
+| Alle 5 Code-Nodes `node --check` | PASS |
+| MQTT-Credentials vorhanden & unverändert | PASS |
+
+### Summary
+
+- **Acceptance Criteria:** 7/7 passed
+- **Edge Cases:** 5/5 passed
+- **Bugs Found:** 0 total (0 critical, 0 high, 0 medium, 0 low)
+- **Security:** Pass — keine neue Angriffsfläche, Path-Traversal-Schutz und Trust-Boundary unverändert wirksam
+- **Production Ready:** YES
+- **Recommendation:** **READY** — Deploy. Alle Acceptance Criteria und Edge Cases eigenständig gegen den echten laufenden Service verifiziert (nicht nur gegen die Implementer-Notizen), inklusive zusätzlicher, über die Spec hinausgehender Angriffsvektoren (Unicode/RTL, Kontrollzeichen, ANSI-Escapes, Wortumbruch-Stresstest). Die einzige Abweichung vom Spec-Wortlaut (REST GET statt GraphQL) ist im Tech Design sachlich begründet und erfüllt den AC-Sinn vollständig — kein Bug.
 
 ## Deployment
 _To be added by /deploy_
