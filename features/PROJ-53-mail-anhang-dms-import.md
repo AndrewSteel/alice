@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: Approved
+## Status: In Review
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-23 (QA-Nachprüfung des confirm-Bugfix per Graph-Trace bestanden — Approved)
+**Last Updated:** 2026-08-23 (Zwei Bugs aus Live-Test entdeckt: falsches LLM-Modell, fehlerhaftes Bild-Routing)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -938,6 +938,40 @@ Die tote Konfiguration ist damit real behoben, nicht nur umgeschrieben.
 - **Security:** **Pass** — keine Änderung der Angriffsfläche.
 - **Production Ready:** **YES — READY**
 - **Recommendation:** **Approved.** Deploy-Voraussetzungen aus Iteration 2 bleiben bestehen: `alice-mail-reader` **neu bauen** (`pypdf`), Backfill zuerst **ohne** `confirm` aufrufen (dieser Default ist jetzt nachweislich der einzige Weg, der nichts tut — und `confirm: true` ist nachweislich der Weg, der importiert), danach AC-5.2/5.3 gegen den laufenden Thumbnailer prüfen.
+
+---
+
+## Iteration 3 — Bugs aus Live-Deployment-Test (2026-08-23)
+
+Nach Deployment (inkl. `alice-mail-reader`-Rebuild) und erstem produktiven Test hat Andreas zwei Probleme gemeldet:
+
+### Bug A: Text-Anhänge werden systematisch nicht klassifiziert (`confidence=0, fallback=true` bei praktisch allen Nicht-Bild-Anhängen)
+
+**Root Cause gefunden:** In `Code: Import Attachments` (`alice-mail-sync.json`) und `Code: Import Mail Attachments` (`alice-mail-attachment-backfill.json`) ist das Ollama-Modell für die Textklassifizierung falsch gesetzt:
+
+```js
+let ollamaModel = 'qwen3.5:27b-q4_K_M'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3.5:27b-q4_K_M'; } catch(e) {}
+```
+
+`qwen3.5:27b-q4_K_M` ist laut `docker/compose/automations/n8n/.env.example` als `OLLAMA_VISION_MODEL` registriert (Bildbeschreibung/OCR-Pfade, z.B. `dms-extractor-image`) — **kein** Textklassifizierungsmodell. Der korrekte Wert (siehe `alice-dms-classify-document.json`, PROJ-78) ist `$env.OLLAMA_MODEL_DMS` (in `.env.example` = `mistral-small3.2:24b`) mit Fallback-Default `qwen3:14b`. Ein Vision-Modell auf einen reinen Text-Klassifizierungs-Prompt angesetzt liefert vermutlich unzuverlässig valides JSON im geforderten Format → Parse-Fehler bzw. `unclear` bei praktisch jedem Aufruf → der bestehende Unsicherheits-Fallback auf `Document` (siehe PROJ-78-Verhalten) greift dadurch systematisch statt in der Ausnahme.
+
+**Fix:** Modell-Default/Fallback in beiden Workflows auf `$env.OLLAMA_MODEL_DMS || 'qwen3:14b'` korrigieren, exakt wie in `alice-dms-classify-document.json`.
+
+### Bug B: Bild-Anhänge landen in `Document/` statt in einem eigenen `Image/`-Ordner
+
+**Klarstellung nach Prüfung:** Die Weaviate-Klassifizierung selbst ist technisch nicht falsch — der bestehende DMS-Scanner (`Switch: Route by Type` in `alice-dms-path-worker.json`) routet Dateien ausschließlich nach Datei-Endung (`file_type`) in die passende Pipeline (u.a. ins eigenständige Weaviate-Schema `Image` mit KI-Bildbeschreibung/EXIF/GPS-Geocoding), unabhängig vom Quellordner. Ein `.jpg` in `Document/` würde also bereits korrekt als `Image`-Objekt landen, sobald der Ordner überwacht wird.
+
+Dennoch: Konsistent mit der Ordnerstruktur der übrigen fünf DMS-Schemata (+ `Video`/`Audio` aus Iteration 2) soll es einen eigenen `Image/`-Zielordner geben, damit die physische Ablage auf dem NAS nicht irreführend ist (ein Mensch, der den Ordner durchsucht, erwartet Bilder nicht in `Document/`).
+
+**Fix:** Neuer Zielordner `/mnt/nas/ai/Image/` (analog `Video/`/`Audio/`, automatisch angelegt). Extension-Routing (siehe Iteration 2) wird angepasst: Bild-Anhänge (jenseits der 20-KB-Müll-Grenze) routen künftig nach `Image/` statt `Document/`. Betrifft `alice-mail-sync.json` und `alice-mail-attachment-backfill.json` (`routeByExtension()`-Funktion in beiden).
+
+### Ergänzung Acceptance Criteria (Zielordner-Struktur)
+
+- [ ] Zusätzlich zu `Invoice/`, `BankStatement/`, `Document/`, `Contract/`, `SecuritySettlement/`, `Video/`, `Audio/` existiert `/mnt/nas/ai/Image/` als Ablageziel für Bild-Anhänge
+- [ ] Bild-Anhänge (jenseits der 20-KB-Müll-Grenze) werden nach `Image/` geroutet, nicht nach `Document/`
+- [ ] Text-Anhänge (PDF/DOCX/XLSX/ODT/ODS/TXT/MD) werden mit dem korrekten DMS-Textklassifizierungsmodell (`$env.OLLAMA_MODEL_DMS`, Fallback `qwen3:14b`) klassifiziert, nicht mit dem Vision-Modell
+
+**Nächste Schritte:** `/backend` für beide Fixes, dann erneut `/qa` (inkl. Regressionsprüfung, dass die Änderung des Modell-Fallbacks nicht versehentlich andere Aufrufer/Workflows betrifft, da `OLLAMA_MODEL_DMS` projektweit gesetzt ist).
 
 ## Deployment
 _To be added by /deploy_
