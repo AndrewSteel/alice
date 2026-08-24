@@ -7,19 +7,16 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 2 * * *"
+              "expression": "0 4 * * *"
             }
           ]
         }
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [
-        -1120,
-        0
-      ],
+      "position": [-1120, 0],
       "id": "ap1-trigger",
-      "name": "Schedule: Nightly 02:00"
+      "name": "Schedule: Nightly 04:00"
     },
     {
       "parameters": {
@@ -27,10 +24,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -900,
-        0
-      ],
+      "position": [-900, 0],
       "id": "ap18-lock",
       "name": "Code: Acquire Processor Lock"
     },
@@ -60,10 +54,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        -680,
-        0
-      ],
+      "position": [-680, 0],
       "id": "ap19-if-lock",
       "name": "IF: Processor Lock Acquired"
     },
@@ -73,10 +64,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -460,
-        -320
-      ],
+      "position": [-460, -320],
       "id": "ap20-busy",
       "name": "Code: Log Already Running"
     },
@@ -84,10 +72,7 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [
-        -240,
-        -320
-      ],
+      "position": [-240, -320],
       "id": "ap21-end-busy",
       "name": "End: Already Running"
     },
@@ -97,10 +82,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -460,
-        0
-      ],
+      "position": [-460, 0],
       "id": "ap2-init",
       "name": "Code: Init"
     },
@@ -110,10 +92,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -240,
-        0
-      ],
+      "position": [-240, 0],
       "id": "ap3-fetch",
       "name": "Code: Fetch Batch"
     },
@@ -143,10 +122,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        -20,
-        0
-      ],
+      "position": [-20, 0],
       "id": "ap4-if-empty",
       "name": "IF: Queue Empty"
     },
@@ -156,10 +132,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        200,
-        -140
-      ],
+      "position": [200, -140],
       "id": "ap22-empty",
       "name": "Code: Empty Summary"
     },
@@ -167,10 +140,7 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [
-        420,
-        -140
-      ],
+      "position": [420, -140],
       "id": "ap5-end-empty",
       "name": "End: Empty Queue"
     },
@@ -182,10 +152,7 @@
       },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [
-        -240,
-        120
-      ],
+      "position": [-240, 120],
       "id": "ap6-split",
       "name": "Split In Batches"
     },
@@ -195,10 +162,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -20,
-        220
-      ],
+      "position": [-20, 220],
       "id": "ap7-timecheck",
       "name": "Code: Time Check"
     },
@@ -228,10 +192,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        200,
-        220
-      ],
+      "position": [200, 220],
       "id": "ap8-if-time",
       "name": "IF: Time Limit Reached"
     },
@@ -241,10 +202,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        420,
-        100
-      ],
+      "position": [420, 100],
       "id": "ap9-final-time",
       "name": "Code: Final Log (Time)"
     },
@@ -252,10 +210,7 @@
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [
-        640,
-        100
-      ],
+      "position": [640, 100],
       "id": "ap10-end-time",
       "name": "End: Time Limit"
     },
@@ -285,10 +240,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        420,
-        340
-      ],
+      "position": [420, 340],
       "id": "ap11-if-parse",
       "name": "IF: Parse Error"
     },
@@ -298,10 +250,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        640,
-        240
-      ],
+      "position": [640, 240],
       "id": "ap12-drop",
       "name": "Code: Drop Unparseable Item",
       "onError": "continueRegularOutput"
@@ -312,10 +261,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        640,
-        440
-      ],
+      "position": [640, 440],
       "id": "ap13-process",
       "name": "Code: Process Queue Item",
       "onError": "continueRegularOutput"
@@ -326,10 +272,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        200,
-        120
-      ],
+      "position": [200, 120],
       "id": "ap16-final",
       "name": "Code: Final Log"
     },
@@ -342,10 +285,7 @@
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        -1120,
-        -560
-      ],
+      "position": [-1120, -560],
       "id": "ap17-sticky",
       "name": "Sticky: Overview"
     }
