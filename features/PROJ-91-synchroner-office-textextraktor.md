@@ -1,8 +1,8 @@
 # PROJ-91: Synchroner Office-Textextraktor
 
-## Status: Planned
+## Status: Deployed
 **Created:** 2026-08-24
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-24 (deployed)
 
 ## Dependencies
 - Erweitert: `alice-mail-reader`s `/attachment-text`-Endpunkt (PROJ-53, Deployed) — bisher nur PDF via `pypdf`, wird um DOCX/XLSX/ODT/ODS erweitert.
@@ -219,4 +219,7 @@ Kein Deploy, kein Live-Container in dieser Umgebung. Eigenständige Verifikation
 - **Recommendation:** **READY** — Deploy. Alle 10 Acceptance Criteria erfüllt, keine Regression im PDF-/TXT-/MD-Pfad. BUG-1 ist real und quantifiziert (nicht nur theoretisch), aber kein Blocker: gleiches Muster besteht bereits im produktiven, akzeptierten PDF-Pfad, betrifft nur einen internen VPN-only-Service und verursacht keinen Datenverlust — Empfehlung, ihn zeitnah für alle fünf Formate gemeinsam zu beheben statt den Rollout von PROJ-91 dafür zu blockieren.
 
 ## Deployment
-_To be added by /deploy_
+
+Deployed am 2026-08-24. `alice-mail-reader` (Container-Rebuild mit `python-docx`/`openpyxl`/`odfpy`) sowie `alice-mail-attachment-processor` und `alice-mail-attachment-backfill` (n8n-Workflows) produktiv live.
+
+**Empfehlung für Post-Deploy-Monitoring:** BUG-1 aus dem QA-Bericht (unbegrenzter Speicher-/Zeitverbrauch bei stark komprimierbaren Office-Anhängen vor der Truncation) im Blick behalten — kein Blocker, aber ein Kandidat für einen zeitnahen Folgefix über alle fünf Formate (inkl. PDF) hinweg.

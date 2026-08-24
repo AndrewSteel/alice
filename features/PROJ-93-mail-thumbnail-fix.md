@@ -1,8 +1,8 @@
 # PROJ-93: Mail-Thumbnail-Fix
 
-## Status: Planned
+## Status: Deployed
 **Created:** 2026-08-24
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-24 (deployed)
 
 ## Dependencies
 - Betrifft: `alice-dms-thumbnailer` (n8n-Workflow, PROJ-55, Deployed) und den zugehörigen `alice-dms-thumbnailer`-Service (`/generate`-Endpoint).
@@ -218,4 +218,5 @@ Kein Deploy, kein Live-n8n/Weaviate in dieser Umgebung. Eigenständige Verifikat
 - **Recommendation:** **READY** — Deploy. Alle Acceptance Criteria und Edge Cases eigenständig gegen den echten laufenden Service verifiziert (nicht nur gegen die Implementer-Notizen), inklusive zusätzlicher, über die Spec hinausgehender Angriffsvektoren (Unicode/RTL, Kontrollzeichen, ANSI-Escapes, Wortumbruch-Stresstest). Die einzige Abweichung vom Spec-Wortlaut (REST GET statt GraphQL) ist im Tech Design sachlich begründet und erfüllt den AC-Sinn vollständig — kein Bug.
 
 ## Deployment
-_To be added by /deploy_
+
+Deployed am 2026-08-24. `alice-dms-thumbnailer` (Container-Rebuild mit dem neuen Mail-Text-Rendering-Modus) sowie der `alice-dms-thumbnailer`-n8n-Workflow (neuer Mail-Zweig) produktiv live.

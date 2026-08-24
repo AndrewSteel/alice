@@ -1,8 +1,8 @@
 # PROJ-92: DMS-Backfill Confirm-Gate Fix
 
-## Status: Planned
+## Status: Deployed
 **Created:** 2026-08-24
-**Last Updated:** 2026-08-24
+**Last Updated:** 2026-08-24 (deployed)
 
 ## Dependencies
 - Betrifft: `alice-dms-language-backfill` (PROJ-79, Deployed) und `alice-dms-classification-backfill` (PROJ-78, Deployed) — kein neuer Baustein, reiner Bugfix zweier bestehender Workflows.
@@ -183,7 +183,5 @@ Kein Deploy und kein Live-n8n/Redis in dieser Umgebung — gleiches Vorgehen wie
 - **Recommendation:** **READY** — Deploy. Fix folgt exakt dem bereits produktiv bewährten PROJ-53-Muster, Diff ist minimal-invasiv (4 Zeilen je Datei), Lock-Node unangetastet, Propagation von `confirm`/`MAX_RUNTIME_SECONDS` bis zu den tatsächlichen Gates eigenständig nachvollzogen und verifiziert.
 
 ## Deployment
-_To be added by /deploy_
 
-## Deployment
-_To be added by /deploy_
+Deployed am 2026-08-24. `alice-dms-language-backfill` und `alice-dms-classification-backfill` mit dem korrigierten Confirm-Gate produktiv live.
