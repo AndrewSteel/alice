@@ -880,7 +880,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-path-worker\", node: \"Code: Renew Path Lock\" } });\nconst redis = require('redis');\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst lockKey = `alice:dms:scanner:lock:folder:${trigger.id}`;\nconst owner = trigger.lock_owner;\nconst LOCK_TTL_MS = 180000;\n\nconst RENEW_SCRIPT = `\nlocal raw = redis.call('GET', KEYS[1])\nif not raw then return 0 end\nlocal ok, data = pcall(cjson.decode, raw)\nif not ok or data.owner ~= ARGV[1] then return 0 end\ndata.last_heartbeat = ARGV[2]\nredis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3])\nreturn 1\n`;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet renewed = false;\ntry {\n  await client.connect();\n  const res = await client.eval(RENEW_SCRIPT, { keys: [lockKey], arguments: [owner, new Date().toISOString(), String(LOCK_TTL_MS)] });\n  renewed = (res === 1);\n} catch(e) {\n  logger.info(`[Path-Worker] Lock renewal error for folder ${trigger.id}: ${e.message} - treating as lock lost`);\n  renewed = false;\n} finally {\n  await client.quit().catch(() => {});\n}\nreturn [{ json: { ...$input.first().json, _lock_still_held: renewed } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-path-worker\", node: \"Code: Renew Path Lock\" } });\nconst redis = require('redis');\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst lockKey = `alice:dms:scanner:lock:folder:${trigger.id}`;\nconst owner = trigger.lock_owner;\nconst LOCK_TTL_MS = 180000;\nconst RUN_TIME_LIMIT_SECONDS = 7200; // PROJ-94: 2h per-folder run limit\n\nconst RENEW_SCRIPT = `\nlocal raw = redis.call('GET', KEYS[1])\nif not raw then return 0 end\nlocal ok, data = pcall(cjson.decode, raw)\nif not ok or data.owner ~= ARGV[1] then return 0 end\ndata.last_heartbeat = ARGV[2]\nredis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3])\nreturn 1\n`;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet renewed = false;\n// PROJ-94: fail-open time-limit check; stays false unless run_start proves the limit was exceeded\nlet timeLimitReached = false;\nlet elapsedSeconds = 0;\ntry {\n  await client.connect();\n  const res = await client.eval(RENEW_SCRIPT, { keys: [lockKey], arguments: [owner, new Date().toISOString(), String(LOCK_TTL_MS)] });\n  renewed = (res === 1);\n  try {\n    const startStr = await client.get(`alice:dms:scanner:stats:folder:${trigger.id}:run_start`);\n    const startMs = parseInt(startStr || '0', 10);\n    if (startMs > 0) {\n      elapsedSeconds = Math.floor((Date.now() - startMs) / 1000);\n      timeLimitReached = elapsedSeconds >= RUN_TIME_LIMIT_SECONDS;\n    }\n  } catch(te) {\n    // Fail-open: a Redis hiccup during the time check must not abort a healthy run.\n    logger.info(`[Path-Worker] Time-limit check error for folder ${trigger.id}: ${te.message} - continuing run (fail-open)`);\n  }\n} catch(e) {\n  logger.info(`[Path-Worker] Lock renewal error for folder ${trigger.id}: ${e.message} - treating as lock lost`);\n  renewed = false;\n} finally {\n  await client.quit().catch(() => {});\n}\nreturn [{ json: { ...$input.first().json, _lock_still_held: renewed, _time_limit_reached: timeLimitReached, _elapsed_seconds: elapsedSeconds } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -940,7 +940,54 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst folderId = trigger.id;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n\nlet scannedFiles = 0, newFiles = 0, skippedFiles = 0, lifecycleFiles = 0, errors = [], startMs = 0;\ntry {\n  await client.connect();\n  const [sf, nf, sk, lf, errLen, startStr] = await Promise.all([\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:scanned_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:new_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:skipped_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:lifecycle_files`),\n    client.lLen(`alice:dms:scanner:stats:folder:${folderId}:errors`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:run_start`)\n  ]);\n  scannedFiles = parseInt(sf || '0', 10);\n  newFiles = parseInt(nf || '0', 10);\n  skippedFiles = parseInt(sk || '0', 10);\n  lifecycleFiles = parseInt(lf || '0', 10);\n  startMs = parseInt(startStr || '0', 10);\n  if (errLen > 0) {\n    errors = await client.lRange(`alice:dms:scanner:stats:folder:${folderId}:errors`, 0, -1);\n  }\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n}\n\nreturn [{ json: {\n  _no_files: false,\n  folder_id: folderId,\n  path: trigger.path,\n  scanned_files: scannedFiles,\n  new_files: newFiles,\n  skipped_files: skippedFiles,\n  lifecycle_files: lifecycleFiles,\n  errors: errors,\n  runtime_seconds: startMs > 0 ? Math.round((Date.now() - startMs) / 1000) : 0,\n  completed_at: new Date().toISOString()\n} }];"
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "proj94-if-time-limit-reached-v1-cond",
+              "leftValue": "={{ $json._time_limit_reached }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        32240,
+        3712
+      ],
+      "id": "proj94-if-time-limit-reached-v1",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-path-worker\", node: \"Code: Abort on Time Limit\" } });\nconst redis = require('redis');\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst folderId = trigger.id;\nconst elapsedSeconds = $input.first().json._elapsed_seconds || 0;\n\n// PROJ-94: read progress so far for the abort log; the lock itself is released\n// by the existing \"Code: Release Path Lock\" node downstream of the summary.\nlet scannedFiles = 0, newFiles = 0, skippedFiles = 0, lifecycleFiles = 0;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  const [sf, nf, sk, lf] = await Promise.all([\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:scanned_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:new_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:skipped_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:lifecycle_files`)\n  ]);\n  scannedFiles = parseInt(sf || '0', 10);\n  newFiles = parseInt(nf || '0', 10);\n  skippedFiles = parseInt(sk || '0', 10);\n  lifecycleFiles = parseInt(lf || '0', 10);\n} catch(e) {\n  logger.info(`[Path-Worker] Could not read progress stats on time-limit abort for folder ${folderId}: ${e.message}`);\n} finally {\n  await client.quit().catch(() => {});\n}\n\nlogger.info(JSON.stringify({\n  event: 'alice-dms-path-worker-time-limit-abort',\n  reason: 'time_limit_reached',\n  folder_id: folderId,\n  path: trigger.path,\n  elapsed_seconds: elapsedSeconds,\n  scanned_files: scannedFiles,\n  new_files: newFiles,\n  skipped_files: skippedFiles,\n  lifecycle_files: lifecycleFiles,\n  timestamp: new Date().toISOString()\n}));\n\n// Stop the file loop: no further files are scanned/processed this run. Remaining\n// files are picked up by the next hourly dispatcher run (lock is released below).\nreturn [{ json: { _time_limit_reached: true, _elapsed_seconds: elapsedSeconds } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32240,
+        4112
+      ],
+      "id": "proj94-code-abort-on-time-limit-v1",
+      "name": "Code: Abort on Time Limit"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nconst trigger = $('Execute Workflow Trigger').first().json;\nconst folderId = trigger.id;\n// PROJ-94: set when the run was aborted by the 2h per-folder time limit\nconst timeLimitReached = ($input.first().json || {})._time_limit_reached === true;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n\nlet scannedFiles = 0, newFiles = 0, skippedFiles = 0, lifecycleFiles = 0, errors = [], startMs = 0;\ntry {\n  await client.connect();\n  const [sf, nf, sk, lf, errLen, startStr] = await Promise.all([\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:scanned_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:new_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:skipped_files`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:lifecycle_files`),\n    client.lLen(`alice:dms:scanner:stats:folder:${folderId}:errors`),\n    client.get(`alice:dms:scanner:stats:folder:${folderId}:run_start`)\n  ]);\n  scannedFiles = parseInt(sf || '0', 10);\n  newFiles = parseInt(nf || '0', 10);\n  skippedFiles = parseInt(sk || '0', 10);\n  lifecycleFiles = parseInt(lf || '0', 10);\n  startMs = parseInt(startStr || '0', 10);\n  if (errLen > 0) {\n    errors = await client.lRange(`alice:dms:scanner:stats:folder:${folderId}:errors`, 0, -1);\n  }\n  await client.quit();\n} catch(e) {\n  try { await client.quit(); } catch(qe) {}\n}\n\nreturn [{ json: {\n  _no_files: false,\n  _time_limit_reached: timeLimitReached,\n  abort_reason: timeLimitReached ? 'time_limit_reached' : null,\n  folder_id: folderId,\n  path: trigger.path,\n  scanned_files: scannedFiles,\n  new_files: newFiles,\n  skipped_files: skippedFiles,\n  lifecycle_files: lifecycleFiles,\n  errors: errors,\n  runtime_seconds: startMs > 0 ? Math.round((Date.now() - startMs) / 1000) : 0,\n  completed_at: new Date().toISOString()\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1001,7 +1048,7 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-path-worker\n\nSub-workflow, invoked exclusively by alice-dms-scanner's Dispatcher via\nExecute Workflow (fire-and-forget, waitForSubWorkflow=false) — one call per\nsuccessfully locked watched folder (PROJ-72). No schedule trigger of its own.\n\nReceives {id, path, suggested_type, lock_owner} from the Dispatcher.\nRecursively scans exactly that one folder, then runs the full existing\nper-file pipeline (hash, lifecycle check, 5s stability check, OCR check,\nMQTT routing by type) — same logic as the pre-PROJ-72 alice-dms-scanner,\nnow scoped to a single folder so independent folders process in true\nparallel executions instead of one shared file loop.\n\n### Redis Lock (PROJ-72)\n- `alice:dms:scanner:lock:folder:<folder_id>` — renewed once per file (ownership-checked);\n  if renewal ever fails (lost ownership or Redis error — fail-closed), the worker\n  self-aborts immediately (throws) rather than risk double-processing a file\n  another worker now owns.\n- Released exactly once at the end of the run (no-files branch or after the\n  file loop completes), also ownership-checked.\n\n### Per-Folder Stats Redis Keys (PROJ-72)\n- `alice:dms:scanner:stats:folder:<folder_id>:{scanned_files,new_files,skipped_files,\n  lifecycle_files,errors,run_start}` — reset at the start of EACH invocation (not shared\n  across concurrently running workers for different folders).\nPublished to alice/dms/scanner/path_stats on completion.\n\n### Redis Key Pattern (unchanged from PROJ-21)\n- `alice:dms:processed`, `alice:dms:queued_files`, `alice:dms:path_to_hash`,\n  `alice:dms:hash_to_paths:<hash>` — same dedup/lifecycle mechanism as before,\n  untouched by PROJ-72.",
+        "content": "## alice-dms-path-worker\n\nSub-workflow, invoked exclusively by alice-dms-scanner's Dispatcher via\nExecute Workflow (fire-and-forget, waitForSubWorkflow=false) — one call per\nsuccessfully locked watched folder (PROJ-72). No schedule trigger of its own.\n\nReceives {id, path, suggested_type, lock_owner} from the Dispatcher.\nRecursively scans exactly that one folder, then runs the full existing\nper-file pipeline (hash, lifecycle check, 5s stability check, OCR check,\nMQTT routing by type) — same logic as the pre-PROJ-72 alice-dms-scanner,\nnow scoped to a single folder so independent folders process in true\nparallel executions instead of one shared file loop.\n\n### Redis Lock (PROJ-72)\n- `alice:dms:scanner:lock:folder:<folder_id>` — renewed once per file (ownership-checked);\n  if renewal ever fails (lost ownership or Redis error — fail-closed), the worker\n  self-aborts immediately (throws) rather than risk double-processing a file\n  another worker now owns.\n- Released exactly once at the end of the run (no-files branch or after the\n  file loop completes), also ownership-checked.\n\n### Run Time Limit (PROJ-94)\n- Per folder run, checked once per file alongside the lock renewal: if more than\n  2h (7200s) elapsed since `alice:dms:scanner:stats:folder:<folder_id>:run_start`,\n  `IF: Time Limit Reached` routes to `Code: Abort on Time Limit`, which logs the\n  progress so far and hands over to the normal summary + lock release path\n  (clean abort, lock freed, no further files this run).\n- Fail-open: if Redis is unreachable during the time check, the run continues;\n  lock-loss detection stays the primary safeguard against hung runs.\n- Unscanned files are picked up by the next hourly dispatcher run - no data loss.\n\n### Per-Folder Stats Redis Keys (PROJ-72)\n- `alice:dms:scanner:stats:folder:<folder_id>:{scanned_files,new_files,skipped_files,\n  lifecycle_files,errors,run_start}` — reset at the start of EACH invocation (not shared\n  across concurrently running workers for different folders).\nPublished to alice/dms/scanner/path_stats on completion.\n\n### Redis Key Pattern (unchanged from PROJ-21)\n- `alice:dms:processed`, `alice:dms:queued_files`, `alice:dms:path_to_hash`,\n  `alice:dms:hash_to_paths:<hash>` — same dedup/lifecycle mechanism as before,\n  untouched by PROJ-72.",
         "height": 460,
         "width": 420
       },
@@ -1112,7 +1159,7 @@
       "main": [
         [
           {
-            "node": "Code: Hash + Size",
+            "node": "IF: Time Limit Reached",
             "type": "main",
             "index": 0
           }
@@ -1465,6 +1512,35 @@
         [
           {
             "node": "End: Path Worker Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [
+          {
+            "node": "Code: Abort on Time Limit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Hash + Size",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Abort on Time Limit": {
+      "main": [
+        [
+          {
+            "node": "Code: Path Worker Summary",
             "type": "main",
             "index": 0
           }

@@ -1,6 +1,6 @@
 # PROJ-94: DMS Path-Worker Zeitlimit
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-08-24
 **Last Updated:** 2026-08-24
 
@@ -80,6 +80,34 @@ Kein neues Datenbankschema, kein neuer Redis-Key. Der bereits existierende Wert 
 ### Dependencies (Pakete)
 
 Keine neuen Pakete — `redis` ist in n8n Code-Nodes bereits erlaubt und wird im Path-Worker bereits für die Lock-Verwaltung genutzt.
+
+### Implementation Notes (Backend)
+
+**Umgesetzt in:** `workflows/alice-dms-path-worker.json` (einziger geänderter Workflow, keine weiteren Dateien).
+
+**Geänderte Nodes:**
+
+- **`Code: Renew Path Lock`** (erweitert): Liest nach der bestehenden Lock-Erneuerung — auf derselben, bereits offenen Redis-Verbindung — `alice:dms:scanner:stats:folder:<folder_id>:run_start`, berechnet `elapsedSeconds` und setzt `_time_limit_reached = elapsedSeconds >= RUN_TIME_LIMIT_SECONDS` (7200). Der Zeit-Check liegt in einem eigenen inneren `try/catch`: jeder Fehler beim Lesen (und ein fehlender/0-Wert von `run_start`) lässt `_time_limit_reached = false` und loggt fail-open. Die bestehende Lock-Logik (`_lock_still_held`, fail-closed) ist unverändert. Neue Ausgabefelder: `_time_limit_reached`, `_elapsed_seconds`.
+- **`IF: Time Limit Reached`** (neu, `n8n-nodes-base.if`, id `proj94-if-time-limit-reached-v1`): sitzt zwischen dem True-Zweig von `IF: Lock Still Held` und `Code: Hash + Size`. True → `Code: Abort on Time Limit`, False → `Code: Hash + Size` (bisheriger Pfad, unverändert).
+- **`Code: Abort on Time Limit`** (neu, `n8n-nodes-base.code`, id `proj94-code-abort-on-time-limit-v1`): liest die bisherigen Fortschritts-Counter (`scanned_files`, `new_files`, `skipped_files`, `lifecycle_files`), loggt sie per winston als ein JSON-Event `alice-dms-path-worker-time-limit-abort` mit `reason: 'time_limit_reached'` und `elapsed_seconds`, und gibt `{_time_limit_reached: true, _elapsed_seconds}` aus. Verlässt die Schleife (keine Rückkante zu `Loop: Files`) und führt direkt zu `Code: Path Worker Summary`.
+- **`Code: Path Worker Summary`** (erweitert): übernimmt `_time_limit_reached` aus dem Input und ergänzt die Ausgabe um `_time_limit_reached` (bool) und `abort_reason` (`'time_limit_reached'` oder `null`). Alle bisherigen Felder bleiben unverändert; im Normalfall ist `abort_reason: null`.
+- **`Sticky: Overview`** (erweitert): neuer Abschnitt "Run Time Limit (PROJ-94)".
+
+**Abweichungen vom Tech Design (explizit):**
+
+1. **Kein separater `Code: Time Check`-Node.** Das Tech Design nennt `alice-dms-processor`s `Code: Time Check` als Muster; dort ist der Zeit-Check aber ohnehin mit der Lock-Erneuerung in *einem* Node kombiniert. Da der Path-Worker in `Code: Renew Path Lock` pro Datei bereits eine Redis-Verbindung öffnet, wurde der Zeit-Check dort eingehängt statt in einem zusätzlichen Node mit zweiter Verbindung — spart pro Datei einen Node und einen Redis-Connect, ohne die Semantik zu ändern. Die Routing-Entscheidung liegt weiterhin in einem eigenen IF-Node (`IF: Time Limit Reached`), analog zum Processor.
+2. **Der Abbruch-Node gibt den Lock nicht selbst frei.** Er leitet stattdessen auf `Code: Path Worker Summary` → `Code: Release Path Lock` (bestehender, ownership-geprüfter Release-Pfad). Damit sind Lock-Freigabe, Statistik-Ermittlung und `MQTT: Publish Path Stats` bei Zeitlimit-Abbruch identisch zum regulären Lauf-Ende — AC "Lock sauber freigegeben" ist erfüllt, ohne die Release-Lua-Logik zu duplizieren. Der Processor nutzt hierfür einen separaten `Code: Final Log (Time)`-Node mit eigenem Release; das wurde bewusst *nicht* kopiert, weil der Path-Worker bereits einen gemeinsamen Abschlusspfad hat.
+3. **Nicht analog zu `Code: Self-Abort on Lock Loss` per `throw` abgebrochen.** Der Lock-Loss-Node wirft absichtlich eine Exception und gibt den Lock *nicht* frei (die Ownership liegt bereits bei einem anderen Worker). Beim Zeitlimit ist der Lock noch in eigenem Besitz und muss freigegeben werden — deshalb ein sauberer Datenpfad statt `throw`. Die Execution endet damit als "success" (nicht als Fehler), was für einen geplanten Abbruch korrekt ist.
+4. **Zusätzliches Feld `_elapsed_seconds`** im Loop-Item (im Tech Design nicht erwähnt) — nur damit der Abbruch-Log die tatsächliche Laufzeit ausweisen kann.
+
+**Verifikation (strukturell + Verhaltenssimulation, kein Deploy):**
+
+- JSON valide; Round-Trip-Formatierung identisch zum Original (Diff enthält ausschließlich die o.g. Änderungen).
+- Alle `connections`-Ziele und alle `$('Node')`-Referenzen lösen auf; keine doppelten Node-Namen/-IDs; keine Canvas-Positions-Überlappungen; MQTT-Credentials unverändert vorhanden.
+- Alle Code-Nodes bestehen `node --check`; kein `console.log` (winston überall, gemäß CLAUDE.md).
+- 18 Verhaltenschecks gegen die geänderten Code-Nodes mit gefaktem Redis/winston: unter Limit → weiter (Item-Passthrough unverändert), exakt 7200s → Abbruch (`>=`), fehlender `run_start` → fail-open, Redis-`GET`-Fehler → fail-open bei erhaltenem Lock-Urteil, kompletter Redis-Ausfall → Lock-Loss-Pfad greift (kein Zeit-Abbruch), Abbruch-Log enthält den korrekten Fortschritt, Abbruch überlebt Redis-Ausfall, Summary setzt `abort_reason` nur im Abbruchfall.
+
+**Nicht verifizierbar ohne Deploy/n8n-Instanz:** Validierung via n8n-MCP-Tools (als Subagent nicht verfügbar), echtes Laufzeitverhalten in n8n (Item-Pairing im `splitInBatches`-Loop, tatsächliche Redis-Werte) sowie ein realer >2h-Lauf. Empfehlung für `/qa`: Zeitlimit temporär niedrig setzen oder `run_start` manuell in die Vergangenheit schreiben, um den Abbruchpfad live zu prüfen.
 
 ## QA Test Results
 _To be added by /qa_
