@@ -23,12 +23,82 @@
     },
     {
       "parameters": {
-        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:mail:attachment_run:start_time', Date.now().toString());\n  await client.del('alice:mail:attachment_run:stats');\n  await client.hSet('alice:mail:attachment_run:stats', { mails_processed: '0', imported: '0', routed_by_extension: '0', skipped_image_junk: '0', skipped_unsupported: '0', skipped_too_large: '0', failed: '0', batches_run: '0' });\n} finally {\n  await client.quit();\n}\n// MAX_RUNTIME_SECONDS 14400 = 4h: a run starting at 02:00 aborts by 06:00 at the\n// latest, i.e. before the chat core time (07:00) reclaims the GPU.\nreturn [{ json: { _start_info: 'Mail attachment processor started', MAX_RUNTIME_SECONDS: 14400 } }];\n"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Acquire Processor Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n// BUG-17: same lock key as alice-dms-processor and the DMS/mail backfills. This lock\n// serializes GPU classification ACROSS workflows - it is not about self-overlap. This\n// workflow shares the identical 0 2 * * * trigger with alice-dms-processor (~2h runtime),\n// so without the lock both would issue Ollama calls concurrently - exactly the GPU\n// contention iteration 4 exists to eliminate.\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 1800000;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false, lockError = false;\ntry {\n  await client.connect();\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  logger.info('[MailAttachmentProcessor] Lock acquire error: ' + e.message);\n  acquired = false; lockError = true;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { _lock_acquired: acquired, _lock_error: lockError, lock_owner: acquired ? ownerToken : null } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         -900,
+        0
+      ],
+      "id": "ap18-lock",
+      "name": "Code: Acquire Processor Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-processor-lock",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -680,
+        0
+      ],
+      "id": "ap19-if-lock",
+      "name": "IF: Processor Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Log Already Running\" } });\n// Graceful skip: another GPU workflow (alice-dms-processor or a backfill) holds the\n// lock. The Redis queue is untouched, so the next nightly run picks everything up.\nconst log = { event: 'alice-mail-attachment-processor-skipped', reason: 'lock_busy', timestamp: new Date().toISOString() };\nlogger.info(JSON.stringify(log));\nreturn [{ json: log }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        -320
+      ],
+      "id": "ap20-busy",
+      "name": "Code: Log Already Running"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -320
+      ],
+      "id": "ap21-end-busy",
+      "name": "End: Already Running"
+    },
+    {
+      "parameters": {
+        "jsCode": "const redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.set('alice:mail:attachment_run:start_time', Date.now().toString());\n  await client.del('alice:mail:attachment_run:stats');\n  await client.hSet('alice:mail:attachment_run:stats', { mails_processed: '0', imported: '0', routed_by_extension: '0', skipped_image_junk: '0', skipped_unsupported: '0', skipped_too_large: '0', failed: '0', batches_run: '0' });\n} finally {\n  await client.quit();\n}\n// MAX_RUNTIME_SECONDS 14400 = 4h: a run starting at 02:00 aborts by 06:00 at the\n// latest, i.e. before the chat core time (07:00) reclaims the GPU.\nreturn [{ json: { _start_info: 'Mail attachment processor started', MAX_RUNTIME_SECONDS: 14400 } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
         0
       ],
       "id": "ap2-init",
@@ -41,7 +111,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -680,
+        -240,
         0
       ],
       "id": "ap3-fetch",
@@ -74,18 +144,31 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -460,
+        -20,
         0
       ],
       "id": "ap4-if-empty",
       "name": "IF: Queue Empty"
     },
     {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Empty Summary\" } });\nconst redis = require('redis');\n// BUG-17: the empty-queue path is also a terminal path and must release the shared\n// GPU lock - otherwise a night with no queued mails would hold it until the TTL\n// expires and needlessly block alice-dms-processor.\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  await client.del('alice:mail:attachment_run:start_time');\n  await client.del('alice:mail:attachment_run:stats');\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  try { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\n} finally {\n  await client.quit();\n}\nconst log = { event: 'alice-mail-attachment-processor-complete', reason: 'empty_queue', mails_processed: 0, imported: 0, failed: 0, remaining_queue: 0, timestamp: new Date().toISOString() };\nlogger.info(JSON.stringify(log));\nreturn [{ json: log }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -140
+      ],
+      "id": "ap22-empty",
+      "name": "Code: Empty Summary"
+    },
+    {
       "parameters": {},
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        -240,
+        420,
         -140
       ],
       "id": "ap5-end-empty",
@@ -108,7 +191,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Time Check\" } });\nconst redis = require('redis');\nconst MAX_RUNTIME_SECONDS = 14400;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:attachment_run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= MAX_RUNTIME_SECONDS;\n    logger.info(`Mail attachment processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached } }];\n"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Time Check\" } });\nconst redis = require('redis');\nconst MAX_RUNTIME_SECONDS = 14400;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nlet timeLimitReached = false;\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:attachment_run:start_time');\n  if (startTimeStr) {\n    const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000;\n    timeLimitReached = elapsed >= MAX_RUNTIME_SECONDS;\n    logger.info(`Mail attachment processor: elapsed=${Math.floor(elapsed)}s, timeLimitReached=${timeLimitReached}`);\n  }\n} finally {\n  await client.quit();\n}\n\n// BUG-17: renew the shared GPU lock per item. The TTL (30 min) is deliberately much\n// shorter than the 4 h runtime budget so a crashed run cannot deadlock the lock for\n// the other DMS workflows - it simply expires. Losing ownership aborts this run.\nconst owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\nconst RENEW_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end data.last_heartbeat = ARGV[2] redis.call('SET', KEYS[1], cjson.encode(data), 'PX', ARGV[3]) return 1`;\nlet lockLost = false;\nconst renewClient = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await renewClient.connect();\n  const res = await renewClient.eval(RENEW_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner, new Date().toISOString(), '1800000'] });\n  lockLost = (res !== 1);\n  if (lockLost) logger.info('[MailAttachmentProcessor] Lock ownership lost - aborting run');\n} catch(e) {\n  logger.info('[MailAttachmentProcessor] Renewal error: ' + e.message);\n  lockLost = true;\n} finally {\n  await renewClient.quit().catch(() => {});\n}\n\nconst item = $input.first().json;\nreturn [{ json: { ...item, _time_limit_reached: timeLimitReached, _lock_lost: lockLost } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -132,7 +215,7 @@
           "conditions": [
             {
               "id": "check-time-limit",
-              "leftValue": "={{ $json._time_limit_reached }}",
+              "leftValue": "={{ $json._time_limit_reached || $json._lock_lost }}",
               "rightValue": true,
               "operator": {
                 "type": "boolean",
@@ -154,7 +237,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Final Log (Time)\" } });\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:attachment_run:start_time');\n  const remainingQueue = await client.lLen('alice:mail:attachment_queue');\n  const stats = await client.hGetAll('alice:mail:attachment_run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:mail:attachment_run:start_time');\n  await client.del('alice:mail:attachment_run:stats');\n  const log = {\n    event: 'alice-mail-attachment-processor-complete',\n    reason: 'time_limit_reached',\n    mails_processed: parseInt(stats.mails_processed || '0'),\n    imported: parseInt(stats.imported || '0'),\n    routed_by_extension: parseInt(stats.routed_by_extension || '0'),\n    skipped_image_junk: parseInt(stats.skipped_image_junk || '0'),\n    skipped_unsupported: parseInt(stats.skipped_unsupported || '0'),\n    skipped_too_large: parseInt(stats.skipped_too_large || '0'),\n    failed: parseInt(stats.failed || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  logger.info(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}\n"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Final Log (Time)\" } });\nconst redis = require('redis');\nconst item = $input.first().json || {};\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:attachment_run:start_time');\n  const remainingQueue = await client.lLen('alice:mail:attachment_queue');\n  const stats = await client.hGetAll('alice:mail:attachment_run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:mail:attachment_run:start_time');\n  await client.del('alice:mail:attachment_run:stats');\n\n  // BUG-17: release the shared GPU lock, but only if we still own it (owner check in\n  // Lua) - a lock already taken over by another workflow must never be deleted here.\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  try { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\n\n  const log = {\n    event: 'alice-mail-attachment-processor-complete',\n    reason: (item._lock_lost ? 'lock_lost' : 'time_limit_reached'),\n    mails_processed: parseInt(stats.mails_processed || '0'),\n    imported: parseInt(stats.imported || '0'),\n    routed_by_extension: parseInt(stats.routed_by_extension || '0'),\n    skipped_image_junk: parseInt(stats.skipped_image_junk || '0'),\n    skipped_unsupported: parseInt(stats.skipped_unsupported || '0'),\n    skipped_too_large: parseInt(stats.skipped_too_large || '0'),\n    failed: parseInt(stats.failed || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  logger.info(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -211,7 +294,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Drop Unparseable Item\" } });\nconst redis = require('redis');\nconst item = $input.first().json;\nlogger.warn(`[PROJ-53] Dropping unparseable queue entry: ${String(item._raw_json || '').slice(0, 200)}`);\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item._raw_json) {\n    await client.lRem('alice:mail:attachment_queue', 0, item._raw_json);\n  }\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'failed', 1);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _dropped: true, _imported_any: false } }];\n"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Drop Unparseable Item\" } });\nconst redis = require('redis');\nconst item = $input.first().json;\nlogger.warn(`[PROJ-53] Dropping unparseable queue entry: ${String(item._raw_json || '').slice(0, 200)}`);\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item._raw_json) {\n    await client.lRem('alice:mail:attachment_queue', 0, item._raw_json);\n  }\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'failed', 1);\n} finally {\n  await client.quit();\n}\nreturn [{ json: { _dropped: true } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -225,7 +308,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Process Queue Item\" } });\nconst axios = require('axios');\nconst redis = require('redis');\nconst fs = require('fs');\nconst path = require('path');\n\n// PROJ-53 iteration 4: this is the attachment pipeline that used to run synchronously\n// in alice-mail-sync's \"Code: Import Attachments\". The logic is unchanged (prefilter,\n// extension routing, PDF text fetch, LLM classification, NAS write, collision suffix);\n// only the data source changed: mail + mailbox context now come from a Redis queue\n// entry instead of from storedEmails / the \"Prepare Mailbox Data\" node in memory.\nconst item = $input.first().json;\nconst mail = item; // queue entry carries subject/sender/date/body_preview/uid/attachments\nconst ctx = item.mailbox || {};\n\nconst QUEUE_KEY = 'alice:mail:attachment_queue';\n\n// Base list mirrors alice-dms-path-worker. The video/audio entries below are a\n// PROJ-53-only extension: they are NOT part of the shared DMS allowlist, because\n// the DMS pipeline has no schema for them - here they are routed by extension\n// into plain filesystem folders (Image/, Video/, Audio/) without any LLM call.\nconst SUPPORTED_EXTENSIONS = new Set([\n  '.pdf','.txt','.md','.docx','.doc','.xlsx','.xls','.odt','.ods',\n  '.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff',\n  // PROJ-53 iteration 2 additions (video)\n  '.mp4','.mov','.avi','.mkv','.webm',\n  // PROJ-53 iteration 2 additions (audio)\n  '.mp3','.wav','.m4a','.ogg','.flac'\n]);\nconst IMAGE_EXTENSIONS = new Set(['.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff']);\nconst VIDEO_EXTENSIONS = new Set(['.mp4','.mov','.avi','.mkv','.webm']);\nconst AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.m4a','.ogg','.flac']);\nconst PLAINTEXT_EXTENSIONS = new Set(['.txt','.md']);\nconst PDF_EXTENSIONS = new Set(['.pdf']);\nconst IMAGE_JUNK_MAX_BYTES = 20480;\n// Upper bound checked from the /fetch metadata BEFORE calling /attachment: the\n// attachment crosses the wire base64-encoded and is held in memory twice (base64\n// string + Buffer) inside the shared n8n container, so an oversized attachment\n// could OOM every other workflow, not just this import. The DMS pipeline itself\n// is file-based and has no such ceiling (alice-dms-path-worker only demotes\n// >100 MB to low priority), hence a dedicated, tighter limit for this path.\nconst ATTACHMENT_MAX_BYTES = 52428800; // 50 MB\n// VALID_SCHEMAS stays exactly the five DMS schemas - it also validates the LLM's\n// answer, so Video/Audio must NOT leak in here (the LLM must never return them).\nconst VALID_SCHEMAS = ['Invoice','BankStatement','Document','Contract','SecuritySettlement'];\n// Folders this workflow may write into = the five schemas plus the three\n// extension-routed media folders (Image added in PROJ-53 iteration 3). Used only\n// to gate the resolved target folder.\nconst VALID_TARGET_FOLDERS = new Set([...VALID_SCHEMAS, 'Image', 'Video', 'Audio']);\nconst NAS_AI_ROOT = '/mnt/nas/ai';\nconst MAIL_READER_URL = 'http://alice-mail-reader:8007';\nconst OLLAMA_URL = 'http://ollama-3090:11434';\nlet ollamaModel = 'qwen3:14b'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\n\nfunction prefilterAttachment(att) {\n  const ext = path.extname(att.name || '').toLowerCase();\n  if (!SUPPORTED_EXTENSIONS.has(ext)) return { keep: false, reason: 'unsupported_extension', ext };\n  const size = Number(att.size_bytes || 0);\n  if (size > ATTACHMENT_MAX_BYTES) return { keep: false, reason: 'too_large', ext, size };\n  const isImage = IMAGE_EXTENSIONS.has(ext) || String(att.mime_type || '').startsWith('image/');\n  if (isImage && size < IMAGE_JUNK_MAX_BYTES) return { keep: false, reason: 'image_junk', ext };\n  return { keep: true, reason: null, ext };\n}\n\n// Extension-based routing (PROJ-53 iteration 2): image/video/audio never reach the\n// LLM - their content cannot be classified into a DMS schema anyway. Returns the\n// target folder name, or null when the attachment must go through classification.\nfunction routeByExtension(ext, mimeType) {\n  const mime = String(mimeType || '');\n  if (IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/')) return 'Image';\n  if (VIDEO_EXTENSIONS.has(ext) || mime.startsWith('video/')) return 'Video';\n  if (AUDIO_EXTENSIONS.has(ext) || mime.startsWith('audio/')) return 'Audio';\n  return null;\n}\n\n// PDF full text via alice-mail-reader (PROJ-53 iteration 2). n8n Code nodes cannot\n// require pdf-parse, so extraction lives in the Python service. Any failure returns\n// '' and the caller falls back to filename + mail context, as for Office formats.\nasync function fetchPdfText(ctxData, uid, attachmentIndex) {\n  try {\n    const r = await axios.post(`${MAIL_READER_URL}/attachment-text`, {\n      host: ctxData.host, port: ctxData.port, ssl: ctxData.ssl,\n      username: ctxData.username, password_enc: ctxData.passwordEnc,\n      folder: 'INBOX', uid: String(uid), attachment_index: attachmentIndex\n    }, { timeout: 120000 });\n    return String(r.data?.text || '');\n  } catch(e) {\n    logger.warn(`[PROJ-53] PDF text extraction failed (uid=${uid} idx=${attachmentIndex}): ${e.message}`);\n    return '';\n  }\n}\n\nfunction shortenSender(sender) {\n  const raw = String(sender || '');\n  const angle = raw.match(/<([^>]+)>/);\n  const addr = angle ? angle[1] : raw;\n  const local = addr.includes('@') ? addr.split('@')[0] : addr;\n  const cleaned = local.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');\n  return (cleaned || 'unknown').slice(0, 40);\n}\n\nfunction mailDateStamp(dateStr) {\n  const d = new Date(dateStr);\n  if (isNaN(d.getTime())) return 'unknown-date';\n  return d.toISOString().slice(0, 10);\n}\n\nfunction sanitizeFilename(name) {\n  return String(name || 'attachment').replace(/[/\\\\]/g, '_').replace(/[\\x00-\\x1f]/g, '').replace(/^\\.+/, '').trim() || 'attachment';\n}\n\nfunction buildBaseFilename(mailDate, sender, originalName) {\n  return `${mailDateStamp(mailDate)}_${shortenSender(sender)}_${sanitizeFilename(originalName)}`;\n}\n\nfunction resolveCollision(targetDir, baseName) {\n  const ext = path.extname(baseName);\n  const stem = ext ? baseName.slice(0, -ext.length) : baseName;\n  if (!fs.existsSync(path.join(targetDir, baseName))) return baseName;\n  for (let i = 1; i < 1000; i++) {\n    const candidate = `${stem}_${i}${ext}`;\n    if (!fs.existsSync(path.join(targetDir, candidate))) return candidate;\n  }\n  return `${stem}_${Date.now()}${ext}`;\n}\n\nfunction buildClassificationPrompt(m, attName, textPreview) {\n  return 'You are a document classifier for attachments of an email.\\n' +\n    'Classify the attachment into EXACTLY ONE of the following types:\\n' +\n    '- Invoice: invoice number, gross/net amount, VAT rate, due date, line items\\n' +\n    '- BankStatement: IBAN, opening/closing balance, list of bookings, statement period\\n' +\n    '- SecuritySettlement: ISIN, depot number, security name, buy/sell/dividend, quantity and price\\n' +\n    '- Contract: contract parties, sign date, start/end date, notice period, recurring cost\\n' +\n    '- Document: generic correspondence, forms, certificates or notices that match none of the above\\n' +\n    'If you cannot decide, use \"unclear\".\\n\\n' +\n    'Email subject: ' + (m.subject || '') + '\\n' +\n    'Email sender: ' + (m.sender || '') + '\\n' +\n    'Email body preview: ' + String(m.body_preview || '').slice(0, 1000) + '\\n' +\n    'Attachment filename: ' + attName + '\\n' +\n    'Attachment text preview: ' + (textPreview ? String(textPreview).slice(0, 4000) : '(no extractable text - classify from filename and email context)') + '\\n\\n' +\n    'Respond ONLY with a JSON object: {\"document_type\": \"<Type|unclear>\", \"confidence\": <0-1>}';\n}\n\nfunction parseClassification(responseStr) {\n  const parsed = JSON.parse(responseStr);\n  const t = parsed.document_type;\n  let confidence = parseFloat(parsed.confidence);\n  if (isNaN(confidence)) confidence = 0;\n  confidence = Math.max(0, Math.min(1, confidence));\n  if (t === 'unclear') return { document_type: 'unclear', confidence };\n  if (!VALID_SCHEMAS.includes(t)) return null;\n  return { document_type: t, confidence };\n}\n\nasync function callOllama(prompt, temperature) {\n  const resp = await axios.post(`${OLLAMA_URL}/api/generate`, {\n    model: ollamaModel, prompt, stream: false, format: 'json',\n    options: { temperature, num_predict: 300 }\n  }, { timeout: 120000 });\n  return resp.data.response || '';\n}\n\n// Two-attempt classification, mirroring alice-dms-classify-document (PROJ-78).\n// Returns null when the LLM is unreachable -> attachment is skipped (no blind import).\nasync function classifyAttachment(m, attName, textPreview) {\n  const prompt = buildClassificationPrompt(m, attName, textPreview);\n  let result = null;\n  let ollamaReachable = false;\n  try {\n    const raw = await callOllama(prompt, 0);\n    ollamaReachable = true;\n    result = parseClassification(raw);\n  } catch(e) {\n    if (e instanceof SyntaxError) ollamaReachable = true;\n  }\n  if (!result) {\n    try {\n      const raw2 = await callOllama(prompt, 0.3);\n      ollamaReachable = true;\n      result = parseClassification(raw2);\n    } catch(e) {\n      if (e instanceof SyntaxError) ollamaReachable = true;\n    }\n  }\n  if (!ollamaReachable) return null;\n  // Uncertain / unparseable but LLM answered -> Document fallback (PROJ-78 behaviour)\n  if (!result || result.document_type === 'unclear') return { document_type: 'Document', confidence: result ? result.confidence : 0, fallback: true };\n  return { ...result, fallback: false };\n}\n\nlet imported = 0, skippedJunk = 0, skippedUnsupported = 0, skippedTooLarge = 0, failed = 0, routedByExtension = 0;\n\nconst attachments = mail.attachments || [];\n\nfor (let idx = 0; idx < attachments.length; idx++) {\n  const att = attachments[idx];\n  try {\n    const pre = prefilterAttachment(att);\n    if (!pre.keep) {\n      // Image junk is expected/normal - not an error, no error log.\n      if (pre.reason === 'image_junk') {\n        skippedJunk++;\n      } else if (pre.reason === 'too_large') {\n        // Logged: unlike junk/unsupported this is a genuinely relevant document\n        // that we deliberately refuse, so it must be visible to the admin.\n        skippedTooLarge++;\n        logger.warn(`[PROJ-53] Attachment skipped, exceeds ${ATTACHMENT_MAX_BYTES} bytes (uid=${mail.uid} file=${att.name} size=${pre.size})`);\n      } else {\n        skippedUnsupported++;\n      }\n      continue;\n    }\n\n    // Fetch the raw bytes via the alice-mail-reader endpoint (PROJ-53 Baustein 1).\n    let attData = null;\n    try {\n      const r = await axios.post(`${MAIL_READER_URL}/attachment`, {\n        host: ctx.host, port: ctx.port, ssl: ctx.ssl,\n        username: ctx.username, password_enc: ctx.passwordEnc,\n        folder: 'INBOX', uid: String(mail.uid), attachment_index: idx\n      }, { timeout: 120000 });\n      attData = r.data;\n    } catch(e) {\n      logger.warn(`[PROJ-53] Attachment fetch failed (uid=${mail.uid} idx=${idx}): ${e.message}`);\n      failed++;\n      continue;\n    }\n    if (!attData || !attData.content_base64) {\n      logger.warn(`[PROJ-53] Attachment fetch returned no content (uid=${mail.uid} idx=${idx})`);\n      failed++;\n      continue;\n    }\n    const buffer = Buffer.from(attData.content_base64, 'base64');\n\n    // Extension routing first (PROJ-53 iteration 2): image/video/audio bypass the\n    // LLM entirely. Only PDF/DOCX/XLSX/ODT/ODS/TXT/MD get classified.\n    let targetFolder = routeByExtension(pre.ext, att.mime_type);\n    let classification = null;\n\n    if (targetFolder) {\n      routedByExtension++;\n      logger.info(`[PROJ-53] Routed by extension: ${att.name} -> ${targetFolder}/ (no LLM call)`);\n    } else {\n      // Text preview: plaintext types decode directly, PDF via /attachment-text.\n      // Office formats still have no synchronous extractor (see PROJ-91) and are\n      // classified from filename + mail context only.\n      let textPreview = '';\n      if (PLAINTEXT_EXTENSIONS.has(pre.ext)) {\n        try { textPreview = buffer.toString('utf8').slice(0, 4000); } catch(e) { textPreview = ''; }\n      } else if (PDF_EXTENSIONS.has(pre.ext)) {\n        textPreview = await fetchPdfText(ctx, mail.uid, idx);\n      }\n\n      classification = await classifyAttachment(mail, att.name, textPreview);\n      if (!classification) {\n        logger.warn(`[PROJ-53] Classification skipped, Ollama unreachable (uid=${mail.uid} file=${att.name})`);\n        failed++;\n        continue;\n      }\n      targetFolder = classification.document_type;\n    }\n\n    // Defence in depth: the folder segment must never be attacker/LLM controlled.\n    if (!VALID_TARGET_FOLDERS.has(targetFolder)) {\n      logger.warn(`[PROJ-53] Refusing invalid target folder \"${targetFolder}\" (uid=${mail.uid} file=${att.name})`);\n      failed++;\n      continue;\n    }\n\n    const targetDir = path.join(NAS_AI_ROOT, targetFolder);\n    try {\n      fs.mkdirSync(targetDir, { recursive: true });\n    } catch(e) {\n      logger.warn(`[PROJ-53] Target folder not creatable (${targetDir}): ${e.message}`);\n      failed++;\n      continue;\n    }\n\n    const baseName = buildBaseFilename(mail.date, mail.sender, att.name);\n    const finalName = resolveCollision(targetDir, baseName);\n    const finalPath = path.join(targetDir, finalName);\n    try {\n      fs.writeFileSync(finalPath, buffer);\n    } catch(e) {\n      logger.warn(`[PROJ-53] Write failed (${finalPath}): ${e.message}`);\n      failed++;\n      continue;\n    }\n\n    imported++;\n    logger.info(`[PROJ-53] Imported attachment: ${finalPath} (target=${targetFolder}, ` +\n      (classification\n        ? `confidence=${classification.confidence}, fallback=${classification.fallback})`\n        : 'routed=extension)'));\n  } catch(e) {\n    logger.warn(`[PROJ-53] Unhandled attachment error (uid=${mail.uid} idx=${idx}): ${e.message}`);\n    failed++;\n  }\n}\n\nconst attachmentStats = { imported, routed_by_extension: routedByExtension, skipped_image_junk: skippedJunk, skipped_unsupported: skippedUnsupported, skipped_too_large: skippedTooLarge, failed };\nlogger.info(`[PROJ-53] Attachment import for mailbox ${ctx.mailboxId} uid=${mail.uid}: ${JSON.stringify(attachmentStats)}`);\n\n// Remove the entry from the queue now that it has been handled, and update run stats.\n// A failing entry is removed too (no automatic retry) - consistent with the error\n// behaviour established in iterations 1-3. Only a time-limit abort leaves entries\n// in the queue, because that path never reaches this node.\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item._raw_json) {\n    await client.lRem(QUEUE_KEY, 0, item._raw_json);\n  }\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'mails_processed', 1);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'imported', imported);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'routed_by_extension', routedByExtension);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'skipped_image_junk', skippedJunk);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'skipped_unsupported', skippedUnsupported);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'skipped_too_large', skippedTooLarge);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'failed', failed);\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { uid: mail.uid, weaviate_uuid: mail.weaviate_uuid || null, subject: mail.subject || '', attachmentStats, _imported_any: imported > 0 } }];\n"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Process Queue Item\" } });\nconst axios = require('axios');\nconst redis = require('redis');\nconst fs = require('fs');\nconst path = require('path');\n\n// PROJ-53 iteration 4: this is the attachment pipeline that used to run synchronously\n// in alice-mail-sync's \"Code: Import Attachments\". The logic is unchanged (prefilter,\n// extension routing, PDF text fetch, LLM classification, NAS write, collision suffix);\n// only the data source changed: mail + mailbox context now come from a Redis queue\n// entry instead of from storedEmails / the \"Prepare Mailbox Data\" node in memory.\nconst item = $input.first().json;\nconst mail = item; // queue entry carries subject/sender/date/body_preview/uid/attachments\nconst ctx = item.mailbox || {};\n\nconst QUEUE_KEY = 'alice:mail:attachment_queue';\n\n// Base list mirrors alice-dms-path-worker. The video/audio entries below are a\n// PROJ-53-only extension: they are NOT part of the shared DMS allowlist, because\n// the DMS pipeline has no schema for them - here they are routed by extension\n// into plain filesystem folders (Image/, Video/, Audio/) without any LLM call.\nconst SUPPORTED_EXTENSIONS = new Set([\n  '.pdf','.txt','.md','.docx','.doc','.xlsx','.xls','.odt','.ods',\n  '.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff',\n  // PROJ-53 iteration 2 additions (video)\n  '.mp4','.mov','.avi','.mkv','.webm',\n  // PROJ-53 iteration 2 additions (audio)\n  '.mp3','.wav','.m4a','.ogg','.flac'\n]);\nconst IMAGE_EXTENSIONS = new Set(['.jpg','.jpeg','.png','.webp','.heic','.tif','.tiff']);\nconst VIDEO_EXTENSIONS = new Set(['.mp4','.mov','.avi','.mkv','.webm']);\nconst AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.m4a','.ogg','.flac']);\nconst PLAINTEXT_EXTENSIONS = new Set(['.txt','.md']);\nconst PDF_EXTENSIONS = new Set(['.pdf']);\nconst IMAGE_JUNK_MAX_BYTES = 20480;\n// Upper bound checked from the /fetch metadata BEFORE calling /attachment: the\n// attachment crosses the wire base64-encoded and is held in memory twice (base64\n// string + Buffer) inside the shared n8n container, so an oversized attachment\n// could OOM every other workflow, not just this import. The DMS pipeline itself\n// is file-based and has no such ceiling (alice-dms-path-worker only demotes\n// >100 MB to low priority), hence a dedicated, tighter limit for this path.\nconst ATTACHMENT_MAX_BYTES = 52428800; // 50 MB\n// VALID_SCHEMAS stays exactly the five DMS schemas - it also validates the LLM's\n// answer, so Video/Audio must NOT leak in here (the LLM must never return them).\nconst VALID_SCHEMAS = ['Invoice','BankStatement','Document','Contract','SecuritySettlement'];\n// Folders this workflow may write into = the five schemas plus the three\n// extension-routed media folders (Image added in PROJ-53 iteration 3). Used only\n// to gate the resolved target folder.\nconst VALID_TARGET_FOLDERS = new Set([...VALID_SCHEMAS, 'Image', 'Video', 'Audio']);\nconst NAS_AI_ROOT = '/mnt/nas/ai';\nconst MAIL_READER_URL = 'http://alice-mail-reader:8007';\nconst OLLAMA_URL = 'http://ollama-3090:11434';\nlet ollamaModel = 'qwen3:14b'; try { ollamaModel = $env.OLLAMA_MODEL_DMS || 'qwen3:14b'; } catch(e) {}\n\nfunction prefilterAttachment(att) {\n  const ext = path.extname(att.name || '').toLowerCase();\n  if (!SUPPORTED_EXTENSIONS.has(ext)) return { keep: false, reason: 'unsupported_extension', ext };\n  const size = Number(att.size_bytes || 0);\n  if (size > ATTACHMENT_MAX_BYTES) return { keep: false, reason: 'too_large', ext, size };\n  const isImage = IMAGE_EXTENSIONS.has(ext) || String(att.mime_type || '').startsWith('image/');\n  if (isImage && size < IMAGE_JUNK_MAX_BYTES) return { keep: false, reason: 'image_junk', ext };\n  return { keep: true, reason: null, ext };\n}\n\n// Extension-based routing (PROJ-53 iteration 2): image/video/audio never reach the\n// LLM - their content cannot be classified into a DMS schema anyway. Returns the\n// target folder name, or null when the attachment must go through classification.\nfunction routeByExtension(ext, mimeType) {\n  const mime = String(mimeType || '');\n  if (IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/')) return 'Image';\n  if (VIDEO_EXTENSIONS.has(ext) || mime.startsWith('video/')) return 'Video';\n  if (AUDIO_EXTENSIONS.has(ext) || mime.startsWith('audio/')) return 'Audio';\n  return null;\n}\n\n// PDF full text via alice-mail-reader (PROJ-53 iteration 2). n8n Code nodes cannot\n// require pdf-parse, so extraction lives in the Python service. Any failure returns\n// '' and the caller falls back to filename + mail context, as for Office formats.\nasync function fetchPdfText(ctxData, uid, attachmentIndex) {\n  try {\n    const r = await axios.post(`${MAIL_READER_URL}/attachment-text`, {\n      host: ctxData.host, port: ctxData.port, ssl: ctxData.ssl,\n      username: ctxData.username, password_enc: ctxData.passwordEnc,\n      folder: 'INBOX', uid: String(uid), attachment_index: attachmentIndex\n    }, { timeout: 120000 });\n    return String(r.data?.text || '');\n  } catch(e) {\n    logger.warn(`[PROJ-53] PDF text extraction failed (uid=${uid} idx=${attachmentIndex}): ${e.message}`);\n    return '';\n  }\n}\n\nfunction shortenSender(sender) {\n  const raw = String(sender || '');\n  const angle = raw.match(/<([^>]+)>/);\n  const addr = angle ? angle[1] : raw;\n  const local = addr.includes('@') ? addr.split('@')[0] : addr;\n  const cleaned = local.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');\n  return (cleaned || 'unknown').slice(0, 40);\n}\n\nfunction mailDateStamp(dateStr) {\n  const d = new Date(dateStr);\n  if (isNaN(d.getTime())) return 'unknown-date';\n  return d.toISOString().slice(0, 10);\n}\n\nfunction sanitizeFilename(name) {\n  return String(name || 'attachment').replace(/[/\\\\]/g, '_').replace(/[\\x00-\\x1f]/g, '').replace(/^\\.+/, '').trim() || 'attachment';\n}\n\nfunction buildBaseFilename(mailDate, sender, originalName) {\n  return `${mailDateStamp(mailDate)}_${shortenSender(sender)}_${sanitizeFilename(originalName)}`;\n}\n\nfunction resolveCollision(targetDir, baseName) {\n  const ext = path.extname(baseName);\n  const stem = ext ? baseName.slice(0, -ext.length) : baseName;\n  if (!fs.existsSync(path.join(targetDir, baseName))) return baseName;\n  for (let i = 1; i < 1000; i++) {\n    const candidate = `${stem}_${i}${ext}`;\n    if (!fs.existsSync(path.join(targetDir, candidate))) return candidate;\n  }\n  return `${stem}_${Date.now()}${ext}`;\n}\n\nfunction buildClassificationPrompt(m, attName, textPreview) {\n  return 'You are a document classifier for attachments of an email.\\n' +\n    'Classify the attachment into EXACTLY ONE of the following types:\\n' +\n    '- Invoice: invoice number, gross/net amount, VAT rate, due date, line items\\n' +\n    '- BankStatement: IBAN, opening/closing balance, list of bookings, statement period\\n' +\n    '- SecuritySettlement: ISIN, depot number, security name, buy/sell/dividend, quantity and price\\n' +\n    '- Contract: contract parties, sign date, start/end date, notice period, recurring cost\\n' +\n    '- Document: generic correspondence, forms, certificates or notices that match none of the above\\n' +\n    'If you cannot decide, use \"unclear\".\\n\\n' +\n    'Email subject: ' + (m.subject || '') + '\\n' +\n    'Email sender: ' + (m.sender || '') + '\\n' +\n    'Email body preview: ' + String(m.body_preview || '').slice(0, 1000) + '\\n' +\n    'Attachment filename: ' + attName + '\\n' +\n    'Attachment text preview: ' + (textPreview ? String(textPreview).slice(0, 4000) : '(no extractable text - classify from filename and email context)') + '\\n\\n' +\n    'Respond ONLY with a JSON object: {\"document_type\": \"<Type|unclear>\", \"confidence\": <0-1>}';\n}\n\nfunction parseClassification(responseStr) {\n  const parsed = JSON.parse(responseStr);\n  const t = parsed.document_type;\n  let confidence = parseFloat(parsed.confidence);\n  if (isNaN(confidence)) confidence = 0;\n  confidence = Math.max(0, Math.min(1, confidence));\n  if (t === 'unclear') return { document_type: 'unclear', confidence };\n  if (!VALID_SCHEMAS.includes(t)) return null;\n  return { document_type: t, confidence };\n}\n\nasync function callOllama(prompt, temperature) {\n  const resp = await axios.post(`${OLLAMA_URL}/api/generate`, {\n    model: ollamaModel, prompt, stream: false, format: 'json',\n    options: { temperature, num_predict: 300 }\n  }, { timeout: 120000 });\n  return resp.data.response || '';\n}\n\n// Two-attempt classification, mirroring alice-dms-classify-document (PROJ-78).\n// Returns null when the LLM is unreachable -> attachment is skipped (no blind import).\nasync function classifyAttachment(m, attName, textPreview) {\n  const prompt = buildClassificationPrompt(m, attName, textPreview);\n  let result = null;\n  let ollamaReachable = false;\n  try {\n    const raw = await callOllama(prompt, 0);\n    ollamaReachable = true;\n    result = parseClassification(raw);\n  } catch(e) {\n    if (e instanceof SyntaxError) ollamaReachable = true;\n  }\n  if (!result) {\n    try {\n      const raw2 = await callOllama(prompt, 0.3);\n      ollamaReachable = true;\n      result = parseClassification(raw2);\n    } catch(e) {\n      if (e instanceof SyntaxError) ollamaReachable = true;\n    }\n  }\n  if (!ollamaReachable) return null;\n  // Uncertain / unparseable but LLM answered -> Document fallback (PROJ-78 behaviour)\n  if (!result || result.document_type === 'unclear') return { document_type: 'Document', confidence: result ? result.confidence : 0, fallback: true };\n  return { ...result, fallback: false };\n}\n\nlet imported = 0, skippedJunk = 0, skippedUnsupported = 0, skippedTooLarge = 0, failed = 0, routedByExtension = 0;\n\nconst attachments = mail.attachments || [];\n\nfor (let idx = 0; idx < attachments.length; idx++) {\n  const att = attachments[idx];\n  try {\n    const pre = prefilterAttachment(att);\n    if (!pre.keep) {\n      // Image junk is expected/normal - not an error, no error log.\n      if (pre.reason === 'image_junk') {\n        skippedJunk++;\n      } else if (pre.reason === 'too_large') {\n        // Logged: unlike junk/unsupported this is a genuinely relevant document\n        // that we deliberately refuse, so it must be visible to the admin.\n        skippedTooLarge++;\n        logger.warn(`[PROJ-53] Attachment skipped, exceeds ${ATTACHMENT_MAX_BYTES} bytes (uid=${mail.uid} file=${att.name} size=${pre.size})`);\n      } else {\n        skippedUnsupported++;\n      }\n      continue;\n    }\n\n    // Fetch the raw bytes via the alice-mail-reader endpoint (PROJ-53 Baustein 1).\n    let attData = null;\n    try {\n      const r = await axios.post(`${MAIL_READER_URL}/attachment`, {\n        host: ctx.host, port: ctx.port, ssl: ctx.ssl,\n        username: ctx.username, password_enc: ctx.passwordEnc,\n        folder: 'INBOX', uid: String(mail.uid), attachment_index: idx\n      }, { timeout: 120000 });\n      attData = r.data;\n    } catch(e) {\n      logger.warn(`[PROJ-53] Attachment fetch failed (uid=${mail.uid} idx=${idx}): ${e.message}`);\n      failed++;\n      continue;\n    }\n    if (!attData || !attData.content_base64) {\n      logger.warn(`[PROJ-53] Attachment fetch returned no content (uid=${mail.uid} idx=${idx})`);\n      failed++;\n      continue;\n    }\n    const buffer = Buffer.from(attData.content_base64, 'base64');\n\n    // Extension routing first (PROJ-53 iteration 2): image/video/audio bypass the\n    // LLM entirely. Only PDF/DOCX/XLSX/ODT/ODS/TXT/MD get classified.\n    let targetFolder = routeByExtension(pre.ext, att.mime_type);\n    let classification = null;\n\n    if (targetFolder) {\n      routedByExtension++;\n      logger.info(`[PROJ-53] Routed by extension: ${att.name} -> ${targetFolder}/ (no LLM call)`);\n    } else {\n      // Text preview: plaintext types decode directly, PDF via /attachment-text.\n      // Office formats still have no synchronous extractor (see PROJ-91) and are\n      // classified from filename + mail context only.\n      let textPreview = '';\n      if (PLAINTEXT_EXTENSIONS.has(pre.ext)) {\n        try { textPreview = buffer.toString('utf8').slice(0, 4000); } catch(e) { textPreview = ''; }\n      } else if (PDF_EXTENSIONS.has(pre.ext)) {\n        textPreview = await fetchPdfText(ctx, mail.uid, idx);\n      }\n\n      classification = await classifyAttachment(mail, att.name, textPreview);\n      if (!classification) {\n        logger.warn(`[PROJ-53] Classification skipped, Ollama unreachable (uid=${mail.uid} file=${att.name})`);\n        failed++;\n        continue;\n      }\n      targetFolder = classification.document_type;\n    }\n\n    // Defence in depth: the folder segment must never be attacker/LLM controlled.\n    if (!VALID_TARGET_FOLDERS.has(targetFolder)) {\n      logger.warn(`[PROJ-53] Refusing invalid target folder \"${targetFolder}\" (uid=${mail.uid} file=${att.name})`);\n      failed++;\n      continue;\n    }\n\n    const targetDir = path.join(NAS_AI_ROOT, targetFolder);\n    try {\n      fs.mkdirSync(targetDir, { recursive: true });\n    } catch(e) {\n      logger.warn(`[PROJ-53] Target folder not creatable (${targetDir}): ${e.message}`);\n      failed++;\n      continue;\n    }\n\n    const baseName = buildBaseFilename(mail.date, mail.sender, att.name);\n    const finalName = resolveCollision(targetDir, baseName);\n    const finalPath = path.join(targetDir, finalName);\n    try {\n      fs.writeFileSync(finalPath, buffer);\n    } catch(e) {\n      logger.warn(`[PROJ-53] Write failed (${finalPath}): ${e.message}`);\n      failed++;\n      continue;\n    }\n\n    imported++;\n    logger.info(`[PROJ-53] Imported attachment: ${finalPath} (target=${targetFolder}, ` +\n      (classification\n        ? `confidence=${classification.confidence}, fallback=${classification.fallback})`\n        : 'routed=extension)'));\n  } catch(e) {\n    logger.warn(`[PROJ-53] Unhandled attachment error (uid=${mail.uid} idx=${idx}): ${e.message}`);\n    failed++;\n  }\n}\n\nconst attachmentStats = { imported, routed_by_extension: routedByExtension, skipped_image_junk: skippedJunk, skipped_unsupported: skippedUnsupported, skipped_too_large: skippedTooLarge, failed };\nlogger.info(`[PROJ-53] Attachment import for mailbox ${ctx.mailboxId} uid=${mail.uid}: ${JSON.stringify(attachmentStats)}`);\n\n// Remove the entry from the queue now that it has been handled, and update run stats.\n// A failing entry is removed too (no automatic retry) - consistent with the error\n// behaviour established in iterations 1-3. Only a time-limit abort leaves entries\n// in the queue, because that path never reaches this node.\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  if (item._raw_json) {\n    await client.lRem(QUEUE_KEY, 0, item._raw_json);\n  }\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'mails_processed', 1);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'imported', imported);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'routed_by_extension', routedByExtension);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'skipped_image_junk', skippedJunk);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'skipped_unsupported', skippedUnsupported);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'skipped_too_large', skippedTooLarge);\n  await client.hIncrBy('alice:mail:attachment_run:stats', 'failed', failed);\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { uid: mail.uid, weaviate_uuid: mail.weaviate_uuid || null, subject: mail.subject || '', attachmentStats } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -239,79 +322,21 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "check-imported-any",
-              "leftValue": "={{ $json._imported_any }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        860,
-        440
-      ],
-      "id": "ap14-if-imported",
-      "name": "IF: Imported Any"
-    },
-    {
-      "parameters": {
-        "topic": "alice/dms/done",
-        "sendInputData": false,
-        "message": "={{ JSON.stringify({ weaviate_uuid: $json.weaviate_uuid, document_type: 'Email', file_type: 'txt', inserted: true, timestamp: new Date().toISOString() }) }}",
-        "options": {
-          "qos": 1
-        }
-      },
-      "type": "n8n-nodes-base.mqtt",
-      "typeVersion": 1,
-      "position": [
-        1080,
-        440
-      ],
-      "id": "ap15-mqtt-done",
-      "name": "MQTT: Publish Attachment Done",
-      "credentials": {
-        "mqtt": {
-          "id": "Kqy6cn7hyDDXrBA0",
-          "name": "mqtt-alice"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Final Log\" } });\nconst redis = require('redis');\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:attachment_run:start_time');\n  const remainingQueue = await client.lLen('alice:mail:attachment_queue');\n  const stats = await client.hGetAll('alice:mail:attachment_run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:mail:attachment_run:start_time');\n  await client.del('alice:mail:attachment_run:stats');\n  const log = {\n    event: 'alice-mail-attachment-processor-complete',\n    reason: 'queue_drained',\n    mails_processed: parseInt(stats.mails_processed || '0'),\n    imported: parseInt(stats.imported || '0'),\n    routed_by_extension: parseInt(stats.routed_by_extension || '0'),\n    skipped_image_junk: parseInt(stats.skipped_image_junk || '0'),\n    skipped_unsupported: parseInt(stats.skipped_unsupported || '0'),\n    skipped_too_large: parseInt(stats.skipped_too_large || '0'),\n    failed: parseInt(stats.failed || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  logger.info(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}\n"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-attachment-processor\", node: \"Code: Final Log\" } });\nconst redis = require('redis');\nconst item = $input.first().json || {};\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const startTimeStr = await client.get('alice:mail:attachment_run:start_time');\n  const remainingQueue = await client.lLen('alice:mail:attachment_queue');\n  const stats = await client.hGetAll('alice:mail:attachment_run:stats');\n  const endTime = Date.now();\n  const startTime = startTimeStr ? parseInt(startTimeStr) : endTime;\n  const runtime_seconds = Math.floor((endTime - startTime) / 1000);\n  await client.del('alice:mail:attachment_run:start_time');\n  await client.del('alice:mail:attachment_run:stats');\n\n  // BUG-17: release the shared GPU lock, but only if we still own it (owner check in\n  // Lua) - a lock already taken over by another workflow must never be deleted here.\n  const owner = $('Code: Acquire Processor Lock').first().json.lock_owner;\n  const RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  try { await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] }); } catch(e) {}\n\n  const log = {\n    event: 'alice-mail-attachment-processor-complete',\n    reason: 'queue_drained',\n    mails_processed: parseInt(stats.mails_processed || '0'),\n    imported: parseInt(stats.imported || '0'),\n    routed_by_extension: parseInt(stats.routed_by_extension || '0'),\n    skipped_image_junk: parseInt(stats.skipped_image_junk || '0'),\n    skipped_unsupported: parseInt(stats.skipped_unsupported || '0'),\n    skipped_too_large: parseInt(stats.skipped_too_large || '0'),\n    failed: parseInt(stats.failed || '0'),\n    batches_run: parseInt(stats.batches_run || '0'),\n    runtime_seconds,\n    remaining_queue: remainingQueue,\n    timestamp: new Date().toISOString()\n  };\n  logger.info(JSON.stringify(log));\n  return [{ json: log }];\n} finally {\n  await client.quit();\n}\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -20,
-        -140
+        200,
+        120
       ],
       "id": "ap16-final",
       "name": "Code: Final Log"
     },
     {
       "parameters": {
-        "content": "## alice-mail-attachment-processor (PROJ-53 Iteration 4)\n\nNightly (02:00) drain of the Redis list `alice:mail:attachment_queue`, which\n`alice-mail-sync` fills minutely via `Code: Enqueue Attachment Jobs`.\n\nThe attachment pipeline (prefilter -> extension routing -> PDF text ->\nLLM classification -> `/attachment` fetch -> NAS write) was moved here 1:1 from\n`alice-mail-sync`s former `Code: Import Attachments`, because alice-mail-sync runs\nevery minute and must not load the DMS model (`OLLAMA_MODEL_DMS`) while the chat\nmodel occupies the GPU.\n\nQueue entries are only removed after they have been handled, so a time-limit abort\nor a crash leaves the rest for the next run (same pattern as `alice-dms-processor`\nwith `alice:dms:plaintext`).\n\nNote: the per-mail thumbnail publish (`alice/dms/done` for the `Email` object\nitself) stays in `alice-mail-sync` - it is independent of attachments. The MQTT\nnode here fires per mail whose attachments produced at least one new NAS file.",
-        "height": 520,
+        "content": "## alice-mail-attachment-processor (PROJ-53 Iteration 4)\n\nNightly (02:00) drain of the Redis list `alice:mail:attachment_queue`, which\n`alice-mail-sync` fills minutely via `Code: Enqueue Attachment Jobs`.\n\nThe attachment pipeline (prefilter -> extension routing -> PDF text ->\nLLM classification -> `/attachment` fetch -> NAS write) was moved here 1:1 from\n`alice-mail-sync`s former `Code: Import Attachments`, because alice-mail-sync runs\nevery minute and must not load the DMS model (`OLLAMA_MODEL_DMS`) while the chat\nmodel occupies the GPU.\n\nQueue entries are only removed after they have been handled, so a time-limit abort\nor a crash leaves the rest for the next run (same pattern as `alice-dms-processor`\nwith `alice:dms:plaintext`).\n\n**GPU lock (BUG-17):** acquires the project-wide `alice:dms:processor:lock:run`,\nshared with `alice-dms-processor` and the DMS/mail backfills, so GPU classification\nis serialised across workflows. This workflow shares the identical `0 2 * * *`\ntrigger with `alice-dms-processor`, so without the lock both would classify at the\nsame time. If the lock is busy the run skips cleanly and the queue is retried the\nnext night. The lock is renewed per item in `Code: Time Check` (TTL 30 min << 4 h\nruntime, so a crash cannot deadlock it) and released on every terminal path.\n\n**No MQTT publish here (BUG-16):** the mail`s own thumbnail trigger stays in\n`alice-mail-sync`; attachment files get their thumbnail via the regular DMS\npipeline (scanner -> processor -> thumbnailer) after being written to\n`/mnt/nas/ai/<folder>/`.",
+        "height": 660,
         "width": 620,
         "color": 4
       },
@@ -330,7 +355,47 @@
       "main": [
         [
           {
+            "node": "Code: Acquire Processor Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Acquire Processor Lock": {
+      "main": [
+        [
+          {
+            "node": "IF: Processor Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Processor Lock Acquired": {
+      "main": [
+        [
+          {
             "node": "Code: Init",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Log Already Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Log Already Running": {
+      "main": [
+        [
+          {
+            "node": "End: Already Running",
             "type": "main",
             "index": 0
           }
@@ -363,7 +428,7 @@
       "main": [
         [
           {
-            "node": "End: Empty Queue",
+            "node": "Code: Empty Summary",
             "type": "main",
             "index": 0
           }
@@ -371,6 +436,17 @@
         [
           {
             "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "End: Empty Queue",
             "type": "main",
             "index": 0
           }
@@ -465,35 +541,6 @@
       ]
     },
     "Code: Process Queue Item": {
-      "main": [
-        [
-          {
-            "node": "IF: Imported Any",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF: Imported Any": {
-      "main": [
-        [
-          {
-            "node": "MQTT: Publish Attachment Done",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Split In Batches",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "MQTT: Publish Attachment Done": {
       "main": [
         [
           {

@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (BUG-16/BUG-17 aus Iteration-4-QA werden vor Deploy noch behoben — Nutzerentscheidung)
+**Last Updated:** 2026-08-24 (BUG-16/BUG-17 aus Iteration-4-QA vor Deploy behoben — GPU-Lock ergänzt, redundanter MQTT-Node entfernt)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1275,7 +1275,7 @@ Bestätigt: `git status` weist die Datei als **nicht geändert** aus. Keine Anbi
 #### Abweichungen vom Tech Design (wichtig für QA)
 
 1. **`MQTT: Publish Email Done` bleibt in `alice-mail-sync`** — bewusste Abweichung von der Formulierung "sowie der zugehörige Split-Zweig für den Thumbnail-MQTT-Publish" (Baustein 1). Begründung: Dieser Publish ist laut AC (Zeile 68) und PROJ-80-Lückenschluss der Trigger für das **Thumbnail der Mail selbst** (`document_type: 'Email'`, gerendert aus Betreff + Body) und hat mit Anhängen nichts zu tun. Er feuert für **jede** neu inserierte Mail. Ein Verschieben in den Nightly-Workflow hätte alle Mails **ohne** Anhang dauerhaft ohne Thumbnail gelassen (Regression gegen das in Iteration 1 QA-geprüfte AC-5.1), da der Processor nur Mails mit Anhang sieht. `Code: Split Stored Emails` → `IF: Has Stored Emails` → `MQTT: Publish Email Done` hängen daher jetzt direkt an `Process + Classify + Store Emails` (nur `position` geändert, Parameter/Credentials unverändert).
-2. **Zusätzlicher MQTT-Node im neuen Workflow:** `MQTT: Publish Attachment Done` feuert pro Queue-Eintrag, bei dem mindestens eine Datei tatsächlich neu auf dem NAS geschrieben wurde (`_imported_any`), mit identischem Payload-Format. Damit bleibt der "nur bei echtem Neu-Insert"-Charakter erhalten. *Hinweis für QA:* Ob dieser zweite Publish fachlich erwünscht ist, sollte geprüft werden — die Anhänge selbst bekommen ihr Thumbnail ohnehin über die reguläre DMS-Pipeline (Scanner → Processor → Thumbnailer), dieser Publish bezieht sich auf die `Email`-UUID und ist damit potenziell redundant zum Publish aus Baustein 1.
+2. ~~**Zusätzlicher MQTT-Node im neuen Workflow:** `MQTT: Publish Attachment Done`~~ — **hinfällig, per BUG-16 entfernt** (siehe "Bugfixes nach QA" unten). Der eigene QA-Hinweis an dieser Stelle ("potenziell redundant zum Publish aus Baustein 1") hat sich bestätigt.
 3. **`IF: Parse Error` / `Code: Drop Unparseable Item`** sind im Tech Design nicht skizziert, aber nötig, weil `Code: Fetch Batch` (analog `alice-dms-processor`) defekte JSON-Einträge markiert statt zu werfen — sonst bliebe ein unparsebarer Eintrag für immer in der Liste und würde jede Nacht erneut scheitern.
 4. **Attachment-Indizes:** Der Queue-Eintrag trägt das **vollständige** `attachments`-Array (nicht nur die gefilterten), weil `/attachment` per `attachment_index` adressiert. Ein Filtern beim Enqueue hätte die Indizes verschoben und den falschen Anhang geladen. Der Vorfilter entscheidet beim Enqueue also nur *ob* die Mail in die Queue kommt; *welche* Anhänge verarbeitet werden, entscheidet unverändert der Processor.
 5. **Feldname `mailbox`** statt des im Tech Design genannten "Mailbox-ID"-Felds: Es werden die vollständigen Verbindungsdaten benötigt (der Processor hat keinen `Prepare Mailbox Data`-Kontext und liest die Mailbox nicht erneut aus Postgres).
@@ -1298,7 +1298,43 @@ Zusätzlich per Mock-Harness (Redis/axios/fs/winston gemockt) zur Laufzeit gepr�
 - Kein Lauf gegen echtes Redis/n8n/IMAP/Ollama/NAS — die Mock-Harness ersetzt keinen Integrationstest.
 - Ob `mistral-small3.2:24b` produktiv besser klassifiziert (Live-Test des Users, nicht Teil dieser Umsetzung).
 - AC-5.2/5.3 (Thumbnail-Rendering für Mail-Objekte) unverändert offen aus Iteration 1–3.
-- Kein Lock-Mechanismus wie in `alice-dms-processor` (`Code: Acquire Processor Lock`) implementiert — bei einem nightly Trigger ohne Overlap-Risiko bewusst weggelassen; falls QA parallele manuelle Läufe abdecken will, wäre das nachzurüsten.
+- ~~Kein Lock-Mechanismus wie in `alice-dms-processor` implementiert~~ — **diese Einschätzung war falsch und wurde per BUG-17 korrigiert** (siehe "Bugfixes nach QA" unten). Der Lock schützt nicht gegen Selbst-Overlap, sondern serialisiert die GPU-Nutzung projektweit.
+
+### Bugfixes nach QA (Iteration 4, 2026-08-24)
+
+QA (`7e6d83e`) hat in den eigenen Abweichungen 2 und 5 zwei Medium-Bugs gefunden. Beide sind behoben; **nur** `workflows/alice-mail-attachment-processor.json` wurde angefasst (`alice-mail-sync.json` und `alice-mail-attachment-backfill.json` sind seit `0c92b6d` unverändert).
+
+#### BUG-17 (Medium) — projektweiter GPU-Lock ergänzt
+
+Die ursprüngliche Begründung analysierte das falsche Risiko: `alice:dms:processor:lock:run` verhindert nicht Selbst-Overlap, sondern **serialisiert GPU-Klassifizierung über Workflow-Grenzen hinweg**. Vier Workflows teilen ihn bereits; der neue Processor war der fünfte GPU-Konsument ohne Lock — bei **identischem** Trigger `0 2 * * *` wie `alice-dms-processor` (~2 h Laufzeit) also bis zu 2 h echte Überschneidung. Das ist exakt die Kontention, für deren Beseitigung Iteration 4 existiert (nur verlagert von "Chat vs. DMS" auf "DMS vs. DMS").
+
+Übernommen wurde das Muster aus `alice-mail-attachment-backfill` (gleicher Key, gleiche TTL, gleicher Owner-Check):
+
+- **Neu: `Code: Acquire Processor Lock`** (`SET NX PX 1800000`, Owner-Token via `crypto.randomUUID()`) direkt hinter dem Schedule-Trigger → **`IF: Processor Lock Acquired`**.
+- **Lock belegt → sauberer Skip:** `Code: Log Already Running` → `End: Already Running`. Kein Blockieren, kein Retry-Loop; die Redis-Queue bleibt unangetastet und wird in der nächsten Nacht abgearbeitet.
+- **Renew pro Item** in `Code: Time Check` (Lua-Owner-Check, TTL-Verlängerung auf 30 min). `_lock_lost` führt über `IF: Time Limit Reached` zum kontrollierten Abbruch — die Bedingung lautet jetzt `_time_limit_reached || _lock_lost` (analog `alice-dms-processor`).
+- **Release auf allen drei Terminal-Pfaden:** `Code: Final Log` (Queue leergelaufen), `Code: Final Log (Time)` (Zeitlimit/Lock verloren) und **neu `Code: Empty Summary`** (leere Queue — sonst würde eine Nacht ohne Mails den Lock bis zum TTL-Ablauf halten und `alice-dms-processor` unnötig blockieren). Release immer per Lua mit Owner-Check, damit ein bereits von einem anderen Workflow übernommener Lock nie gelöscht wird.
+- **Kein Deadlock möglich:** TTL (30 min) ≪ Laufzeitbudget (4 h); die Renewal ist der Heartbeat. Stirbt n8n mitten im Lauf, verfällt der Lock automatisch.
+
+#### BUG-16 (Medium) — `MQTT: Publish Attachment Done` ersatzlos entfernt
+
+Der Node publizierte `{ weaviate_uuid: <UUID der Mail>, document_type: 'Email' }` — also die Identität der **Mail**, nicht des Anhangs. Fachlich falsch (Anhänge sind Invoice/Document/Image/…, nie `Email`) und redundant zum korrekt in `alice-mail-sync` verbliebenen `MQTT: Publish Email Done`. Anhänge bekommen ihr Thumbnail ohnehin über die reguläre DMS-Pipeline, sobald sie unter `/mnt/nas/ai/<Ordner>/` liegen.
+
+Entfernt wurden der MQTT-Node **und** `IF: Imported Any` (existierte ausschließlich, um diesen Publish zu gaten); `Code: Process Queue Item` führt jetzt direkt zurück auf `Split In Batches`. Das dafür eingeführte Feld `_imported_any` wurde in `Code: Process Queue Item` und `Code: Drop Unparseable Item` ebenfalls entfernt (verwaist). Der neue Workflow enthält damit **keinen MQTT-Node und keine MQTT-Credential** mehr.
+
+#### Verifikation der Fixes
+
+- Struktur-Validierung erneut grün für alle drei Workflows (JSON, Connection-/`$('Node')`-Referenzen, keine verwaisten Nodes, `node --check`, 0 `console.log`, Credentials, erlaubte Module).
+- **Lock-Simulation** mit einem Fake-Redis, das `SET NX PX` und die Lua-Skripte (Owner-Check, TTL) nachbildet, gegen den **echten** jsCode der Lock-Nodes — 5 Szenarien, alle bestanden:
+  1. `alice-dms-processor` hält den Lock → Acquire schlägt fehl, Skip mit `reason: 'lock_busy'`, fremder Lock unangetastet.
+  2. Lock frei → Acquire OK; **zweiter paralleler Acquire schlägt fehl** (Mutual Exclusion); Renew hält Ownership; `Code: Final Log` gibt den Lock frei.
+  3. Lock von fremdem Owner übernommen → `_lock_lost: true` (Abbruch), und der fremde Lock wird **nicht** gelöscht.
+  4. TTL läuft ohne Renewal ab (simulierter Absturz) → Lock frei, nächster Lauf kann acquiren → **kein Deadlock**.
+  5. Leere Queue → `Code: Empty Summary` gibt den Lock frei.
+- **Kein funktionaler Regress:** Round-Trip (Enqueue → `lRange` → Process → `lRem`) und Medien-Routing/Limits erneut durchlaufen, Ergebnisse identisch zu vor dem Fix (PDF → `Invoice/`, Bild → `Image/`, Video → `Video/`, Audio → `Audio/`, 0 LLM-Calls für Medien, 50-MB-Limit greift).
+- **1:1-Code-Move weiterhin intakt:** Ähnlichkeit des Anhang-Pipeline-Rumpfs zum ursprünglichen `Code: Import Attachments` unverändert **98,9 %**.
+
+**Weiterhin nicht verifizierbar:** kein Lauf gegen echtes Redis/n8n (die Lock-Simulation bildet Redis-Semantik nach, ersetzt aber keinen Integrationstest — insbesondere echtes n8n-Verhalten bei zeitgleichem Schedule-Feuern zweier Workflows). BUG-15 (pre-existing, Mail-Thumbnail) bleibt bewusst unangetastet und außerhalb dieses Scopes.
 
 ## QA Test Results — Iteration 4 (2026-08-24)
 
