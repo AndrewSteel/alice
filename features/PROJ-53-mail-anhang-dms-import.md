@@ -1201,7 +1201,49 @@ Die Anhang-Verarbeitung (Klassifizierung + Ablage) wird aus `alice-mail-sync` **
 - **Nightly Run überschreitet Zeitlimit**: Bricht kontrolliert ab (wie `alice-dms-processor`), verbleibende Redis-Einträge werden beim nächsten Lauf weiterverarbeitet.
 - **n8n/Server war während 02:00 Uhr nicht erreichbar**: Schedule-Trigger holt den verpassten Lauf nicht automatisch nach; Redis-Einträge bleiben bestehen und werden beim nächsten regulären nightly Lauf abgearbeitet, sobald der Server wieder verfügbar ist (kein Datenverlust, nur Verzögerung).
 
-**Nächste Schritte:** `/architecture` für den neuen `alice-mail-attachment-processor`-Workflow und die Redis-Queue-Struktur, dann `/backend`, dann `/qa`.
+### Tech Design Iteration 4 (Solution Architect, 2026-08-24)
+
+#### E) Workflow Architecture
+
+Drei Bausteine ändern sich: `alice-mail-sync` wird verschlankt, ein neuer Workflow `alice-mail-attachment-processor` entsteht, `alice-mail-attachment-backfill` bleibt unangetastet.
+
+**Baustein 1: Verschlankung von `alice-mail-sync`**
+
+- **Entfernt:** Der komplette Anhang-Verarbeitungsblock (`Code: Import Attachments` inkl. Klassifizierung, `/attachment`-/`/attachment-text`-Abruf, NAS-Ablage, MQTT-Publish) sowie der zugehörige Split-Zweig für den Thumbnail-MQTT-Publish.
+- **Neu, ersetzt den entfernten Block:** Ein schlanker Code-Schritt direkt nach dem bestehenden "Process + Classify + Store Emails" (Mail-Metadaten-Insert bleibt unverändert). Für jede neu gespeicherte Mail mit mindestens einem Anhang, der den bestehenden Extension-Vorfilter besteht (Format-Allowlist-Check bleibt hier, damit die Warteschlange nicht mit offensichtlich irrelevanten Anhängen — falsche Endung, Bild-Datenmüll < 20 KB — vollläuft), wird **ein Redis-Listeneintrag** geschrieben: Mailbox-Kontext (Verbindungsdaten wie bisher für `/attachment`), IMAP-UID, Attachment-Index(e), Mail-Metadaten (Betreff, Absender, Datum, Body-Preview — für den späteren Klassifizierungs-Prompt), Weaviate-`Email`-UUID.
+- **Trigger/Taktung unverändert:** Läuft weiterhin minütlich, Mail-Metadaten-Pfad unverändert schnell.
+
+**Baustein 2: Neuer Workflow `alice-mail-attachment-processor`**
+
+Struktur analog `alice-dms-processor` (Nightly-Batch-Verarbeitung mit Zeitlimit-Schutz):
+
+- **Trigger:** Schedule, `0 2 * * *` (identisch zu `alice-dms-processor`)
+- **Ablauf:** Liest die Redis-Liste vollständig ein (Items bleiben in der Liste, bis sie einzeln erfolgreich verarbeitet wurden — Absturz-/Zeitlimit-sicher, gleiches Muster wie `alice-dms-processor`s `Code: Fetch Batch`/`alice:dms:plaintext`) → verarbeitet batchweise mit periodischem Zeitlimit-Check → pro Eintrag: **exakt dieselbe** Klassifizierungs-/Abruf-/Ablage-/MQTT-Logik, die bisher synchron in `alice-mail-sync` lief (1:1 verschobener Code, keine Verhaltensänderung) → entfernt erfolgreich verarbeitete Einträge aus der Redis-Liste
+- **Modell:** `$env.OLLAMA_MODEL_DMS` (identisch zu allen anderen DMS-Klassifizierungs-Workflows) — läuft außerhalb der Chat-Kernzeit, daher unkritisch, wenn dort ein anderes Modell als für Chat/Vision geladen wird
+- **Zeitlimit-Schutz:** Analog `alice-dms-processor`s `Code: Time Check`/`IF: Time Limit Reached` — bricht kontrolliert ab, bevor der Lauf in die Chat-Kernzeit hineinreicht; unverarbeitete Redis-Einträge bleiben für den nächsten Lauf erhalten
+- **Fehlerverhalten:** Einzelner Eintrag schlägt fehl (IMAP-Fehler, Klassifizierung nicht erreichbar, Ablage nicht möglich) → wird geloggt und aus der Liste entfernt (wie bisher: kein automatischer Retry im nächsten Zyklus, konsistent mit dem bereits etablierten PROJ-53-Fehlerverhalten) — **nicht** zu verwechseln mit einem Zeitlimit-Abbruch, der unverarbeitete Einträge bewusst *nicht* entfernt
+
+**Baustein 3: `alice-mail-attachment-backfill` — unverändert**
+
+Deckt weiterhin bereits vor Iteration 4 indexierte Alt-Mails ab (Dateisystem-basierte "bereits importiert"-Prüfung, wie bisher). Kein Zusammenhang mit der neuen Redis-Liste — der Backfill fragt weiterhin Weaviate direkt ab, nicht die Queue.
+
+### Datenmodell (fachlich) — Ergänzung Iteration 4
+
+- **Neue Redis-Liste** `alice:mail:attachment_queue` (Namensvorschlag, konsistent mit bestehenden `alice:mail:*`-Präfixen aus Iteration 2): JSON-Einträge mit Mailbox-Kontext, IMAP-UID, Attachment-Index(es), Mail-Metadaten, Email-UUID. Kein neues Datenbankschema, keine neue Persistenzschicht jenseits von Redis (konsistent mit der bestehenden Projektentscheidung aus der ursprünglichen Spec).
+- Kein neues Weaviate-Feld — die Redis-Liste referenziert die bereits existierende `Email`-UUID nur lesend.
+
+### Tech-Entscheidungen (Begründung) — Ergänzung Iteration 4
+
+- **Redis-Liste statt neuer Postgres-Tabelle:** Konsistent mit der bestehenden Projektentscheidung (keine neue Persistenzschicht) und identisch zum bereits etablierten Muster in `alice-dms-processor` (`alice:dms:plaintext`), das exakt dieselbe Anforderung löst (Batch-Queue, crash-sicher durch "erst entfernen nach erfolgreicher Verarbeitung").
+- **02:00 Uhr statt eigener Zeitpunkt:** Wiederverwendung des bereits etablierten, GPU-schonenden Zeitfensters von `alice-dms-processor` statt eines neuen Zeitpunkts — vermeidet, zwei nightly Jobs mit unterschiedlichen Zeiten zu pflegen und hält das Modell-Umlade-Risiko auf ein bekanntes Minimum (beide Jobs könnten sogar dasselbe Modell laden, falls sie sich zeitlich überschneiden — kein neues Konfliktpotential gegenüber dem Ist-Zustand).
+- **1:1-Code-Verschiebung statt Neuentwicklung:** Die Klassifizierungs-/Ablage-Logik wurde in Iteration 1–3 bereits mehrfach QA-geprüft und gefixt (Dedup, Größenlimit, Pfad-Sanitisierung, Image-Routing, Modell-Referenz). Eine Neuentwicklung würde dieses Risiko unnötig wiederholen; die Architektur-Änderung betrifft ausschließlich **wann** und **wodurch getriggert** der Code läuft, nicht **was** er tut.
+- **Kein Trigger-Nachhol-Mechanismus bei verpasstem 02:00-Lauf:** Konsistent mit dem bestehenden Verhalten von `alice-dms-processor` (kein Backfill-Trigger bei verpasstem Schedule) — Redis-Einträge gehen dabei nicht verloren, nur der nächste reguläre Lauf holt sie nach.
+
+### Dependencies (Pakete) — Ergänzung Iteration 4
+
+Keine neuen Pakete — `redis` ist in n8n Code-Nodes bereits erlaubt (`NODE_FUNCTION_ALLOW_EXTERNAL`) und wird bereits in mehreren bestehenden Workflows verwendet.
+
+**Nächste Schritte:** `/backend` für die Umsetzung (Verschlankung von `alice-mail-sync`, neuer Workflow `alice-mail-attachment-processor`), dann erneut `/qa`.
 
 ## Deployment
 _To be added by /deploy_
