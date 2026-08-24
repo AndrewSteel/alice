@@ -51,7 +51,41 @@ Beide Bugs wurden verifiziert (Code der betroffenen Nodes in beiden Workflow-JSO
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### E) Workflow Architecture
+
+PROJ-92 hat keine UI-Komponente. Es ändert zwei bestehende Workflows (`alice-dms-language-backfill`, `alice-dms-classification-backfill`) an derselben Stelle, mit demselben bereits produktiv bewährten Muster wie in `alice-mail-attachment-backfill` (PROJ-53, Commit `8581996`) — kein neuer Workflow, kein neuer Trigger, keine neuen Nodes.
+
+**Einordnung in den bestehenden Ablauf (beide Workflows identisch):**
+
+`Webhook → Code: Acquire Backfill Lock → IF: Lock Acquired → Code: Init Backfill Run → ... → Code: Time Check → ...`
+
+**Änderung 1 — Payload-Zugriff in `Code: Init Backfill Run`:**
+
+Statt des Payloads vom direkten Input (der vom dazwischenliegenden Lock-Node stammt und `body`/`query` nicht enthält) wird der ursprüngliche Webhook-Payload gezielt beim Webhook-Node selbst abgeholt, per Node-Namens-Referenz. `confirm` wird davon wie bisher aus Body oder Query gelesen (Body hat Vorrang), inkl. der bestehenden Boolean/String-Toleranz (`true` oder `"true"`).
+
+**Änderung 2 — Zeitlimit-Override durchreichen:**
+
+`Code: Init Backfill Run` liest zusätzlich einen optionalen `max_runtime_seconds`-Wert aus demselben Payload (Body oder Query) und gibt ihn validiert aus (Fallback auf 7200s bei fehlendem/ungültigem/nicht-positivem Wert). `Code: Time Check` liest diesen Wert anschließend per Node-Namens-Referenz auf `Code: Init Backfill Run` zurück, statt ihn wie bisher hardcoded zu berechnen.
+
+**Data flow:** Webhook-Request (Body/Query mit optionalen `confirm`- und `max_runtime_seconds`-Feldern) → Lock-Erwerb (unverändert, gibt Payload nicht weiter) → Init liest Original-Payload direkt vom Webhook-Node → Rest des Laufs (Collections-Iteration, Klassifizierungs-/Sprachprüfung, Zeitlimit-Check) nutzt `CONFIRM` und `MAX_RUNTIME_SECONDS` aus Init.
+
+**Integrationen:** Keine neuen. Weiterhin nur Redis (Lock, Lauf-Statistik) und Weaviate (Collections-Zugriff, bestehend).
+
+**Fehlerverhalten:** Unverändert. Bleibt `confirm` unbestimmt oder falsy, bleibt der Lauf im bestehenden Dry-Run-Modus (Sicherheitsverhalten unverändert). Ein ungültiger `max_runtime_seconds`-Wert fällt auf den bisherigen Default 7200s zurück statt einen Fehler zu werfen oder ein Zeitlimit von 0 zu erzeugen.
+
+### Tech-Entscheidungen (Begründung)
+
+- **Exakt dasselbe Muster wie der PROJ-53-Fix (Commit `8581996`) übernehmen, keine eigene Lösung entwickeln:** Der Fix wurde dort bereits mit einem Graph-Trace-Test verifiziert und ist produktiv bewährt. Eine abweichende Implementierung in den beiden hier betroffenen Workflows würde unnötige Inkonsistenz zwischen drei strukturell identischen Backfill-Workflows schaffen.
+- **Lock-Node bleibt unangetastet:** Wie in der Commit-Begründung von `8581996` festgehalten — der Lock-Node ist ein etabliertes, wiederverwendetes Muster über mehrere Backfill-Workflows hinweg. Ihn zu ändern, um den Payload durchzureichen, würde von dieser Konvention abweichen und mehr anfassen als nötig.
+- **`max_runtime_seconds`-Fix wird mitgeliefert statt in einem separaten Ticket:** Gleiche Ursache (Init-Output wird von einem nachgelagerten Node ignoriert bzw. nicht korrekt berechnet), gleiche Dateien, gleicher Verifikationsaufwand — ein zweites Ticket für denselben Change-Set wäre unnötiger Overhead (Nutzerentscheidung während der Spec-Phase).
+
+### Dependencies (Pakete)
+
+Keine neuen Pakete — `redis` ist in beiden Workflows bereits im Einsatz.
+
+---
+_Implementation folgt in /backend._
 
 ## QA Test Results
 _To be added by /qa_
