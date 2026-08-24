@@ -1,8 +1,8 @@
 # PROJ-53: Mail-Anhang DMS-Import
 
-## Status: In Review
+## Status: Planned
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (QA Iteration 3: Bild-Routing verifiziert behoben; Modell-Fix greift produktiv nicht — BUG-13 High offen)
+**Last Updated:** 2026-08-24 (Iteration 4: Anhang-Verarbeitung entkoppelt von alice-mail-sync — GPU-Ressourcenkonflikt)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -33,7 +33,7 @@ Zusätzlich schließt PROJ-53 eine bei PROJ-80 entdeckte Lücke: Mail-Objekte in
 - [ ] Fehlt einer dieser Ordner beim ersten Sync-Lauf, wird er automatisch angelegt
 - [ ] Die Ordner sind reine Ablageziele der Mail-Pipeline; die Aufnahme in `alice.dms_watched_folders` (inkl. Zuordnung zum passenden deutschen `suggested_type`-Wert) erfolgt manuell durch den Admin — kein automatischer DB-Eintrag durch PROJ-53
 
-### Anhang-Erkennung & Klassifizierung (Erweiterung von `alice-mail-sync`)
+### Anhang-Erkennung & Klassifizierung (⚠️ ab Iteration 4 nicht mehr synchron in `alice-mail-sync` — siehe "Iteration 4" unten für den aktuellen Ablauf; dieser Abschnitt beschreibt die Klassifizierungs-/Ablage-**Logik**, die weiterhin gilt, nur der Trigger-Kontext ändert sich)
 - [ ] Für jede neu indexierte Mail mit mindestens einem Anhang wird ein zusätzlicher Klassifizierungsschritt ausgeführt, unabhängig von der bestehenden Wichtig/Werbung/Social-Media/Spam-Kategorisierung aus PROJ-46
 - [ ] Nur Anhänge mit einer Dateiendung aus der `SUPPORTED_EXTENSIONS`-Allowlist werden berücksichtigt; die Liste bleibt zentral erweiterbar
 - [ ] Offensichtlicher Bild-Datenmüll (typische E-Mail-Signatur-Icons/Logos: Bildformate < 20 KB) wird ohne Klassifizierungsversuch übersprungen — kein Import
@@ -1159,6 +1159,49 @@ Bereits als generisches Muster dokumentiert (Edge-Cases Zeile 78): *„Datei lie
   3. Danach: `Image/` in `alice.dms_watched_folders` eintragen (Settings → DMS-Ordner), Deploy-Voraussetzungen aus Iteration 2 bleiben bestehen.
 
 ---
+
+## Iteration 4 — Anhang-Verarbeitung entkoppelt (2026-08-24)
+
+### Hintergrund
+
+BUG-13 (Iteration 3) war kein Code-Fehler, sondern ein GPU-Ressourcenkonflikt: Andreas betreibt bewusst **ein einziges** Ollama-Modell (`qwen3.5:27b-q4_K_M`) für Chat, Vision **und** DMS-Textklassifizierung, weil die GPU beim gleichzeitigen Einsatz mehrerer Modelle ständig neu laden müsste. Ein Live-Test mit `OLLAMA_MODEL_DMS=mistral-small3.2:24b` zeigt: Mistral klassifiziert DMS-Dokumente deutlich zuverlässiger als das Vision-Modell auf reinem Text. Mistral soll daher produktiv für die DMS-Textklassifizierung genutzt werden — das erfordert aber ein zweites, exklusiv geladenes Modell, was das ursprüngliche Umlade-Problem wieder aufwirft.
+
+**Analyse nach Trigger-Häufigkeit ergibt:** Alle DMS-Klassifizierungs-Workflows außer einem sind unkritisch, weil sie nur manuell oder nightly laufen (kein Kollisionsrisiko mit dem minütlich aktiven Chat-Modell):
+- `alice-dms-classify-document` (PROJ-78-Sub-Workflow): getriggert von `alice-dms-processor` (nightly) und manuellen Backfills
+- `alice-dms-language-check` / `-backfill`: manuell + nightly
+- `alice-mail-attachment-backfill` (PROJ-53): manuell getriggert — unkritisch
+
+**Kritisch ist ausschließlich `alice-mail-sync`**, da es **minütlich** läuft und damit während der Chat-Kernzeit (07:00–23:30 Uhr) ständig mit dem Chat-Modell um die GPU konkurrieren würde, sobald es selbst Mistral für die Anhang-Klassifizierung lädt.
+
+### Entscheidung
+
+Die Anhang-Verarbeitung (Klassifizierung + Ablage) wird aus `alice-mail-sync` **vollständig herausgelöst** in einen neuen, eigenständigen Workflow `alice-mail-attachment-processor`, der **nightly um 02:00 Uhr** läuft (gleicher Zeitpunkt wie `alice-dms-processor`, außerhalb der Chat-Kernzeit) und dort Mistral exklusiv nutzen kann.
+
+- `alice-mail-sync` bleibt **unverändert minütlich** aktiv und verarbeitet Mail-Metadaten (Betreff, Absender, Kategorisierung, Weaviate-`Email`-Insert) wie bisher — Mails sind also weiterhin **sofort** per Chat auffindbar.
+- Neu: Pro neu gespeicherter Mail mit mindestens einem klassifizierungswürdigen Anhang (nach dem bestehenden Extension-Vorfilter — offensichtlich irrelevante Anhänge werden weiterhin sofort synchron verworfen, damit die Warteschlange nicht unnötig wächst) trägt `alice-mail-sync` einen Eintrag in eine Redis-Liste ein (Mailbox-ID, Message-ID/UID, Anhang-Metadaten, Weaviate-`Email`-UUID) — keine weitere Verarbeitung an dieser Stelle.
+- Der komplette bestehende Anhang-Code (Klassifizierung, `/attachment`- und `/attachment-text`-Abruf, NAS-Ablage, Kollisions-Suffix, MQTT-Publish für Thumbnails) wandert **1:1 unverändert** in den neuen nightly Workflow, der die Redis-Liste batchweise abarbeitet — Struktur analog `alice-dms-processor` (Init → Fetch Batch → Split In Batches mit Time-Check → Verarbeitung → Summary).
+- Der bestehende `alice-mail-attachment-backfill`-Workflow bleibt unverändert bestehen (weiterhin manuell/Dry-Run) — er deckt bereits indexierte Alt-Mails ab, der neue nightly Workflow deckt den laufenden Betrieb ab.
+
+**Konsequenz für den Nutzer:** Neue Mails sind sofort im Chat auffindbar (Text/Metadaten), ihre Anhänge werden aber erst beim nächsten nightly Run (spätestens am folgenden Tag um 02:00 Uhr) klassifiziert und ins DMS eingespeist — bewusster Trade-off zwischen Aktualität und GPU-Ressourcenschonung.
+
+### Neue/geänderte Acceptance Criteria
+
+- [ ] `alice-mail-sync` klassifiziert und speichert Anhänge **nicht mehr selbst** — es trägt pro Mail mit mindestens einem (nach Extension-Vorfilter) klassifizierungswürdigen Anhang einen Eintrag in eine Redis-Liste ein und läuft ansonsten unverändert minütlich weiter
+- [ ] Ein neuer Workflow `alice-mail-attachment-processor` läuft **nightly um 02:00 Uhr** (`cronExpression: 0 2 * * *`, wie `alice-dms-processor`) und verarbeitet die Redis-Liste batchweise
+- [ ] Der Nightly-Workflow nutzt exakt dieselbe Klassifizierungs-/Ablage-/MQTT-Logik wie die bisherige synchrone Implementierung in `alice-mail-sync` (unverändert übernommen, kein Verhaltensunterschied außer dem Zeitpunkt)
+- [ ] Der Nightly-Workflow nutzt `OLLAMA_MODEL_DMS` für die Klassifizierung (identisch zu allen anderen DMS-Klassifizierungs-Workflows) — produktiv auf ein Textmodell (z.B. `mistral-small3.2:24b`) gesetzt, ohne dass dies Kollisionen mit dem Chat-Modell verursacht, da der Lauf außerhalb der Kernzeit stattfindet
+- [ ] Zeitlimit-Schutz analog `alice-dms-processor` (`Code: Time Check` / `IF: Time Limit Reached`), damit ein sehr langer Lauf nicht bis in die Chat-Kernzeit hineinläuft
+- [ ] Ist eine Mail-Redis-Warteschlangen-Eintrag beim nightly Run nicht mehr verarbeitbar (z.B. IMAP-Fehler), wird er übersprungen und geloggt, der Lauf geht mit den übrigen Einträgen weiter — analog zum bisherigen Fehlerverhalten
+- [ ] `alice-mail-attachment-backfill` bleibt unverändert bestehen und unabhängig nutzbar
+- [ ] Bereits behobene Bugs aus Iteration 3 (Bild-Routing nach `Image/`, korrekter Modell-Zugriff über `$env.OLLAMA_MODEL_DMS`) gelten unverändert für den neuen Nightly-Workflow — reine Verschiebung des Codes, keine Logikänderung
+
+### Edge Cases (neu)
+
+- **Mail mit Anhang kommt kurz vor 02:00 Uhr rein**: Wird im selben nightly Run noch verarbeitet, sofern `alice-mail-sync` den Redis-Eintrag vor dem Start des nightly Runs geschrieben hat; andernfalls erst im nächsten Lauf (24h später) — kein Datenverlust, nur Verzögerung.
+- **Nightly Run überschreitet Zeitlimit**: Bricht kontrolliert ab (wie `alice-dms-processor`), verbleibende Redis-Einträge werden beim nächsten Lauf weiterverarbeitet.
+- **n8n/Server war während 02:00 Uhr nicht erreichbar**: Schedule-Trigger holt den verpassten Lauf nicht automatisch nach; Redis-Einträge bleiben bestehen und werden beim nächsten regulären nightly Lauf abgearbeitet, sobald der Server wieder verfügbar ist (kein Datenverlust, nur Verzögerung).
+
+**Nächste Schritte:** `/architecture` für den neuen `alice-mail-attachment-processor`-Workflow und die Redis-Queue-Struktur, dann `/backend`, dann `/qa`.
 
 ## Deployment
 _To be added by /deploy_
