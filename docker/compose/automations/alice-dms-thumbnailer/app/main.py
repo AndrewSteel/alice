@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from PIL import Image
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from .auth import verify_jwt
 
@@ -69,10 +69,13 @@ async def startup():
 # Models
 # ---------------------------------------------------------------------------
 class GenerateRequest(BaseModel):
-    original_path: str
     weaviate_uuid: str
     document_type: str
     file_type: str
+    # PROJ-93: Email objects have no NAS file - original_path is required for
+    # every other document_type, mail_text is required (and exclusive) for Email.
+    original_path: str | None = None
+    mail_text: str | None = None
 
     @field_validator("weaviate_uuid")
     @classmethod
@@ -85,7 +88,9 @@ class GenerateRequest(BaseModel):
 
     @field_validator("original_path")
     @classmethod
-    def _check_path(cls, v: str) -> str:
+    def _check_path(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         v = v.strip()
         if not v:
             raise ValueError("original_path must not be empty")
@@ -94,6 +99,17 @@ class GenerateRequest(BaseModel):
         if not str(resolved).startswith(DOCUMENTS_ROOT):
             raise ValueError(f"original_path not in allowed locations: {v}")
         return v
+
+    @model_validator(mode="after")
+    def _check_document_type_pairing(self):
+        # A model-level validator (not field_validator) so it can see every
+        # field regardless of declaration order.
+        if self.document_type == "Email":
+            if not (self.mail_text or "").strip():
+                raise ValueError("mail_text must not be empty when document_type is Email")
+        elif not self.original_path:
+            raise ValueError("original_path is required when document_type is not Email")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -152,30 +168,53 @@ def _convert_office_to_pdf(office_path: str) -> str | None:
         return stable.name
 
 
+def _render_text_image(text: str) -> Image.Image | None:
+    """Render plaintext (already in memory) as an image. Shared by the
+    file-based text preview and the mail preview (PROJ-93, no file on disk)."""
+    text = text.strip()
+    if not text:
+        return None
+    img = Image.new("RGB", (800, 800), color=(255, 255, 255))  # type: ignore[arg-type]
+    from PIL import ImageDraw, ImageFont
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 18)
+    except Exception:
+        font = ImageFont.load_default()
+    draw.multiline_text((10, 10), text[:2000], fill=(30, 30, 30), font=font, spacing=4)
+    return img
+
+
 def _render_text_preview(text_path: str) -> Image.Image | None:
     """Render first N lines of text file as an image."""
     try:
         with open(text_path, encoding="utf-8", errors="replace") as f:
             lines = [f.readline() for _ in range(30)]
-        text = "".join(lines).strip()
-        if not text:
-            return None
-        img = Image.new("RGB", (800, 800), color=(255, 255, 255))  # type: ignore[arg-type]
-        from PIL import ImageDraw, ImageFont
-        draw = ImageDraw.Draw(img)
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 18)
-        except Exception:
-            font = ImageFont.load_default()
-        draw.multiline_text((10, 10), text[:2000], fill=(30, 30, 30), font=font, spacing=4)
-        return img
+        text = "".join(lines)
+        return _render_text_image(text)
     except Exception as exc:
         logger.warning("Text render failed for %s: %s", text_path, exc)
         return None
 
 
-def generate_thumbnail(original_path: str, file_type: str) -> Image.Image | None:
-    """Generate thumbnail image. Returns PIL Image or None on failure."""
+def generate_thumbnail(
+    original_path: str | None, file_type: str, mail_text: str | None = None
+) -> Image.Image | None:
+    """Generate thumbnail image. Returns PIL Image or None on failure.
+
+    PROJ-93: when mail_text is given (Email objects have no NAS file), render
+    directly from that text instead of reading original_path.
+    """
+    if mail_text is not None:
+        img = _render_text_image(mail_text)
+        if img is None:
+            return None
+        img = _square_crop(img, top_crop=True)
+        img = img.resize((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        return img
+
     ext = file_type.lower().lstrip(".")
     img: Image.Image | None = None
     tmp_pdf: str | None = None
@@ -236,12 +275,13 @@ async def generate(req: GenerateRequest):
     """
     thumb_path = THUMB_DIR / f"{req.weaviate_uuid}.jpg"
 
-    src = Path(req.original_path)
-    if not src.exists():
-        logger.warning("Source file not found: %s", req.original_path)
-        raise HTTPException(status_code=422, detail=f"Source file not found: {req.original_path}")
+    if req.document_type != "Email":
+        src = Path(req.original_path)  # type: ignore[arg-type]
+        if not src.exists():
+            logger.warning("Source file not found: %s", req.original_path)
+            raise HTTPException(status_code=422, detail=f"Source file not found: {req.original_path}")
 
-    img = generate_thumbnail(req.original_path, req.file_type)
+    img = generate_thumbnail(req.original_path, req.file_type, mail_text=req.mail_text)
     if img is None:
         logger.warning("Thumbnail generation returned None for %s (type=%s)", req.original_path, req.file_type)
         raise HTTPException(status_code=422, detail="Thumbnail generation failed")
