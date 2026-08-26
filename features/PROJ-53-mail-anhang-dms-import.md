@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-22
-**Last Updated:** 2026-08-24 (nightly Attachment-Processor auf 04:00 Uhr verschoben — GPU-Rechenzeit-Trennung von alice-dms-processor)
+**Last Updated:** 2026-08-26 (axios/Node-24-Crash bei Nicht-2xx-Antworten in `/attachment`-Aufrufen gefixt und deployed, siehe "Fix-Forward" unten)
 
 ## Dependencies
 - Requires: PROJ-46 (Mail IMAP Integration) — Deployed. Liefert `alice-mail-sync` (Sync-Loop, Message-ID-Dedup, LLM-Kategorisierung Wichtig/Werbung/Social Media/Spam) und `alice-mail-reader` (IMAP-Adapter für Attachment-Zugriff).
@@ -1569,6 +1569,35 @@ Der neue Nightly-Workflow `alice-mail-attachment-processor` sowie die entspreche
 **Nach dem Deploy zu prüfen (nächster nightly Lauf, 04:00 Uhr):**
 - Queue wird korrekt abgearbeitet, GPU-Lock verhindert Kollision mit `alice-dms-processor`, Anhänge landen in den richtigen Zielordnern inkl. `Image/`.
 - AC-5.2/5.3 (Mail-Thumbnail-Rendering) bleiben laut QA offen — als eigener Bug in **PROJ-93** getrackt (vorbestehend, nicht PROJ-53-spezifisch, blockiert Deployment nicht).
+
+### Fix-Forward — axios/Node-24-Crash bei Nicht-2xx-Antworten (2026-08-26)
+
+Fix-Forward auf einem bereits freigegebenen Workflow — **kein neuer Review-Zyklus**, Status bleibt **Deployed**.
+
+**Symptom:** Backfill-Aufrufe blieben bei drei bestimmten Mails hängen, jeder Lauf endete mit demselben Ergebnis (`{"processed":3,"imported":0,"failed":2,"remaining":0}`). Das n8n-Log zeigte einen rohen Node.js-Crash statt eines sauberen `winston.warn`-Log-Eintrags: `TypeError: Cannot assign to read only property 'name' of object 'Error: Request failed with status code 404'` in `axios@1.18.0`, ausgelöst beim Bau eines `AxiosError` durch `settle()`.
+
+**Ursache:** Bekannte Inkompatibilität zwischen `axios@1.18.0` und `Node.js ≥ 22` (Task-Runner-Container läuft `Node.js v24.18.1`): Beim Konstruieren eines `AxiosError`-Objekts für jede Nicht-2xx-Antwort versucht axios `this.name = 'AxiosError'` zu setzen, was auf einer read-only `name`-Property des zugrunde liegenden `Error`-Prototyps unter neueren V8-Versionen eine `TypeError` wirft. Der Crash passiert **innerhalb** von axios' eigener Fehlerkonstruktion, bevor der bestehende `catch(e)`-Block im Code-Node überhaupt ein normales rejected Promise erhält — der komplette Node-Ausführungsschritt bricht ab, statt den vorgesehenen Log-Pfad (`logger.warn(...); failed++; continue;`) zu durchlaufen. Betroffen ist jeder `axios`-Aufruf in den PROJ-53-Workflows, der einen Fehlerstatus zurückbekommt — nicht nur der ursprünglich gemeldete `/attachment`-Aufruf mit uid=2085.
+
+Der eigentliche Datenzustand hinter dem Symptom ist harmlos und im System bereits vorgesehen: `alice-mail-reader`s `/attachment`-Endpunkt antwortet für uid=2085 idx=0/1 korrekt mit 404 "Anhang nicht gefunden" (`_fetch_attachment_part` in `app.py`), weil die MIME-Struktur dieser Mail beim erneuten IMAP-Refetch nicht mehr exakt der beim ursprünglichen `/fetch` erfassten entspricht. Ohne den Crash hätte der Backfill diesen Fall bereits korrekt über den bestehenden `if (!attData || !attData.content_base64)`-Zweig als `failed` geloggt und wäre mit den übrigen Anhängen weitergelaufen — das ist auch nach dem Fix weiterhin das erwartete Verhalten für diese drei Mails.
+
+**Fix:** In allen `axios.post(...)`-Aufrufen der drei betroffenen Workflow-Code-Nodes wurde `validateStatus: () => true` ergänzt, sodass axios für 4xx/5xx keinen `AxiosError` mehr konstruiert, sondern eine normale Response mit gesetztem `.status` zurückgibt. Die Statusprüfung erfolgt danach explizit im Code statt implizit über `catch(e)`/`e.response?.status`.
+
+- `workflows/alice-mail-attachment-backfill.json`
+  - `Code: Fetch Mails With Attachments` — Weaviate-GraphQL-Aufruf (`/v1/graphql`)
+  - `Code: Import Mail Attachments` — `/attachment-text`, Ollama `/api/generate`, `/attachment`. Der `/attachment`-Aufruf hatte zusätzlich eine Statusunterscheidung, die vorher implizit über `e.response?.status` im `catch`-Block lief (400 → `mailbox_unreachable`, sonst → `failed`); diese Unterscheidung läuft jetzt explizit über `r.status` (404 → `failed` mit spezifischem Log, 400 → `mailbox_unreachable`, sonstige Nicht-2xx → `failed`), ein `catch(e)` bleibt nur noch für echte Netzwerkfehler (kein Response überhaupt) als `mailbox_unreachable` bestehen.
+- `workflows/alice-mail-attachment-processor.json` (Nightly-Pfad seit Iteration 4, betrifft denselben Bug am selben Aufruf-Muster)
+  - `Code: Process Queue Item` — `/attachment-text`, Ollama `/api/generate`, `/attachment`. Gleiches Muster wie im Backfill, aber ohne die 400/404-Sonderfälle des Backfills (der Processor kannte diese Unterscheidung vorher nicht und tut es weiterhin nicht — reiner Fix des Crashs, keine Verhaltensänderung dieses Nodes über die Statusprüfung hinaus).
+
+`alice-mail-sync.json` selbst ist **nicht** betroffen: Seit Iteration 4 führt `Code: Enqueue Attachment Jobs` dort keine `axios`-Aufrufe mehr aus (nur `redis`), die eigentliche Anhang-Verarbeitung mit den axios-Calls läuft ausschließlich im nächtlichen `alice-mail-attachment-processor`.
+
+**Verifikation:**
+
+- Beide geänderten Workflow-JSONs bleiben strukturell gültiges JSON (`json.load` ohne Fehler), Node-Anzahl unverändert (18 bzw. 20).
+- Der geänderte `jsCode` aus allen drei Nodes wurde extrahiert und mit `node --check` gegen echtes Node.js syntaktisch validiert (keine Parse-Fehler).
+- Diff bewusst minimal gehalten (nur die betroffenen `jsCode`-Strings geändert, keine Neuformatierung von Positionsdaten oder anderen Nodes) — `git diff --stat`: 2 Zeilen in `alice-mail-attachment-backfill.json`, 1 Zeile in `alice-mail-attachment-processor.json`.
+- **Nicht verifiziert:** kein Lauf gegen echtes n8n (`mcp__n8n-mcp__*`-Tools in dieser Session nicht aufgerufen, konsistent mit der bereits in der Erstimplementierung dokumentierten Einschränkung). Nach Deployment sollte ein erneuter Backfill-Lauf bestätigen, dass uid=2085 jetzt sauber als `failed` geloggt wird (kein Crash mehr) und die übrigen Mails unverändert importiert werden.
+
+**Deployment:** Beide Workflows (`alice-mail-attachment-backfill`, `alice-mail-attachment-processor`) am 2026-08-26 vom Nutzer manuell in n8n neu importiert und aktiviert. Nutzer bestätigt: Verarbeitung läuft seither fehlerfrei, kein axios/Node-Crash mehr im Log.
 
 ### Bekannte Folge-Tickets (außerhalb PROJ-53)
 
