@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-21
-**Last Updated:** 2026-08-21
+**Last Updated:** 2026-08-26 (axios/Node-24-Crash in `alice-dms-language-backfill` gefixt und deployed, siehe "Fix-Forward" unten)
 
 ## Dependencies
 - None (voraussetzungsfrei)
@@ -303,3 +303,19 @@ This sandbox had no network path to the production n8n/Weaviate instances (same 
 
 ### Known follow-up (not blocking, see QA BUG-2)
 `DMS_LANGUAGE_HEURISTIC_THRESHOLD` is not declared in `docker/compose/automations/n8n/compose.yml` (same pre-existing gap as `DMS_CLASSIFICATION_CONFIDENCE_THRESHOLD` from PROJ-78) — code falls back to `0.3` if unset. Worth a combined follow-up chore for both threshold vars rather than a one-off fix here.
+
+### Fix-Forward — axios/Node-24-Crash bei Nicht-2xx-Antworten (2026-08-26)
+
+Fix-Forward auf einem bereits freigegebenen Workflow — **kein neuer Review-Zyklus**, Status bleibt **Deployed**. Gefunden und gefixt im selben Zug wie der identische Bug in **PROJ-78**s `alice-dms-classification-backfill` (dort die vollständige Ursachenanalyse: bekannte `axios@1.18.0`/`Node.js ≥ 22`-Inkompatibilität, die den n8n-Task-Runner beim Bau eines `AxiosError` für jede Nicht-2xx-Antwort abstürzen lässt — ein Absturz der Runner-Infrastruktur selbst, den kein `try/catch` im Code abfangen kann).
+
+`alice-dms-language-backfill` teilt laut PROJ-92 dieselbe Code-Basis für `Code: Ollama Health Check` und `Code: Fetch All Documents` mit `alice-dms-classification-backfill`; zusätzlich hat `Code: Apply Correction` einen eigenen `axios.patch()`-Aufruf gegen `${WEAVIATE_URL}/v1/objects/${doc.class}/${doc.weaviate_id}` (Feld-PATCH für `summary`/`title`/`languageUncertain`).
+
+**Fix:** Alle drei axios-Aufrufe bekamen `validateStatus: () => true`, Statusprüfung läuft danach explizit über `r.status`/`patchResp.status`:
+
+- `Code: Ollama Health Check` — `ollamaOk` aus `r.status` statt aus "kein Fehler geworfen"
+- `Code: Fetch All Documents` — Nicht-2xx bricht die Pagination-Schleife für die betroffene Collection sauber ab
+- `Code: Apply Correction` — Nicht-2xx beim PATCH wirft jetzt `weaviate_patch_failed: HTTP <status> <Detail>`, landet im bestehenden äußeren `catch`, wird als `failed` gezählt statt den Runner abstürzen zu lassen
+
+**Verifikation:** Workflow-JSON bleibt strukturell gültig (25 Nodes, keine hängenden Connection-Referenzen), alle drei geänderten `jsCode`-Bodies mit `node --check` syntaktisch validiert, Diff minimal (3 Zeilen). Nicht gegen echtes n8n verifiziert (kein `mcp__n8n-mcp__*`-Zugriff in dieser Session).
+
+**Deployment:** Vom Nutzer manuell in n8n neu importiert und aktiviert (2026-08-26), zusammen mit `alice-dms-classification-backfill`. Nutzer bestätigt: Verarbeitung läuft seither fehlerfrei.

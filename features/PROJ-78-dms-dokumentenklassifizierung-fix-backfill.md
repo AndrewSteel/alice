@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-18
-**Last Updated:** 2026-08-21
+**Last Updated:** 2026-08-26 (axios/Node-24-Crash in `alice-dms-classification-backfill` gefixt und deployed, siehe "Fix-Forward" unten)
 
 ## Dependencies
 - None (voraussetzungsfrei)
@@ -273,3 +273,30 @@ Ausführen (auf dem Server bzw. mit Netzwerkzugriff auf Weaviate):
 ```
 
 Status: **Abgeschlossen** — von Andreas ausgeführt, Properties erfolgreich an allen sechs Collections ergänzt.
+
+### Fix-Forward — axios/Node-24-Crash bei Nicht-2xx-Antworten (2026-08-26)
+
+Fix-Forward auf einem bereits freigegebenen Workflow — **kein neuer Review-Zyklus**, Status bleibt **Deployed**.
+
+**Symptom:** Ein Backfill-Lauf gegen 150 Datensätze verarbeitete nur 149 und brach dann komplett ab. n8n-Log zeigte einen rohen Node.js-Crash in `Code: Compare & Handle` statt eines sauberen `winston.warn`-Eintrags: `TypeError: Cannot assign to read only property 'name' of object 'Error: Request failed with status code 422'` in `axios@1.18.0`. Derselbe Crash-Typ wie der zuerst in **PROJ-53** (Mail-Attachment-Backfill) diagnostizierte und dort gefixte Bug (siehe dort für die vollständige Ursachenanalyse).
+
+**Ursache:** Bekannte Inkompatibilität zwischen `axios@1.18.0` und `Node.js ≥ 22` (Task-Runner läuft `Node.js v24.18.1`): Beim Bau eines `AxiosError`-Objekts für jede Nicht-2xx-Antwort wirft axios eine `TypeError`, weil `this.name = 'AxiosError'` auf einer read-only Property des `Error`-Prototyps unter neueren V8-Versionen fehlschlägt. Wichtiger Unterschied zu PROJ-53: Hier lag um den gesamten fehleranfälligen Code bereits ein äußerer `try { ... } catch(e) { logger.warn(...); await incr('failed', 1); ... }`-Block (Zeilen 147–219 vor dem Fix) — der Crash passiert aber **innerhalb** der Task-Runner-Infrastruktur selbst (`InternalTaskRunnerDisconnectAnalyzer` im Log), nicht als normale JavaScript-Exception innerhalb des Sandboxes. Kein noch so umfassender `try/catch` im Node-Code kann einen Absturz des Runner-Prozesses selbst abfangen — deshalb beendete der Fehler die gesamte Batch-Verarbeitung (`Split In Batches`-Schleife) statt nur den einen Datensatz als `failed` zu zählen.
+
+`Code: Compare & Handle` enthielt **10** axios-Aufrufe (GraphQL-Queries, Objekt-Insert/-Delete/-Batch-Insert bei Weaviate, zwei Ollama-Extraktionsaufrufe, ein Thumbnailer-Trigger) — jeder davon war exponiert, nicht nur der eine, der den 422 auslöste. Zusätzlich waren zwei weitere Nodes desselben Workflows betroffen: `Code: Ollama Health Check` (1 Aufruf) und `Code: Fetch All Documents` (1 Aufruf).
+
+**Fix:** In allen 12 axios-Aufrufen (3 Nodes) wurde `validateStatus: () => true` ergänzt, sodass axios für 4xx/5xx keinen `AxiosError` mehr konstruiert, sondern eine normale Response mit gesetztem `.status` zurückgibt. Statusprüfung erfolgt danach explizit im Code:
+
+- `Code: Ollama Health Check` — `ollamaOk` wird jetzt aus `r.status` abgeleitet statt aus "kein Fehler geworfen"
+- `Code: Fetch All Documents` — Nicht-2xx bricht die Pagination-Schleife für die betroffene Collection sauber ab (gleiches Muster wie der GraphQL-Fix in PROJ-53)
+- `Code: Compare & Handle` — alle 10 Aufrufe (`cascadeDeleteBankTransactions`, `deleteExistingByHash`, `extractChunk`/Ollama, BankTransaction-Batch-Insert, Klassifizierungs-Extraktion, Weaviate-Insert des neuen Objekts, Alt-Objekt-Löschung, Thumbnail-Trigger) prüfen jetzt `r.status` statt sich auf axios' Wurfverhalten zu verlassen. Der Weaviate-Insert (Zeile mit dem ursprünglich gemeldeten 422) wirft jetzt `weaviate_insert_failed: HTTP 422 <Fehlerdetail>` — landet im äußeren `catch`, wird als `failed` gezählt und geloggt, der Lauf geht mit dem nächsten Batch-Item weiter, statt abzubrechen
+
+**Zusätzlich gefixt (gleiches Muster, auf Nutzerwunsch mitgenommen):** `alice-dms-language-backfill` (PROJ-79) teilt laut PROJ-92 dieselbe Code-Basis für `Code: Ollama Health Check` und `Code: Fetch All Documents`, plus einen eigenen `axios.patch()`-Aufruf in `Code: Apply Correction` — alle drei ebenfalls auf `validateStatus` umgestellt. Siehe PROJ-79-Spec.
+
+**Verifikation:**
+
+- Beide geänderten Workflow-JSONs bleiben strukturell gültiges JSON, Node-Anzahl unverändert (19 bzw. 25), keine hängenden Connection-Referenzen (eigene Prüfung: alle `connections`-Einträge lösen auf existierende Node-Namen auf).
+- Der geänderte `jsCode` aus allen betroffenen Nodes wurde extrahiert und mit `node --check` syntaktisch validiert (keine Parse-Fehler).
+- Diff bewusst minimal gehalten (nur die betroffenen `jsCode`-Strings geändert, byte-identische Unicode-Kodierung beibehalten) — `git diff --stat`: 3 Zeilen je Datei.
+- **Nicht verifiziert:** kein Lauf gegen echtes n8n in dieser Session (`mcp__n8n-mcp__*`-Tools nicht aufgerufen).
+
+**Deployment:** Vom Nutzer manuell in n8n neu importiert und aktiviert (2026-08-26), zusammen mit `alice-dms-language-backfill`. Nutzer bestätigt: Verarbeitung läuft seither fehlerfrei.
