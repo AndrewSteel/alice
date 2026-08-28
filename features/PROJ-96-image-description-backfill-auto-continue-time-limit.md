@@ -1,8 +1,8 @@
 # PROJ-96: Image-Description-Backfill Auto-Fortsetzung + Zeitlimit
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-28
-**Last Updated:** 2026-08-28 (2 Live-Testläufe durch Nutzer erfolgreich verifiziert, 3 Bugs gefunden und behoben, 0 offen)
+**Last Updated:** 2026-08-28 (deployed — produktiv gesetzt durch Nutzer)
 
 ## Dependencies
 - Betrifft: `alice-dms-image-description-backfill` (PROJ-?, Deployed, aber bisher noch nie ausgeführt — 0 Executions) — kein neuer Baustein, Erweiterung eines bestehenden, ungenutzten Workflows.
@@ -267,4 +267,10 @@ _Bereit für Review._
 - **Recommendation:** Deploy freigeben. Empfehlung an den Nutzer: nach Deploy einmal einen längeren Testlauf beobachten, bei dem die Selbstaufruf-Kette tatsächlich einmal auslöst (bisherige Testläufe endeten jeweils mit `_should_continue: false`, da `remaining` noch weit über 0 lag und die Zeit ausging, bevor eine Fortsetzung nötig wurde — der Selbstaufruf-Pfad selbst wurde daher noch nicht live beobachtet), bevor die nächtlichen Schedule-Trigger unbeaufsichtigt laufen.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-08-28
+**Deployed by:** Nutzer (manuell über n8n-UI, wie von der Backend-Policy vorgesehen — kein automatisiertes Deploy durch Claude Code)
+
+Workflow `alice-dms-image-description-backfill` ist produktiv gesetzt. Die beiden Schedule-Trigger (23:30 Uhr, 06:00 Uhr) laufen ab sofort unbeaufsichtigt; der bestehende Webhook bleibt für Ad-hoc-Testläufe zusätzlich aktiv.
+
+**Offene Beobachtung:** Der Selbstaufruf-Pfad (Auto-Fortsetzung über mehrere Batches) wurde in den bisherigen Testläufen noch nicht ausgelöst, da `remaining` in beiden Fällen die Zeit überdauerte. Empfehlung: n8n-Executions nach dem ersten oder zweiten nächtlichen Lauf prüfen, um zu bestätigen, dass die Selbstaufruf-Kette (`Execute Workflow: Self (Continue)`) bei Bedarf tatsächlich greift und die Lock-Erneuerung über mehrere Kettenglieder hinweg funktioniert.
