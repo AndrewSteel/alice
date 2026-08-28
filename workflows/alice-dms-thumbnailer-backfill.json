@@ -140,6 +140,12 @@
               "responseFormat": "json",
               "fullResponse": true
             }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 200
+            }
           }
         }
       },

@@ -19,6 +19,7 @@ import uuid as uuid_mod
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, field_validator, model_validator
@@ -313,7 +314,15 @@ async def generate(req: GenerateRequest):
             raise HTTPException(status_code=422, detail=f"Source file not found: {req.original_path}")
 
     try:
-        img = generate_thumbnail(req.original_path, req.file_type, mail_text=req.mail_text)
+        # generate_thumbnail() is blocking (subprocess.run, Pillow) and can run
+        # for up to ~120s; calling it directly here would block uvicorn's
+        # event loop and stall every other in-flight request behind it. Under
+        # the backfill's unthrottled concurrency (n8n fires all batch items in
+        # parallel) that queued up hundreds of accepted-but-unserved
+        # connections until the container hit its open-file limit.
+        img = await run_in_threadpool(
+            generate_thumbnail, req.original_path, req.file_type, req.mail_text
+        )
     except Exception as exc:
         logger.warning(
             "Thumbnail generation raised for %s (type=%s): %s: %s",
