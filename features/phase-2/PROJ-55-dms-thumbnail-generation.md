@@ -306,6 +306,25 @@ Validierung: n8n `validate_workflow` meldet 15/15 gültige Verbindungen, 0 ungü
 
 **Status bleibt Deployed bis Verifikation.** Noch nicht deployed/getestet — nächster Schritt: Container neu bauen und deployen, `/tmp` einmalig bereinigen, danach Backfill erneut auslösen.
 
+## Refine — eigentliche Root Cause: unbegrenzte Parallelität + blockierender Event-Loop (2026-08-28)
+
+**Auslöser**: Nach Deploy von BUG-55-6 blieb die Fehlerquote nahezu unverändert (19381 `generation_failed` von 26357). Live-Diagnose während eines laufenden Backfills (`docker exec` auf dem Server, während Fehler im n8n-Log eintrafen) zeigte: **kein** Filesystem-Leck (`/tmp` blieb bei 0–2 Einträgen) und **keine** offenen Dateien — stattdessen fast 1000 offene **Sockets** (`socket:[...]`-Einträge in `/proc/1/fd`) innerhalb von unter 2 Minuten, bei einem `ulimit` von 1024. Das erklärt sowohl `FileNotFoundError: No usable temporary directory` (Python kann bei erschöpftem FD-Limit keine neue Datei/kein Verzeichnis mehr öffnen, unabhängig vom eigentlichen `/tmp`-Zustand) als auch `Too many open files` und das abschließende `socket hang up` (Server kann keine Verbindungen mehr annehmen/bedienen) als **Symptome derselben Ursache**, nicht als eigenständige Bugs.
+
+**Root Cause**: `POST /generate` ist als `async def` deklariert, ruft aber `generate_thumbnail()` **synchron/blockierend** auf (`subprocess.run` mit bis zu 120s Timeout, blockierendes Pillow). Das blockiert uvicorns einzigen Event-Loop-Thread für die gesamte Dauer eines Requests. Der `HTTP: POST /generate`-Node im Backfill-Workflow hatte kein `options.batching` konfiguriert — n8n feuert dann alle Items eines Collection-Batches **parallel** (kein implizites Concurrency-Limit). Bei bis zu 18498 Image-Dokumenten in einer Collection führte das zu hunderten gleichzeitig eingehenden Verbindungen, die der blockierte Event-Loop nicht bedienen konnte; sie stauten sich als angenommene, aber unbearbeitete Sockets auf, bis das `ulimit -n 1024` erreicht war.
+
+### Neuer Bug
+
+| ID | Severity | Beschreibung |
+|---|---|---|
+| BUG-55-7 | Critical | `/generate`-Handler blockiert den uvicorn-Event-Loop während der gesamten (bis zu 120s dauernden) Konvertierung; kombiniert mit fehlendem Concurrency-Limit auf n8n-Seite führt das bei großen Backfill-Läufen zur Erschöpfung des Open-File-Limits und zum Totalausfall des Containers für die restliche Laufzeit (alle nachfolgenden Requests scheitern, zuletzt mit "socket hang up"). BUG-55-6 (Tmpdir-Cleanup) war real und ist weiterhin ein korrekter Fix, aber nicht die dominante Ursache der Fehlerquote. |
+
+### Fix
+
+- `alice-dms-thumbnailer/app/main.py`: `generate_thumbnail()`-Aufruf in `/generate` läuft jetzt über `fastapi.concurrency.run_in_threadpool` (`await run_in_threadpool(generate_thumbnail, ...)`) statt direkt im Event-Loop — Starlettes Default-Threadpool begrenzt die tatsächliche Parallelität selbst (Default-Limit 40 Threads) und hält den Event-Loop für andere Requests frei
+- `workflows/alice-dms-thumbnailer-backfill.json`: `HTTP: POST /generate`-Node erhält `options.batching = { batchSize: 5, batchInterval: 200ms }` — begrenzt die vom Client (n8n) erzeugte Parallelität als zweite, unabhängige Absicherung
+
+**Noch nicht deployed/getestet.** Nächster Schritt: Container neu bauen, Workflow redeployen, `/tmp` einmalig bereinigen (Befehl siehe oben), danach Backfill erneut auslösen und `failed_by_reason` sowie Live-FD-Zahl beobachten.
+
 ### Edge Case (Ergänzung)
 
 - **Weaviate-Objekt in falscher Collection** (z. B. `document_type=Email`-Objekt mit NAS-`file_path` statt `mail_text` — vermutlich Fehlklassifizierungs-Altlast): `/generate` antwortet kontrolliert mit 422 (Pydantic-Validierung bereits vorhanden); Backfill loggt dies unter einem eigenen `reason` (z. B. `validation_error`) statt unspezifisch `generation_failed`, damit Datenqualitätsprobleme von echten Konvertierungsfehlern unterscheidbar sind
