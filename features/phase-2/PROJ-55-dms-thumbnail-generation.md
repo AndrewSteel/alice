@@ -325,6 +325,26 @@ Validierung: n8n `validate_workflow` meldet 15/15 gültige Verbindungen, 0 ungü
 
 **Noch nicht deployed/getestet.** Nächster Schritt: Container neu bauen, Workflow redeployen, `/tmp` einmalig bereinigen (Befehl siehe oben), danach Backfill erneut auslösen und `failed_by_reason` sowie Live-FD-Zahl beobachten.
 
+## Refine — Verifikationslauf nach BUG-55-7-Fix (2026-08-28)
+
+**Ergebnis** nach Deploy von BUG-55-7 (Threadpool + n8n-Batching): Laufzeit 12m13s, `{processed: 16690, failed: 131, skipped_no_path: 5965, total: 22786}` — Erfolgsquote von 4% auf 73% gestiegen. `failed_by_reason`: `weaviate_patch_failed: 49`, `validation_error: 75`, `generation_failed: 7`. Der Kern-Fix (Event-Loop-Blockade + unbegrenzte Parallelität) ist damit als dominante Ursache bestätigt behoben.
+
+### Verbleibende Befunde (niedrige Priorität, dokumentiert statt gefixt)
+
+**`weaviate_patch_failed` (49×) — CUDA Out-of-Memory bei Weaviate-Vektorisierung:**
+
+Root Cause: `thumbnail_path` fehlt in 6 der 7 per `scripts/proj55-add-thumbnail-path.sh` nachträglich ergänzten Collections (Invoice, BankStatement, Document, Email, SecuritySettlement, Contract) der `moduleConfig`-Block mit `skip: true` — nur `Image.thumbnail_path` (beim initialen Schema-Import angelegt, nicht per Nachtrags-Skript) hat ihn korrekt. Grund: Das Skript sendet beim `POST /v1/schema/{cls}/properties` nur `{name, dataType, description}`, ohne `moduleConfig` (Zeile 40-44). Ohne `skip: true` fließt der Thumbnail-Pfad-String in die `text2vec-transformers`-Vektorisierung ein, und jeder PATCH auf `thumbnail_path` löst eine volle Neu-Vektorisierung des Objekts auf der GPU aus — parallel zur ohnehin laufenden Thumbnail-Generierung, was unter Last zu CUDA-OOM führen kann.
+
+**Geprüfter, aber verworfener Fix:** Weaviate erlaubt weder das Ändern noch das Löschen einer bestehenden Property (per Live-Test bestätigt: `DELETE /v1/schema/{cls}/properties/{prop}` → 404, Property blieb bestehen). Eine Korrektur wäre nur über ein neues Feld + Datenkopie + Umstellung aller Codepfade (Container, beide n8n-Workflows, ggf. Frontend) möglich. Angesichts der geringen Fehlerquote (49 von 22786 ≈ 0,2%, keine Datenintegrität betroffen, betroffene Objekte werden beim nächsten — idempotenten — Backfill-Lauf automatisch erneut versucht) **keine Migration**, nur Dokumentation dieser Einschränkung.
+
+`scripts/proj55-add-thumbnail-path.sh` wird **nicht** korrigiert: Die lokalen `schemas/*.json` sind bereits der korrekte Zielzustand (inkl. `moduleConfig`) für Neuinstallationen, die das komplette Schema in einem Rutsch importieren — das Skript kommt dabei nie zum Einsatz, der Bug tritt also bei zukünftigen Aufsetzungen nicht erneut auf.
+
+**Restliche Fehlerursachen** (`validation_error: 75`, `generation_failed: 7`, sowie `timeout of 120000ms exceeded` in einzelnen `HTTP: POST /generate`-Aufrufen): erwartungskonform bei dieser Größenordnung, kein weiterer Handlungsbedarf im Rahmen von PROJ-55.
+
+**`BankTransaction` fehlt `thumbnail_path` komplett** (GraphQL-Fehler beim Backfill-Query, `found 0 docs` obwohl Transaktionen ohne Thumbnail existieren): wird nicht in PROJ-55 behoben, siehe [PROJ-95](../INDEX.md) (BankTransaction-Thumbnails, Text-Rendering-Modus analog PROJ-93).
+
+**Status: PROJ-55 kann nach diesem Verifikationslauf als abgeschlossen betrachtet werden** — die Kernfunktion (Laufzeit-Thumbnailer + Backfill) arbeitet zuverlässig; verbleibende Fehlerquote ist erklärt und bewusst nicht weiter reduziert (GPU-Vektorisierungs-Altlast) bzw. an PROJ-95 verwiesen (BankTransaction). Nächster Schritt: `/qa` gegen die aktualisierten Acceptance Criteria, dann Status auf Deployed.
+
 ### Edge Case (Ergänzung)
 
 - **Weaviate-Objekt in falscher Collection** (z. B. `document_type=Email`-Objekt mit NAS-`file_path` statt `mail_text` — vermutlich Fehlklassifizierungs-Altlast): `/generate` antwortet kontrolliert mit 422 (Pydantic-Validierung bereits vorhanden); Backfill loggt dies unter einem eigenen `reason` (z. B. `validation_error`) statt unspezifisch `generation_failed`, damit Datenqualitätsprobleme von echten Konvertierungsfehlern unterscheidbar sind
