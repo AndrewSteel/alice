@@ -254,3 +254,28 @@ curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-bac
 ## Nachträgliche Änderung (2026-08-17)
 
 **Logging auf winston umgestellt**: Die Code-Nodes in `workflows/alice-dms-thumbnailer.json` verwendeten `console.log`/`console.warn`, deren Ausgabe nur im Browser-Log landet und für Post-Incident-Analysen nicht verfügbar ist. Umgestellt auf einen `winston`-Logger pro Node (File-Transport nach `/home/node/.n8n/logs/n8n.log`, `defaultMeta` mit Workflow-/Node-Namen), analog zur PROJ-72-Migration von scanner/path-worker/processor. Reine Logging-Änderung, keine funktionale Änderung. Deployed: 2026-08-17.
+
+## Refine — Backfill-Fehleranalyse (2026-08-28)
+
+**Auslöser**: Beim ersten produktiven Lauf von `alice-dms-thumbnailer-backfill` (Execution 160594, 2026-08-28, 22170 verarbeitete Objekte) meldete die `HTTP: POST /generate`-Node zunächst `550`/`500 - Internal Server Error`. Der Runtime-Workflow `alice-dms-thumbnailer` stand zu diesem Zeitpunkt fälschlich auf unpublished; nach Publizieren blieb unklar, ob dies der einzige Auslöser war, da für den Runtime-Workflow noch keine Executions vorlagen. Analyse der Execution-Daten (n8n MCP) und des Containercodes (`alice-dms-thumbnailer/app/main.py`) ergab drei unabhängige Ursachen — der ursprüngliche "550"-Verdacht (unpublished Workflow) war nicht die (alleinige) Ursache.
+
+### Neue Bugs
+
+| ID | Severity | Beschreibung |
+|---|---|---|
+| BUG-55-3 | High | `Merge: All Results` (n8n-nodes-base.merge, typeVersion 3) hat keinen `numberInputs`-Parameter gesetzt (Default = 1 Input). Alle drei Vorgänger-Branches (`Code: Log PATCH Result`, `Code: Log Generation Error`, `Code: Log Skip (no file_path)`) sind auf denselben Input-Index 0 verbunden, statt auf 3 getrennte Inputs. Dadurch erreichen nur die `processed`-Items (884) den `Code: Summary`-Node; `failed` (21286) und `skipped` (5965) werden verworfen. `Respond to Webhook` meldet fälschlich `{processed: 884, failed: 0, skipped_no_path: 0, total: 884}` statt der tatsächlichen Zahlen — ein produktiver Lauf mit 96 % Fehlerquote erscheint im Response als vollständiger Erfolg. |
+| BUG-55-4 | Medium | `Code: Log Generation Error` liest `item.json.weaviate_uuid`, aber `item.json` ist an dieser Stelle die HTTP-Fehlerantwort von `/generate` (`{error: {...}}`), nicht das ursprüngliche Request-Item. Dadurch wird für jeden der 21286 Fehler `uuid: "unknown"` geloggt — eine Zuordnung von Fehler zu Dokument ist im Log nicht mehr möglich. |
+| BUG-55-5 | Medium | `generate_thumbnail()` in `alice-dms-thumbnailer/app/main.py` fängt keine Exceptions aus der Konvertierungslogik (PDF-Rendering, LibreOffice-Aufruf, Pillow) ab. Nur der bereits behandelte Fall "Quelldatei fehlt" liefert kontrolliert 422; jede andere Konvertierungs-Exception propagiert unbehandelt und wird von FastAPI als 500 beantwortet — abweichend von den in den Edge Cases beschriebenen Fällen (Zeile 57–58: "Fehler loggen, kein Thumbnail"), die einen kontrollierten Fehlerpfad vorsehen. Zusätzlich wurden bei der Postman-Stichprobe Objekte beobachtet, die in der Weaviate-Collection `Email` liegen, aber einen `file_path` auf ein NAS-Dokument (nicht `mail_text`) besitzen — für diese schlägt die Pydantic-Validierung in `GenerateRequest` mit 422 "mail_text must not be empty" fehl. Da BUG-55-3/-4 die genaue Fehlerverteilung (422 vs. 500, betroffene UUIDs) verschleiert haben, ist unbekannt, welcher Anteil der 21286 Fehler auf Fehlklassifizierung vs. echte Konvertierungsfehler entfällt; das lässt sich erst nach Fix von BUG-55-3/-4 im nächsten Lauf feststellen. |
+
+### Neue Acceptance Criteria (Backfill-Robustheit)
+
+- [ ] `Merge: All Results` ist korrekt mit 3 Inputs konfiguriert (`numberInputs: 3`, Mode "Append"); jeder der drei Branches (processed / failed / skipped) ist auf einen eigenen Input-Index verbunden
+- [ ] Das Backfill-Response-JSON spiegelt nach einem Lauf mit gemischten Ergebnissen alle drei Kategorien korrekt wider (verifiziert per Testlauf mit bekannt gemischten Daten)
+- [ ] `Code: Log Generation Error` loggt die tatsächliche `weaviate_uuid` und `document_type` des fehlgeschlagenen Dokuments (aus dem Request-Item, nicht aus der Fehlerantwort) sowie den HTTP-Statuscode der `/generate`-Antwort, damit Fehlerursachen (422 Validierung vs. 500 Konvertierung) im Log unterscheidbar sind
+- [ ] `alice-dms-thumbnailer`-Container: Konvertierungsfehler (PDF-Rendering, LibreOffice, Pillow) werden in `generate_thumbnail()` bzw. im `/generate`-Handler abgefangen und als kontrollierter 422 mit aussagekräftigem `detail` zurückgegeben, nicht als unbehandelter 500
+
+### Edge Case (Ergänzung)
+
+- **Weaviate-Objekt in falscher Collection** (z. B. `document_type=Email`-Objekt mit NAS-`file_path` statt `mail_text` — vermutlich Fehlklassifizierungs-Altlast): `/generate` antwortet kontrolliert mit 422 (Pydantic-Validierung bereits vorhanden); Backfill loggt dies unter einem eigenen `reason` (z. B. `validation_error`) statt unspezifisch `generation_failed`, damit Datenqualitätsprobleme von echten Konvertierungsfehlern unterscheidbar sind
+
+**Status bleibt Deployed** — die bestehende Produktivfunktion (Runtime-Thumbnailer bei Einzeldokumenten) ist von diesen Bugs nicht betroffen; sie betreffen ausschließlich den Backfill-Workflow und dessen Diagnostizierbarkeit. Fix ist über `/backend` einzuplanen.
