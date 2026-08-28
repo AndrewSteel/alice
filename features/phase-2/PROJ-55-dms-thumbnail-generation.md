@@ -284,6 +284,28 @@ curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-bac
 
 Validierung: n8n `validate_workflow` meldet 15/15 gültige Verbindungen, 0 ungültige; verbleibende Warnungen sind vorbestehend (veraltete typeVersions, IF-Branch-Hinweise sind False Positives für true/false-Ausgänge). `python3 -m py_compile` auf `main.py` fehlerfrei.
 
+## Refine — Nachfolge-Fehler nach Deploy von BUG-55-3/-4/-5 (2026-08-28)
+
+**Auslöser**: Nach Deploy der drei Fixes blieb die Fehlerquote im Backfill weiterhin hoch. Dank BUG-55-5 (kontrollierter 422 statt unbehandeltem 500) waren die tatsächlichen Fehlermeldungen jetzt erstmals sichtbar: `FileNotFoundError: No usable temporary directory found in ['/tmp', '/var/tmp', '/usr/tmp', '/app']` und `OSError: [Errno 24] Too many open files`.
+
+**Diagnose** (per Server-Zugriff des Nutzers, `docker exec alice-dms-thumbnailer`): Offene Filehandles (13) und `/tmp`-Speicherplatz (700G frei) waren unauffällig — kein FD-Leck, keine Diskplatzknappheit. Stattdessen lagen 78 **leere** `tmp*`-Verzeichnisse in `/tmp` (Python-`tempfile.TemporaryDirectory()`-Namensschema), die nie aufgeräumt wurden. Leere Verzeichnisse (keine `.pdf`/`.jpg`-Reste) schließen einen mitten in der Konvertierung abgebrochenen Prozess als Ursache aus — das Verzeichnis wurde erstellt, aber der reguläre `with`-Exit (Cleanup) griff nie.
+
+### Neuer Bug
+
+| ID | Severity | Beschreibung |
+|---|---|---|
+| BUG-55-6 | High | `_render_pdf_first_page()` und `_convert_office_to_pdf()` in `alice-dms-thumbnailer/app/main.py` riefen `subprocess.run(..., timeout=N)` auf. Bei Timeout terminiert `subprocess.run` nur den direkten Kindprozess — LibreOffice forkt jedoch einen `soffice.bin`-Worker, der das `--outdir`-Verzeichnis weiterhin offenhält. Das nachfolgende `TemporaryDirectory.__exit__` (`shutil.rmtree`) scheitert dadurch für dieses Verzeichnis ("directory not empty"/Handle noch offen); über viele Backfill-Requests akkumulieren sich offene Handles bis zum `ulimit`-Limit ("Too many open files") bzw. `/tmp` wird durch liegengebliebene (aber leere) Verzeichnisse als "kein nutzbares Tempdir" fehlinterpretiert. |
+
+### Fix
+
+- `_run_with_timeout_kill()`: neue Hilfsfunktion, startet den Subprozess mit `start_new_session=True` und killt bei Timeout die **gesamte Prozessgruppe** (`os.killpg(..., SIGKILL)`) statt nur den direkten Kindprozess — verhindert, dass LibreOffice-Worker das Tempdir offenhalten
+- `_render_pdf_first_page()` / `_convert_office_to_pdf()`: `with tempfile.TemporaryDirectory()` ersetzt durch `tempfile.mkdtemp()` + explizites `try/finally: shutil.rmtree(tmpdir, ignore_errors=True)` — Cleanup-Fehler werden verschluckt statt selbst zur Exception zu werden und weiteren Müll zu hinterlassen
+- `Image.open(pages[0]).copy()` → `with Image.open(pages[0]) as im: return im.copy()` — schließt das PIL-Filehandle explizit statt es dem GC zu überlassen
+
+**Manuelle Aufräumaktion nötig**: Die 78 bereits vorhandenen verwaisten `/tmp/tmp*`-Verzeichnisse werden vom Fix nicht rückwirkend entfernt (kein Startup-Cleanup eingebaut — einmaliges Aufräumen reicht, kein wiederkehrendes Muster erwartet nach dem Fix). Vor dem nächsten Backfill-Lauf manuell entfernen: `docker exec alice-dms-thumbnailer sh -c 'find /tmp -maxdepth 1 -name "tmp??????????" -type d -exec rmdir {} +'`
+
+**Status bleibt Deployed bis Verifikation.** Noch nicht deployed/getestet — nächster Schritt: Container neu bauen und deployen, `/tmp` einmalig bereinigen, danach Backfill erneut auslösen.
+
 ### Edge Case (Ergänzung)
 
 - **Weaviate-Objekt in falscher Collection** (z. B. `document_type=Email`-Objekt mit NAS-`file_path` statt `mail_text` — vermutlich Fehlklassifizierungs-Altlast): `/generate` antwortet kontrolliert mit 422 (Pydantic-Validierung bereits vorhanden); Backfill loggt dies unter einem eigenen `reason` (z. B. `validation_error`) statt unspezifisch `generation_failed`, damit Datenqualitätsprobleme von echten Konvertierungsfehlern unterscheidbar sind
