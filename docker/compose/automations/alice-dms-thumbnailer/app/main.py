@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
+import signal
 import subprocess
 import tempfile
 import uuid as uuid_mod
@@ -126,14 +128,37 @@ def _square_crop(img: Image.Image, top_crop: bool = False) -> Image.Image:
     return img.crop((left, upper, left + size, upper + size))
 
 
+def _run_with_timeout_kill(cmd: list[str], timeout: int) -> None:
+    """Run cmd, killing its whole process group on timeout.
+
+    subprocess.run(timeout=...) only terminates the direct child. LibreOffice
+    forks a soffice.bin worker that survives that kill, keeps the outdir's
+    FDs open, and made shutil.rmtree()/TemporaryDirectory cleanup fail
+    (observed as "Too many open files" and orphaned empty /tmp/tmpXXXXXXXX
+    dirs after many backfill requests). Running in a new session lets us
+    kill the whole group instead of just the immediate child.
+    """
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+    )
+    try:
+        _, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=stderr)
+
+
 def _render_pdf_first_page(pdf_path: str) -> Image.Image | None:
     """Use pdftoppm to render first page of PDF, return PIL Image."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    tmpdir = tempfile.mkdtemp()
+    try:
         out_prefix = os.path.join(tmpdir, "page")
         try:
-            subprocess.run(
-                ["pdftoppm", "-r", "150", "-l", "1", "-jpeg", pdf_path, out_prefix],
-                check=True, capture_output=True, timeout=60,
+            _run_with_timeout_kill(
+                ["pdftoppm", "-r", "150", "-l", "1", "-jpeg", pdf_path, out_prefix], timeout=60,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
             logger.warning("pdftoppm failed for %s: %s", pdf_path, exc)
@@ -141,19 +166,23 @@ def _render_pdf_first_page(pdf_path: str) -> Image.Image | None:
         pages = sorted(Path(tmpdir).glob("*.jpg"))
         if not pages:
             return None
-        return Image.open(pages[0]).copy()
+        with Image.open(pages[0]) as im:
+            return im.copy()
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _convert_office_to_pdf(office_path: str) -> str | None:
     """Use LibreOffice headless to convert Office file to PDF, return PDF path."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    tmpdir = tempfile.mkdtemp()
+    try:
         try:
-            subprocess.run(
+            _run_with_timeout_kill(
                 [
                     "libreoffice", "--headless", "--convert-to", "pdf",
                     "--outdir", tmpdir, office_path
                 ],
-                check=True, capture_output=True, timeout=120,
+                timeout=120,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
             logger.warning("LibreOffice conversion failed for %s: %s", office_path, exc)
@@ -166,6 +195,8 @@ def _convert_office_to_pdf(office_path: str) -> str | None:
         stable.write(pdfs[0].read_bytes())
         stable.close()
         return stable.name
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _render_text_image(text: str) -> Image.Image | None:
