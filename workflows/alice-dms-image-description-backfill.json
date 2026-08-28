@@ -3,16 +3,50 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## alice-dms-image-description-backfill\n\nManual backfill: retries the AI vision description for Weaviate \"Image\"\nobjects where extraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Trigger**: POST /webhook/alice-dms-image-description-backfill\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
-        "height": 220,
-        "width": 460,
+        "content": "## alice-dms-image-description-backfill\n\nRetries the AI vision description for Weaviate \"Image\" objects where\nextraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Triggers**:\n- `Schedule Trigger: 23:30` — daily, window limit 2h15min (8100s)\n- `Schedule Trigger: 06:00` — daily, window limit 1h45min (6300s)\n- `Webhook: POST /image-description-backfill` — ad-hoc test runs, optional\n  `max_runtime_seconds` override in body/query (same override pattern as PROJ-92)\n\n**Auto-continue (PROJ-96)**: fetches up to 50 images per batch (LIMIT unchanged).\nIf time remains in the window (>= 5min buffer) and images with extraction_failed=true\nremain, the workflow re-invokes itself (Execute Workflow, waitForSubWorkflow=true),\npassing the original window_start + limit forward so the time check stays consistent\nacross the whole self-invocation chain.\n\n**Time limit check**: between loop iterations (not mid Ollama-call/PATCH), analog\nPROJ-94 — the in-flight image always finishes before the loop is left.\n\n**Overlap lock**: `alice:dms:image-description-backfill:lock:run` (Redis) — first\ninvocation of a window chain acquires fail-closed (skip run if already locked by\nanother chain); every self-invocation renews the same lock fail-open (Redis hiccup\nmust not abort an already-running chain — TTL is the fallback safety net).\n\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
+        "height": 460,
+        "width": 500,
         "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [0, -240],
+      "position": [0, -520],
       "id": "sticky-image-desc-backfill",
       "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 23 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, -240],
+      "id": "schedule-trigger-2330",
+      "name": "Schedule Trigger: 23:30"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, -80],
+      "id": "schedule-trigger-0600",
+      "name": "Schedule Trigger: 06:00"
     },
     {
       "parameters": {
@@ -24,7 +58,7 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [0, 100],
       "id": "webhook-trigger",
       "name": "Webhook: POST /image-description-backfill",
       "webhookId": "alice-dms-image-description-backfill-v1",
@@ -32,11 +66,81 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Fetch Failed Batch\" } });\nconst axios = require('axios');\n\n// Reset per-run counters (workflow static data persists across executions, so it must be zeroed at the start of every run)\nconst staticData = $getWorkflowStaticData('node');\nstaticData.updated = 0;\nstaticData.still_failed = 0;\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 50;\nconst gql = `{ Get { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }, limit: ${LIMIT}) { _additional { id } file_path additionalPaths } } }`;\n\nlet results = [];\ntry {\n  const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  if (r.data?.errors) {\n    logger.warn(`[image-description-backfill] GraphQL error: ${JSON.stringify(r.data.errors)}`);\n  } else {\n    results = r.data?.data?.Get?.Image || [];\n  }\n} catch (e) {\n  logger.warn(`[image-description-backfill] Fetch failed: ${e.message}`);\n}\n\nlogger.info(`[image-description-backfill] Found ${results.length} image(s) with extraction_failed=true`);\n\nif (results.length === 0) {\n  return [{ json: { _empty: true } }];\n}\n\nreturn results.map(doc => ({\n  json: {\n    weaviate_uuid: doc._additional?.id,\n    file_path: doc.file_path || null,\n    additionalPaths: doc.additionalPaths || [],\n    _empty: false\n  }\n}));"
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 260],
+      "id": "execute-workflow-trigger",
+      "name": "Execute Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Init Run\" } });\n\n// Window limits per schedule (seconds). Webhook may override for ad-hoc test runs.\nconst WINDOW_LIMITS = {\n  'Schedule Trigger: 23:30': 8100,  // 2h15min\n  'Schedule Trigger: 06:00': 6300   // 1h45min\n};\nconst DEFAULT_TEST_LIMIT_SECONDS = 300; // fallback for ad-hoc webhook runs without an explicit override\n\nconst item = $input.first().json;\n\n// A self-invocation (Execute Workflow Trigger) always carries an explicit\n// window_start + max_runtime_seconds from the parent run — continue that\n// window unchanged rather than starting a new one.\nif (item.window_start !== undefined && item.max_runtime_seconds !== undefined) {\n  logger.info(`[image-description-backfill] Continuation run, window_start=${item.window_start}, max_runtime_seconds=${item.max_runtime_seconds}`);\n  return [{ json: {\n    window_start: item.window_start,\n    max_runtime_seconds: item.max_runtime_seconds,\n    lock_owner: item.lock_owner,\n    is_continuation: true,\n    _from_webhook: item._from_webhook === true\n  } }];\n}\n\n// First run of a window: determine which trigger fired and the limit that applies.\nlet maxRuntimeSeconds;\nlet fromWebhook = false;\n\n// Determine the actual firing trigger via node names present in the execution.\nlet firedNode = null;\ntry {\n  if ($('Schedule Trigger: 23:30').first()) firedNode = 'Schedule Trigger: 23:30';\n} catch(e) {}\ntry {\n  if (!firedNode && $('Schedule Trigger: 06:00').first()) firedNode = 'Schedule Trigger: 06:00';\n} catch(e) {}\ntry {\n  if (!firedNode && $('Webhook: POST /image-description-backfill').first()) firedNode = 'Webhook: POST /image-description-backfill';\n} catch(e) {}\n\nif (firedNode && WINDOW_LIMITS[firedNode]) {\n  maxRuntimeSeconds = WINDOW_LIMITS[firedNode];\n} else {\n  // Webhook (ad-hoc test) run: read override from body/query, same pattern as PROJ-92.\n  fromWebhook = true;\n  let body = {}, query = {};\n  try {\n    const webhookItem = $('Webhook: POST /image-description-backfill').first().json;\n    body = webhookItem.body || {};\n    query = webhookItem.query || {};\n  } catch(e) {}\n  const rawMax = body.max_runtime_seconds !== undefined ? body.max_runtime_seconds : query.max_runtime_seconds;\n  const parsedMax = parseInt(rawMax, 10);\n  maxRuntimeSeconds = (!isNaN(parsedMax) && parsedMax > 0) ? parsedMax : DEFAULT_TEST_LIMIT_SECONDS;\n}\n\nconst windowStart = Date.now();\nlogger.info(`[image-description-backfill] First run of window, trigger=${firedNode || 'webhook'}, max_runtime_seconds=${maxRuntimeSeconds}, window_start=${windowStart}`);\n\nreturn [{ json: {\n  window_start: windowStart,\n  max_runtime_seconds: maxRuntimeSeconds,\n  is_continuation: false,\n  _from_webhook: fromWebhook\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [300, 0],
+      "position": [300, -40],
+      "id": "code-init-run",
+      "name": "Code: Init Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Acquire/Renew Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n\nconst LOCK_KEY = 'alice:dms:image-description-backfill:lock:run';\nconst LOCK_TTL_MS = 900000; // 15 min, well above a single 50-image batch (~25 min worst case at 30s/image, renewed every batch)\n\nconst item = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n\nif (!item.is_continuation) {\n  // First run of a window: fail-closed. Two overlapping chains would double up\n  // Ollama load on a server with n_slots=1 - the core reason this lock exists.\n  const ownerToken = crypto.randomUUID();\n  let acquired = false;\n  try {\n    await client.connect();\n    const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n    acquired = (res === 'OK');\n  } catch(e) {\n    logger.info(`[image-description-backfill] Lock acquire error: ${e.message} - failing closed (skip run)`);\n    acquired = false;\n  } finally {\n    await client.quit().catch(() => {});\n  }\n  return [{ json: { ...item, lock_owner: acquired ? ownerToken : null, _lock_acquired: acquired } }];\n}\n\n// Continuation (self-invocation): renew the same lock, fail-open. No second\n// chain can start in the meantime without seeing this lock (even if expired,\n// TTL is generous relative to batch time), so a Redis hiccup here must not\n// abort an already-successfully-started, multi-hour chain.\nconst owner = item.lock_owner;\nconst RENEW_SCRIPT = `\nlocal raw = redis.call('GET', KEYS[1])\nif not raw then return 0 end\nlocal ok, data = pcall(cjson.decode, raw)\nif not ok or data.owner ~= ARGV[1] then return 0 end\nredis.call('SET', KEYS[1], raw, 'PX', ARGV[2])\nreturn 1\n`;\ntry {\n  await client.connect();\n  await client.eval(RENEW_SCRIPT, { keys: [LOCK_KEY], arguments: [owner, String(LOCK_TTL_MS)] });\n} catch(e) {\n  logger.info(`[image-description-backfill] Lock renew error: ${e.message} - continuing fail-open`);\n} finally {\n  await client.quit().catch(() => {});\n}\nreturn [{ json: { ...item, _lock_acquired: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, -40],
+      "id": "code-acquire-renew-lock",
+      "name": "Code: Acquire/Renew Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-lock-acquired",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [900, -40],
+      "id": "if-lock-acquired",
+      "name": "IF: Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Skip (Locked)\" } });\nlogger.info('[image-description-backfill] Run skipped: another window chain is already in progress (lock held)');\nconst run = $input.first().json;\nreturn [{ json: { processed: 0, updated: 0, still_failed: 0, remaining: null, skipped: true, reason: 'locked', _from_webhook: run._from_webhook === true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 100],
+      "id": "code-skip-locked",
+      "name": "Code: Skip (Locked)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Fetch Failed Batch\" } });\nconst axios = require('axios');\n\n// Reset per-run counters (workflow static data persists across executions, so it must be zeroed at the start of every run)\nconst staticData = $getWorkflowStaticData('global');\nstaticData.updated = 0;\nstaticData.still_failed = 0;\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 50;\nconst gql = `{ Get { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }, limit: ${LIMIT}) { _additional { id } file_path additionalPaths } } }`;\n\nlet results = [];\ntry {\n  const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  if (r.data?.errors) {\n    logger.warn(`[image-description-backfill] GraphQL error: ${JSON.stringify(r.data.errors)}`);\n  } else {\n    results = r.data?.data?.Get?.Image || [];\n  }\n} catch (e) {\n  logger.warn(`[image-description-backfill] Fetch failed: ${e.message}`);\n}\n\nlogger.info(`[image-description-backfill] Found ${results.length} image(s) with extraction_failed=true`);\n\nconst run = $('Code: Acquire/Renew Lock').first().json;\n\nif (results.length === 0) {\n  return [{ json: { _empty: true, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner, _from_webhook: run._from_webhook } }];\n}\n\nreturn results.map(doc => ({\n  json: {\n    weaviate_uuid: doc._additional?.id,\n    file_path: doc.file_path || null,\n    additionalPaths: doc.additionalPaths || [],\n    _empty: false,\n    window_start: run.window_start,\n    max_runtime_seconds: run.max_runtime_seconds,\n    lock_owner: run.lock_owner,\n    _from_webhook: run._from_webhook\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, -40],
       "id": "code-fetch-failed",
       "name": "Code: Fetch Failed Batch"
     },
@@ -66,7 +170,7 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [600, 0],
+      "position": [1500, -40],
       "id": "if-batch-empty",
       "name": "IF: Batch Empty"
     },
@@ -76,7 +180,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, -100],
+      "position": [1800, -160],
       "id": "code-empty-summary",
       "name": "Code: Empty Summary"
     },
@@ -89,7 +193,7 @@
       },
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [900, 100],
+      "position": [1800, 60],
       "id": "split-per-image",
       "name": "Split: Per Image"
     },
@@ -99,7 +203,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 100],
+      "position": [2100, 60],
       "id": "code-resolve-read",
       "name": "Code: Resolve & Read Image"
     },
@@ -129,17 +233,17 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1500, 100],
+      "position": [2400, 60],
       "id": "if-file-readable",
       "name": "IF: File Readable"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (No File)\" } });\nconst staticData = $getWorkflowStaticData('node');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst item = $input.first().json;\nlogger.warn(`[image-description-backfill] Still failed (no readable file): ${item.weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'no_file' } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (No File)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst item = $input.first().json;\nlogger.warn(`[image-description-backfill] Still failed (no readable file): ${item.weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'no_file' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1800, 250],
+      "position": [2700, 210],
       "id": "code-log-still-failed-nofile",
       "name": "Code: Log Still Failed (No File)"
     },
@@ -171,7 +275,7 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1800, 0],
+      "position": [2700, -40],
       "id": "http-ollama-vision",
       "name": "HTTP: Ollama Vision",
       "onError": "continueRegularOutput"
@@ -202,17 +306,17 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [2100, 0],
+      "position": [3000, -40],
       "id": "if-ollama-ok",
       "name": "IF: Ollama OK"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (Ollama Error)\" } });\nconst staticData = $getWorkflowStaticData('node');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\nlogger.warn(`[image-description-backfill] Ollama call failed for ${weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'ollama_error' } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (Ollama Error)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\nlogger.warn(`[image-description-backfill] Ollama call failed for ${weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'ollama_error' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 150],
+      "position": [3300, 110],
       "id": "code-log-still-failed-ollama",
       "name": "Code: Log Still Failed (Ollama Error)"
     },
@@ -222,7 +326,7 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, -150],
+      "position": [3300, -190],
       "id": "code-extract-description",
       "name": "Code: Extract Description"
     },
@@ -254,30 +358,170 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2700, -150],
+      "position": [3600, -190],
       "id": "http-patch-weaviate",
       "name": "HTTP: PATCH Weaviate",
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log PATCH Result\" } });\nconst resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nconst staticData = $getWorkflowStaticData('node');\nif (statusCode >= 200 && statusCode < 300) {\n  staticData.updated = (staticData.updated || 0) + 1;\n  return [{ json: { result: 'updated' } }];\n} else {\n  staticData.still_failed = (staticData.still_failed || 0) + 1;\n  logger.warn(`[image-description-backfill] PATCH failed (HTTP ${statusCode})`);\n  return [{ json: { result: 'still_failed', reason: 'patch_failed' } }];\n}"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log PATCH Result\" } });\nconst resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nconst staticData = $getWorkflowStaticData('global');\nif (statusCode >= 200 && statusCode < 300) {\n  staticData.updated = (staticData.updated || 0) + 1;\n  return [{ json: { result: 'updated' } }];\n} else {\n  staticData.still_failed = (staticData.still_failed || 0) + 1;\n  logger.warn(`[image-description-backfill] PATCH failed (HTTP ${statusCode})`);\n  return [{ json: { result: 'still_failed', reason: 'patch_failed' } }];\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3000, -150],
+      "position": [3900, -190],
       "id": "code-log-patch-result",
       "name": "Code: Log PATCH Result"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Summary\" } });\nconst staticData = $getWorkflowStaticData('node');\nconst updated = staticData.updated || 0;\nconst still_failed = staticData.still_failed || 0;\nconst processed = updated + still_failed;\n\nconst axios = require('axios');\nlet remaining = null;\ntry {\n  const gql = `{ Aggregate { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }) { meta { count } } } }`;\n  const r = await axios.post('http://weaviate:8080/v1/graphql', { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  remaining = r.data?.data?.Aggregate?.Image?.[0]?.meta?.count ?? null;\n} catch (e) {\n  logger.warn(`[image-description-backfill] Remaining count query failed: ${e.message}`);\n}\n\nconst summary = { processed, updated, still_failed, remaining };\nlogger.info(`[image-description-backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Time Check\" } });\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst elapsedSeconds = (Date.now() - run.window_start) / 1000;\nconst timeLimitReached = elapsedSeconds >= run.max_runtime_seconds;\nif (timeLimitReached) {\n  logger.info(`[image-description-backfill] Window time limit reached (elapsed=${Math.round(elapsedSeconds)}s, limit=${run.max_runtime_seconds}s) - leaving loop, in-flight image already completed`);\n}\nreturn [{ json: { ...$input.first().json, _time_limit_reached: timeLimitReached } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, -100],
+      "position": [4200, 60],
+      "id": "code-time-check",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-time-limit-reached",
+              "leftValue": "={{ $json._time_limit_reached }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [4500, 60],
+      "id": "if-time-limit-reached",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Summary\" } });\nconst staticData = $getWorkflowStaticData('global');\nconst updated = staticData.updated || 0;\nconst still_failed = staticData.still_failed || 0;\nconst processed = updated + still_failed;\n\nconst axios = require('axios');\nlet remaining = null;\ntry {\n  const gql = `{ Aggregate { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }) { meta { count } } } }`;\n  const r = await axios.post('http://weaviate:8080/v1/graphql', { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  remaining = r.data?.data?.Aggregate?.Image?.[0]?.meta?.count ?? null;\n} catch (e) {\n  logger.warn(`[image-description-backfill] Remaining count query failed: ${e.message}`);\n}\n\nconst summary = { processed, updated, still_failed, remaining };\nlogger.info(`[image-description-backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2100, -160],
       "id": "code-summary",
       "name": "Code: Summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Check Continue\" } });\nconst summary = $input.first().json;\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst BUFFER_SECONDS = 300; // 5 min safety buffer before the window limit\n\nconst elapsedSeconds = (Date.now() - run.window_start) / 1000;\nconst timeRemaining = run.max_runtime_seconds - elapsedSeconds;\nconst hasMoreImages = (summary.remaining || 0) > 0;\nconst enoughTimeForAnotherBatch = timeRemaining >= BUFFER_SECONDS;\n\nconst shouldContinue = hasMoreImages && enoughTimeForAnotherBatch;\nlogger.info(`[image-description-backfill] Check Continue: remaining=${summary.remaining}, time_remaining=${Math.round(timeRemaining)}s, shouldContinue=${shouldContinue}`);\n\nreturn [{ json: { ...summary, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner, _from_webhook: run._from_webhook, _should_continue: shouldContinue } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, -160],
+      "id": "code-check-continue",
+      "name": "Code: Check Continue"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-should-continue",
+              "leftValue": "={{ $json._should_continue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2700, -160],
+      "id": "if-should-continue",
+      "name": "IF: Should Continue"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "qpsHWXtcrfDwwlwC",
+          "cachedResultName": "alice-dms-image-description-backfill"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [3000, -260],
+      "id": "execute-self-continue",
+      "name": "Execute Workflow: Self (Continue)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Release Lock\" } });\nconst redis = require('redis');\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst owner = run.lock_owner;\n\nif (owner) {\n  const LOCK_KEY = 'alice:dms:image-description-backfill:lock:run';\n  const RELEASE_SCRIPT = `\nlocal raw = redis.call('GET', KEYS[1])\nif not raw then return 0 end\nlocal ok, data = pcall(cjson.decode, raw)\nif not ok or data.owner ~= ARGV[1] then return 0 end\nredis.call('DEL', KEYS[1])\nreturn 1\n`;\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  try {\n    await client.connect();\n    await client.eval(RELEASE_SCRIPT, { keys: [LOCK_KEY], arguments: [owner] });\n  } catch(e) {\n    logger.info(`[image-description-backfill] Lock release error: ${e.message}`);\n  } finally {\n    await client.quit().catch(() => {});\n  }\n}\n\nreturn [{ json: { ...$input.first().json, _from_webhook: run._from_webhook === true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, -60],
+      "id": "code-release-lock",
+      "name": "Code: Release Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-from-webhook",
+              "leftValue": "={{ $json._from_webhook }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3300, -60],
+      "id": "if-from-webhook",
+      "name": "IF: From Webhook"
     },
     {
       "parameters": {
@@ -287,17 +531,109 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1500, -100],
+      "position": [3600, -160],
       "id": "respond-webhook",
       "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3600, 40],
+      "id": "end-no-webhook",
+      "name": "End: No Webhook Response Needed"
     }
   ],
   "connections": {
+    "Schedule Trigger: 23:30": {
+      "main": [
+        [
+          {
+            "node": "Code: Init Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger: 06:00": {
+      "main": [
+        [
+          {
+            "node": "Code: Init Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Webhook: POST /image-description-backfill": {
       "main": [
         [
           {
+            "node": "Code: Init Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code: Init Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Init Run": {
+      "main": [
+        [
+          {
+            "node": "Code: Acquire/Renew Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Acquire/Renew Lock": {
+      "main": [
+        [
+          {
+            "node": "IF: Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Lock Acquired": {
+      "main": [
+        [
+          {
             "node": "Code: Fetch Failed Batch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Skip (Locked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Skip (Locked)": {
+      "main": [
+        [
+          {
+            "node": "IF: From Webhook",
             "type": "main",
             "index": 0
           }
@@ -337,7 +673,7 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Code: Release Lock",
             "type": "main",
             "index": 0
           }
@@ -395,7 +731,7 @@
       "main": [
         [
           {
-            "node": "Split: Per Image",
+            "node": "Code: Time Check",
             "type": "main",
             "index": 0
           }
@@ -435,7 +771,7 @@
       "main": [
         [
           {
-            "node": "Split: Per Image",
+            "node": "Code: Time Check",
             "type": "main",
             "index": 0
           }
@@ -468,6 +804,35 @@
       "main": [
         [
           {
+            "node": "Code: Time Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Time Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Time Limit Reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [
+          {
+            "node": "Code: Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Split: Per Image",
             "type": "main",
             "index": 0
@@ -479,7 +844,76 @@
       "main": [
         [
           {
+            "node": "Code: Check Continue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Check Continue": {
+      "main": [
+        [
+          {
+            "node": "IF: Should Continue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Should Continue": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow: Self (Continue)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Release Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow: Self (Continue)": {
+      "main": [
+        [
+          {
+            "node": "Code: Release Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Release Lock": {
+      "main": [
+        [
+          {
+            "node": "IF: From Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: From Webhook": {
+      "main": [
+        [
+          {
             "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End: No Webhook Response Needed",
             "type": "main",
             "index": 0
           }
