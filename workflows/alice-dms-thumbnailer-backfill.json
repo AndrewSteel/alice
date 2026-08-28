@@ -250,7 +250,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Generation Error\" } });\nreturn $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  logger.warn(`[backfill] Generation failed for UUID: ${uuid}`);\n  return { json: { result: 'failed', uuid, reason: 'generation_failed' } };\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Generation Error\" } });\n// The HTTP node runs with onError=continueRegularOutput, so on failure the\n// item is the error object and no longer carries weaviate_uuid. Resolve the\n// originating request item via pairedItem — only the failed subset reaches\n// this branch, so a positional lookup would misalign.\nreturn $input.all().map((item, i) => {\n  let src = {};\n  try {\n    src = $('IF: Has file_path and UUID').itemMatching(i).json;\n  } catch (e) {\n    logger.warn(`[backfill] Could not resolve source item for index ${i}: ${e.message}`);\n  }\n  const uuid = src.weaviate_uuid || 'unknown';\n  const documentType = src.document_type || 'unknown';\n  const filePath = src.file_path || null;\n  const status = item.json?.error?.status || item.json?.statusCode || 0;\n  const detail = item.json?.error?.message || '';\n  const reason = status === 422 ? 'validation_error' : 'generation_failed';\n  logger.warn(`[backfill] Generation failed: uuid=${uuid} type=${documentType} status=${status} reason=${reason} path=${filePath} detail=${detail}`);\n  return { json: { result: 'failed', uuid, document_type: documentType, status, reason } };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -276,7 +276,8 @@
     },
     {
       "parameters": {
-        "mode": "append"
+        "mode": "append",
+        "numberInputs": 3
       },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
@@ -289,7 +290,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Summary\" } });\nconst items = $input.all();\nlet processed = 0, failed = 0, skipped = 0;\nfor (const item of items) {\n  const result = item.json.result;\n  if (result === 'processed') processed++;\n  else if (result === 'failed') failed++;\n  else if (result === 'skipped') skipped++;\n}\nconst summary = { processed, failed, skipped_no_path: skipped, total: items.length };\nlogger.info(`[backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Summary\" } });\nconst items = $input.all();\nlet processed = 0, failed = 0, skipped = 0;\nconst failed_by_reason = {};\nfor (const item of items) {\n  const result = item.json.result;\n  if (result === 'processed') processed++;\n  else if (result === 'failed') {\n    failed++;\n    const reason = item.json.reason || 'unknown';\n    failed_by_reason[reason] = (failed_by_reason[reason] || 0) + 1;\n  }\n  else if (result === 'skipped') skipped++;\n}\nconst summary = { processed, failed, skipped_no_path: skipped, total: items.length, failed_by_reason };\nlogger.info(`[backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -436,7 +437,7 @@
           {
             "node": "Merge: All Results",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -447,7 +448,7 @@
           {
             "node": "Merge: All Results",
             "type": "main",
-            "index": 0
+            "index": 2
           }
         ]
       ]

@@ -281,12 +281,31 @@ async def generate(req: GenerateRequest):
             logger.warning("Source file not found: %s", req.original_path)
             raise HTTPException(status_code=422, detail=f"Source file not found: {req.original_path}")
 
-    img = generate_thumbnail(req.original_path, req.file_type, mail_text=req.mail_text)
+    try:
+        img = generate_thumbnail(req.original_path, req.file_type, mail_text=req.mail_text)
+    except Exception as exc:
+        logger.warning(
+            "Thumbnail generation raised for %s (type=%s): %s: %s",
+            req.original_path, req.file_type, type(exc).__name__, exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"Thumbnail generation failed: {type(exc).__name__}: {exc}",
+        ) from exc
+
     if img is None:
         logger.warning("Thumbnail generation returned None for %s (type=%s)", req.original_path, req.file_type)
         raise HTTPException(status_code=422, detail="Thumbnail generation failed")
 
-    img.save(str(thumb_path), "JPEG", quality=85)
+    try:
+        img.save(str(thumb_path), "JPEG", quality=85)
+    except Exception as exc:
+        logger.warning("Thumbnail save failed for %s: %s: %s", thumb_path, type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Thumbnail save failed: {type(exc).__name__}: {exc}",
+        ) from exc
+
     logger.info("Thumbnail saved: %s", thumb_path)
     return {"thumbnail_path": str(thumb_path), "weaviate_uuid": req.weaviate_uuid, "document_type": req.document_type}
 

@@ -269,10 +269,20 @@ curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-bac
 
 ### Neue Acceptance Criteria (Backfill-Robustheit)
 
-- [ ] `Merge: All Results` ist korrekt mit 3 Inputs konfiguriert (`numberInputs: 3`, Mode "Append"); jeder der drei Branches (processed / failed / skipped) ist auf einen eigenen Input-Index verbunden
-- [ ] Das Backfill-Response-JSON spiegelt nach einem Lauf mit gemischten Ergebnissen alle drei Kategorien korrekt wider (verifiziert per Testlauf mit bekannt gemischten Daten)
-- [ ] `Code: Log Generation Error` loggt die tatsächliche `weaviate_uuid` und `document_type` des fehlgeschlagenen Dokuments (aus dem Request-Item, nicht aus der Fehlerantwort) sowie den HTTP-Statuscode der `/generate`-Antwort, damit Fehlerursachen (422 Validierung vs. 500 Konvertierung) im Log unterscheidbar sind
-- [ ] `alice-dms-thumbnailer`-Container: Konvertierungsfehler (PDF-Rendering, LibreOffice, Pillow) werden in `generate_thumbnail()` bzw. im `/generate`-Handler abgefangen und als kontrollierter 422 mit aussagekräftigem `detail` zurückgegeben, nicht als unbehandelter 500
+- [x] `Merge: All Results` ist korrekt mit 3 Inputs konfiguriert (`numberInputs: 3`, Mode "Append"); jeder der drei Branches (processed / failed / skipped) ist auf einen eigenen Input-Index verbunden
+- [ ] Das Backfill-Response-JSON spiegelt nach einem Lauf mit gemischten Ergebnissen alle drei Kategorien korrekt wider (verifiziert per Testlauf mit bekannt gemischten Daten) — **offen, erst nach Deploy verifizierbar**
+- [x] `Code: Log Generation Error` loggt die tatsächliche `weaviate_uuid` und `document_type` des fehlgeschlagenen Dokuments (aus dem Request-Item, nicht aus der Fehlerantwort) sowie den HTTP-Statuscode der `/generate`-Antwort, damit Fehlerursachen (422 Validierung vs. 500 Konvertierung) im Log unterscheidbar sind
+- [x] `alice-dms-thumbnailer`-Container: Konvertierungsfehler (PDF-Rendering, LibreOffice, Pillow) werden in `generate_thumbnail()` bzw. im `/generate`-Handler abgefangen und als kontrollierter 422 mit aussagekräftigem `detail` zurückgegeben, nicht als unbehandelter 500
+
+### Implementierung (2026-08-28)
+
+| Bug | Datei | Änderung |
+|---|---|---|
+| BUG-55-3 | `workflows/alice-dms-thumbnailer-backfill.json` | `Merge: All Results`: `numberInputs: 3` ergänzt; die drei Branches auf Input-Index 0 (processed) / 1 (failed) / 2 (skipped) umverdrahtet. |
+| BUG-55-4 | `workflows/alice-dms-thumbnailer-backfill.json` | `Code: Log Generation Error`: Quell-Item wird über `$('IF: Has file_path and UUID').itemMatching(i)` aufgelöst (pairedItem-basiert, da nur die Fehler-Teilmenge diesen Branch erreicht und ein positionsbasierter Zugriff verschieben würde). Loggt jetzt `uuid`, `document_type`, `file_path`, HTTP-`status` und `detail`; `reason` unterscheidet `validation_error` (422) von `generation_failed`. `Code: Summary` aggregiert zusätzlich `failed_by_reason`. |
+| BUG-55-5 | `alice-dms-thumbnailer/app/main.py` | `/generate`: `generate_thumbnail()` und `img.save()` in try/except gekapselt; unerwartete Exceptions (Pillow-Decode, `_square_crop`, `resize`, Schreibfehler) werden als kontrollierter 422 mit Exception-Typ und -Text beantwortet statt als unbehandelter 500. |
+
+Validierung: n8n `validate_workflow` meldet 15/15 gültige Verbindungen, 0 ungültige; verbleibende Warnungen sind vorbestehend (veraltete typeVersions, IF-Branch-Hinweise sind False Positives für true/false-Ausgänge). `python3 -m py_compile` auf `main.py` fehlerfrei.
 
 ### Edge Case (Ergänzung)
 
