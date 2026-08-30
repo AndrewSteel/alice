@@ -3,76 +3,100 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## alice-dms-thumbnailer-backfill\n\nOne-time manual backfill: generates thumbnails for all Weaviate documents\nthat don't have a thumbnail_path set yet.\n\n**Trigger**: POST /webhook/alice/dms/thumb-backfill\n**Processes**: Invoice, BankStatement, BankTransaction, Document, Email, SecuritySettlement, Contract, Image\n**Progress**: logged as { processed, failed, skipped_already_has_thumb, remaining }\n**Safe to re-run**: skips documents that already have thumbnail_path",
-        "height": 200,
-        "width": 440,
+        "content": "## alice-dms-thumbnailer-backfill (PROJ-95)\n\nManual, resumable backfill: generates thumbnails for all Weaviate documents\nacross all 8 collections that don't have a thumbnail_path set yet.\n\n**Trigger**: POST /webhook/alice-dms-thumbnailer-backfill\n**Optional body param**: `time_limit_seconds` — stop cleanly after N seconds,\nrelease the lock, respond with progress counts. Not set → run until every\ncollection is fully processed.\n\n**Coverage**:\n- File-based (Invoice, BankStatement, Document, SecuritySettlement, Contract,\n  Image): rendered from the NAS file.\n- Email (PROJ-93): rendered from subject + content (fetched by the query).\n- BankTransaction (PROJ-95): rendered from amount/direction/counterparty/\n  purpose/date/bankName/accountIban (fetched by the query).\n\n**Lock**: `alice:dms:processor:lock:run` (Redis) — shared with the nightly\nprocessor and the other DMS backfills; a busy lock → clean skip, no wait.\n\n**No auto-continue** (unlike PROJ-96): a time-limited run is re-invoked\nmanually. The query skips objects that already have a thumbnail_path, so a\nre-run resumes where the previous one stopped.\n\n**Progress**: { processed, failed, skipped_no_source, remaining, stopped_reason }",
+        "height": 620,
+        "width": 480,
         "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        0,
-        -220
-      ],
-      "id": "sticky-backfill",
+      "position": [17376, 96],
+      "id": "d6992faa-49bf-4c0f-8963-04b66dfb1a12",
       "name": "Sticky Note"
     },
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "alice-dms-thumbnailer-backfill",
-        "authentication": "none",
         "responseMode": "responseNode",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        0,
-        0
-      ],
-      "id": "webhook-trigger",
+      "position": [17376, 800],
+      "id": "df0e9216-58c7-499d-a58b-f4e868290e7a",
       "name": "Webhook: POST /thumb-backfill",
-      "webhookId": "alice-dms-thumbnailer-backfill-v1"
+      "webhookId": "alice-dms-thumbnailer-backfill-v1",
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "// Initialize backfill — pass collections list downstream\nconst COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract', 'Image'];\nconst LIMIT = 100;\nreturn [{ json: { collections: COLLECTIONS, limit: LIMIT } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Acquire Backfill Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n// Same lock key as alice-dms-processor / the other DMS backfills — must never\n// run concurrently (NAS read + Weaviate write load spikes).\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 1800000; // 30 min — TTL fallback if the workflow hard-crashes\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false;\ntry {\n  await client.connect();\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  logger.info('[thumb-backfill] Lock acquire error: ' + e.message + ' — failing closed (skip run)');\n  acquired = false;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { _lock_acquired: acquired, lock_owner: acquired ? ownerToken : null } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        300,
-        0
-      ],
-      "id": "code-init",
-      "name": "Code: Init Collections"
+      "position": [17680, 800],
+      "id": "b23f1548-92dd-4167-93ba-71d4c37ff27c",
+      "name": "Code: Acquire Backfill Lock"
     },
     {
       "parameters": {
-        "fieldToSplitOut": "collections",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-lock-acquired",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
         "options": {}
       },
-      "type": "n8n-nodes-base.splitOut",
-      "typeVersion": 1,
-      "position": [
-        600,
-        0
-      ],
-      "id": "split-collections",
-      "name": "Split: Per Collection"
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [17984, 800],
+      "id": "1b7a4c2e-0000-4a00-9000-locked00if01",
+      "name": "IF: Lock Acquired"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Query Weaviate (no thumbnail)\" } });\nconst axios = require('axios');\nconst { collections, limit } = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = limit || 100;\n\nconst allDocs = [];\n\nfor (const collection of collections) {\n  let cursor = null;\n  let pageCount = 0;\n\n  while (true) {\n    pageCount++;\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const isImage = collection === 'Image';\n    const pathField = isImage ? 'file_path' : 'filePath';\n    const hashField = isImage ? 'file_hash' : 'fileHash';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { _additional { id } ${pathField} ${hashField} thumbnail_path } } }`;\n\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 30000\n      });\n      if (r.data?.errors) {\n        logger.warn(`[backfill] GraphQL error for ${collection}: ${JSON.stringify(r.data.errors)}`);\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      logger.warn(`[backfill] Request failed for ${collection}: ${e.message}`);\n      break;\n    }\n\n    if (results.length === 0) break;\n\n    for (const doc of results) {\n      if (!doc.thumbnail_path) {\n        allDocs.push({\n          weaviate_uuid: doc._additional?.id,\n          file_path: doc[pathField] || null,\n          document_type: collection\n        });\n      }\n    }\n\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n\n  const collCount = allDocs.filter(d => d.document_type === collection).length;\n  logger.info(`[backfill] ${collection}: found ${collCount} docs without thumbnail`);\n}\n\nlogger.info(`[backfill] Total docs to process: ${allDocs.length}`);\nreturn allDocs.map(d => ({ json: d }));"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Respond Locked\" } });\nlogger.info('[thumb-backfill] Run skipped: lock alice:dms:processor:lock:run is already held (nightly processor or another backfill).');\nreturn [{ json: { status: 'skipped', stopped_reason: 'locked', message: 'Lauf bereits aktiv', processed: 0, failed: 0, skipped_no_source: 0, remaining: null } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        900,
-        0
-      ],
-      "id": "code-query-weaviate",
+      "position": [17984, 1040],
+      "id": "1b7a4c2e-0000-4a00-9000-locked00cd02",
+      "name": "Code: Respond Locked"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Init Run\" } });\n\n// Reset per-run counters at the START (workflow static data persists across\n// executions — a run that crashed before Code: Build Summary must not carry\n// stale counts into the next run's summary).\nconst staticData = $getWorkflowStaticData('global');\nstaticData.processed = 0;\nstaticData.failed = 0;\nstaticData.skipped_no_source = 0;\n\n// Read time_limit_seconds from the ORIGINAL webhook payload by node name — the\n// upstream lock node returns a fresh object without body/query (the PROJ-92 bug).\nlet body = {}, query = {};\ntry {\n  const webhookItem = $('Webhook: POST /thumb-backfill').first().json;\n  body = webhookItem.body || {};\n  query = webhookItem.query || {};\n} catch(e) {}\nconst rawLimit = body.time_limit_seconds !== undefined ? body.time_limit_seconds : query.time_limit_seconds;\nconst parsedLimit = parseInt(rawLimit, 10);\nconst maxRuntimeSeconds = (!isNaN(parsedLimit) && parsedLimit > 0) ? parsedLimit : null;\n\nconst COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract', 'Image'];\nconst LIMIT = 100;\n\nconst lockOwner = $('Code: Acquire Backfill Lock').first().json.lock_owner;\n\nlogger.info(`[thumb-backfill] Init: max_runtime_seconds=${maxRuntimeSeconds === null ? 'none' : maxRuntimeSeconds}`);\nreturn [{ json: { collections: COLLECTIONS, limit: LIMIT, window_start: Date.now(), max_runtime_seconds: maxRuntimeSeconds, lock_owner: lockOwner } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [18288, 800],
+      "id": "b23f1548-0000-4167-93ba-initrun000001",
+      "name": "Code: Init Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Query Weaviate (no thumbnail)\" } });\nconst axios = require('axios');\nconst run = $input.first().json;\nconst { collections, limit } = run;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = limit || 100;\n\n// Per-collection field sets. Email and BankTransaction have no path field in\n// their Weaviate schema — asking for filePath/fileHash there returns a GraphQL\n// error and the whole collection would be silently skipped (the bug PROJ-95\n// fixes). Instead we fetch the fields each render mode actually needs.\n// thumbnail_path itself may not exist yet on a class that has never had a\n// thumbnail (e.g. BankTransaction on first run — Weaviate auto-schema only\n// adds it on the first PATCH) — so it is requested separately and dropped on\n// a GraphQL 'Cannot query field' error (every returned object is then a\n// no-thumbnail hit by definition).\nconst CORE_FIELDS = {\n  Image: '_additional { id } file_path file_hash',\n  Email: '_additional { id } subject content',\n  BankTransaction: '_additional { id } amount currency direction counterparty purpose transactionDate bankName accountIban'\n};\nfunction coreFieldsFor(collection) {\n  return CORE_FIELDS[collection] || '_additional { id } filePath fileHash';\n}\n\nfunction isMissingFieldError(errors, field) {\n  try {\n    const s = JSON.stringify(errors);\n    return s.includes('Cannot query field') && s.includes(field);\n  } catch(e) { return false; }\n}\n\nconst allDocs = [];\n\nfor (const collection of collections) {\n  let cursor = null;\n  const isImage = collection === 'Image';\n  const pathField = isImage ? 'file_path' : 'filePath';\n  let includeThumbField = true; // becomes false if the class has no thumbnail_path yet\n\n  while (true) {\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const thumbClause = includeThumbField ? ' thumbnail_path' : '';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { ${coreFieldsFor(collection)}${thumbClause} } } }`;\n\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n        headers: { 'Content-Type': 'application/json' },\n        timeout: 30000\n      });\n      if (r.data?.errors) {\n        if (includeThumbField && isMissingFieldError(r.data.errors, 'thumbnail_path')) {\n          logger.info(`[thumb-backfill] ${collection} has no thumbnail_path property yet — retrying query without it`);\n          includeThumbField = false;\n          continue; // retry same page without the thumbnail_path field\n        }\n        logger.warn(`[thumb-backfill] GraphQL error for ${collection}: ${JSON.stringify(r.data.errors)}`);\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      logger.warn(`[thumb-backfill] Request failed for ${collection}: ${e.message}`);\n      break;\n    }\n\n    if (results.length === 0) break;\n\n    for (const doc of results) {\n      if (includeThumbField && doc.thumbnail_path) continue;\n      const entry = {\n        weaviate_uuid: doc._additional?.id,\n        document_type: collection,\n        file_path: doc[pathField] || null\n      };\n      if (collection === 'Email') {\n        entry.subject = doc.subject || '';\n        entry.content = doc.content || '';\n      } else if (collection === 'BankTransaction') {\n        entry.amount = doc.amount;\n        entry.currency = doc.currency || null;\n        entry.direction = doc.direction || null;\n        entry.counterparty = doc.counterparty || null;\n        entry.purpose = doc.purpose || null;\n        entry.transactionDate = doc.transactionDate || null;\n        entry.bankName = doc.bankName || null;\n        entry.accountIban = doc.accountIban || null;\n      }\n      allDocs.push(entry);\n    }\n\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n\n  const collCount = allDocs.filter(d => d.document_type === collection).length;\n  logger.info(`[thumb-backfill] ${collection}: found ${collCount} docs without thumbnail`);\n}\n\nconst totalDocs = allDocs.length;\nlogger.info(`[thumb-backfill] Total docs to process: ${totalDocs}`);\nif (totalDocs === 0) {\n  return [{ json: { _empty: true, total_docs: 0, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner } }];\n}\nreturn allDocs.map(d => ({ json: { ...d, _empty: false, total_docs: totalDocs, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [18592, 800],
+      "id": "4e129085-2b86-419f-a1ce-c6f1a2d186b0",
       "name": "Code: Query Weaviate (no thumbnail)"
     },
     {
@@ -86,21 +110,12 @@
           },
           "conditions": [
             {
-              "id": "check-has-file-path",
-              "leftValue": "={{ $json.file_path }}",
-              "rightValue": "",
+              "id": "check-batch-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
               "operator": {
-                "type": "string",
-                "operation": "notEmpty"
-              }
-            },
-            {
-              "id": "check-has-uuid",
-              "leftValue": "={{ $json.weaviate_uuid }}",
-              "rightValue": "",
-              "operator": {
-                "type": "string",
-                "operation": "notEmpty"
+                "type": "boolean",
+                "operation": "equals"
               }
             }
           ],
@@ -110,12 +125,61 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        1200,
-        0
-      ],
-      "id": "if-has-path",
-      "name": "IF: Has file_path and UUID"
+      "position": [18896, 800],
+      "id": "4e129085-0000-4a00-9000-emptyif000001",
+      "name": "IF: Nothing To Do"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [19200, 900],
+      "id": "loop-over-docs-00000000000001",
+      "name": "Loop Over Docs"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-has-uuid",
+              "leftValue": "={{ $json.weaviate_uuid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "check-renderable",
+              "leftValue": "={{ !!$json.file_path || $json.document_type === 'Email' || $json.document_type === 'BankTransaction' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [19504, 880],
+      "id": "22f0addc-925a-4b74-a9e8-3ea6582adbfc",
+      "name": "IF: Renderable"
     },
     {
       "parameters": {
@@ -132,30 +196,21 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type, file_type: ($json.file_path || '').split('.').pop().toLowerCase() }) }}",
+        "jsonBody": "={{ $json.document_type === 'Email' ? JSON.stringify({ mail_text: [ ($json.subject || '').slice(0,200), ($json.content || '').slice(0,2000) ].filter(Boolean).join('\\n\\n'), weaviate_uuid: $json.weaviate_uuid, document_type: 'Email', file_type: 'txt' }) : ($json.document_type === 'BankTransaction' ? JSON.stringify({ weaviate_uuid: $json.weaviate_uuid, document_type: 'BankTransaction', file_type: 'txt', bt_amount: $json.amount, bt_currency: $json.currency || null, bt_direction: $json.direction || null, bt_counterparty: $json.counterparty || null, bt_purpose: $json.purpose || null, bt_transaction_date: $json.transactionDate || null, bt_bank_name: $json.bankName || null, bt_account_iban: $json.accountIban || null }) : JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type, file_type: ($json.file_path || '').split('.').pop().toLowerCase() })) }}",
         "options": {
-          "timeout": 120000,
           "response": {
             "response": {
-              "responseFormat": "json",
-              "fullResponse": true
+              "fullResponse": true,
+              "responseFormat": "json"
             }
           },
-          "batching": {
-            "batch": {
-              "batchSize": 5,
-              "batchInterval": 200
-            }
-          }
+          "timeout": 120000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1500,
-        -100
-      ],
-      "id": "http-generate",
+      "position": [19808, 780],
+      "id": "56b871d2-a4df-4a89-b650-2bddea5cbb66",
       "name": "HTTP: POST /generate",
       "onError": "continueRegularOutput"
     },
@@ -185,24 +240,18 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        1800,
-        -100
-      ],
-      "id": "if-generate-ok",
+      "position": [20112, 780],
+      "id": "a3ae8779-0960-4b77-9d0e-79c11927b16c",
       "name": "IF: Generate OK"
     },
     {
       "parameters": {
-        "jsCode": "// Process ALL items, not just first — required for batch backfill\nreturn $input.all().map(item => {\n  const resp = item.json;\n  const body = resp.body || resp;\n  const thumbPath = body.thumbnail_path || null;\n  const uuid = body.weaviate_uuid || null;\n  const docType = body.document_type || 'Document';\n  if (!thumbPath || !uuid) {\n    throw new Error('Missing thumbnail_path or uuid in response: ' + JSON.stringify(body));\n  }\n  return { json: { thumbnail_path: thumbPath, weaviate_uuid: uuid, document_type: docType } };\n});"
+        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst thumbPath = body.thumbnail_path || null;\nconst src = $('IF: Renderable').first().json;\nconst uuid = body.weaviate_uuid || src.weaviate_uuid || null;\nconst docType = body.document_type || src.document_type || 'Document';\nif (!thumbPath || !uuid) {\n  throw new Error('Missing thumbnail_path or uuid in response: ' + JSON.stringify(body));\n}\nreturn [{ json: { thumbnail_path: thumbPath, weaviate_uuid: uuid, document_type: docType } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2100,
-        -200
-      ],
-      "id": "code-extract-path",
+      "position": [20416, 680],
+      "id": "11b078d9-b742-44a1-8eb5-41d1b4178bb4",
       "name": "Code: Extract Path"
     },
     {
@@ -222,90 +271,101 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ properties: { thumbnail_path: $json.thumbnail_path } }) }}",
         "options": {
-          "timeout": 15000,
           "response": {
             "response": {
-              "responseFormat": "json",
-              "fullResponse": true
+              "fullResponse": true,
+              "responseFormat": "json"
             }
-          }
+          },
+          "timeout": 15000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        2400,
-        -200
-      ],
-      "id": "http-weaviate-patch",
+      "position": [20720, 680],
+      "id": "7e391324-030a-4fe8-ae79-8b33ef78eb93",
       "name": "HTTP: PATCH Weaviate",
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log PATCH Result\" } });\n// Process ALL items, not just first — required for batch backfill\nreturn $input.all().map(item => {\n  const resp = item.json;\n  const statusCode = resp.statusCode || 0;\n  if (statusCode >= 200 && statusCode < 300) {\n    return { json: { result: 'processed' } };\n  } else {\n    logger.warn(`[backfill] PATCH failed (HTTP ${statusCode})`);\n    return { json: { result: 'failed', reason: 'weaviate_patch_failed' } };\n  }\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log PATCH Result\" } });\nconst staticData = $getWorkflowStaticData('global');\nconst resp = $input.first().json;\nconst statusCode = resp.statusCode || 0;\nif (statusCode >= 200 && statusCode < 300) {\n  staticData.processed = (staticData.processed || 0) + 1;\n  return [{ json: { result: 'processed' } }];\n}\nstaticData.failed = (staticData.failed || 0) + 1;\nlogger.warn(`[thumb-backfill] PATCH failed (HTTP ${statusCode})`);\nreturn [{ json: { result: 'failed', reason: 'weaviate_patch_failed' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2700,
-        -200
-      ],
-      "id": "code-log-patch",
+      "position": [21024, 680],
+      "id": "503594b5-8155-47f7-a7e6-a82331b28fbf",
       "name": "Code: Log PATCH Result"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Generation Error\" } });\n// The HTTP node runs with onError=continueRegularOutput, so on failure the\n// item is the error object and no longer carries weaviate_uuid. Resolve the\n// originating request item via pairedItem — only the failed subset reaches\n// this branch, so a positional lookup would misalign.\nreturn $input.all().map((item, i) => {\n  let src = {};\n  try {\n    src = $('IF: Has file_path and UUID').itemMatching(i).json;\n  } catch (e) {\n    logger.warn(`[backfill] Could not resolve source item for index ${i}: ${e.message}`);\n  }\n  const uuid = src.weaviate_uuid || 'unknown';\n  const documentType = src.document_type || 'unknown';\n  const filePath = src.file_path || null;\n  const status = item.json?.error?.status || item.json?.statusCode || 0;\n  const detail = item.json?.error?.message || '';\n  const reason = status === 422 ? 'validation_error' : 'generation_failed';\n  logger.warn(`[backfill] Generation failed: uuid=${uuid} type=${documentType} status=${status} reason=${reason} path=${filePath} detail=${detail}`);\n  return { json: { result: 'failed', uuid, document_type: documentType, status, reason } };\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Generation Error\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.failed = (staticData.failed || 0) + 1;\nconst src = $('IF: Renderable').first().json;\nconst item = $input.first().json;\nconst status = item?.error?.status || item?.statusCode || 0;\nconst reason = status === 422 ? 'validation_error' : 'generation_failed';\nlogger.warn(`[thumb-backfill] Generation failed: uuid=${src.weaviate_uuid} type=${src.document_type} status=${status} reason=${reason}`);\nreturn [{ json: { result: 'failed', reason } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2100,
-        0
-      ],
-      "id": "code-log-gen-error",
+      "position": [20416, 900],
+      "id": "dad5baaa-9447-4588-be00-60f5d18df910",
       "name": "Code: Log Generation Error"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Skip (no file_path)\" } });\nreturn $input.all().map(item => {\n  const uuid = item.json.weaviate_uuid || 'unknown';\n  logger.warn(`[backfill] Skipping doc without file_path: ${uuid}`);\n  return { json: { result: 'skipped', uuid, reason: 'no_file_path' } };\n});"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Log Skip (no source)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.skipped_no_source = (staticData.skipped_no_source || 0) + 1;\nconst uuid = $input.first().json.weaviate_uuid || 'unknown';\nlogger.warn(`[thumb-backfill] Skipping doc with no rendering source: ${uuid}`);\nreturn [{ json: { result: 'skipped_no_source' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1500,
-        100
-      ],
-      "id": "code-log-skip",
-      "name": "Code: Log Skip (no file_path)"
+      "position": [19808, 980],
+      "id": "80f59f1f-43f9-4828-bd49-afa42cf7afd0",
+      "name": "Code: Log Skip (no source)"
     },
     {
       "parameters": {
-        "mode": "append",
-        "numberInputs": 3
-      },
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        3000,
-        0
-      ],
-      "id": "merge-results",
-      "name": "Merge: All Results"
-    },
-    {
-      "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Summary\" } });\nconst items = $input.all();\nlet processed = 0, failed = 0, skipped = 0;\nconst failed_by_reason = {};\nfor (const item of items) {\n  const result = item.json.result;\n  if (result === 'processed') processed++;\n  else if (result === 'failed') {\n    failed++;\n    const reason = item.json.reason || 'unknown';\n    failed_by_reason[reason] = (failed_by_reason[reason] || 0) + 1;\n  }\n  else if (result === 'skipped') skipped++;\n}\nconst summary = { processed, failed, skipped_no_path: skipped, total: items.length, failed_by_reason };\nlogger.info(`[backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Time Check\" } });\n// Runs once per document (after the in-flight doc is fully processed). Reads\n// the window from Code: Init Run by node name.\nconst run = $('Code: Init Run').first().json;\nconst maxRuntime = run.max_runtime_seconds;\nlet timeLimitReached = false;\nif (maxRuntime !== null && maxRuntime !== undefined) {\n  const elapsed = (Date.now() - run.window_start) / 1000;\n  timeLimitReached = elapsed >= maxRuntime;\n  if (timeLimitReached) {\n    logger.info(`[thumb-backfill] Time limit reached (elapsed=${Math.round(elapsed)}s, limit=${maxRuntime}s) — leaving loop, in-flight doc already done`);\n  }\n}\nreturn [{ json: { _time_limit_reached: timeLimitReached } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        3300,
-        0
-      ],
-      "id": "code-summary",
-      "name": "Code: Summary"
+      "position": [21024, 900],
+      "id": "timecheck-0000-4a00-9000-000000000001",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-time-limit-reached",
+              "leftValue": "={{ $json._time_limit_reached }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [21328, 900],
+      "id": "timecheck-if00-4a00-9000-000000000002",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer-backfill\", node: \"Code: Build Summary\" } });\nconst redis = require('redis');\nconst staticData = $getWorkflowStaticData('global');\n\nconst processed = staticData.processed || 0;\nconst failed = staticData.failed || 0;\nconst skipped_no_source = staticData.skipped_no_source || 0;\n\n// Reset per-run counters for the next invocation (also reset at the start in\n// Code: Init Run — belt and braces).\nstaticData.processed = 0;\nstaticData.failed = 0;\nstaticData.skipped_no_source = 0;\n\nconst run = $('Code: Init Run').first().json;\nconst stoppedByTime = (() => {\n  if (run.max_runtime_seconds === null || run.max_runtime_seconds === undefined) return false;\n  return ((Date.now() - run.window_start) / 1000) >= run.max_runtime_seconds;\n})();\n\n// remaining = entries of THIS run's flat list that were not reached (time\n// limit) — a completed run always leaves 0. thumbnail_path is indexFilterable:\n// false in every schema, so an IsNull aggregate is not possible; deriving it\n// from the flat-list total is exact and cheaper. total_docs is 0 on the empty\n// path (IF: Nothing To Do -> here), which correctly yields remaining 0.\nlet totalDocs = 0;\ntry {\n  const first = $('Code: Query Weaviate (no thumbnail)').first().json;\n  totalDocs = first.total_docs || 0;\n} catch(e) {}\nconst touched = processed + failed + skipped_no_source;\nconst remaining = Math.max(0, totalDocs - touched);\n\n// Release the lock (owner-checked) in every completion path.\nconst owner = run.lock_owner;\nif (owner) {\n  const RELEASE_SCRIPT = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  try {\n    await client.connect();\n    await client.eval(RELEASE_SCRIPT, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] });\n  } catch(e) {\n    logger.info(`[thumb-backfill] Lock release error: ${e.message}`);\n  } finally {\n    await client.quit().catch(() => {});\n  }\n}\n\nconst stopped_reason = stoppedByTime ? 'time_limit' : 'completed';\nconst summary = { status: 'ok', stopped_reason, processed, failed, skipped_no_source, remaining };\nlogger.info(`[thumb-backfill] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [21632, 800],
+      "id": "e264057a-9ba4-4425-82ff-e795c8ffb15f",
+      "name": "Code: Build Summary"
     },
     {
       "parameters": {
@@ -315,177 +375,116 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        3600,
-        0
-      ],
-      "id": "respond-webhook",
+      "position": [21936, 800],
+      "id": "42b3ec02-2ede-4072-b336-c10af361ae43",
       "name": "Respond to Webhook"
     }
   ],
   "connections": {
     "Webhook: POST /thumb-backfill": {
       "main": [
-        [
-          {
-            "node": "Code: Init Collections",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Code: Acquire Backfill Lock", "type": "main", "index": 0 }]
       ]
     },
-    "Code: Init Collections": {
+    "Code: Acquire Backfill Lock": {
       "main": [
-        [
-          {
-            "node": "Code: Query Weaviate (no thumbnail)",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "IF: Lock Acquired", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Lock Acquired": {
+      "main": [
+        [{ "node": "Code: Init Run", "type": "main", "index": 0 }],
+        [{ "node": "Code: Respond Locked", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Respond Locked": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Init Run": {
+      "main": [
+        [{ "node": "Code: Query Weaviate (no thumbnail)", "type": "main", "index": 0 }]
       ]
     },
     "Code: Query Weaviate (no thumbnail)": {
       "main": [
-        [
-          {
-            "node": "IF: Has file_path and UUID",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "IF: Nothing To Do", "type": "main", "index": 0 }]
       ]
     },
-    "IF: Has file_path and UUID": {
+    "IF: Nothing To Do": {
       "main": [
-        [
-          {
-            "node": "HTTP: POST /generate",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Code: Log Skip (no file_path)",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Docs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Loop Over Docs": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "IF: Renderable", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Renderable": {
+      "main": [
+        [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }],
+        [{ "node": "Code: Log Skip (no source)", "type": "main", "index": 0 }]
       ]
     },
     "HTTP: POST /generate": {
       "main": [
-        [
-          {
-            "node": "IF: Generate OK",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "IF: Generate OK", "type": "main", "index": 0 }]
       ]
     },
     "IF: Generate OK": {
       "main": [
-        [
-          {
-            "node": "Code: Extract Path",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Code: Log Generation Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Code: Extract Path", "type": "main", "index": 0 }],
+        [{ "node": "Code: Log Generation Error", "type": "main", "index": 0 }]
       ]
     },
     "Code: Extract Path": {
       "main": [
-        [
-          {
-            "node": "HTTP: PATCH Weaviate",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "HTTP: PATCH Weaviate", "type": "main", "index": 0 }]
       ]
     },
     "HTTP: PATCH Weaviate": {
       "main": [
-        [
-          {
-            "node": "Code: Log PATCH Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Code: Log PATCH Result", "type": "main", "index": 0 }]
       ]
     },
     "Code: Log PATCH Result": {
       "main": [
-        [
-          {
-            "node": "Merge: All Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Code: Time Check", "type": "main", "index": 0 }]
       ]
     },
     "Code: Log Generation Error": {
       "main": [
-        [
-          {
-            "node": "Merge: All Results",
-            "type": "main",
-            "index": 1
-          }
-        ]
+        [{ "node": "Code: Time Check", "type": "main", "index": 0 }]
       ]
     },
-    "Code: Log Skip (no file_path)": {
+    "Code: Log Skip (no source)": {
       "main": [
-        [
-          {
-            "node": "Merge: All Results",
-            "type": "main",
-            "index": 2
-          }
-        ]
+        [{ "node": "Code: Time Check", "type": "main", "index": 0 }]
       ]
     },
-    "Merge: All Results": {
+    "Code: Time Check": {
       "main": [
-        [
-          {
-            "node": "Code: Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "IF: Time Limit Reached", "type": "main", "index": 0 }]
       ]
     },
-    "Code: Summary": {
+    "IF: Time Limit Reached": {
       "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Docs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Build Summary": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
       ]
     }
   },
   "settings": {
     "executionOrder": "v1",
-    "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner",
     "executionTimeout": 86400
   },
   "staticData": null,
