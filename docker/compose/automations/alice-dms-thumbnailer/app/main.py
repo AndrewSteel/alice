@@ -79,6 +79,17 @@ class GenerateRequest(BaseModel):
     # every other document_type, mail_text is required (and exclusive) for Email.
     original_path: str | None = None
     mail_text: str | None = None
+    # PROJ-95: BankTransaction objects are Phase-B children of a BankStatement
+    # and never have their own NAS file. They get a dedicated structured render
+    # (bank/amount/counterparty/purpose/date) built from these fields.
+    bt_amount: float | None = None
+    bt_currency: str | None = None
+    bt_direction: str | None = None
+    bt_counterparty: str | None = None
+    bt_purpose: str | None = None
+    bt_transaction_date: str | None = None
+    bt_bank_name: str | None = None
+    bt_account_iban: str | None = None
 
     @field_validator("weaviate_uuid")
     @classmethod
@@ -110,6 +121,11 @@ class GenerateRequest(BaseModel):
         if self.document_type == "Email":
             if not (self.mail_text or "").strip():
                 raise ValueError("mail_text must not be empty when document_type is Email")
+        elif self.document_type == "BankTransaction":
+            # PROJ-95: amount carries the transaction; without it there is
+            # nothing meaningful to render.
+            if self.bt_amount is None:
+                raise ValueError("bt_amount is required when document_type is BankTransaction")
         elif not self.original_path:
             raise ValueError("original_path is required when document_type is not Email")
         return self
@@ -217,6 +233,92 @@ def _render_text_image(text: str) -> Image.Image | None:
     return img
 
 
+def _render_bank_transaction(
+    amount: float,
+    currency: str | None,
+    direction: str | None,
+    counterparty: str | None,
+    purpose: str | None,
+    transaction_date: str | None,
+    bank_name: str | None,
+    account_iban: str | None,
+) -> Image.Image | None:
+    """PROJ-95: render a BankTransaction as a visually distinct card
+    (not the generic monospace text preview): small bank/IBAN header,
+    a large colour-coded amount, then counterparty, purpose and date.
+
+    Colour follows `direction` (amount is always positive per schema):
+    debit -> red with a leading '-', credit -> green with '+',
+    unknown direction or amount 0 -> neutral, no sign.
+    """
+    from PIL import ImageDraw, ImageFont
+
+    W = H = 800
+    img = Image.new("RGB", (W, H), color=(255, 255, 255))  # type: ignore[arg-type]
+    draw = ImageDraw.Draw(img)
+
+    font_dir = "/usr/share/fonts/truetype/liberation"
+
+    def _font(name: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        try:
+            return ImageFont.truetype(f"{font_dir}/{name}", size)
+        except Exception:
+            return ImageFont.load_default()
+
+    font_header = _font("LiberationSans-Regular.ttf", 22)
+    font_amount = _font("LiberationSans-Bold.ttf", 84)
+    font_body = _font("LiberationSans-Regular.ttf", 30)
+    font_date = _font("LiberationSans-Regular.ttf", 26)
+
+    neutral = (30, 30, 30)
+    muted = (107, 114, 128)
+    red = (185, 28, 28)
+    green = (21, 128, 61)
+
+    dir_norm = (direction or "").strip().lower()
+    if amount == 0 or dir_norm not in ("credit", "debit"):
+        amount_colour = neutral
+        sign = ""
+    elif dir_norm == "debit":
+        amount_colour = red
+        sign = "−"  # minus sign
+    else:
+        amount_colour = green
+        sign = "+"
+
+    cur = (currency or "").strip()
+    amount_str = f"{sign}{amount:,.2f}"
+    if cur:
+        amount_str = f"{amount_str} {cur}"
+
+    def _center(text: str, font, y: int, fill) -> None:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        w = bbox[2] - bbox[0]
+        draw.text(((W - w) / 2, y), text, font=font, fill=fill)
+
+    # Header: "Bank · IBAN" — omit empty parts, drop the line if both empty.
+    header_parts = [p for p in (bank_name, account_iban) if (p or "").strip()]
+    y = 90
+    if header_parts:
+        _center(" · ".join(header_parts)[:60], font_header, y, muted)
+    y = 300
+    _center(amount_str, font_amount, y, amount_colour)
+
+    y = 440
+    for text, font in (
+        ((counterparty or "").strip(), font_body),
+        ((purpose or "").strip()[:120], font_body),
+    ):
+        if text:
+            _center(text, font, y, neutral)
+            y += 55
+
+    if (transaction_date or "").strip():
+        _center((transaction_date or "").strip()[:10], font_date, 680, muted)
+
+    return img
+
+
 def _render_text_preview(text_path: str) -> Image.Image | None:
     """Render first N lines of text file as an image."""
     try:
@@ -230,13 +332,28 @@ def _render_text_preview(text_path: str) -> Image.Image | None:
 
 
 def generate_thumbnail(
-    original_path: str | None, file_type: str, mail_text: str | None = None
+    original_path: str | None,
+    file_type: str,
+    mail_text: str | None = None,
+    bank_transaction: dict | None = None,
 ) -> Image.Image | None:
     """Generate thumbnail image. Returns PIL Image or None on failure.
 
     PROJ-93: when mail_text is given (Email objects have no NAS file), render
     directly from that text instead of reading original_path.
+    PROJ-95: when bank_transaction is given (BankTransaction objects have no
+    NAS file), render the structured transaction card instead.
     """
+    if bank_transaction is not None:
+        img = _render_bank_transaction(**bank_transaction)
+        if img is None:
+            return None
+        img = _square_crop(img, top_crop=False)
+        img = img.resize((THUMB_SIZE, THUMB_SIZE), Image.Resampling.LANCZOS)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        return img
+
     if mail_text is not None:
         img = _render_text_image(mail_text)
         if img is None:
@@ -307,11 +424,27 @@ async def generate(req: GenerateRequest):
     """
     thumb_path = THUMB_DIR / f"{req.weaviate_uuid}.jpg"
 
-    if req.document_type != "Email":
+    # Email (PROJ-93) and BankTransaction (PROJ-95) render from Weaviate fields,
+    # not from a NAS file — skip the file existence check for them.
+    file_based = req.document_type not in ("Email", "BankTransaction")
+    if file_based:
         src = Path(req.original_path)  # type: ignore[arg-type]
         if not src.exists():
             logger.warning("Source file not found: %s", req.original_path)
             raise HTTPException(status_code=422, detail=f"Source file not found: {req.original_path}")
+
+    bank_transaction = None
+    if req.document_type == "BankTransaction":
+        bank_transaction = {
+            "amount": req.bt_amount,
+            "currency": req.bt_currency,
+            "direction": req.bt_direction,
+            "counterparty": req.bt_counterparty,
+            "purpose": req.bt_purpose,
+            "transaction_date": req.bt_transaction_date,
+            "bank_name": req.bt_bank_name,
+            "account_iban": req.bt_account_iban,
+        }
 
     try:
         # generate_thumbnail() is blocking (subprocess.run, Pillow) and can run
@@ -321,7 +454,7 @@ async def generate(req: GenerateRequest):
         # parallel) that queued up hundreds of accepted-but-unserved
         # connections until the container hit its open-file limit.
         img = await run_in_threadpool(
-            generate_thumbnail, req.original_path, req.file_type, req.mail_text
+            generate_thumbnail, req.original_path, req.file_type, req.mail_text, bank_transaction
         )
     except Exception as exc:
         logger.warning(

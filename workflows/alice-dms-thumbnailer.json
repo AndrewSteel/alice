@@ -3,15 +3,15 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## alice-dms-thumbnailer\n\nSubscribes to `alice/dms/done` MQTT topic.\nFor each successfully inserted document, calls the alice-dms-thumbnailer\ncontainer (POST /generate) to create a 400×400 JPEG thumbnail on warm storage,\nthen PATCHes the Weaviate object with the thumbnail_path.\n\nOn failure: logs error and publishes to `alice/dms/thumb_error`.\n\n**Trigger**: MQTT `alice/dms/done`\n**Container**: alice-dms-thumbnailer:8004\n**Storage**: /srv/warm/alice/thumbnails/{uuid}.jpg",
-        "height": 200,
+        "content": "## alice-dms-thumbnailer\n\nSubscribes to `alice/dms/done` MQTT topic.\nFor each successfully inserted document, calls the alice-dms-thumbnailer\ncontainer (POST /generate) to create a 400×400 JPEG thumbnail on warm storage,\nthen PATCHes the Weaviate object with the thumbnail_path.\n\n**Text-based types (no NAS file):**\n- Email (PROJ-93): subject + body preview fetched from Weaviate.\n- BankTransaction (PROJ-95): Phase B of alice-dms-processor publishes one\n  `alice/dms/done` per inserted transaction with `document_type: 'BankTransaction'`\n  and the transaction fields inline (amount, direction, counterparty, purpose,\n  transactionDate, bankName, accountIban) — no Weaviate lookup needed.\n\nOn failure: logs error and publishes to `alice/dms/thumb_error`.\n\n**Trigger**: MQTT `alice/dms/done`\n**Container**: alice-dms-thumbnailer:8004\n**Storage**: /srv/warm/alice/thumbnails/{uuid}.jpg",
+        "height": 520,
         "width": 400,
         "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [0, -200],
-      "id": "sticky-note-thumbnailer",
+      "position": [2336, -992],
+      "id": "4cfe1fb0-9635-47aa-b817-84e95ff887a4",
       "name": "Sticky Note"
     },
     {
@@ -21,8 +21,8 @@
       },
       "type": "n8n-nodes-base.mqttTrigger",
       "typeVersion": 1,
-      "position": [0, 0],
-      "id": "mqtt-trigger-dms-done",
+      "position": [2336, -512],
+      "id": "ba557aa1-6ef9-44d7-92e5-2983e7203ece",
       "name": "MQTT: alice/dms/done",
       "webhookId": "alice-dms-thumbnailer-trigger-v1",
       "credentials": {
@@ -34,62 +34,96 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Parse & Filter\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  logger.info(`[alice-dms-thumbnailer] Skipping non-inserted document: ${msg.file_path}`);\n  return [];\n}\n\nif (!msg.weaviate_uuid) {\n  logger.warn(`[alice-dms-thumbnailer] Missing weaviate_uuid — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\n// PROJ-93: Email objects have no NAS file_path (their content lives only in\n// Weaviate) - they get a dedicated text-rendering path instead of the\n// file-based one, so they are exempt from the file_path requirement below.\nconst isEmail = msg.document_type === 'Email';\nif (!isEmail && !msg.file_path) {\n  logger.warn(`[alice-dms-thumbnailer] Missing file_path — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\nlogger.info(`[alice-dms-thumbnailer] Processing: ${msg.weaviate_uuid} ${msg.file_path || '(email, no file_path)'}`);\nreturn [{ json: { ...msg } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Parse & Filter\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('alice-dms-thumbnailer: Malformed MQTT message: ' + e.message);\n}\n\n// Only process successfully inserted documents\nif (!msg.inserted) {\n  logger.info(`[alice-dms-thumbnailer] Skipping non-inserted document: ${msg.file_path}`);\n  return [];\n}\n\nif (!msg.weaviate_uuid) {\n  logger.warn(`[alice-dms-thumbnailer] Missing weaviate_uuid — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\n// PROJ-93 (Email) + PROJ-95 (BankTransaction): these types have no NAS\n// file_path (their content lives only in Weaviate) - they get a dedicated\n// rendering path instead of the file-based one, so they are exempt from the\n// file_path requirement below.\nconst textBased = msg.document_type === 'Email' || msg.document_type === 'BankTransaction';\nif (!textBased && !msg.file_path) {\n  logger.warn(`[alice-dms-thumbnailer] Missing file_path — skipping: ${JSON.stringify(msg)}`);\n  return [];\n}\n\nlogger.info(`[alice-dms-thumbnailer] Processing: ${msg.weaviate_uuid} ${msg.file_path || '(' + msg.document_type + ', no file_path)'}`);\nreturn [{ json: { ...msg } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [300, 0],
-      "id": "code-parse-validate",
+      "position": [2640, -512],
+      "id": "8a8aaf2c-4d52-4099-a3b5-966211e09dd2",
       "name": "Code: Parse & Filter"
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
+        "rules": {
+          "values": [
             {
-              "id": "check-is-email",
-              "leftValue": "={{ $json.document_type }}",
-              "rightValue": "Email",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-email",
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "Email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-banktransaction",
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "BankTransaction",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "BankTransaction"
             }
-          ],
-          "combinator": "and"
+          ]
         },
-        "options": {}
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "File"
+        }
       },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [450, 0],
-      "id": "if-is-email",
-      "name": "IF: Is Email"
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [2800, -512],
+      "id": "2892fe65-63a5-40f8-8ee1-a2a512a9be7e",
+      "name": "Switch: Rendering Type"
     },
     {
       "parameters": {
-        "method": "GET",
         "url": "={{ 'http://weaviate:8080/v1/objects/Email/' + $json.weaviate_uuid }}",
         "options": {
-          "timeout": 15000,
           "response": {
             "response": {
-              "responseFormat": "json",
-              "fullResponse": true
+              "fullResponse": true,
+              "responseFormat": "json"
             }
-          }
+          },
+          "timeout": 15000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, -150],
-      "id": "http-get-email-content",
+      "position": [3040, -656],
+      "id": "77051fb9-e032-4919-9a9f-98335709dad3",
       "name": "HTTP: GET Weaviate Email Content",
       "onError": "continueRegularOutput"
     },
@@ -99,8 +133,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [950, -150],
-      "id": "code-merge-mail-text",
+      "position": [3296, -656],
+      "id": "941eae4f-4966-43a2-ba55-331ec9c121dd",
       "name": "Code: Merge Mail Text"
     },
     {
@@ -118,21 +152,21 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json.document_type === 'Email' ? JSON.stringify({ mail_text: $json._mail_text || '', weaviate_uuid: $json.weaviate_uuid, document_type: 'Email', file_type: 'txt' }) : JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type || 'Document', file_type: $json.file_type || $json.file_path.split('.').pop().toLowerCase() }) }}",
+        "jsonBody": "={{ $json.document_type === 'Email' ? JSON.stringify({ mail_text: $json._mail_text || '', weaviate_uuid: $json.weaviate_uuid, document_type: 'Email', file_type: 'txt' }) : ($json.document_type === 'BankTransaction' ? JSON.stringify({ weaviate_uuid: $json.weaviate_uuid, document_type: 'BankTransaction', file_type: 'txt', bt_amount: $json.amount, bt_currency: $json.currency || null, bt_direction: $json.direction || null, bt_counterparty: $json.counterparty || null, bt_purpose: $json.purpose || null, bt_transaction_date: $json.transactionDate || null, bt_bank_name: $json.bankName || null, bt_account_iban: $json.accountIban || null }) : JSON.stringify({ original_path: $json.file_path, weaviate_uuid: $json.weaviate_uuid, document_type: $json.document_type || 'Document', file_type: $json.file_type || $json.file_path.split('.').pop().toLowerCase() })) }}",
         "options": {
-          "timeout": 120000,
           "response": {
             "response": {
-              "responseFormat": "json",
-              "fullResponse": true
+              "fullResponse": true,
+              "responseFormat": "json"
             }
-          }
+          },
+          "timeout": 120000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1200, 0],
-      "id": "http-generate-thumbnail",
+      "position": [3536, -512],
+      "id": "be8e45be-2bf4-45fd-a6ea-fd7da7c1160b",
       "name": "HTTP: POST /generate",
       "onError": "continueRegularOutput"
     },
@@ -162,8 +196,8 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1500, 0],
-      "id": "if-generate-ok",
+      "position": [3840, -512],
+      "id": "f104ab4b-5258-4d12-8a3c-03c522ca0f29",
       "name": "IF: Generate OK"
     },
     {
@@ -172,8 +206,8 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1800, -100],
-      "id": "code-extract-path",
+      "position": [4144, -608],
+      "id": "81b84cae-450d-4784-8610-e15271f352db",
       "name": "Code: Extract Thumbnail Path"
     },
     {
@@ -193,19 +227,19 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ properties: { thumbnail_path: $json.thumbnail_path } }) }}",
         "options": {
-          "timeout": 15000,
           "response": {
             "response": {
-              "responseFormat": "json",
-              "fullResponse": true
+              "fullResponse": true,
+              "responseFormat": "json"
             }
-          }
+          },
+          "timeout": 15000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2100, -100],
-      "id": "http-weaviate-patch",
+      "position": [4448, -608],
+      "id": "dc1f610b-d0f0-483a-957d-9c368219ed9b",
       "name": "HTTP: PATCH Weaviate thumbnail_path",
       "onError": "continueRegularOutput"
     },
@@ -215,18 +249,18 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, -100],
-      "id": "code-log-success",
+      "position": [4736, -608],
+      "id": "577c0989-3dde-4791-b1a4-72edd5bd3043",
       "name": "Code: Log Result"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Log Error\" } });\nconst item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nconst locator = original.document_type === 'Email' ? '(email, no file_path)' : original.file_path;\nlogger.warn(`[alice-dms-thumbnailer] Generation failed for: ${original.weaviate_uuid} ${locator} Status: ${item.statusCode}`);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path || null, status_code: item.statusCode } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-thumbnailer\", node: \"Code: Log Error\" } });\nconst item = $input.first().json;\nconst original = $('Code: Parse & Filter').first().json;\nconst textBased = original.document_type === 'Email' || original.document_type === 'BankTransaction';\nconst locator = textBased ? ('(' + original.document_type + ', no file_path)') : original.file_path;\nlogger.warn(`[alice-dms-thumbnailer] Generation failed for: ${original.weaviate_uuid} ${locator} Status: ${item.statusCode}`);\nreturn [{ json: { error: 'thumbnail_generation_failed', weaviate_uuid: original.weaviate_uuid, file_path: original.file_path || null, status_code: item.statusCode } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1800, 100],
-      "id": "code-log-error",
+      "position": [4144, -400],
+      "id": "f28ea582-d31c-4c6f-8738-e69a90407870",
       "name": "Code: Log Error"
     },
     {
@@ -239,8 +273,8 @@
       },
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [2100, 100],
-      "id": "mqtt-publish-error",
+      "position": [4448, -400],
+      "id": "be88b0ef-ae09-418f-bff3-db69b5c5c560",
       "name": "MQTT: Publish thumb_error",
       "credentials": {
         "mqtt": {
@@ -258,12 +292,13 @@
     },
     "Code: Parse & Filter": {
       "main": [
-        [{ "node": "IF: Is Email", "type": "main", "index": 0 }]
+        [{ "node": "Switch: Rendering Type", "type": "main", "index": 0 }]
       ]
     },
-    "IF: Is Email": {
+    "Switch: Rendering Type": {
       "main": [
         [{ "node": "HTTP: GET Weaviate Email Content", "type": "main", "index": 0 }],
+        [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }],
         [{ "node": "HTTP: POST /generate", "type": "main", "index": 0 }]
       ]
     },
@@ -305,9 +340,7 @@
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner"
+    "executionOrder": "v1"
   },
   "staticData": null,
   "meta": {
