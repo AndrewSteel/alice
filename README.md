@@ -144,6 +144,7 @@ Workflows live in `workflows/`. The streaming endpoint is `POST /api/stream/chat
 | `alice-dms-lifecycle`            | MQTT `alice/dms/lifecycle`     | Duplicate/move events: Weaviate PATCH, no LLM         |
 | `alice-dms-thumbnailer`          | MQTT `alice/dms/done`          | Generate 400×400 thumbnail after DMS import           |
 | `alice-dms-thumbnailer-backfill` | Webhook POST (manual)          | Generate thumbnails for all existing Weaviate objects |
+| `alice-dms-reconcile`            | Webhook POST + Schedule (monthly) | Reconcile Weaviate vs. Redis path map: repair drift, delete orphans |
 | `alice-dms-folder-api`           | Webhook `/webhook/dms/folders` | Admin CRUD for NAS watched folders                    |
 
 ---

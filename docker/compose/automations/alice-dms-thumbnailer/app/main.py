@@ -518,6 +518,36 @@ async def serve_thumbnail(
 
 
 # ---------------------------------------------------------------------------
+# DELETE /thumbnail/{uuid}
+# ---------------------------------------------------------------------------
+@app.delete("/thumbnail/{weaviate_uuid}")
+async def delete_thumbnail(weaviate_uuid: str):
+    """
+    Delete the thumbnail JPEG for a document whose Weaviate object is being
+    removed. Called by the alice-dms-reconcile n8n workflow (PROJ-97), which
+    has no direct access to THUMB_DIR. No JWT auth — internal-only endpoint
+    (not exposed via nginx). Idempotent: a missing file is not an error.
+    """
+    safe = re.fullmatch(r"[0-9a-f-]{36}", weaviate_uuid)
+    if not safe:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID: {weaviate_uuid}")
+
+    thumb_path = THUMB_DIR / f"{weaviate_uuid}.jpg"
+    try:
+        existed = thumb_path.exists()
+        thumb_path.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("Thumbnail delete failed for %s: %s: %s", thumb_path, type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Thumbnail delete failed: {type(exc).__name__}: {exc}",
+        ) from exc
+
+    logger.info("Thumbnail delete: %s (existed=%s)", thumb_path, existed)
+    return {"deleted": existed, "weaviate_uuid": weaviate_uuid}
+
+
+# ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
 @app.get("/health")
