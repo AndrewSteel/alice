@@ -1,8 +1,8 @@
 # PROJ-95: BankTransaction- & Email-Thumbnails + Backfill-Robustheit
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-28
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-08-31
 
 ## Dependencies
 - Betrifft: `alice-dms-thumbnailer` (n8n-Workflow, PROJ-55, In Review) und den zugehörigen `alice-dms-thumbnailer`-Service (`/generate`-Endpoint).
@@ -429,4 +429,29 @@ plus Rebuild/Redeploy des `alice-dms-thumbnailer`-Containers (main.py-Änderung)
 - **Recommendation:** Deploy. Beim Deploy: Container-Rebuild `alice-dms-thumbnailer` + 3 Workflow-Deploys. Nach Deploy einen Laufzeit-Smoke-Test fahren: (1) Backfill mit `time_limit_seconds: 60` gegen den Bestand, Response-Zahlen prüfen; (2) einen neuen BankStatement durch `alice-dms-processor` schicken, prüfen dass BankTransaction-Thumbnails live entstehen.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed am 2026-08-30/31.**
+
+- **Container** `alice-dms-thumbnailer` neu gebaut und ausgerollt (`main.py` mit `_render_bank_transaction`, `bt_*`-Feldern, Validator-Zweig, `/generate`-Skip für BankTransaction).
+- **n8n-Workflows** deployed:
+  - `alice-dms-processor` (`qPIg6uLTe8LfOYwv`) — Phase B mit `_inserted_bank_transactions`, `Code: Emit BankTransaction Done`, `MQTT: Publish BankTransaction Done`.
+  - `alice-dms-thumbnailer` (`wcl4nBzwDboA9T1H`) — `Switch: Rendering Type`, BankTransaction-Zweig.
+  - `alice-dms-thumbnailer-backfill` (`o5YjdTpVeYm5nDLM`) — Redis-Lock, `time_limit_seconds`, sequenzielle `Loop Over Docs`, typ-spezifische Query, `IF: Renderable`, `Split: Per Collection` entfernt.
+
+**Verifikationslauf** (Execution `164088`, Webhook mit `time_limit_seconds: 300`):
+
+| Zähler | Wert |
+| --- | --- |
+| `processed` | 465 |
+| `failed` | 35 (Service HTTP 422 „Thumbnail generation failed" — nicht renderbare/verschobene Dateien, bekannte PROJ-55-Restfehlerquote ~7 %) |
+| `skipped_no_source` | 704 (datei-basierte Objekte, deren `filePath` in Weaviate `null` ist) |
+| `remaining` | 541 |
+| `stopped_reason` | `time_limit` |
+
+Der Workflow arbeitet wie spezifiziert: Lock genommen und freigegeben, per-Dokument-Zeitcheck greift, Response vollständig, `IF: Renderable` verzweigt korrekt (Email/BankTransaction + datei-basierte mit gültigem `filePath` → Generate; pfadlose → Skip).
+
+**Nachgelagert entdeckt (kein PROJ-95-Regressionsproblem, eigenes Feature [[PROJ-97]]):**
+
+- Die 704 `skipped_no_source`-Objekte sind ~700 datei-basierte Weaviate-Objekte ohne `filePath`. Vergleich mit einem Lauf von vor PROJ-95 (Execution `161941`): dasselbe Problem, dort 5965 von 6047 aus demselben Grund übersprungen. Vorbestehender Datenbestand aus Alt-Importen.
+- Die 35 `failed`-Objekte sind teils defekte Bilder, teils verschobene Dateien (Weaviate zeigt den alten Pfad, der Thumbnailer-Service findet die Datei dort nicht → HTTP 422).
+- Beides ist ein Lifecycle-/Datenqualitätsproblem außerhalb des PROJ-95-Scopes → in [[PROJ-97]] (DMS Pfad-Drift-Reconcile + Cleanup verwaister Weaviate-Objekte) adressiert.
