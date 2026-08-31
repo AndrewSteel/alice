@@ -1,0 +1,400 @@
+{
+  "name": "alice-mail-reconcile",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-mail-reconcile (PROJ-98)\n\nReconciles the Weaviate `Email` collection against two truths:\n- (a) the mailbox list in `alice.imap_mailboxes` — an Email whose `mailboxId`\n  points at no live row is a **mailbox orphan** (no IMAP needed).\n- (b) the live IMAP UID list of each INBOX (`POST /list-uids` in\n  alice-mail-reader, one roundtrip per mailbox) — an Email whose `imapUid`\n  is not in that list is a **message orphan**.\n\n**Triggers**\n- POST /webhook/alice-mail-reconcile — manual. Without `confirm=true` (body\n  OR query) it is a pure DRY-RUN (identify, count, log, call list-uids for\n  live numbers, delete nothing). With `confirm=true` deletions run. Optional\n  `time_limit_seconds`.\n- Schedule (cron `0 1 1-7 * 1` = first Monday of the month, 01:00 UTC).\n  Always confirm mode, fixed 3600s limit. No schedule dry-run.\n\n**Fail-safe (keep on any doubt)**\n- list-uids fails for a mailbox        → skip mailbox (skipped_mailbox_unreachable)\n- list-uids returns empty list         → skip mailbox (skipped_mailbox_empty)\n- mailbox status='syncing' (<30 min)   → skip mailbox (skipped_mailbox_syncing)\n- Email object has no imapUid           → keep (skipped_ok)\n- Email newer than the list-uids call   → keep (skipped_ok, race guard)\nCase (a) still runs for skipped mailboxes — it needs no IMAP.\n\n**Lock**: `alice:dms:processor:lock:run` (shared with the nightly DMS\nprocessor / PROJ-97 reconcile / the DMS backfills). Busy → clean skip, no\nwait. Redis down at lock time → fail-closed, no Weaviate ops.\n\n**Side effects on delete**: thumbnail file via alice-dms-thumbnailer\n`DELETE /thumbnail/<uuid>` (PROJ-97, idempotent, non-blocking); Redis\n`alice:dms:*` map cleanup only when a SHA-256 `fileHash` is set (archived\n.eml). No `alice/dms/done` — pure deletion, no repair.\n\n**Out of scope**: file-based DMS collections + BankTransaction (PROJ-97),\nnon-INBOX folders, PROJ-53 attachment DMS objects (no cascade).",
+        "height": 820,
+        "width": 540,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "sticky-mail-reconcile-overview",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-mail-reconcile",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [608, 480],
+      "id": "webhook-mail-reconcile",
+      "name": "Webhook: POST /alice-mail-reconcile",
+      "webhookId": "alice-mail-reconcile-v1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 1-7 * 1"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [608, 720],
+      "id": "schedule-mail-reconcile-monthly",
+      "name": "Schedule Trigger: Monthly"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Init Run\" } });\n\n// Reset per-run counters at the START — workflow static data persists across\n// executions; a run that crashed before Code: Build Summary must not carry\n// stale counts into the next run.\nconst staticData = $getWorkflowStaticData('global');\nstaticData.checked = 0;\nstaticData.deleted_orphan_mailbox = 0;\nstaticData.deleted_orphan_message = 0;\nstaticData.thumbnail_files_removed = 0;\nstaticData.redis_hashes_cleaned = 0;\nstaticData.skipped_ok = 0;\nstaticData.skipped_mailbox_unreachable = 0;\nstaticData.skipped_mailbox_empty = 0;\nstaticData.skipped_mailbox_syncing = 0;\nstaticData._plan = null;\n\n// Which trigger fired? Read the trigger nodes by NAME — n8n throws for a node\n// that did not execute in this run. Do NOT read $input.first() here: the\n// upstream lock node returns a fresh object without body/query (PROJ-92 bug).\nlet firedNode = null;\ntry { if ($('Schedule Trigger: Monthly').first()) firedNode = 'schedule'; } catch(e) {}\ntry { if (!firedNode && $('Webhook: POST /alice-mail-reconcile').first()) firedNode = 'webhook'; } catch(e) {}\nconst fromSchedule = firedNode === 'schedule';\n\nlet body = {}, query = {};\nif (!fromSchedule) {\n  try {\n    const webhookItem = $('Webhook: POST /alice-mail-reconcile').first().json;\n    body = webhookItem.body || {};\n    query = webhookItem.query || {};\n  } catch(e) {}\n}\n\nlet trigger, mode, maxRuntimeSeconds;\nif (fromSchedule) {\n  trigger = 'schedule';\n  mode = 'confirm';           // schedule always executes — no schedule dry-run\n  maxRuntimeSeconds = 3600;   // fixed 1h window\n} else {\n  trigger = 'webhook';\n  const confirmRaw = body.confirm !== undefined ? body.confirm : query.confirm;\n  mode = (confirmRaw === true || confirmRaw === 'true') ? 'confirm' : 'dry-run';\n  const rawLimit = body.time_limit_seconds !== undefined ? body.time_limit_seconds : query.time_limit_seconds;\n  const parsed = parseInt(rawLimit, 10);\n  maxRuntimeSeconds = (!isNaN(parsed) && parsed > 0) ? parsed : null;\n}\n\nlogger.info(`[mail-reconcile] Init: trigger=${trigger} mode=${mode} max_runtime_seconds=${maxRuntimeSeconds === null ? 'none' : maxRuntimeSeconds}`);\nreturn [{ json: { trigger, mode, max_runtime_seconds: maxRuntimeSeconds, window_start: Date.now() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [912, 600],
+      "id": "code-init-run",
+      "name": "Code: Init Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Acquire Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n// Same lock key as alice-dms-processor / PROJ-97 reconcile / the DMS backfills.\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 3900000; // 65 min — TTL fallback (>= the 3600s schedule window)\n\nconst run = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false;\nlet redisReachable = false;\ntry {\n  await client.connect();\n  redisReachable = true;\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, workflow: 'alice-mail-reconcile', started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  logger.info('[mail-reconcile] Lock acquire error: ' + e.message + ' — failing closed (skip run)');\n  acquired = false;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { ...run, _lock_acquired: acquired, _redis_reachable: redisReachable, lock_owner: acquired ? ownerToken : null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1216, 600],
+      "id": "code-acquire-lock",
+      "name": "Code: Acquire Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-lock-acquired",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1520, 600],
+      "id": "if-lock-acquired",
+      "name": "IF: Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Respond Locked\" } });\nconst run = $input.first().json;\nconst reason = run._redis_reachable ? 'lock alice:dms:processor:lock:run is already held' : 'Redis unreachable — failing closed';\nlogger.info(`[mail-reconcile] Run skipped: ${reason}`);\nreturn [{ json: { status: 'skipped', mode: run.mode, trigger: run.trigger, stopped_reason: 'locked', message: 'Lauf bereits aktiv oder Redis nicht erreichbar', checked: 0, deleted_orphan_mailbox: 0, deleted_orphan_message: 0, thumbnail_files_removed: 0, redis_hashes_cleaned: 0, skipped_ok: 0, skipped_mailbox_unreachable: 0, skipped_mailbox_empty: 0, skipped_mailbox_syncing: 0, mailboxes_checked: 0, remaining: null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1824, 780],
+      "id": "code-respond-locked",
+      "name": "Code: Respond Locked"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text AS id, imap_host, imap_port, imap_username, password_enc, ssl_enabled, status, updated_at FROM alice.imap_mailboxes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1824, 480],
+      "id": "pg-load-mailboxes",
+      "name": "PG: Load Mailboxes",
+      "credentials": {
+        "postgres": { "id": "2YBtxcocRMLQuAdF", "name": "pg-alice" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Query Weaviate\" } });\nconst axios = require('axios');\nconst run = $('Code: Init Run').first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 100;\n\n// Flat work list of ALL Email objects. thumbnail_path / fileHash are queried\n// with a graceful fallback if the field is not on the class (Muster PROJ-95).\nlet includeThumb = true;\nlet includeHash = true;\nfunction isMissingFieldError(errors, field) {\n  try { const s = JSON.stringify(errors); return s.includes('Cannot query field') && s.includes(field); } catch(e) { return false; }\n}\n\nconst work = [];\nlet cursor = null;\nwhile (true) {\n  const cursorClause = cursor ? `, after: \\\"${cursor}\\\"` : '';\n  const hashClause = includeHash ? ' fileHash' : '';\n  const thumbClause = includeThumb ? ' thumbnail_path' : '';\n  const gql = `{ Get { Email(limit: ${LIMIT}${cursorClause}) { _additional { id creationTimeUnix } mailboxId imapUid subject date${hashClause}${thumbClause} } } }`;\n  let results;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });\n    if (r.data?.errors) {\n      if (includeThumb && isMissingFieldError(r.data.errors, 'thumbnail_path')) { includeThumb = false; continue; }\n      if (includeHash && isMissingFieldError(r.data.errors, 'fileHash')) { includeHash = false; continue; }\n      logger.warn(`[mail-reconcile] GraphQL error for Email: ${JSON.stringify(r.data.errors)}`);\n      break;\n    }\n    results = r.data?.data?.Get?.Email || [];\n  } catch(e) {\n    logger.warn(`[mail-reconcile] Weaviate request failed: ${e.message}`);\n    // Weaviate unreachable — cannot build the work list. Abort the run (the\n    // lock is released by the error branch is NOT triggered here; return a\n    // sentinel that Code: Plan Run turns into a clean 'skipped').\n    return [{ json: { _weaviate_error: true, trigger: run.trigger, mode: run.mode, max_runtime_seconds: run.max_runtime_seconds, window_start: run.window_start, lock_owner: $('Code: Acquire Lock').first().json.lock_owner } }];\n  }\n  if (results.length === 0) break;\n  for (const doc of results) {\n    work.push({\n      weaviate_uuid: doc._additional?.id || null,\n      creation_time_unix: doc._additional?.creationTimeUnix ? Number(doc._additional.creationTimeUnix) : null,\n      mailbox_id: doc.mailboxId || null,\n      imap_uid: (doc.imapUid !== undefined && doc.imapUid !== null && doc.imapUid !== '') ? String(doc.imapUid) : null,\n      subject: doc.subject || '',\n      date: doc.date || null,\n      file_hash: doc.fileHash || null,\n      thumbnail_path: doc.thumbnail_path || null\n    });\n  }\n  if (results.length < LIMIT) break;\n  cursor = results[results.length - 1]?._additional?.id;\n  if (!cursor) break;\n}\n\nconst total = work.length;\nlogger.info(`[mail-reconcile] Email objects to check: ${total}`);\nconst common = { _empty: total === 0, _weaviate_error: false, total_objects: total, trigger: run.trigger, mode: run.mode, max_runtime_seconds: run.max_runtime_seconds, window_start: run.window_start, lock_owner: $('Code: Acquire Lock').first().json.lock_owner };\nif (total === 0) return [{ json: { ...common } }];\nreturn work.map(w => ({ json: { ...w, ...common } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2128, 480],
+      "id": "code-query-weaviate",
+      "name": "Code: Query Weaviate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Plan Run\" } });\nconst axios = require('axios');\nconst MAIL_READER = 'http://alice-mail-reader:8007';\nconst SYNC_TIMEOUT_MIN = 30; // matches alice-mail-sync PG: Check Active Syncs\n\nconst items = $input.all();\nconst first = items[0].json;\n\nfunction setAbortPlan(reason) {\n  const sd = $getWorkflowStaticData('global');\n  sd._plan = {\n    abort: true, abort_reason: reason, total_objects: 0,\n    trigger: first.trigger, mode: first.mode,\n    max_runtime_seconds: first.max_runtime_seconds || null,\n    window_start: first.window_start || Date.now(),\n    lock_owner: first.lock_owner || null,\n    live_mailbox_ids: [], snapshots: {}, mailboxes_checked: 0\n  };\n}\n\n// --- abort paths from Code: Query Weaviate ---\nif (first._weaviate_error) {\n  logger.warn('[mail-reconcile] Weaviate unreachable — aborting run, nothing deleted');\n  setAbortPlan('weaviate_unreachable');\n  return [{ json: { _abort: true, _empty: true } }];\n}\n\n// --- load the mailbox rows ---\nconst mailboxRows = $('PG: Load Mailboxes').all().map(i => i.json).filter(r => r && r.id);\nconst liveMailboxIds = new Set(mailboxRows.map(r => String(r.id)));\n\n// --- per-mailbox snapshot: which mailboxes have >= 1 Email object? ---\nconst work = first._empty ? [] : items.map(i => i.json);\nconst mailboxesWithObjects = new Set();\nfor (const w of work) {\n  if (w.mailbox_id && liveMailboxIds.has(String(w.mailbox_id))) mailboxesWithObjects.add(String(w.mailbox_id));\n}\n\n// snapshot per mailbox id: { state: 'ok'|'unreachable'|'empty'|'syncing', uidSet: Set, query_ts: <ms> }\nconst snapshots = {};\nlet mailboxesChecked = 0;\n\nfor (const row of mailboxRows) {\n  const mid = String(row.id);\n  if (!mailboxesWithObjects.has(mid)) continue; // no Email object references it — skip the IMAP roundtrip\n\n  // syncing check — status='syncing' AND updated_at within the timeout window\n  const isSyncing = String(row.status || '') === 'syncing' &&\n    row.updated_at && ((Date.now() - new Date(row.updated_at).getTime()) / 60000) < SYNC_TIMEOUT_MIN;\n  if (isSyncing) {\n    snapshots[mid] = { state: 'syncing' };\n    logger.warn(`[mail-reconcile] Mailbox ${mid} is syncing — skipped this run`);\n    continue;\n  }\n\n  // one list-uids roundtrip\n  const query_ts = Date.now();\n  try {\n    const r = await axios.post(`${MAIL_READER}/list-uids`, {\n      host: row.imap_host,\n      port: row.imap_port,\n      ssl: row.ssl_enabled,\n      username: row.imap_username,\n      password_enc: row.password_enc,\n      folder: 'INBOX'\n    }, { timeout: 60000, validateStatus: () => true });\n\n    if (r.status < 200 || r.status >= 300) {\n      snapshots[mid] = { state: 'unreachable' };\n      logger.warn(`[mail-reconcile] list-uids failed for mailbox ${mid}: HTTP ${r.status} ${r.data?.error || ''} — mailbox skipped`);\n      continue;\n    }\n    const uids = Array.isArray(r.data?.uids) ? r.data.uids.map(u => String(u)) : [];\n    if (uids.length === 0) {\n      snapshots[mid] = { state: 'empty' };\n      logger.warn(`[mail-reconcile] list-uids returned 0 UIDs for mailbox ${mid} — mailbox skipped (skipped_mailbox_empty)`);\n      continue;\n    }\n    snapshots[mid] = { state: 'ok', uidSet: uids, query_ts };\n    mailboxesChecked++;\n    logger.info(`[mail-reconcile] Mailbox ${mid}: ${uids.length} live INBOX UIDs`);\n  } catch(e) {\n    snapshots[mid] = { state: 'unreachable' };\n    logger.warn(`[mail-reconcile] list-uids error for mailbox ${mid}: ${e.message} — mailbox skipped`);\n  }\n}\n\n// Fail-safe: PG returned ZERO mailbox rows. Ambiguous — a genuinely emptied\n// table vs. a query that silently returned nothing. Deleting the ENTIRE Email\n// collection as \\\"mailbox orphans\\\" on that basis is exactly the irreversible\n// mistake the spec's fail-safe asymmetry forbids. Only proceed with case (a)\n// wholesale deletion when there is truly nothing to lose (0 Email objects too);\n// otherwise abort the run untouched.\nif (mailboxRows.length === 0 && work.length > 0) {\n  logger.warn(`[mail-reconcile] PG: Load Mailboxes returned 0 rows but ${work.length} Email objects exist — aborting run (fail-safe, nothing deleted)`);\n  setAbortPlan('no_mailbox_rows');\n  return [{ json: { _abort: true, _empty: true } }];\n}\n\nlogger.info(`[mail-reconcile] Plan: ${mailboxRows.length} mailboxes, ${mailboxesWithObjects.size} referenced, ${mailboxesChecked} with a live UID list`);\n\n// The run context + per-mailbox snapshots live on staticData ONCE — do NOT\n// spread the (potentially huge) uid sets onto every work item (Muster PROJ-97).\n// Code: Process Object / Time Check / Build Summary read them from here.\nconst staticData = $getWorkflowStaticData('global');\nstaticData._plan = {\n  abort: false,\n  total_objects: work.length,\n  trigger: first.trigger,\n  mode: first.mode,\n  max_runtime_seconds: first.max_runtime_seconds,\n  window_start: first.window_start,\n  lock_owner: first.lock_owner,\n  live_mailbox_ids: [...liveMailboxIds],\n  snapshots,\n  mailboxes_checked: mailboxesChecked\n};\n\nif (work.length === 0) return [{ json: { _abort: false, _empty: true } }];\n// Lean per-object items only.\nreturn work.map(w => ({ json: { ...w, _abort: false, _empty: false } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2432, 480],
+      "id": "code-plan-run",
+      "name": "Code: Plan Run"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2736, 480],
+      "id": "if-nothing-to-do",
+      "name": "IF: Nothing To Do"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": { "reset": false }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [3040, 580],
+      "id": "loop-over-objects",
+      "name": "Loop Over Objects"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Process Object\" } });\nconst axios = require('axios');\nconst redis = require('redis');\n\nconst item = $input.first().json;\nconst plan = $getWorkflowStaticData('global')._plan || {};\nconst WEAVIATE = 'http://weaviate:8080';\nconst THUMBNAILER = 'http://alice-dms-thumbnailer:8004';\nconst mode = plan.mode;                 // 'dry-run' | 'confirm'\nconst confirm = mode === 'confirm';\nconst liveMailboxIds = new Set(plan.live_mailbox_ids || []);\nconst snapshots = plan.snapshots || {};\nconst SHA256_RE = /^[a-f0-9]{64}$/i;\n\nconst staticData = $getWorkflowStaticData('global');\nstaticData.checked = (staticData.checked || 0) + 1;\nfunction bump(k, n) { staticData[k] = (staticData[k] || 0) + (n === undefined ? 1 : n); }\n\nconst uuid = item.weaviate_uuid;\nconst mailboxId = item.mailbox_id ? String(item.mailbox_id) : null;\nconst imapUid = item.imap_uid;   // already normalised to String|null in Code: Query Weaviate\nconst subject = item.subject || '';\nconst fileHash = item.file_hash || null;\nconst hashValid = !!fileHash && SHA256_RE.test(String(fileHash));\n\n// ---- classify ----\n// 1. mailboxId empty OR not in the live set     -> orphan_mailbox\n// 2. mailbox snapshot syncing/unreachable/empty -> keep (skipped_mailbox_*)\n// 3. imapUid missing (pre-PROJ-46-BUG-2 legacy) -> keep (skipped_ok)\n// 4. object newer than the list-uids query time -> keep (skipped_ok, race guard)\n// 5. String(imapUid) in the snapshot uidSet     -> healthy (skipped_ok)\n// 6. otherwise                                  -> orphan_message\nlet category = 'healthy';\n\nif (!uuid) {\n  logger.warn('[mail-reconcile] Email object without uuid — skipping');\n  bump('skipped_ok');\n  return [{ json: { _category: 'healthy' } }];\n}\n\nif (!mailboxId || !liveMailboxIds.has(mailboxId)) {\n  category = 'orphan_mailbox';\n} else {\n  const snap = snapshots[mailboxId];\n  if (!snap || snap.state !== 'ok') {\n    if (snap && snap.state === 'unreachable') bump('skipped_mailbox_unreachable');\n    else if (snap && snap.state === 'empty') bump('skipped_mailbox_empty');\n    else if (snap && snap.state === 'syncing') bump('skipped_mailbox_syncing');\n    else bump('skipped_ok');\n    return [{ json: { _category: 'keep' } }];\n  }\n  if (!imapUid) {\n    logger.warn(`[mail-reconcile] Email ${uuid} has no imapUid (legacy) — keeping (skipped_ok)`);\n    bump('skipped_ok');\n    return [{ json: { _category: 'keep' } }];\n  }\n  // race guard: object created after the snapshot was taken\n  const objTsMs = item.creation_time_unix ? Number(item.creation_time_unix)\n    : (item.date ? new Date(item.date).getTime() : null);\n  if (objTsMs && snap.query_ts && objTsMs > snap.query_ts) {\n    logger.warn(`[mail-reconcile] Email ${uuid} is newer than the list-uids snapshot — keeping (race guard)`);\n    bump('skipped_ok');\n    return [{ json: { _category: 'keep' } }];\n  }\n  const uidSet = new Set(snap.uidSet || []);\n  if (uidSet.has(String(imapUid))) {\n    bump('skipped_ok');\n    return [{ json: { _category: 'healthy' } }];\n  }\n  category = 'orphan_message';\n}\n\n// ---- orphan (a or b) ----\nlogger.info(`[mail-reconcile] ${category} uuid=${uuid} mailboxId=${mailboxId || '(none)'} imapUid=${imapUid || '(none)'} subject=${JSON.stringify(subject).slice(0,120)} — ${confirm ? 'deleting' : 'DRY-RUN would delete'}`);\nconst counterKey = category === 'orphan_mailbox' ? 'deleted_orphan_mailbox' : 'deleted_orphan_message';\nbump(counterKey); // planned-or-done\n\nif (!confirm) {\n  return [{ json: { _category: category } }];\n}\n\n// 1) thumbnail file (idempotent, never blocks the object delete)\ntry {\n  const tr = await axios.delete(`${THUMBNAILER}/thumbnail/${uuid}`, { timeout: 10000, validateStatus: () => true });\n  if (tr.status >= 200 && tr.status < 300 && tr.data?.deleted) bump('thumbnail_files_removed');\n} catch(e) {\n  logger.warn(`[mail-reconcile] thumbnail delete call failed for ${uuid}: ${e.message}`);\n}\n\n// 2) delete the Weaviate object\ntry {\n  await axios.delete(`${WEAVIATE}/v1/objects/Email/${uuid}`, { timeout: 10000 });\n} catch(e) {\n  logger.warn(`[mail-reconcile] DELETE Email/${uuid} failed: ${e.message}`);\n  bump(counterKey, -1);\n  bump('skipped_ok');\n  return [{ json: { _category: category } }];\n}\n\n// 3) Redis fileHash cleanup — only for archived .eml objects, and only if no\n// other live Weaviate object (any collection) still uses the hash.\nif (hashValid) {\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  try {\n    await client.connect();\n    // is the hash still referenced by a live object?\n    let stillUsed = false;\n    const COLLECTIONS = ['Invoice', 'BankStatement', 'Document', 'SecuritySettlement', 'Contract', 'Email'];\n    for (const c of COLLECTIONS) {\n      const q = `{ Aggregate { ${c}(where: { path: [\\\"fileHash\\\"], operator: Equal, valueText: \\\"${fileHash}\\\" }) { meta { count } } } }`;\n      try {\n        const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n        const cnt = r.data?.data?.Aggregate?.[c]?.[0]?.meta?.count;\n        if (typeof cnt === 'number' && cnt > 0) { stillUsed = true; break; }\n      } catch(e) { /* treat as unknown -> err on not-cleaning below */ stillUsed = true; break; }\n    }\n    if (!stillUsed) {\n      const members = await client.sMembers(`alice:dms:hash_to_paths:${fileHash}`);\n      for (const m of members) await client.hDel('alice:dms:path_to_hash', m);\n      await client.del(`alice:dms:hash_to_paths:${fileHash}`);\n      await client.sRem('alice:dms:processed', fileHash);\n      bump('redis_hashes_cleaned');\n      logger.info(`[mail-reconcile] cleaned Redis map entries for hash ${fileHash}`);\n    }\n  } catch(e) {\n    logger.warn(`[mail-reconcile] Redis cleanup failed for hash ${fileHash}: ${e.message}`);\n  } finally {\n    await client.quit().catch(() => {});\n  }\n}\n\nreturn [{ json: { _category: category } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3344, 580],
+      "id": "code-process-object",
+      "name": "Code: Process Object"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Time Check\" } });\n// Runs once per object. Reads the window from staticData._plan.\nconst plan = $getWorkflowStaticData('global')._plan || {};\nconst maxRuntime = plan.max_runtime_seconds;\nlet timeLimitReached = false;\nif (maxRuntime !== null && maxRuntime !== undefined) {\n  const elapsed = (Date.now() - plan.window_start) / 1000;\n  timeLimitReached = elapsed >= maxRuntime;\n  if (timeLimitReached) {\n    logger.info(`[mail-reconcile] Time limit reached (elapsed=${Math.round(elapsed)}s, limit=${maxRuntime}s) — leaving loop`);\n  }\n}\nreturn [{ json: { _time_limit_reached: timeLimitReached } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3648, 580],
+      "id": "code-time-check",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-time-limit",
+              "leftValue": "={{ $json._time_limit_reached }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3952, 580],
+      "id": "if-time-limit-reached",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Build Summary\" } });\nconst redis = require('redis');\nconst staticData = $getWorkflowStaticData('global');\nconst plan = staticData._plan || {};\n\nconst checked = staticData.checked || 0;\nconst deleted_orphan_mailbox = staticData.deleted_orphan_mailbox || 0;\nconst deleted_orphan_message = staticData.deleted_orphan_message || 0;\nconst thumbnail_files_removed = staticData.thumbnail_files_removed || 0;\nconst redis_hashes_cleaned = staticData.redis_hashes_cleaned || 0;\nconst skipped_ok = staticData.skipped_ok || 0;\nconst skipped_mailbox_unreachable = staticData.skipped_mailbox_unreachable || 0;\nconst skipped_mailbox_empty = staticData.skipped_mailbox_empty || 0;\nconst skipped_mailbox_syncing = staticData.skipped_mailbox_syncing || 0;\n\n// reset for the next run (also reset in Code: Init Run — belt and braces)\nstaticData.checked = 0;\nstaticData.deleted_orphan_mailbox = 0;\nstaticData.deleted_orphan_message = 0;\nstaticData.thumbnail_files_removed = 0;\nstaticData.redis_hashes_cleaned = 0;\nstaticData.skipped_ok = 0;\nstaticData.skipped_mailbox_unreachable = 0;\nstaticData.skipped_mailbox_empty = 0;\nstaticData.skipped_mailbox_syncing = 0;\n\nconst abort = plan.abort === true;\n// _plan stays until the next run's Code: Init Run nulls it — Build Summary may\n// still need lock_owner below; clearing it here would race the release.\n\nconst totalObjects = plan.total_objects || 0;\nconst stoppedByTime = (() => {\n  if (abort) return false;\n  if (plan.max_runtime_seconds === null || plan.max_runtime_seconds === undefined) return false;\n  return ((Date.now() - plan.window_start) / 1000) >= plan.max_runtime_seconds;\n})();\nconst remaining = stoppedByTime ? Math.max(0, totalObjects - checked) : 0;\nconst stopped_reason = abort ? 'locked' : (stoppedByTime ? 'time_limit' : 'completed');\n\n// release the lock (owner-checked) on every completion path\nconst owner = plan.lock_owner;\nif (owner) {\n  const RELEASE = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  try {\n    await client.connect();\n    await client.eval(RELEASE, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] });\n  } catch(e) {\n    logger.info(`[mail-reconcile] Lock release error: ${e.message}`);\n  } finally {\n    await client.quit().catch(() => {});\n  }\n}\n\nconst summary = {\n  status: abort ? 'skipped' : 'ok',\n  mode: plan.mode,\n  trigger: plan.trigger,\n  stopped_reason,\n  checked,\n  deleted_orphan_mailbox,\n  deleted_orphan_message,\n  thumbnail_files_removed,\n  redis_hashes_cleaned,\n  skipped_ok,\n  skipped_mailbox_unreachable,\n  skipped_mailbox_empty,\n  skipped_mailbox_syncing,\n  mailboxes_checked: plan.mailboxes_checked || 0,\n  remaining\n};\nlogger.info(`[mail-reconcile] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4256, 520],
+      "id": "code-build-summary",
+      "name": "Code: Build Summary"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-from-webhook",
+              "leftValue": "={{ $json.trigger }}",
+              "rightValue": "webhook",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [4560, 520],
+      "id": "if-from-webhook",
+      "name": "IF: From Webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4864, 400],
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "topic": "alice/mail/reconcile-stats",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": { "qos": 1 }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [4864, 620],
+      "id": "mqtt-reconcile-stats",
+      "name": "MQTT: Publish reconcile-stats",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "mqtt": { "id": "Kqy6cn7hyDDXrBA0", "name": "mqtt-alice" }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [5168, 620],
+      "id": "noop-end",
+      "name": "End (Schedule)"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [608, 1080],
+      "id": "error-trigger",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-mail-reconcile\", node: \"Code: Release Lock (error)\" } });\nconst redis = require('redis');\nconst errorData = $input.first().json;\n\n// Best-effort lock release on crash. Owner token is gone here, so drop the\n// lock only if it is ours by workflow tag — otherwise leave it for the TTL.\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  const raw = await client.get('alice:dms:processor:lock:run');\n  if (raw) {\n    let data = null;\n    try { data = JSON.parse(raw); } catch(e) {}\n    if (data && data.workflow === 'alice-mail-reconcile') {\n      await client.del('alice:dms:processor:lock:run');\n      logger.info('[mail-reconcile] Released stale lock after error');\n    }\n  }\n} catch(e) {\n  logger.info('[mail-reconcile] Lock release on error failed: ' + e.message + ' (TTL will clear it)');\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { workflow: 'alice-mail-reconcile', error: errorData.execution?.error?.message || 'Unknown error', node: errorData.execution?.lastNodeExecuted || 'unknown', timestamp: new Date().toISOString(), execution_id: errorData.execution?.id || null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [912, 1080],
+      "id": "code-release-lock-error",
+      "name": "Code: Release Lock (error)"
+    },
+    {
+      "parameters": {
+        "topic": "alice/mail/error",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": { "qos": 1 }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [1216, 1080],
+      "id": "mqtt-publish-error",
+      "name": "MQTT: Publish Error",
+      "credentials": {
+        "mqtt": { "id": "Kqy6cn7hyDDXrBA0", "name": "mqtt-alice" }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: POST /alice-mail-reconcile": {
+      "main": [[{ "node": "Code: Init Run", "type": "main", "index": 0 }]]
+    },
+    "Schedule Trigger: Monthly": {
+      "main": [[{ "node": "Code: Init Run", "type": "main", "index": 0 }]]
+    },
+    "Code: Init Run": {
+      "main": [[{ "node": "Code: Acquire Lock", "type": "main", "index": 0 }]]
+    },
+    "Code: Acquire Lock": {
+      "main": [[{ "node": "IF: Lock Acquired", "type": "main", "index": 0 }]]
+    },
+    "IF: Lock Acquired": {
+      "main": [
+        [{ "node": "PG: Load Mailboxes", "type": "main", "index": 0 }],
+        [{ "node": "Code: Respond Locked", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Respond Locked": {
+      "main": [[{ "node": "IF: From Webhook", "type": "main", "index": 0 }]]
+    },
+    "PG: Load Mailboxes": {
+      "main": [[{ "node": "Code: Query Weaviate", "type": "main", "index": 0 }]]
+    },
+    "Code: Query Weaviate": {
+      "main": [[{ "node": "Code: Plan Run", "type": "main", "index": 0 }]]
+    },
+    "Code: Plan Run": {
+      "main": [[{ "node": "IF: Nothing To Do", "type": "main", "index": 0 }]]
+    },
+    "IF: Nothing To Do": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Objects", "type": "main", "index": 0 }]
+      ]
+    },
+    "Loop Over Objects": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Code: Process Object", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Process Object": {
+      "main": [[{ "node": "Code: Time Check", "type": "main", "index": 0 }]]
+    },
+    "Code: Time Check": {
+      "main": [[{ "node": "IF: Time Limit Reached", "type": "main", "index": 0 }]]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Objects", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Build Summary": {
+      "main": [[{ "node": "IF: From Webhook", "type": "main", "index": 0 }]]
+    },
+    "IF: From Webhook": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }],
+        [{ "node": "MQTT: Publish reconcile-stats", "type": "main", "index": 0 }]
+      ]
+    },
+    "MQTT: Publish reconcile-stats": {
+      "main": [[{ "node": "End (Schedule)", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[{ "node": "Code: Release Lock (error)", "type": "main", "index": 0 }]]
+    },
+    "Code: Release Lock (error)": {
+      "main": [[{ "node": "MQTT: Publish Error", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 86400,
+    "errorWorkflow": "po2OuxzG5htVHK6E",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}

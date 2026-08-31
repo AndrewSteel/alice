@@ -6,6 +6,7 @@ Endpoints:
   GET  /health         — liveness check
   POST /encrypt        — encrypt a plaintext IMAP password (used by alice-mail-api)
   POST /test           — test IMAP login (accepts password_enc)
+  POST /list-uids      — list every live IMAP UID of a folder (default INBOX), read-only
   POST /fetch          — fetch emails since a given IMAP UID, returns metadata + body preview
   POST /body           — fetch full body of a single email by UID
   POST /attachment     — fetch raw bytes of a single attachment by UID + attachment index
@@ -325,6 +326,41 @@ def test_connection():
     except Exception as exc:
         log.exception("test_connection failed")
         return jsonify({"ok": False, "message": str(exc)}), 500
+
+
+@app.route("/list-uids", methods=["POST"])
+def list_uids():
+    """Return every live IMAP UID of a folder (PROJ-98).
+
+    Used by the alice-mail-reconcile n8n workflow to detect Email Weaviate
+    objects whose source mail was deleted in the mailbox. One `UID SEARCH ALL`
+    against the read-only opened folder — changes no flags, no expunge.
+
+    Success: {"uids": [<int>, ...], "count": <n>}.
+    Failure: {"uids": [], "error": "<msg>"} with HTTP 400 (IMAP/auth) or 500.
+    """
+    data = request.json or {}
+    folder = data.get("folder", "INBOX")
+    try:
+        password = _decrypt_password(data["password_enc"])
+        imap = _connect(data)
+        imap.login(data["username"], password)
+        imap.select(folder, readonly=True)
+
+        typ, search_data = imap.uid("search", None, "ALL")
+        imap.logout()
+
+        if typ != "OK":
+            return jsonify({"uids": [], "error": "search failed"}), 400
+
+        uids = [int(u) for u in (search_data[0].split() if search_data and search_data[0] else [])]
+        return jsonify({"uids": uids, "count": len(uids)})
+
+    except imaplib.IMAP4.error as exc:
+        return jsonify({"uids": [], "error": str(exc)}), 400
+    except Exception as exc:
+        log.exception("list_uids failed")
+        return jsonify({"uids": [], "error": str(exc)}), 500
 
 
 @app.route("/fetch", methods=["POST"])
