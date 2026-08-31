@@ -1,8 +1,8 @@
 # PROJ-97: DMS Pfad-Drift-Reconcile + Cleanup verwaister Weaviate-Objekte
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-31
-**Last Updated:** 2026-08-31 (QA bestanden: 0 Critical/High, 3 Low-Bugs in-Iteration behoben, BUG-2/Medium ist Nutzerentscheidung; Status → Approved)
+**Last Updated:** 2026-08-31 (Deployed + 2 Dry-Run-Läufe verifiziert; `confirm`-Lauf steht noch aus; Status → Deployed)
 
 ## Dependencies
 
@@ -444,11 +444,10 @@ _Review 2026-08-31: Tech Design gegen die realen Workflows geprüft (`alice-dms-
 - **Detail:** `Code: Process Object` fügte bei `path_drift` für `collection === 'Image'` `props.additionalPaths` hinzu → Weaviate-Auto-Schema hätte die Property angelegt.
 - **Fix (2026-08-31):** Image-PATCH setzt nur noch `file_path` (+ `file_name`/`file_type` nur wenn die Property auf dem abgefragten Objekt existiert). Kein `additionalPaths` mehr für Image.
 
-#### BUG-2: Reconcile-Webhook ohne Authentifizierung löst destruktive Löschungen aus
+#### BUG-2: Reconcile-Webhook ohne Authentifizierung löst destruktive Löschungen aus — ⚖️ AKZEPTIERT (Nutzerentscheidung 2026-08-31)
 - **Severity:** Medium
-- **Detail:** `POST /webhook/alice-dms-reconcile` hat keine JWT-/Token-Prüfung. Mit `confirm=true` löscht der Aufruf endgültig Weaviate-Objekte (inkl. Vektoren + LLM-Klassifizierung). Schutz aktuell: VPN-only, `confirm`-Gate, nginx-Pfad. Gleiches Muster wie die bestehenden DMS-Backfills, aber die anderen reparieren/erzeugen nur — dieser löscht.
-- **Repro:** `curl -X POST .../webhook/alice-dms-reconcile -d '{"confirm":true}'` ohne Auth-Header.
-- **Priorität:** Fix in nächstem Sprint erwägen (z.B. Shared-Secret-Header oder JWT-Node wie `alice-session-api`). Nutzerentscheidung nötig, ob konsistent mit den anderen Backfills bleiben.
+- **Detail:** `POST /webhook/alice-dms-reconcile` hat keine JWT-/Token-Prüfung. Mit `confirm=true` löscht der Aufruf endgültig Weaviate-Objekte (inkl. Vektoren + LLM-Klassifizierung). Schutz: VPN-only, `confirm`-Gate (Default = Dry-Run), nginx-Pfad. Gleiches Muster wie die bestehenden DMS-Backfills.
+- **Entscheidung:** Bewusst **so belassen** — konsistent mit `alice-dms-thumbnailer-backfill` / `alice-dms-classification-backfill` / `alice-dms-language-backfill`. Der VPN-only-Zugang plus das `confirm`-Gate gelten als ausreichend. Kein Auth-Node.
 
 #### BUG-3: `time_limit_seconds` nur aus Body, nicht aus Query-String — ✅ BEHOBEN
 - **Severity:** Low
@@ -468,10 +467,44 @@ _Review 2026-08-31: Tech Design gegen die realen Workflows geprüft (`alice-dms-
 ### Summary
 - **Acceptance Criteria:** alle Kategorien erfüllt (1 bewusste, begründete Abweichung bei der Cron-Zeit; 1 gleichwertige Umsetzung bei „Pfad in additionalPaths").
 - **Edge Cases:** 17/17 abgedeckt.
-- **Bugs Found:** 5 total (0 Critical, 0 High, 1 Medium, 4 Low). **BUG-1, BUG-3, BUG-4 in-Iteration behoben und re-verifiziert (`node --check` grün, Struktur- + Datenfluss-Trace erneut geprüft).** Offen: BUG-2 (Medium, Nutzerentscheidung), BUG-5 (Low, dokumentiert).
-- **Security:** Pass mit Vorbehalt — BUG-2 (fehlende Webhook-Auth für einen destruktiven Endpoint) ist eine bewusste Konsistenzentscheidung mit den bestehenden Backfills; Nutzer sollte sie explizit bestätigen.
-- **Production Ready:** **JA.** Kein Critical/High; die drei Low-Bugs behoben, BUG-2 (Medium) ist eine Design-/Konsistenzfrage ohne funktionalen Blocker, BUG-5 (Low) ist eine bekannte, mit dem Referenz-Backfill geteilte Einschränkung.
-- **Empfehlung:** BUG-2 mit Nutzer klären (Webhook-Auth ja/nein). Dann **`/deploy`** — Pflicht-Reihenfolge: (1) `alice-dms-thumbnailer` Container-Rebuild + Deploy (neuer Endpoint), (2) `alice-dms-reconcile` Workflow deployen, (3) erster Lauf als **Dry-Run** gegen den echten Bestand, Zähler gegen die ~700+~35-Erwartung prüfen, erst dann `confirm=true`.
+- **Bugs Found:** 5 total (0 Critical, 0 High, 1 Medium, 4 Low). **BUG-1, BUG-3, BUG-4 in-Iteration behoben und re-verifiziert.** BUG-2 (Medium) vom Nutzer als bewusste Konsistenzentscheidung akzeptiert (kein Auth-Node). BUG-5 (Low) dokumentiert.
+- **Security:** Pass. BUG-2 (fehlende Webhook-Auth) bewusst akzeptiert — VPN-only + `confirm`-Gate, konsistent mit allen anderen DMS-Backfills.
+- **Production Ready:** **JA.** Kein Critical/High offen.
+- **Deploy erfolgt (2026-08-31):** `alice-dms-thumbnailer` (neuer `DELETE`-Endpoint) + `alice-dms-reconcile` (Workflow-ID `pKeTwgkgshNwVZ7L`, aktiv).
+
+### Live-Verifikation (2026-08-31)
+
+**Dry-Run 1 (Execution 165064, `time_limit_seconds=180`):**
+```
+checked=1439  remaining=823  stopped_reason=time_limit
+deleted_orphan=710  deleted_orphan_banktx=34  skipped_ok=695
+path_repaired=0  deleted_cascade_banktx=0  thumbnail_files_removed=0  done_events_published=0
+```
+- `deleted_orphan=710` deckt sich mit der PROJ-95-Erwartung (~700 pfadlose Objekte). Stichprobe der `Code: Query Weaviate`-Ausgabe: Großteil der betroffenen `Invoice`-Objekte hat `file_path=null` **und** `file_hash=null` (Alt-Importe ohne verwertbare Quelle → korrekt `orphan`).
+- `deleted_orphan_banktx=34`: Cascade-Waisen (BankTransaction ohne lebendes Parent-BankStatement) — Bonus-Fund, in PROJ-95 nicht separat beziffert.
+- `path_repaired=0`: noch nicht aussagekräftig — der Lauf stoppte bei 1439/2262. **Voller Dry-Run ausstehend.**
+
+**Dry-Run 2 (Execution 165078, voll, ~11 min, `stopped_reason=completed`):**
+```
+checked=2262  remaining=0
+deleted_orphan=710  deleted_orphan_banktx=229  skipped_ok=1323
+path_repaired=0  deleted_cascade_banktx=0  thumbnail_files_removed=0  done_events_published=0
+```
+
+**Log-Analyse (winston, `/srv/warm/n8n/data/logs/n8n.log`):**
+- **`path_repaired=0` ist korrekt, kein Bug.** ALLE geloggten `orphan`-Entscheidungen haben `lastPath=(none)` UND `hash=(none)` (`grep -vc 'lastPath=(none)'` → 0; `grep -v 'hash=(none)'` → 0). Die 710 Waisen sind ausschließlich pfad- **und** hash-lose Alt-Importe — reine Geister-Objekte ohne Rekonstruktionsmöglichkeit. **Kein einziger Fall, in dem `confirm` ein Objekt mit lebender Quelldatei löschen würde** — die Fail-safe-Logik greift.
+- Die ~35 Pfad-Drift-Fälle aus PROJ-95 haben sich zwischen dem 30.08. und dem 31.08. **selbst geheilt**: `alice-dms-scanner` hat die verschobenen Dateien am neuen Ort neu indexiert, ihr `filePath` zeigt wieder auf eine existierende Datei → jetzt in `skipped_ok`. Es gibt keine Drift mehr zu reparieren.
+- **`deleted_orphan_banktx=229` ist korrekt — Cascade-Artefakt des Dry-Runs.** Die geloggten `parentStatementId` wiederholen sich stark (wenige verwaiste BankStatements × je viele Transaktions-Kinder). Diese Parent-BankStatements sind selbst Teil der 710 `orphan`. Im Dry-Run zählt der Cascade-Zweig nicht (`if (confirm)`), daher landen alle Kinder im `banktx_orphan`-Zähler; im `confirm`-Lauf werden dieselben Kinder über den BankStatement-Cascade-Pfad gelöscht und zählen dann als `deleted_cascade_banktx`. Netto identisch. Keine Doppel-Löschung dank BUG-4-Fix.
+- **Ergebnis: grünes Licht für den `confirm`-Lauf.** Erwartung: `deleted_orphan≈710`, `deleted_cascade_banktx + deleted_orphan_banktx ≈ 229` (Split je nachdem, in welcher Reihenfolge Parent/Kind verarbeitet werden — Parent zuerst, daher überwiegend `deleted_cascade_banktx`), `path_repaired=0`, `skipped_ok≈1323`.
+
+_(Hinweis: die Logdatei enthält beide vollen Läufe — 710 + 710 ≈ 1420 `orphan`-Zeilen.)_
 
 ## Deployment
-_To be added by /deploy_
+
+**2026-08-31 — deployed:**
+- `alice-dms-thumbnailer` (Container-Rebuild): neuer Endpoint `DELETE /thumbnail/{uuid}`.
+- `alice-dms-reconcile` (n8n-Workflow-ID `pKeTwgkgshNwVZ7L`, aktiv): Webhook + Schedule Trigger (`0 0 1-7 * 1`).
+
+**Verifikation:** 2 Dry-Run-Läufe (Execution 165064 partiell, 165078 voll) — Klassifikation bestätigt, keine Fehllöschungen möglich (alle `orphan` sind pfad-/hash-lose Alt-Importe). Siehe „Live-Verifikation" oben.
+
+**Ausstehend:** erster `confirm=true`-Lauf (räumt die 710 verwaisten Objekte + ~229 Cascade-Waisen-Transaktionen auf). Danach optional Verifikations-Dry-Run (`deleted_orphan` sollte dann ~0 sein). Der monatliche Schedule läuft ab dem ersten Montag im September automatisch.
