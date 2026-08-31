@@ -104,7 +104,7 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
     <a href="#ingest">Ingestion &amp; dispatch</a>
     <a href="#extract">Extraction &amp; storage</a>
     <a href="#mail">Mail side-channel</a>
-    <a href="#backfills">Backfills</a>
+    <a href="#backfills">Backfills &amp; sweeps</a>
     <a href="#redis">Redis key inventory</a>
     <a href="#mqtt">MQTT topic inventory</a>
     <a href="#stores">Postgres &amp; Weaviate</a>
@@ -115,11 +115,11 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
     <header class="hero">
       <p class="eyebrow">Alice · Internal Reference</p>
       <h1>DMS Pipeline Map</h1>
-      <p class="lede">How the 16 <code>alice-dms-*</code> / <code>alice-mail-*</code> n8n workflows and 5 extractor containers hand documents to each other — every Redis key, MQTT topic, and database write, traced end to end.</p>
+      <p class="lede">How the 17 <code>alice-dms-*</code> / <code>alice-mail-*</code> n8n workflows and 5 extractor containers hand documents to each other — every Redis key, MQTT topic, and database write, traced end to end.</p>
       <div class="meta-row">
-        <span><b>20</b> workflows</span>
+        <span><b>21</b> workflows</span>
         <span><b>~30</b> Redis keys</span>
-        <span><b>11</b> MQTT topics</span>
+        <span><b>12</b> MQTT topics</span>
         <span><b>8</b> Weaviate collections</span>
         <span><b>1</b> Postgres table (dms-specific)</span>
       </div>
@@ -130,7 +130,7 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
 
     <figure>
       <div class="diagram-card">
-        <svg viewBox="0 0 1080 620" role="img" aria-label="Pipeline flow: scanner locks folders and dispatches to path-worker, which hashes files and routes them by type over five MQTT topics to extractor containers; extractors push text onto a Redis queue; the nightly processor drains that queue, classifies documents via Ollama, writes into Weaviate, and publishes a done event that triggers thumbnailing. A lifecycle topic handles moves and deletes in parallel. Mail sync feeds email directly into Weaviate and queues attachments back into the folder-scan path.">
+        <svg viewBox="0 0 1080 680" role="img" aria-label="Pipeline flow: scanner locks folders and dispatches to path-worker, which hashes files and routes them by type over five MQTT topics to extractor containers; extractors push text onto a Redis queue; the nightly processor drains that queue, classifies documents via Ollama, writes into Weaviate, and publishes a done event that triggers thumbnailing. A lifecycle topic handles moves and deletes in parallel. A monthly reconcile workflow compares Weaviate against the Redis path map, repairing moved-file paths and deleting objects whose source file is gone. Mail sync feeds email directly into Weaviate and queues attachments back into the folder-scan path.">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -206,25 +206,36 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
           <line x1="899" y1="330" x2="758" y2="348" class="edge" marker-end="url(#arrow)"/>
           <text x="915" y="200" class="cap" transform="rotate(90 915 200)">patch/delete object</text>
 
-          <!-- Mail side -->
-          <rect x="24" y="530" width="200" height="60" rx="8" class="box"/>
-          <text x="124" y="552" text-anchor="middle" class="lbl">mail-sync</text>
-          <text x="124" y="568" text-anchor="middle" class="sub">every minute · IMAP</text>
-          <text x="124" y="582" text-anchor="middle" class="sub">→ Email direct insert</text>
-          <line x1="224" y1="556" x2="658" y2="374" class="edge" marker-end="url(#arrow)"/>
+          <!-- Reconcile branch -->
+          <rect x="658" y="464" width="360" height="72" rx="8" class="box"/>
+          <text x="838" y="486" text-anchor="middle" class="lbl">dms-reconcile</text>
+          <text x="838" y="502" text-anchor="middle" class="sub">monthly (1st Mon) + webhook · shares GPU lock</text>
+          <text x="838" y="516" text-anchor="middle" class="sub">reconciles Weaviate against the Redis path map</text>
+          <text x="838" y="530" text-anchor="middle" class="sub">repair drift / delete orphans</text>
+          <line x1="778" y1="464" x2="778" y2="412" class="edgeAccent" marker-end="url(#arrowAccent)"/>
+          <text x="866" y="440" text-anchor="middle" class="cap">PATCH filePath / DELETE object</text>
+          <line x1="658" y1="490" x2="544" y2="486" class="edgeAccent" marker-end="url(#arrowAccent)"/>
+          <text x="600" y="478" text-anchor="middle" class="cap">alice/dms/done</text>
 
-          <rect x="284" y="530" width="240" height="60" rx="8" class="box"/>
-          <text x="404" y="552" text-anchor="middle" class="lbl">mail-attachment-processor</text>
-          <text x="404" y="568" text-anchor="middle" class="sub">nightly 04:00 · drains queue</text>
-          <text x="404" y="582" text-anchor="middle" class="sub">writes files → watched NAS folder</text>
-          <line x1="124" y1="530" x2="124" y2="500" class="edgeDash"/>
-          <line x1="124" y1="500" x2="284" y2="560" class="edgeDash" marker-end="url(#arrow)"/>
-          <text x="150" y="490" class="cap">alice:mail:attachment_queue</text>
-          <line x1="404" y1="530" x2="124" y2="76" class="edgeDash" marker-end="url(#arrow)"/>
-          <text x="60" y="300" class="cap" transform="rotate(-90 60 300)">rejoins as ordinary file</text>
+          <!-- Mail side -->
+          <rect x="24" y="590" width="200" height="60" rx="8" class="box"/>
+          <text x="124" y="612" text-anchor="middle" class="lbl">mail-sync</text>
+          <text x="124" y="628" text-anchor="middle" class="sub">every minute · IMAP</text>
+          <text x="124" y="642" text-anchor="middle" class="sub">→ Email direct insert</text>
+          <line x1="224" y1="616" x2="658" y2="378" class="edge" marker-end="url(#arrow)"/>
+
+          <rect x="284" y="590" width="240" height="60" rx="8" class="box"/>
+          <text x="404" y="612" text-anchor="middle" class="lbl">mail-attachment-processor</text>
+          <text x="404" y="628" text-anchor="middle" class="sub">nightly 04:00 · drains queue</text>
+          <text x="404" y="642" text-anchor="middle" class="sub">writes files → watched NAS folder</text>
+          <line x1="124" y1="590" x2="124" y2="560" class="edgeDash"/>
+          <line x1="124" y1="560" x2="284" y2="620" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="150" y="550" class="cap">alice:mail:attachment_queue</text>
+          <line x1="404" y1="590" x2="124" y2="76" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="60" y="330" class="cap" transform="rotate(-90 60 330)">rejoins as ordinary file</text>
         </svg>
       </div>
-      <figcaption>Files move scanner → path-worker → extractor → Redis queue → nightly processor → Weaviate → thumbnailer. Lifecycle events (moves/deletes) and the mail side-channel run in parallel and rejoin the same path.</figcaption>
+      <figcaption>Files move scanner → path-worker → extractor → Redis queue → nightly processor → Weaviate → thumbnailer. Lifecycle events (moves/deletes), the monthly reconcile sweep, and the mail side-channel run in parallel and rejoin the same path.</figcaption>
     </figure>
 
     <h2 id="ingest"><span class="num">02</span>Ingestion &amp; dispatch</h2>
@@ -260,6 +271,19 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
         <dt>Redis</dt><dd>HSET/HDEL <code>path_to_hash</code> · SADD/SREM <code>hash_to_paths:&lt;hash&gt;</code></dd>
         <dt>Weaviate</dt><dd>PATCH additionalPaths / filePath · DELETE object (cascades BankTransaction children)</dd>
         <dt>MQTT out</dt><dd>pub <span class="k">alice/dms/done</span> or <span class="k">alice/dms/error</span></dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>alice-dms-reconcile</h3>
+      <div class="role">Batch counterpart to lifecycle — reconciles the whole Weaviate corpus against the Redis path map, catching drift lifecycle's per-event path never saw <span class="tag trigger">PROJ-97</span></div>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">cron 0 0 1-7 * 1</span> (1st Monday, 00:00 UTC) · <span class="tag trigger">webhook</span> (dry-run unless <code>confirm=true</code>)</dd>
+        <dt>Redis</dt><dd>takes <span class="pill lock">GPU lock</span> <code>alice:dms:processor:lock:run</code> · reads <code>path_to_hash</code>, <code>hash_to_paths:&lt;hash&gt;</code> · on orphan delete: HDEL/SREM the dead entries, SREM <code>processed</code></dd>
+        <dt>Per object</dt><dd>file exists at <code>filePath</code> → <b>healthy</b> · <code>fileHash</code> maps to a live file → <b>path-drift</b>, PATCH <code>filePath</code> · no live source anywhere → <b>orphan</b>, DELETE (+ BankTransaction cascade, + thumbnail file) · BankTransaction with no live parent → <b>delete</b></dd>
+        <dt>Weaviate</dt><dd>GraphQL scan of the 6 file-based collections + BankTransaction (Email excluded → PROJ-98) · REST PATCH / DELETE</dd>
+        <dt>Calls</dt><dd><code>DELETE</code> <span class="k">dms-thumbnailer:8004/thumbnail/&lt;uuid&gt;</span> (n8n has no <code>THUMB_DIR</code> mount)</dd>
+        <dt>MQTT</dt><dd>pub <span class="k">alice/dms/done</span> after each path repair (→ live thumbnailer) · pub <span class="k">alice/dms/reconcile-stats</span> (scheduled runs) · pub <span class="k">alice/dms/error</span></dd>
       </dl>
     </div>
 
@@ -303,6 +327,7 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
       <dl class="kv">
         <dt>Trigger</dt><dd><span class="tag trigger">MQTT</span> <span class="k">alice/dms/done</span></dd>
         <dt>Does</dt><dd>fetches source (NAS file, or Weaviate Email body) → POST container <code>/generate</code> → PATCH <code>thumbnail_path</code> on the Weaviate object</dd>
+        <dt>Endpoints</dt><dd><code>POST /generate</code> · <code>GET /thumbnail/&lt;uuid&gt;</code> (JWT) · <code>DELETE /thumbnail/&lt;uuid&gt;</code> — called by <code>dms-reconcile</code> when an orphan is removed (PROJ-97)</dd>
         <dt>MQTT out</dt><dd>pub <span class="k">alice/dms/thumb_error</span> on failure</dd>
       </dl>
     </div>
@@ -329,7 +354,7 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
       </dl>
     </div>
 
-    <h2 id="backfills"><span class="num">05</span>Backfills</h2>
+    <h2 id="backfills"><span class="num">05</span>Backfills &amp; maintenance sweeps</h2>
     <p class="section-sub">All manual or scheduled, all resumable, all mutually exclusive with the nightly processor via the same GPU lock.</p>
 
     <div class="table-scroll">
@@ -341,10 +366,12 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
         <tr><td class="key">image-description-backfill</td><td>cron ×2 + webhook</td><td>Image (extraction_failed)</td><td>Retries failed Ollama Vision descriptions, self-continues</td></tr>
         <tr><td class="key">thumbnailer-backfill</td><td>webhook</td><td>all 8 collections</td><td>Generates thumbnails for objects missing one</td></tr>
         <tr><td class="key">mail-attachment-backfill</td><td>webhook</td><td>indexed Email objects</td><td>Retroactively imports attachments to NAS folders</td></tr>
+        <tr><td class="key">reconcile</td><td>cron (monthly) + webhook</td><td>6 file-based collections + BankTransaction</td><td>Repairs stale <code>filePath</code>, deletes objects whose source file is gone; webhook is dry-run unless <code>confirm=true</code></td></tr>
       </tbody>
     </table>
     </div>
-    <div class="flag"><b>Confirmed gap → PROJ-95</b>thumbnailer-backfill has no lock key and no time limit, unlike its four siblings — it never grabs <code>processor:lock:run</code> and can't be started with a duration like the others. Both are being added as part of PROJ-95.</div>
+    <div class="flag"><b>Resolved — PROJ-95 deployed 2026-08-30/31</b>thumbnailer-backfill now takes <code>processor:lock:run</code> and accepts a <code>time_limit_seconds</code>; Email and BankTransaction objects get thumbnails retroactively. The first backfill run surfaced ~700 path-less and ~35 path-drift Weaviate objects, which is what <code>dms-reconcile</code> (PROJ-97) was built to clean up.</div>
+    <div class="flag"><b>Reconcile is fail-safe by design</b>An object is deleted only when <em>no</em> live source file can be mapped to it — any Redis/Weaviate error during classification keeps the object. The two dry-runs (2026-08-31) confirmed all 710 orphan candidates are path- <em>and</em> hash-less legacy imports; the 35 path-drift cases had already self-healed via a later scanner run.</div>
 
     <h2 id="redis"><span class="num">06</span>Redis key inventory</h2>
     <p class="section-sub">Grouped by what the state represents. All keys are prefixed <code>alice:</code>.</p>
@@ -355,7 +382,7 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
       <thead><tr><th>Key</th><th>Written by</th><th>Read/shared by</th></tr></thead>
       <tbody>
         <tr><td class="key">dms:scanner:lock:folder:&lt;id&gt;</td><td>dms-scanner (acquire, NX+PX 180s)</td><td>dms-path-worker (renews, releases)</td></tr>
-        <tr><td class="key">dms:processor:lock:run</td><td>dms-processor</td><td>classification-backfill, language-backfill, mail-attachment-processor, mail-attachment-backfill — all wait on it to avoid concurrent Ollama/GPU use</td></tr>
+        <tr><td class="key">dms:processor:lock:run</td><td>dms-processor</td><td>classification-backfill, language-backfill, mail-attachment-processor, mail-attachment-backfill, thumbnailer-backfill, reconcile — all wait on it to avoid concurrent Ollama/GPU use and racing Weaviate writes</td></tr>
         <tr><td class="key">dms:image-description-backfill:lock:run</td><td>image-description-backfill</td><td>itself only (self-invocation chain)</td></tr>
       </tbody>
     </table>
@@ -366,10 +393,10 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
     <table>
       <thead><tr><th>Key</th><th>Type</th><th>Written by</th><th>Read by</th></tr></thead>
       <tbody>
-        <tr><td class="key">dms:processed</td><td>Set</td><td>dms-processor</td><td>dms-path-worker, dms-scanner</td></tr>
+        <tr><td class="key">dms:processed</td><td>Set</td><td>dms-processor, dms-reconcile (SREM on orphan delete)</td><td>dms-path-worker, dms-scanner</td></tr>
         <tr><td class="key">dms:queued_files</td><td>Set</td><td>dms-path-worker, dms-processor</td><td>dms-path-worker</td></tr>
-        <tr><td class="key">dms:path_to_hash</td><td>Hash</td><td>dms-lifecycle, dms-processor</td><td>dms-path-worker, dms-scanner, chat-stream (admin dashboard)</td></tr>
-        <tr><td class="key">dms:hash_to_paths:&lt;hash&gt;</td><td>Set</td><td>dms-lifecycle, dms-processor</td><td>dms-path-worker, dms-scanner</td></tr>
+        <tr><td class="key">dms:path_to_hash</td><td>Hash</td><td>dms-lifecycle, dms-processor, dms-reconcile (HDEL dead entries)</td><td>dms-path-worker, dms-scanner, dms-reconcile, chat-stream (admin dashboard)</td></tr>
+        <tr><td class="key">dms:hash_to_paths:&lt;hash&gt;</td><td>Set</td><td>dms-lifecycle, dms-processor, dms-reconcile (DEL dead sets)</td><td>dms-path-worker, dms-scanner, dms-reconcile</td></tr>
       </tbody>
     </table>
     </div>
@@ -413,6 +440,7 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
         <tr><td class="key">dms:language-backfill:run:hits / :start_time / :stats</td><td>language-backfill</td></tr>
         <tr><td class="key">mail:backfill:mailboxes / mail:backfill:run:start_time / :stats</td><td>mail-attachment-backfill</td></tr>
         <tr><td class="key">mail:attachment_run:start_time / :stats</td><td>mail-attachment-processor</td></tr>
+        <tr><td class="key">dms-reconcile — no counter keys</td><td>counters live in workflow static data, not Redis; summary goes out on <code>alice/dms/reconcile-stats</code></td></tr>
       </tbody>
     </table>
     </div>
@@ -430,8 +458,9 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
         <tr><td class="key">alice/dms/office</td><td>dms-path-worker</td><td>extractor-office</td><td>same shape</td></tr>
         <tr><td class="key">alice/dms/image</td><td>dms-path-worker</td><td>extractor-image</td><td>same shape</td></tr>
         <tr><td class="key">alice/dms/lifecycle</td><td>dms-path-worker, dms-scanner</td><td>dms-lifecycle</td><td>action: add_path / update_path / delete_file</td></tr>
-        <tr><td class="key">alice/dms/done</td><td>dms-lifecycle, dms-processor, mail-sync</td><td>dms-thumbnailer</td><td>weaviate_uuid, document_type, inserted</td></tr>
-        <tr><td class="key">alice/dms/error</td><td>dms-lifecycle, dms-processor</td><td><span class="pill stat">none found</span></td><td>file_path, error, timestamp</td></tr>
+        <tr><td class="key">alice/dms/done</td><td>dms-lifecycle, dms-processor, mail-sync, dms-reconcile</td><td>dms-thumbnailer</td><td>weaviate_uuid, document_type, inserted</td></tr>
+        <tr><td class="key">alice/dms/error</td><td>dms-lifecycle, dms-processor, dms-reconcile</td><td><span class="pill stat">none found</span></td><td>file_path, error, timestamp</td></tr>
+        <tr><td class="key">alice/dms/reconcile-stats</td><td>dms-reconcile (scheduled runs only)</td><td><span class="pill stat">none found</span></td><td>checked, path_repaired, deleted_orphan, skipped_ok, …</td></tr>
         <tr><td class="key">alice/dms/scanner/stats</td><td>dms-scanner</td><td><span class="pill stat">none found</span></td><td>dispatch run summary</td></tr>
         <tr><td class="key">alice/dms/scanner/path_stats</td><td>dms-path-worker</td><td><span class="pill stat">none found</span></td><td>per-folder run summary</td></tr>
         <tr><td class="key">alice/dms/thumb_error</td><td>dms-thumbnailer</td><td><span class="pill stat">none found</span></td><td>weaviate_uuid, file_path, error</td></tr>
@@ -460,25 +489,26 @@ footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); f
     <table>
       <thead><tr><th>Collection</th><th>Written by</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td class="key">Invoice</td><td>dms-processor, dms-lifecycle</td><td>issuer, amounts, lineItems, fullText</td></tr>
-        <tr><td class="key">BankStatement</td><td>dms-processor, dms-lifecycle</td><td>parent of BankTransaction children</td></tr>
-        <tr><td class="key">BankTransaction</td><td>dms-processor "Phase B" only</td><td>child rows, cascade-deleted with parent</td></tr>
-        <tr><td class="key">Document</td><td>dms-processor, dms-lifecycle</td><td>generic fallback type</td></tr>
-        <tr><td class="key">Email</td><td>mail-sync (primary path), dms-processor (fallback)</td><td>thumbnailer reads body text for rendering</td></tr>
-        <tr><td class="key">SecuritySettlement</td><td>dms-processor, dms-lifecycle</td><td>depot/ISIN/settlement fields</td></tr>
-        <tr><td class="key">Contract</td><td>dms-processor, dms-lifecycle</td><td>partner, terms, cost fields</td></tr>
-        <tr><td class="key">Image</td><td>dms-processor image branch, image-description-backfill (patch)</td><td>excluded from classification/language backfill scope</td></tr>
+        <tr><td class="key">Invoice</td><td>dms-processor, dms-lifecycle, dms-reconcile (patch/delete)</td><td>issuer, amounts, lineItems, fullText</td></tr>
+        <tr><td class="key">BankStatement</td><td>dms-processor, dms-lifecycle, dms-reconcile (patch/delete)</td><td>parent of BankTransaction children</td></tr>
+        <tr><td class="key">BankTransaction</td><td>dms-processor "Phase B"; dms-reconcile (delete only)</td><td>child rows, cascade-deleted with parent or when parent is gone</td></tr>
+        <tr><td class="key">Document</td><td>dms-processor, dms-lifecycle, dms-reconcile (patch/delete)</td><td>generic fallback type</td></tr>
+        <tr><td class="key">Email</td><td>mail-sync (primary path), dms-processor (fallback)</td><td>thumbnailer reads body text for rendering · <b>excluded from reconcile</b> → PROJ-98</td></tr>
+        <tr><td class="key">SecuritySettlement</td><td>dms-processor, dms-lifecycle, dms-reconcile (patch/delete)</td><td>depot/ISIN/settlement fields</td></tr>
+        <tr><td class="key">Contract</td><td>dms-processor, dms-lifecycle, dms-reconcile (patch/delete)</td><td>partner, terms, cost fields</td></tr>
+        <tr><td class="key">Image</td><td>dms-processor image branch, image-description-backfill (patch), dms-reconcile (patch/delete)</td><td>excluded from classification/language backfill scope · reconcile uses snake_case field names</td></tr>
       </tbody>
     </table>
     </div>
     <p class="section-sub"><b style="color:var(--text)">Read-only consumers:</b> alice-tool-search (assistant document search, permission-filtered across all 8 collections) and the alice-chat-stream admin dashboard (coverage aggregates).</p>
 
     <h2 id="open"><span class="num">09</span>Resolved &amp; tracked</h2>
-    <p class="section-sub">Follow-up from 2026-08-30 review — all four items below are now scoped into <b>PROJ-95</b> (Roadmap).</p>
-    <div class="flag"><b>Dead MQTT topics — confirmed</b><code>alice/dms/error</code>, <code>scanner/stats</code>, <code>scanner/path_stats</code>, <code>thumb_error</code> were debugging aids from before winston logging was adopted. No longer needed; safe to treat as dead.</div>
-    <div class="flag"><b>alice-dms-thumbnailer never covers BankTransaction</b>Emails get thumbnails (PROJ-93), but BankTransaction objects (no <code>file_path</code>, generated from a BankStatement) are never rendered. Needs the same text-rendering mode PROJ-93 gave Email, built from <code>purpose</code>/<code>counterparty</code>/<code>amount</code> plus a <code>parentStatementId</code> lookup.</div>
-    <div class="flag"><b>alice-dms-thumbnailer-backfill drops every filePath-less object</b>Both Email and BankTransaction are discarded outright, so neither ever gets a thumbnail retroactively — same root cause as above, but in the backfill path. Also missing: the <code>processor:lock:run</code> lock every other backfill takes, and a time-limit/auto-continue mechanism (so a run can't be started with a duration like the others). The unconnected <b>"Split: Per collection"</b> node (no input or output edges) should be removed while this workflow is touched.</div>
+    <p class="section-sub">Follow-ups from the 2026-08-30 review and the PROJ-95 backfill run that followed it.</p>
+    <div class="flag"><b>Dead MQTT topics — confirmed</b><code>scanner/stats</code>, <code>scanner/path_stats</code>, <code>thumb_error</code> were debugging aids from before winston logging was adopted. <code>alice/dms/error</code> is still published (now also by <code>dms-reconcile</code>) but has no subscriber in this repo slice.</div>
+    <div class="flag"><b>Done — PROJ-95 (deployed 2026-08-30/31)</b>BankTransaction now gets a text-rendered thumbnail (from <code>purpose</code>/<code>counterparty</code>/<code>amount</code> + <code>parentStatementId</code> lookup); the backfill no longer drops <code>filePath</code>-less Email/BankTransaction objects, takes <code>processor:lock:run</code>, accepts <code>time_limit_seconds</code>, and the orphan "Split: Per collection" node is gone. Verification run generated 465 thumbnails.</div>
+    <div class="flag"><b>Done — PROJ-97 (deployed 2026-08-31)</b>The ~700 path-less + ~35 path-drift objects the PROJ-95 run surfaced are now handled by <code>dms-reconcile</code> (§02) — a monthly + on-demand sweep that repairs stale <code>filePath</code> and deletes objects with no recoverable source. New endpoint <code>DELETE /thumbnail/&lt;uuid&gt;</code> on the thumbnailer container lets it clean up the orphan's JPEG. Two dry-runs verified; the first <code>confirm=true</code> run is still pending.</div>
+    <div class="flag"><b>Tracked — PROJ-98 (Roadmap)</b>Email consistency: an IMAP-based orphan check for <code>Email</code> objects whose message was deleted from the mailbox or whose mailbox left the config. Split out of PROJ-97 because <code>mail-sync</code> is a pure IMAP pull with no Redis inventory to reconcile against — every object needs a live IMAP check.</div>
 
-    <footer>Compiled from workflows/*.json, docker/compose/automations/*, sql/init-schema.sql — 2026-08-30</footer>
+    <footer>Compiled from workflows/*.json, docker/compose/automations/*, sql/init-schema.sql — updated 2026-08-31 for PROJ-95 / PROJ-97</footer>
   </main>
 </div>
