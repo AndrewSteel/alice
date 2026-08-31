@@ -1,0 +1,429 @@
+{
+  "name": "alice-dms-reconcile",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-dms-reconcile (PROJ-97)\n\nReconciles the file-based Weaviate DMS collections against the Redis truth\n(`alice:dms:path_to_hash` / `alice:dms:hash_to_paths:<hash>`) that\nalice-dms-scanner / alice-dms-path-worker maintain.\n\n**Triggers**\n- POST /webhook/alice-dms-reconcile — manual. Without `confirm=true` in the\n  body it is a pure DRY-RUN (identify, count, log, write nothing). With\n  `confirm=true` repairs + deletes run. Optional `time_limit_seconds`.\n- Schedule (cron `0 0 1-7 * 1` = first Monday of the month, 00:00 UTC =\n  01:00/02:00 Berlin). Always runs in confirm mode, fixed 3600s limit.\n\n**Per object, one of four outcomes**\n- healthy      — filePath set + file exists (thumbnail is PROJ-95's job)\n- path_drift   — fileHash (or stored path) maps to a live file → PATCH filePath\n                 + publish alice/dms/done\n- orphan       — no live source file anywhere → DELETE object (+ BankTransaction\n                 cascade if BankStatement, + thumbnail file via thumbnailer\n                 service, + dead Redis map entries)\n- banktx_orphan — BankTransaction whose parentStatementId points at no live\n                  BankStatement → DELETE\n\n**Email is out of scope** (→ PROJ-98).\n\n**Lock**: `alice:dms:processor:lock:run` (shared with the nightly processor\nand the other DMS backfills). Busy lock → clean skip, no wait. Redis down at\nlock time → fail-closed, no Weaviate ops.\n\n**Fail-safe**: an object is only deleted when NO live source file can be\nmapped to it. Any Redis/Weaviate error during classification → keep the\nobject (skipped_ok).",
+        "height": 760,
+        "width": 520,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "sticky-reconcile-overview",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alice-dms-reconcile",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [576, 480],
+      "id": "webhook-reconcile",
+      "name": "Webhook: POST /alice-dms-reconcile",
+      "webhookId": "alice-dms-reconcile-v1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 1-7 * 1"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [576, 720],
+      "id": "schedule-reconcile-monthly",
+      "name": "Schedule Trigger: Monthly"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Init Run\" } });\n\n// Reset per-run counters at the START — workflow static data persists across\n// executions; a run that crashed before Code: Build Summary must not carry\n// stale counts into the next run.\nconst staticData = $getWorkflowStaticData('global');\nstaticData.checked = 0;\nstaticData.path_repaired = 0;\nstaticData.deleted_orphan = 0;\nstaticData.deleted_cascade_banktx = 0;\nstaticData.deleted_orphan_banktx = 0;\nstaticData.thumbnail_files_removed = 0;\nstaticData.done_events_published = 0;\nstaticData.skipped_ok = 0;\nstaticData._cascaded_banktx_uuids = {};\n\n// Which trigger fired? Read the trigger nodes by NAME — n8n throws for a node\n// that did not execute in this run (proven pattern, see\n// alice-dms-image-description-backfill Code: Init Run). Do NOT read\n// $input.first() here: the upstream lock node returns a fresh object without\n// body/query (the PROJ-92 bug).\nlet firedNode = null;\ntry { if ($('Schedule Trigger: Monthly').first()) firedNode = 'schedule'; } catch(e) {}\ntry { if (!firedNode && $('Webhook: POST /alice-dms-reconcile').first()) firedNode = 'webhook'; } catch(e) {}\nconst fromSchedule = firedNode === 'schedule';\n\nlet body = {}, query = {};\nif (!fromSchedule) {\n  try {\n    const webhookItem = $('Webhook: POST /alice-dms-reconcile').first().json;\n    body = webhookItem.body || {};\n    query = webhookItem.query || {};\n  } catch(e) {}\n}\n\nlet trigger, mode, maxRuntimeSeconds;\nif (fromSchedule) {\n  trigger = 'schedule';\n  mode = 'confirm';           // schedule always executes — no schedule dry-run\n  maxRuntimeSeconds = 3600;   // fixed 1h window, finishes before the 02:00 UTC processor\n} else {\n  trigger = 'webhook';\n  const confirmRaw = body.confirm !== undefined ? body.confirm : query.confirm;\n  mode = (confirmRaw === true || confirmRaw === 'true') ? 'confirm' : 'dry-run';\n  const rawLimit = body.time_limit_seconds !== undefined ? body.time_limit_seconds : query.time_limit_seconds;\n  const parsed = parseInt(rawLimit, 10);\n  maxRuntimeSeconds = (!isNaN(parsed) && parsed > 0) ? parsed : null;\n}\n\nlogger.info(`[reconcile] Init: trigger=${trigger} mode=${mode} max_runtime_seconds=${maxRuntimeSeconds === null ? 'none' : maxRuntimeSeconds}`);\nreturn [{ json: { trigger, mode, max_runtime_seconds: maxRuntimeSeconds, window_start: Date.now() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 600],
+      "id": "code-init-run",
+      "name": "Code: Init Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Acquire Lock\" } });\nconst redis = require('redis');\nconst crypto = require('crypto');\n// Same lock key as alice-dms-processor / the other DMS backfills — reconcile\n// and the nightly processor must never write concurrently (BankStatement\n// delete vs. the processor re-writing its children).\nconst LOCK_KEY = 'alice:dms:processor:lock:run';\nconst LOCK_TTL_MS = 3900000; // 65 min — TTL fallback if the workflow hard-crashes (>= the 3600s schedule window)\n\nconst run = $input.first().json;\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nconst ownerToken = crypto.randomUUID();\nlet acquired = false;\ntry {\n  await client.connect();\n  const res = await client.set(LOCK_KEY, JSON.stringify({ owner: ownerToken, workflow: 'alice-dms-reconcile', started_at: new Date().toISOString() }), { NX: true, PX: LOCK_TTL_MS });\n  acquired = (res === 'OK');\n} catch(e) {\n  logger.info('[reconcile] Lock acquire error: ' + e.message + ' — failing closed (skip run)');\n  acquired = false;\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { ...run, _lock_acquired: acquired, lock_owner: acquired ? ownerToken : null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1184, 600],
+      "id": "code-acquire-lock",
+      "name": "Code: Acquire Lock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-lock-acquired",
+              "leftValue": "={{ $json._lock_acquired }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1488, 600],
+      "id": "if-lock-acquired",
+      "name": "IF: Lock Acquired"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Respond Locked\" } });\nconst run = $input.first().json;\nlogger.info('[reconcile] Run skipped: lock alice:dms:processor:lock:run is already held (nightly processor or another backfill).');\nreturn [{ json: { status: 'skipped', mode: run.mode, trigger: run.trigger, stopped_reason: 'locked', message: 'Lauf bereits aktiv', checked: 0, path_repaired: 0, deleted_orphan: 0, deleted_cascade_banktx: 0, deleted_orphan_banktx: 0, thumbnail_files_removed: 0, done_events_published: 0, skipped_ok: 0, remaining: null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1792, 780],
+      "id": "code-respond-locked",
+      "name": "Code: Respond Locked"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Load Redis Maps\" } });\nconst redis = require('redis');\nconst run = $input.first().json;\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n\nlet pathToHash = {};\nlet redisOk = false;\ntry {\n  await client.connect();\n  pathToHash = await client.hGetAll('alice:dms:path_to_hash') || {};\n  redisOk = true;\n} catch(e) {\n  logger.warn('[reconcile] Could not load alice:dms:path_to_hash: ' + e.message + ' — every object will be treated as fail-safe (skipped_ok)');\n  pathToHash = {};\n  redisOk = false;\n} finally {\n  await client.quit().catch(() => {});\n}\n\n// hash -> [paths] reverse index, built once from path_to_hash so per-object\n// classification does not hit Redis again for the common case. hash_to_paths:*\n// sets are only consulted as a fallback inside Code: Process Object.\nconst hashToPaths = {};\nfor (const [p, h] of Object.entries(pathToHash)) {\n  if (!h) continue;\n  (hashToPaths[h] = hashToPaths[h] || []).push(p);\n}\n\nlogger.info(`[reconcile] Redis maps loaded: redis_ok=${redisOk} path_to_hash entries=${Object.keys(pathToHash).length} distinct hashes=${Object.keys(hashToPaths).length}`);\nreturn [{ json: { ...run, _redis_ok: redisOk, _path_to_hash: pathToHash, _hash_to_paths: hashToPaths } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1792, 480],
+      "id": "code-load-redis-maps",
+      "name": "Code: Load Redis Maps"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Query Weaviate\" } });\nconst axios = require('axios');\nconst run = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 100;\n\n// File-based collections + BankTransaction. Email is out of scope (PROJ-98).\n// Image uses snake_case field names; everything else camelCase.\nconst FILE_COLLECTIONS = ['Invoice', 'BankStatement', 'Document', 'SecuritySettlement', 'Contract', 'Image'];\n\nfunction fieldsFor(collection) {\n  if (collection === 'Image') return '_additional { id } file_path file_hash file_name file_type additionalPaths';\n  return '_additional { id } filePath fileHash fileName fileType additionalPaths';\n}\nfunction isMissingFieldError(errors, field) {\n  try { const s = JSON.stringify(errors); return s.includes('Cannot query field') && s.includes(field); } catch(e) { return false; }\n}\n\nconst work = [];\n\n// --- file-based collections ---\nfor (const collection of FILE_COLLECTIONS) {\n  const isImage = collection === 'Image';\n  let cursor = null;\n  let includeThumb = true;\n  let includeAdditional = true;\n  while (true) {\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    let coreFields = fieldsFor(collection);\n    if (!includeAdditional) coreFields = coreFields.replace(' additionalPaths', '');\n    const thumbClause = includeThumb ? ' thumbnail_path' : '';\n    const gql = `{ Get { ${collection}(limit: ${LIMIT}${cursorClause}) { ${coreFields}${thumbClause} } } }`;\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });\n      if (r.data?.errors) {\n        if (includeThumb && isMissingFieldError(r.data.errors, 'thumbnail_path')) { includeThumb = false; continue; }\n        if (includeAdditional && isMissingFieldError(r.data.errors, 'additionalPaths')) { includeAdditional = false; continue; }\n        logger.warn(`[reconcile] GraphQL error for ${collection}: ${JSON.stringify(r.data.errors)}`);\n        break;\n      }\n      results = r.data?.data?.Get?.[collection] || [];\n    } catch(e) {\n      logger.warn(`[reconcile] Request failed for ${collection}: ${e.message}`);\n      break;\n    }\n    if (results.length === 0) break;\n    for (const doc of results) {\n      work.push({\n        weaviate_uuid: doc._additional?.id,\n        collection,\n        kind: 'file',\n        file_path: (isImage ? doc.file_path : doc.filePath) || null,\n        file_hash: (isImage ? doc.file_hash : doc.fileHash) || null,\n        file_name: (isImage ? doc.file_name : doc.fileName) || null,\n        file_type: (isImage ? doc.file_type : doc.fileType) || null,\n        additional_paths: Array.isArray(doc.additionalPaths) ? doc.additionalPaths : [],\n        thumbnail_path: doc.thumbnail_path || null\n      });\n    }\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n  const c = work.filter(w => w.collection === collection).length;\n  logger.info(`[reconcile] ${collection}: ${c} objects queued`);\n}\n\n// --- BankTransaction (parent-existence check only) ---\n{\n  let cursor = null;\n  while (true) {\n    const cursorClause = cursor ? `, after: \"${cursor}\"` : '';\n    const gql = `{ Get { BankTransaction(limit: ${LIMIT}${cursorClause}) { _additional { id } parentStatementId } } }`;\n    let results;\n    try {\n      const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });\n      if (r.data?.errors) { logger.warn(`[reconcile] GraphQL error for BankTransaction: ${JSON.stringify(r.data.errors)}`); break; }\n      results = r.data?.data?.Get?.BankTransaction || [];\n    } catch(e) {\n      logger.warn(`[reconcile] Request failed for BankTransaction: ${e.message}`);\n      break;\n    }\n    if (results.length === 0) break;\n    for (const doc of results) {\n      work.push({\n        weaviate_uuid: doc._additional?.id,\n        collection: 'BankTransaction',\n        kind: 'banktx',\n        parent_statement_id: doc.parentStatementId || null\n      });\n    }\n    if (results.length < LIMIT) break;\n    cursor = results[results.length - 1]?._additional?.id;\n    if (!cursor) break;\n  }\n  const c = work.filter(w => w.collection === 'BankTransaction').length;\n  logger.info(`[reconcile] BankTransaction: ${c} objects queued`);\n}\n\nconst total = work.length;\nlogger.info(`[reconcile] Total objects to check: ${total}`);\n// The Redis maps stay on Code: Load Redis Maps' output — Code: Process Object\n// reads them by node name. Do NOT copy them onto every work item (the\n// path_to_hash map has thousands of entries; duplicating it per object blows\n// up memory).\nconst common = { _empty: total === 0, total_objects: total, trigger: run.trigger, mode: run.mode, max_runtime_seconds: run.max_runtime_seconds, window_start: run.window_start, lock_owner: run.lock_owner, _redis_ok: run._redis_ok };\nif (total === 0) return [{ json: { ...common } }];\nreturn work.map(w => ({ json: { ...w, ...common } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2096, 480],
+      "id": "code-query-weaviate",
+      "name": "Code: Query Weaviate"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2400, 480],
+      "id": "if-nothing-to-do",
+      "name": "IF: Nothing To Do"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": { "reset": false }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2704, 580],
+      "id": "loop-over-objects",
+      "name": "Loop Over Objects"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Process Object\" } });\nconst axios = require('axios');\nconst fs = require('fs');\nconst redis = require('redis');\n\nconst item = $input.first().json;\nconst run = $('Code: Query Weaviate').first().json;\nconst maps = $('Code: Load Redis Maps').first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst THUMBNAILER = 'http://alice-dms-thumbnailer:8004';\nconst mode = run.mode;                 // 'dry-run' | 'confirm'\nconst confirm = mode === 'confirm';\nconst redisOk = maps._redis_ok === true;\nconst pathToHash = maps._path_to_hash || {};\nconst hashToPaths = maps._hash_to_paths || {};\nconst staticData = $getWorkflowStaticData('global');\nstaticData.checked = (staticData.checked || 0) + 1;\nfunction bump(k, n) { staticData[k] = (staticData[k] || 0) + (n === undefined ? 1 : n); }\n\nconst SHA256_RE = /^[a-f0-9]{64}$/i;\nconst uuid = item.weaviate_uuid;\nconst collection = item.collection;\n\nfunction fileExists(p) { try { return !!p && fs.existsSync(p); } catch(e) { return false; } }\n\nlet action = 'healthy';\nlet publishDone = false;\nlet donePayload = null;\n\ntry {\n  if (!uuid) {\n    logger.warn(`[reconcile] object without uuid in ${collection} — skipping`);\n    bump('skipped_ok');\n    return [{ json: { _action: 'healthy', _publish_done: false } }];\n  }\n\n  // ============ BankTransaction: parent existence only ============\n  if (item.kind === 'banktx') {\n    // Skip children already removed by a BankStatement cascade earlier in this\n    // same run (avoids a redundant 404 DELETE + misleading failure log). Already\n    // counted under deleted_cascade_banktx — do not double-count.\n    const cascaded = staticData._cascaded_banktx_uuids || {};\n    if (cascaded[uuid]) {\n      logger.info(`[reconcile] BankTransaction ${uuid} already cascade-deleted this run — skipping`);\n      return [{ json: { _action: 'banktx_orphan', _publish_done: false } }];\n    }\n    const parentId = item.parent_statement_id;\n    let parentAlive = false;\n    if (parentId) {\n      try {\n        // REST GET by id: 200 -> alive, 404 -> gone. Unambiguous.\n        const r = await axios.get(`${WEAVIATE}/v1/objects/BankStatement/${parentId}`, { timeout: 10000, validateStatus: () => true });\n        if (r.status === 200) parentAlive = true;\n        else if (r.status === 404) parentAlive = false;\n        else { logger.warn(`[reconcile] BankStatement check HTTP ${r.status} for ${parentId} — keeping BankTransaction ${uuid} (fail-safe)`); parentAlive = true; }\n      } catch(e) {\n        logger.warn(`[reconcile] BankStatement check failed for ${parentId}: ${e.message} — keeping BankTransaction ${uuid}`);\n        parentAlive = true;\n      }\n    }\n    if (parentAlive) {\n      bump('skipped_ok');\n      return [{ json: { _action: 'healthy', _publish_done: false } }];\n    }\n    action = 'banktx_orphan';\n    logger.info(`[reconcile] banktx_orphan uuid=${uuid} parentStatementId=${parentId || '(none)'} — ${confirm ? 'deleting' : 'DRY-RUN would delete'}`);\n    bump('deleted_orphan_banktx'); // planned-or-done\n    if (confirm) {\n      try {\n        await axios.delete(`${WEAVIATE}/v1/objects/BankTransaction/${uuid}`, { timeout: 10000 });\n      } catch(e) {\n        logger.warn(`[reconcile] DELETE BankTransaction ${uuid} failed: ${e.message}`);\n        bump('deleted_orphan_banktx', -1);\n        bump('skipped_ok');\n      }\n    }\n    return [{ json: { _action: action, _publish_done: false } }];\n  }\n\n  // ============ file-based collections ============\n  const storedPath = item.file_path;\n  const storedHash = item.file_hash;\n  const hashValid = !!storedHash && SHA256_RE.test(String(storedHash));\n\n  // 1) healthy: stored path present and file exists there\n  if (fileExists(storedPath)) {\n    bump('skipped_ok');\n    return [{ json: { _action: 'healthy', _publish_done: false } }];\n  }\n\n  // 2) path_drift: hash maps to >= 1 live file\n  let livePaths = [];\n  if (hashValid) {\n    const candidates = Array.isArray(hashToPaths[storedHash]) ? hashToPaths[storedHash].slice() : [];\n    if (redisOk) {\n      let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n      const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n      try {\n        await client.connect();\n        const members = await client.sMembers(`alice:dms:hash_to_paths:${storedHash}`);\n        for (const m of members) if (!candidates.includes(m)) candidates.push(m);\n      } catch(e) {\n        logger.warn(`[reconcile] hash_to_paths lookup failed for ${storedHash}: ${e.message}`);\n      } finally {\n        await client.quit().catch(() => {});\n      }\n    }\n    livePaths = candidates.filter(fileExists);\n  }\n\n  if (livePaths.length > 0) {\n    livePaths.sort();\n    action = 'path_drift';\n    const newFilePath = livePaths[0];\n    const merged = new Set([...(item.additional_paths || []), ...livePaths.slice(1)]);\n    merged.delete(newFilePath);\n    const newAdditionalPaths = [...merged];\n    const base = newFilePath.split('/').pop();\n    const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : null;\n    const newFileName = (base && base !== item.file_name) ? base : null;\n    const newFileType = (ext && ext !== item.file_type) ? ext : null;\n\n    logger.info(`[reconcile] path_drift uuid=${uuid} collection=${collection} old=${storedPath || '(none)'} new=${newFilePath} — ${confirm ? 'patching' : 'DRY-RUN would patch'}`);\n    bump('path_repaired'); // planned-or-done\n\n    if (confirm) {\n      let props;\n      if (collection === 'Image') {\n        // Image schema has no fileName/fileType/additionalPaths — only patch\n        // file_path (+ file_name if the property exists on the queried object).\n        props = { file_path: newFilePath };\n        if (newFileName && item.file_name !== null) props.file_name = newFileName;\n        if (newFileType && item.file_type !== null) props.file_type = newFileType;\n      } else {\n        props = { filePath: newFilePath, additionalPaths: newAdditionalPaths };\n        if (newFileName) props.fileName = newFileName;\n        if (newFileType) props.fileType = newFileType;\n      }\n      try {\n        await axios.patch(`${WEAVIATE}/v1/objects/${collection}/${uuid}`, { properties: props }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });\n        publishDone = true;\n        donePayload = { document_type: collection, weaviate_uuid: uuid, file_path: newFilePath, file_type: (newFileType || item.file_type) || null, inserted: true };\n        bump('done_events_published');\n      } catch(e) {\n        logger.warn(`[reconcile] PATCH ${collection}/${uuid} failed: ${e.message}`);\n        bump('path_repaired', -1);\n        bump('skipped_ok');\n      }\n    }\n    return [{ json: { _action: action, _publish_done: publishDone, _done_payload: donePayload } }];\n  }\n\n  // 3) healthy (hash broken, path ok): stored path is a live key in path_to_hash\n  if (storedPath && pathToHash[storedPath] !== undefined && fileExists(storedPath)) {\n    bump('skipped_ok');\n    return [{ json: { _action: 'healthy', _publish_done: false } }];\n  }\n\n  // 3b) fail-safe: Redis unavailable -> cannot prove there is no live source.\n  if (!redisOk) {\n    logger.warn(`[reconcile] Redis unavailable — cannot classify uuid=${uuid} collection=${collection}, keeping (fail-safe)`);\n    bump('skipped_ok');\n    return [{ json: { _action: 'healthy', _publish_done: false } }];\n  }\n\n  // 4) orphan: no live source file anywhere -> delete\n  action = 'orphan';\n  logger.info(`[reconcile] orphan uuid=${uuid} collection=${collection} lastPath=${storedPath || '(none)'} hash=${storedHash || '(none)'} — ${confirm ? 'deleting' : 'DRY-RUN would delete'}`);\n  bump('deleted_orphan'); // planned-or-done\n\n  if (confirm) {\n    // 4a) BankStatement cascade: delete BankTransaction children first\n    if (collection === 'BankStatement') {\n      let cursor = null;\n      const childUuids = [];\n      for (let page = 0; page < 100; page++) {\n        const afterClause = cursor ? `, after: \"${cursor}\"` : '';\n        const q = `{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"${uuid}\" }, limit: 100${afterClause}) { _additional { id } } } }`;\n        try {\n          const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n          const hits = r.data?.data?.Get?.BankTransaction || [];\n          for (const h of hits) if (h._additional?.id) childUuids.push(h._additional.id);\n          if (hits.length < 100) break;\n          cursor = hits[hits.length - 1]._additional.id;\n        } catch(e) {\n          logger.warn(`[reconcile] cascade GraphQL page ${page} failed for ${uuid}: ${e.message}`);\n          break;\n        }\n      }\n      const cascadedSet = staticData._cascaded_banktx_uuids || (staticData._cascaded_banktx_uuids = {});\n      for (const cu of childUuids) {\n        try {\n          await axios.delete(`${WEAVIATE}/v1/objects/BankTransaction/${cu}`, { timeout: 10000 });\n          bump('deleted_cascade_banktx');\n          cascadedSet[cu] = true;\n        } catch(e) {\n          logger.warn(`[reconcile] cascade DELETE BankTransaction ${cu} failed: ${e.message}`);\n        }\n      }\n      if (childUuids.length) logger.info(`[reconcile] cascade: deleted BankTransaction children of ${uuid}`);\n    }\n\n    // 4b) delete the thumbnail file via the thumbnailer service (n8n has no\n    // THUMB_DIR access). Idempotent; a failure never blocks the object delete.\n    try {\n      const tr = await axios.delete(`${THUMBNAILER}/thumbnail/${uuid}`, { timeout: 10000, validateStatus: () => true });\n      if (tr.status >= 200 && tr.status < 300 && tr.data?.deleted) bump('thumbnail_files_removed');\n    } catch(e) {\n      logger.warn(`[reconcile] thumbnail delete call failed for ${uuid}: ${e.message}`);\n    }\n\n    // 4c) delete the Weaviate object\n    try {\n      await axios.delete(`${WEAVIATE}/v1/objects/${collection}/${uuid}`, { timeout: 10000 });\n    } catch(e) {\n      logger.warn(`[reconcile] DELETE ${collection}/${uuid} failed: ${e.message}`);\n      bump('deleted_orphan', -1);\n      bump('skipped_ok');\n      return [{ json: { _action: 'orphan', _publish_done: false } }];\n    }\n\n    // 4d) clean up dead Redis map entries for this hash — only if no other live\n    // file uses it.\n    if (hashValid) {\n      let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n      const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n      try {\n        await client.connect();\n        const members = await client.sMembers(`alice:dms:hash_to_paths:${storedHash}`);\n        const anyAlive = members.some(fileExists);\n        if (!anyAlive) {\n          for (const m of members) await client.hDel('alice:dms:path_to_hash', m);\n          await client.del(`alice:dms:hash_to_paths:${storedHash}`);\n          await client.sRem('alice:dms:processed', storedHash);\n          logger.info(`[reconcile] cleaned dead Redis map entries for hash ${storedHash}`);\n        }\n      } catch(e) {\n        logger.warn(`[reconcile] Redis cleanup failed for hash ${storedHash}: ${e.message}`);\n      } finally {\n        await client.quit().catch(() => {});\n      }\n    }\n  }\n\n  return [{ json: { _action: action, _publish_done: false } }];\n} catch(e) {\n  logger.warn(`[reconcile] unexpected error for uuid=${uuid} collection=${collection}: ${e.message} — keeping object (fail-safe)`);\n  bump('skipped_ok');\n  return [{ json: { _action: 'healthy', _publish_done: false } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3008, 580],
+      "id": "code-process-object",
+      "name": "Code: Process Object"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-publish-done",
+              "leftValue": "={{ $json._publish_done }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3312, 580],
+      "id": "if-publish-done",
+      "name": "IF: Publish Done?"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "message": "={{ JSON.stringify($json._done_payload) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [3616, 460],
+      "id": "mqtt-publish-done",
+      "name": "MQTT: Publish alice/dms/done",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "mqtt": { "id": "Kqy6cn7hyDDXrBA0", "name": "mqtt-alice" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Time Check\" } });\n// Runs once per object (after the in-flight object is fully processed,\n// cascade included). Reads the window from Code: Query Weaviate by node name.\nconst run = $('Code: Query Weaviate').first().json;\nconst maxRuntime = run.max_runtime_seconds;\nlet timeLimitReached = false;\nif (maxRuntime !== null && maxRuntime !== undefined) {\n  const elapsed = (Date.now() - run.window_start) / 1000;\n  timeLimitReached = elapsed >= maxRuntime;\n  if (timeLimitReached) {\n    logger.info(`[reconcile] Time limit reached (elapsed=${Math.round(elapsed)}s, limit=${maxRuntime}s) — leaving loop, in-flight object already done`);\n  }\n}\nreturn [{ json: { _time_limit_reached: timeLimitReached } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3616, 660],
+      "id": "code-time-check",
+      "name": "Code: Time Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-time-limit",
+              "leftValue": "={{ $json._time_limit_reached }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3920, 660],
+      "id": "if-time-limit-reached",
+      "name": "IF: Time Limit Reached"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Build Summary\" } });\nconst redis = require('redis');\nconst staticData = $getWorkflowStaticData('global');\nconst run = $('Code: Query Weaviate').first().json;\n\nconst checked = staticData.checked || 0;\nconst path_repaired = staticData.path_repaired || 0;\nconst deleted_orphan = staticData.deleted_orphan || 0;\nconst deleted_cascade_banktx = staticData.deleted_cascade_banktx || 0;\nconst deleted_orphan_banktx = staticData.deleted_orphan_banktx || 0;\nconst thumbnail_files_removed = staticData.thumbnail_files_removed || 0;\nconst done_events_published = staticData.done_events_published || 0;\nconst skipped_ok = staticData.skipped_ok || 0;\n\n// reset for the next run (also reset in Code: Init Run — belt and braces)\nstaticData.checked = 0; staticData.path_repaired = 0; staticData.deleted_orphan = 0;\nstaticData.deleted_cascade_banktx = 0; staticData.deleted_orphan_banktx = 0;\nstaticData.thumbnail_files_removed = 0; staticData.done_events_published = 0; staticData.skipped_ok = 0;\nstaticData._cascaded_banktx_uuids = {};\n\nconst totalObjects = run.total_objects || 0;\nconst stoppedByTime = (() => {\n  if (run.max_runtime_seconds === null || run.max_runtime_seconds === undefined) return false;\n  return ((Date.now() - run.window_start) / 1000) >= run.max_runtime_seconds;\n})();\nconst remaining = stoppedByTime ? Math.max(0, totalObjects - checked) : 0;\nconst stopped_reason = stoppedByTime ? 'time_limit' : 'completed';\n\n// release the lock (owner-checked) on every completion path\nconst owner = run.lock_owner;\nif (owner) {\n  const RELEASE = `local raw = redis.call('GET', KEYS[1]) if not raw then return 0 end local ok, data = pcall(cjson.decode, raw) if not ok or data.owner ~= ARGV[1] then return 0 end redis.call('DEL', KEYS[1]) return 1`;\n  let redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\n  const client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\n  try {\n    await client.connect();\n    await client.eval(RELEASE, { keys: ['alice:dms:processor:lock:run'], arguments: [owner] });\n  } catch(e) {\n    logger.info(`[reconcile] Lock release error: ${e.message}`);\n  } finally {\n    await client.quit().catch(() => {});\n  }\n}\n\nconst summary = {\n  status: 'ok',\n  mode: run.mode,\n  trigger: run.trigger,\n  stopped_reason,\n  checked,\n  path_repaired,\n  deleted_orphan,\n  deleted_cascade_banktx,\n  deleted_orphan_banktx,\n  thumbnail_files_removed,\n  done_events_published,\n  skipped_ok,\n  remaining\n};\nlogger.info(`[reconcile] Summary: ${JSON.stringify(summary)}`);\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4224, 520],
+      "id": "code-build-summary",
+      "name": "Code: Build Summary"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "check-from-webhook",
+              "leftValue": "={{ $json.trigger }}",
+              "rightValue": "webhook",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [4528, 520],
+      "id": "if-from-webhook",
+      "name": "IF: From Webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4832, 400],
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/reconcile-stats",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": { "qos": 1 }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [4832, 620],
+      "id": "mqtt-reconcile-stats",
+      "name": "MQTT: Publish reconcile-stats",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "mqtt": { "id": "Kqy6cn7hyDDXrBA0", "name": "mqtt-alice" }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [5136, 620],
+      "id": "noop-end",
+      "name": "End (Schedule)"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [576, 1080],
+      "id": "error-trigger",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-reconcile\", node: \"Code: Release Lock (error)\" } });\nconst redis = require('redis');\nconst errorData = $input.first().json;\n\n// Best-effort lock release on crash. We do not know the owner token here\n// (the run item is gone), so drop the lock only if it is ours by workflow\n// tag — otherwise leave it for the TTL. Never DEL another workflow's lock.\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\ntry {\n  await client.connect();\n  const raw = await client.get('alice:dms:processor:lock:run');\n  if (raw) {\n    let data = null;\n    try { data = JSON.parse(raw); } catch(e) {}\n    if (data && data.workflow === 'alice-dms-reconcile') {\n      await client.del('alice:dms:processor:lock:run');\n      logger.info('[reconcile] Released stale lock after error');\n    }\n  }\n} catch(e) {\n  logger.info('[reconcile] Lock release on error failed: ' + e.message + ' (TTL will clear it)');\n} finally {\n  await client.quit().catch(() => {});\n}\n\nreturn [{ json: { workflow: 'alice-dms-reconcile', error: errorData.execution?.error?.message || 'Unknown error', node: errorData.execution?.lastNodeExecuted || 'unknown', timestamp: new Date().toISOString(), execution_id: errorData.execution?.id || null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 1080],
+      "id": "code-release-lock-error",
+      "name": "Code: Release Lock (error)"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/error",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": { "qos": 1 }
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [1184, 1080],
+      "id": "mqtt-publish-error",
+      "name": "MQTT: Publish Error",
+      "credentials": {
+        "mqtt": { "id": "Kqy6cn7hyDDXrBA0", "name": "mqtt-alice" }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: POST /alice-dms-reconcile": {
+      "main": [[{ "node": "Code: Init Run", "type": "main", "index": 0 }]]
+    },
+    "Schedule Trigger: Monthly": {
+      "main": [[{ "node": "Code: Init Run", "type": "main", "index": 0 }]]
+    },
+    "Code: Init Run": {
+      "main": [[{ "node": "Code: Acquire Lock", "type": "main", "index": 0 }]]
+    },
+    "Code: Acquire Lock": {
+      "main": [[{ "node": "IF: Lock Acquired", "type": "main", "index": 0 }]]
+    },
+    "IF: Lock Acquired": {
+      "main": [
+        [{ "node": "Code: Load Redis Maps", "type": "main", "index": 0 }],
+        [{ "node": "Code: Respond Locked", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Respond Locked": {
+      "main": [[{ "node": "IF: From Webhook", "type": "main", "index": 0 }]]
+    },
+    "Code: Load Redis Maps": {
+      "main": [[{ "node": "Code: Query Weaviate", "type": "main", "index": 0 }]]
+    },
+    "Code: Query Weaviate": {
+      "main": [[{ "node": "IF: Nothing To Do", "type": "main", "index": 0 }]]
+    },
+    "IF: Nothing To Do": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Objects", "type": "main", "index": 0 }]
+      ]
+    },
+    "Loop Over Objects": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Code: Process Object", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Process Object": {
+      "main": [[{ "node": "IF: Publish Done?", "type": "main", "index": 0 }]]
+    },
+    "IF: Publish Done?": {
+      "main": [
+        [{ "node": "MQTT: Publish alice/dms/done", "type": "main", "index": 0 }],
+        [{ "node": "Code: Time Check", "type": "main", "index": 0 }]
+      ]
+    },
+    "MQTT: Publish alice/dms/done": {
+      "main": [[{ "node": "Code: Time Check", "type": "main", "index": 0 }]]
+    },
+    "Code: Time Check": {
+      "main": [[{ "node": "IF: Time Limit Reached", "type": "main", "index": 0 }]]
+    },
+    "IF: Time Limit Reached": {
+      "main": [
+        [{ "node": "Code: Build Summary", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Objects", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Build Summary": {
+      "main": [[{ "node": "IF: From Webhook", "type": "main", "index": 0 }]]
+    },
+    "IF: From Webhook": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }],
+        [{ "node": "MQTT: Publish reconcile-stats", "type": "main", "index": 0 }]
+      ]
+    },
+    "MQTT: Publish reconcile-stats": {
+      "main": [[{ "node": "End (Schedule)", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[{ "node": "Code: Release Lock (error)", "type": "main", "index": 0 }]]
+    },
+    "Code: Release Lock (error)": {
+      "main": [[{ "node": "MQTT: Publish Error", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 86400,
+    "errorWorkflow": "po2OuxzG5htVHK6E",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}
