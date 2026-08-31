@@ -1,0 +1,484 @@
+<title>DMS Pipeline Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#f7f8fa; --surface:#ffffff; --surface-2:#eef0f4; --border:#dbe0e8;
+  --text:#20242e; --text-dim:#565f70; --text-faint:#8992a3;
+  --accent:#2f6fb0; --accent-soft:#e4eef8;
+  --warn:#a6720b; --warn-soft:#faf1de;
+  --ok:#1f7a58; --ok-soft:#e2f3ec;
+  --code-bg:#eef0f4;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'Inter',system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12151b; --surface:#191d25; --surface-2:#1f242e; --border:#2b313d;
+    --text:#eef1f6; --text-dim:#aab4c4; --text-faint:#727d90;
+    --accent:#6badea; --accent-soft:#1c2c3d;
+    --warn:#e0a94e; --warn-soft:#2e2510;
+    --ok:#5fb896; --ok-soft:#122a22;
+    --code-bg:#1f242e;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12151b; --surface:#191d25; --surface-2:#1f242e; --border:#2b313d;
+  --text:#eef1f6; --text-dim:#aab4c4; --text-faint:#727d90;
+  --accent:#6badea; --accent-soft:#1c2c3d;
+  --warn:#e0a94e; --warn-soft:#2e2510;
+  --ok:#5fb896; --ok-soft:#122a22;
+  --code-bg:#1f242e;
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--text); font-family:var(--sans);
+  line-height:1.55; font-size:16px;
+}
+.wrap{ display:grid; grid-template-columns:220px minmax(0,860px); gap:48px; max-width:1180px; margin:0 auto; padding:56px 24px 120px; }
+@media (max-width:900px){ .wrap{ grid-template-columns:1fr; } .toc{ display:none; } }
+
+.toc{ position:sticky; top:32px; align-self:start; font-size:13px; }
+.toc-title{ font-family:var(--mono); text-transform:uppercase; letter-spacing:.08em; font-size:11px; color:var(--text-faint); margin-bottom:12px; }
+.toc a{ display:block; color:var(--text-dim); text-decoration:none; padding:5px 0; border-left:2px solid transparent; padding-left:10px; margin-left:-11px; }
+.toc a:hover, .toc a:focus-visible{ color:var(--accent); border-left-color:var(--accent); }
+
+header.hero{ margin-bottom:8px; }
+.eyebrow{ font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); margin:0 0 10px; }
+h1{ font-size:clamp(28px,4vw,38px); margin:0 0 12px; letter-spacing:-0.01em; text-wrap:balance; }
+.lede{ color:var(--text-dim); font-size:17px; max-width:62ch; margin:0 0 4px; }
+.meta-row{ display:flex; gap:18px; flex-wrap:wrap; margin-top:20px; font-family:var(--mono); font-size:12.5px; color:var(--text-faint); }
+.meta-row b{ color:var(--text); font-weight:600; }
+
+h2{ font-size:22px; margin:64px 0 6px; letter-spacing:-0.01em; scroll-margin-top:24px; }
+h2 .num{ font-family:var(--mono); color:var(--text-faint); font-weight:500; margin-right:10px; font-size:15px; }
+.section-sub{ color:var(--text-dim); font-size:14.5px; margin:0 0 24px; max-width:66ch; }
+
+figure{ margin:28px 0 40px; }
+.diagram-card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px 16px; overflow-x:auto; }
+svg text{ font-family:var(--mono); }
+figcaption{ font-size:13px; color:var(--text-faint); margin-top:10px; text-align:center; }
+
+code, .k{ font-family:var(--mono); font-size:0.86em; background:var(--code-bg); border-radius:4px; padding:1px 5px; color:var(--text); }
+a.k-topic{ color:var(--accent); }
+
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px 22px; margin-bottom:16px; }
+.card h3{ font-family:var(--mono); font-size:15px; margin:0 0 4px; color:var(--text); font-weight:600; }
+.card .role{ font-size:12.5px; color:var(--text-faint); margin-bottom:14px; }
+.kv{ display:grid; grid-template-columns:88px 1fr; gap:6px 14px; font-size:14px; }
+.kv dt{ color:var(--text-faint); font-size:12px; text-transform:uppercase; letter-spacing:.04em; padding-top:2px; font-family:var(--mono); }
+.kv dd{ margin:0; color:var(--text-dim); }
+.kv dd .k{ margin:1px 3px 1px 0; display:inline-block; }
+.tag{ display:inline-flex; align-items:center; font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:20px; letter-spacing:.02em; }
+.tag.trigger{ background:var(--accent-soft); color:var(--accent); }
+
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+@media (max-width:640px){ .grid2{ grid-template-columns:1fr; } }
+
+table{ width:100%; border-collapse:collapse; font-size:13.5px; background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.table-scroll{ overflow-x:auto; border-radius:10px; margin:20px 0 36px; }
+thead th{ text-align:left; background:var(--surface-2); color:var(--text-faint); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:10px 14px; border-bottom:1px solid var(--border); white-space:nowrap; }
+tbody td{ padding:10px 14px; border-bottom:1px solid var(--border); color:var(--text-dim); vertical-align:top; }
+tbody tr:last-child td{ border-bottom:none; }
+tbody tr:hover{ background:var(--surface-2); }
+td.key{ font-family:var(--mono); font-size:12.5px; color:var(--text); white-space:nowrap; }
+
+.pill{ display:inline-block; font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:5px; white-space:nowrap; }
+.pill.lock{ background:var(--warn-soft); color:var(--warn); }
+.pill.queue{ background:var(--accent-soft); color:var(--accent); }
+.pill.state{ background:var(--ok-soft); color:var(--ok); }
+.pill.stat{ background:var(--surface-2); color:var(--text-faint); }
+
+.flag{ border-left:3px solid var(--warn); background:var(--warn-soft); padding:12px 16px; border-radius:0 8px 8px 0; font-size:13.5px; color:var(--text); margin:14px 0 32px; }
+.flag b{ color:var(--warn); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:4px; }
+
+.storelabel{ font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin:28px 0 -8px; }
+
+footer{ margin-top:72px; padding-top:20px; border-top:1px solid var(--border); font-size:12.5px; color:var(--text-faint); font-family:var(--mono); }
+</style>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Section navigation">
+    <div class="toc-title">Contents</div>
+    <a href="#flow">Pipeline flow</a>
+    <a href="#ingest">Ingestion &amp; dispatch</a>
+    <a href="#extract">Extraction &amp; storage</a>
+    <a href="#mail">Mail side-channel</a>
+    <a href="#backfills">Backfills</a>
+    <a href="#redis">Redis key inventory</a>
+    <a href="#mqtt">MQTT topic inventory</a>
+    <a href="#stores">Postgres &amp; Weaviate</a>
+    <a href="#open">Open questions</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <p class="eyebrow">Alice · Internal Reference</p>
+      <h1>DMS Pipeline Map</h1>
+      <p class="lede">How the 16 <code>alice-dms-*</code> / <code>alice-mail-*</code> n8n workflows and 5 extractor containers hand documents to each other — every Redis key, MQTT topic, and database write, traced end to end.</p>
+      <div class="meta-row">
+        <span><b>20</b> workflows</span>
+        <span><b>~30</b> Redis keys</span>
+        <span><b>11</b> MQTT topics</span>
+        <span><b>8</b> Weaviate collections</span>
+        <span><b>1</b> Postgres table (dms-specific)</span>
+      </div>
+    </header>
+
+    <h2 id="flow"><span class="num">01</span>Pipeline flow</h2>
+    <p class="section-sub">A file's journey from watched folder to searchable, thumbnailed document. Solid arrows are MQTT hops; dashed arrows are Redis-mediated hand-offs. The nightly batch (02:00) is where classification and structured extraction actually happen — everything before it just moves and stages raw text.</p>
+
+    <figure>
+      <div class="diagram-card">
+        <svg viewBox="0 0 1080 620" role="img" aria-label="Pipeline flow: scanner locks folders and dispatches to path-worker, which hashes files and routes them by type over five MQTT topics to extractor containers; extractors push text onto a Redis queue; the nightly processor drains that queue, classifies documents via Ollama, writes into Weaviate, and publishes a done event that triggers thumbnailing. A lifecycle topic handles moves and deletes in parallel. Mail sync feeds email directly into Weaviate and queues attachments back into the folder-scan path.">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+            <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+          <style>
+            .box{ fill:var(--surface-2); stroke:var(--border); stroke-width:1; }
+            .boxstore{ fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.2; }
+            .lbl{ fill:currentColor; font-size:12.5px; font-weight:600; }
+            .sub{ fill:currentColor; opacity:0.62; font-size:10.5px; }
+            .edge{ stroke:currentColor; opacity:0.55; stroke-width:1.4; fill:none; }
+            .edgeAccent{ stroke:var(--accent); stroke-width:1.6; fill:none; }
+            .edgeDash{ stroke:currentColor; opacity:0.55; stroke-width:1.4; fill:none; stroke-dasharray:4 4; }
+            .cap{ fill:currentColor; opacity:0.7; font-size:10px; font-style:italic; }
+          </style>
+
+          <rect x="24" y="24" width="200" height="52" rx="8" class="box"/>
+          <text x="124" y="46" text-anchor="middle" class="lbl">dms-scanner</text>
+          <text x="124" y="62" text-anchor="middle" class="sub">hourly cron · locks folders</text>
+
+          <line x1="224" y1="50" x2="280" y2="50" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="252" y="42" text-anchor="middle" class="cap">fires</text>
+
+          <rect x="284" y="24" width="210" height="52" rx="8" class="box"/>
+          <text x="389" y="46" text-anchor="middle" class="lbl">dms-path-worker</text>
+          <text x="389" y="62" text-anchor="middle" class="sub">per-folder hash + route</text>
+
+          <line x1="389" y1="76" x2="389" y2="128" class="edgeAccent" marker-end="url(#arrowAccent)"/>
+          <text x="399" y="105" class="cap">alice/dms/{pdf,ocr,txt,office,image}</text>
+
+          <rect x="60" y="132" width="658" height="60" rx="8" class="box"/>
+          <text x="389" y="156" text-anchor="middle" class="lbl">Extractors: dms-extractor-pdf / -ocr / -txt / -office / -image</text>
+          <text x="389" y="174" text-anchor="middle" class="sub">MQTT-triggered · dedup via short-TTL Redis key · text or Ollama-Vision</text>
+
+          <line x1="389" y1="192" x2="389" y2="240" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="446" y="220" text-anchor="middle" class="cap">RPUSH</text>
+
+          <rect x="234" y="244" width="310" height="52" rx="8" class="box"/>
+          <text x="389" y="266" text-anchor="middle" class="lbl">alice:dms:plaintext / :image</text>
+          <text x="389" y="282" text-anchor="middle" class="sub">Redis list · staging queue</text>
+
+          <line x1="389" y1="296" x2="389" y2="344" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="440" y="324" text-anchor="middle" class="cap">drains nightly</text>
+
+          <rect x="184" y="348" width="410" height="64" rx="8" class="box"/>
+          <text x="389" y="370" text-anchor="middle" class="lbl">dms-processor  ·  02:00 nightly</text>
+          <text x="389" y="386" text-anchor="middle" class="sub">classify-document + language-check (Ollama)</text>
+          <text x="389" y="401" text-anchor="middle" class="sub">→ extract fields → upsert</text>
+
+          <line x1="594" y1="380" x2="654" y2="380" class="edgeAccent" marker-end="url(#arrowAccent)"/>
+          <rect x="658" y="348" width="200" height="64" rx="8" class="boxstore"/>
+          <text x="758" y="374" text-anchor="middle" class="lbl">Weaviate</text>
+          <text x="758" y="392" text-anchor="middle" class="sub">Invoice / BankStatement /</text>
+          <text x="758" y="405" text-anchor="middle" class="sub">Document / Email / …</text>
+
+          <line x1="389" y1="412" x2="389" y2="460" class="edgeAccent" marker-end="url(#arrowAccent)"/>
+          <text x="440" y="440" text-anchor="middle" class="cap">alice/dms/done</text>
+
+          <rect x="234" y="464" width="310" height="52" rx="8" class="box"/>
+          <text x="389" y="486" text-anchor="middle" class="lbl">dms-thumbnailer (workflow)</text>
+          <text x="389" y="502" text-anchor="middle" class="sub">renders JPEG → PATCHes thumbnail_path</text>
+
+          <!-- Lifecycle branch -->
+          <rect x="784" y="24" width="230" height="52" rx="8" class="box"/>
+          <text x="899" y="46" text-anchor="middle" class="lbl">dms-lifecycle</text>
+          <text x="899" y="62" text-anchor="middle" class="sub">MQTT: alice/dms/lifecycle</text>
+          <line x1="784" y1="50" x2="500" y2="50" class="edge" marker-end="url(#arrow)"/>
+          <text x="640" y="42" text-anchor="middle" class="cap">add_path / update_path / delete_file</text>
+          <line x1="899" y1="76" x2="899" y2="330" class="edge" marker-end="url(#arrow)"/>
+          <line x1="899" y1="330" x2="758" y2="348" class="edge" marker-end="url(#arrow)"/>
+          <text x="915" y="200" class="cap" transform="rotate(90 915 200)">patch/delete object</text>
+
+          <!-- Mail side -->
+          <rect x="24" y="530" width="200" height="60" rx="8" class="box"/>
+          <text x="124" y="552" text-anchor="middle" class="lbl">mail-sync</text>
+          <text x="124" y="568" text-anchor="middle" class="sub">every minute · IMAP</text>
+          <text x="124" y="582" text-anchor="middle" class="sub">→ Email direct insert</text>
+          <line x1="224" y1="556" x2="658" y2="374" class="edge" marker-end="url(#arrow)"/>
+
+          <rect x="284" y="530" width="240" height="60" rx="8" class="box"/>
+          <text x="404" y="552" text-anchor="middle" class="lbl">mail-attachment-processor</text>
+          <text x="404" y="568" text-anchor="middle" class="sub">nightly 04:00 · drains queue</text>
+          <text x="404" y="582" text-anchor="middle" class="sub">writes files → watched NAS folder</text>
+          <line x1="124" y1="530" x2="124" y2="500" class="edgeDash"/>
+          <line x1="124" y1="500" x2="284" y2="560" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="150" y="490" class="cap">alice:mail:attachment_queue</text>
+          <line x1="404" y1="530" x2="124" y2="76" class="edgeDash" marker-end="url(#arrow)"/>
+          <text x="60" y="300" class="cap" transform="rotate(-90 60 300)">rejoins as ordinary file</text>
+        </svg>
+      </div>
+      <figcaption>Files move scanner → path-worker → extractor → Redis queue → nightly processor → Weaviate → thumbnailer. Lifecycle events (moves/deletes) and the mail side-channel run in parallel and rejoin the same path.</figcaption>
+    </figure>
+
+    <h2 id="ingest"><span class="num">02</span>Ingestion &amp; dispatch</h2>
+    <p class="section-sub">Folder config lives in Postgres; everything about <em>which file is where</em> during a scan lives in Redis.</p>
+
+    <div class="card">
+      <h3>alice-dms-scanner</h3>
+      <div class="role">Dispatcher — does not read file contents itself</div>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">cron 0 7-22 * * *</span></dd>
+        <dt>Reads</dt><dd><code>alice.dms_watched_folders</code> (Postgres, active folders)</dd>
+        <dt>Redis</dt><dd><span class="pill lock">lock</span> <code>alice:dms:scanner:lock:folder:&lt;id&gt;</code> · <span class="pill stat">stats</span> <code>dispatch:run_start</code>, <code>dispatch:stats:*</code> · reads <code>path_to_hash</code>, <code>hash_to_paths:&lt;hash&gt;</code>, <code>processed</code> for its stale-file sweep</dd>
+        <dt>MQTT</dt><dd>pub <span class="k">alice/dms/scanner/stats</span> · pub <span class="k">alice/dms/lifecycle</span> (delete_file, for vanished files)</dd>
+        <dt>Calls</dt><dd>fires <code>alice-dms-path-worker</code> per locked folder, fire-and-forget</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>alice-dms-path-worker</h3>
+      <div class="role">Sub-workflow only — one call per locked folder, 2h run cap</div>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">Execute Workflow</span> from scanner</dd>
+        <dt>Redis</dt><dd><span class="pill lock">renews/releases</span> the folder lock · <span class="pill state">dedup</span> <code>processed</code>, <code>queued_files</code> (Sets) · <span class="pill state">map</span> <code>path_to_hash</code> (Hash), <code>hash_to_paths:&lt;hash&gt;</code> (Set) · <span class="pill stat">stats</span> <code>scanner:stats:folder:&lt;id&gt;:*</code></dd>
+        <dt>MQTT</dt><dd>pub <span class="k">alice/dms/{pdf,ocr,txt,office,image}</span> by file type · pub <span class="k">alice/dms/lifecycle</span> for moves/renames · pub <span class="k">alice/dms/scanner/path_stats</span></dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>alice-dms-lifecycle</h3>
+      <div class="role">Keeps Redis path-maps and Weaviate objects in sync on move/delete — independent of the nightly batch</div>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">MQTT</span> <span class="k">alice/dms/lifecycle</span></dd>
+        <dt>Redis</dt><dd>HSET/HDEL <code>path_to_hash</code> · SADD/SREM <code>hash_to_paths:&lt;hash&gt;</code></dd>
+        <dt>Weaviate</dt><dd>PATCH additionalPaths / filePath · DELETE object (cascades BankTransaction children)</dd>
+        <dt>MQTT out</dt><dd>pub <span class="k">alice/dms/done</span> or <span class="k">alice/dms/error</span></dd>
+      </dl>
+    </div>
+
+    <h2 id="extract"><span class="num">03</span>Extraction &amp; nightly storage</h2>
+    <p class="section-sub">Five stateless extractor containers stage text; one nightly workflow does all classification and writes.</p>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>dms-extractor-pdf / -txt / -office / -ocr</h3>
+        <div class="role">Node.js / Python containers, MQTT-triggered</div>
+        <dl class="kv">
+          <dt>Sub</dt><dd><span class="k">alice/dms/{pdf,txt,office,ocr}</span></dd>
+          <dt>Redis</dt><dd>RPUSH <code>alice:dms:plaintext</code> · dedup <span class="pill lock">TTL 3600s</span> <code>alice:dms:&lt;type&gt;:processing:&lt;field&gt;</code></dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h3>dms-extractor-image</h3>
+        <div class="role">Python, Ollama Vision</div>
+        <dl class="kv">
+          <dt>Sub</dt><dd><span class="k">alice/dms/image</span></dd>
+          <dt>Redis</dt><dd>RPUSH <code>alice:dms:image</code> · if GPS EXIF: RPUSH <code>alice:dms:geocode_pending</code></dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>alice-dms-processor</h3>
+      <div class="role">The core write path — everything else just feeds this</div>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">cron 0 2 * * *</span></dd>
+        <dt>Redis</dt><dd><span class="pill lock">GPU lock</span> <code>alice:dms:processor:lock:run</code> (shared with 4 other workflows, see below) · drains <code>plaintext</code>, <code>image</code>, <code>geocode_pending</code> · updates <code>processed</code>, <code>queued_files</code>, <code>path_to_hash</code> · quota <code>geocode_quota:&lt;date&gt;</code> · stats <code>run:stats</code></dd>
+        <dt>Calls</dt><dd><code>alice-dms-classify-document</code> (2-attempt Ollama classification) → <code>alice-dms-language-check</code> (forces German title/summary)</dd>
+        <dt>Weaviate</dt><dd>dedup search by filePath → upsert into <b>Invoice / BankStatement / Document / Email / SecuritySettlement / Contract</b>; "Phase B" chunks BankStatement text → batch-inserts <b>BankTransaction</b> children; separate branch inserts <b>Image</b> + geocodes via Geoapify</dd>
+        <dt>MQTT</dt><dd>pub <span class="k">alice/dms/done</span> (success) or <span class="k">alice/dms/error</span></dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>alice-dms-thumbnailer</h3>
+      <div class="role">Workflow + FastAPI container (port 8004)</div>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">MQTT</span> <span class="k">alice/dms/done</span></dd>
+        <dt>Does</dt><dd>fetches source (NAS file, or Weaviate Email body) → POST container <code>/generate</code> → PATCH <code>thumbnail_path</code> on the Weaviate object</dd>
+        <dt>MQTT out</dt><dd>pub <span class="k">alice/dms/thumb_error</span> on failure</dd>
+      </dl>
+    </div>
+
+    <h2 id="mail"><span class="num">04</span>Mail side-channel</h2>
+    <p class="section-sub">Email skips the extractor stage (body text is already available) but attachments deliberately rejoin the normal folder-scan path.</p>
+
+    <div class="card">
+      <h3>alice-mail-sync</h3>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">every 1 min</span></dd>
+        <dt>Postgres</dt><dd><code>alice.imap_mailboxes</code>, <code>alice.imap_mailbox_access</code></dd>
+        <dt>Weaviate</dt><dd>dedup by messageId+mailboxId → direct insert into <b>Email</b></dd>
+        <dt>Redis</dt><dd>RPUSH <code>alice:mail:attachment_queue</code> (doesn't process attachments itself — avoids GPU contention)</dd>
+        <dt>MQTT</dt><dd>pub <span class="k">alice/dms/done</span> (document_type=Email) → triggers thumbnailer</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h3>alice-mail-attachment-processor</h3>
+      <dl class="kv">
+        <dt>Trigger</dt><dd><span class="tag trigger">cron 0 4 * * *</span></dd>
+        <dt>Redis</dt><dd>drains <code>alice:mail:attachment_queue</code> · shares <span class="pill lock">GPU lock</span> <code>processor:lock:run</code></dd>
+        <dt>Writes</dt><dd>classified attachments → watched NAS folder (files, not DB) — re-enters the scanner pipeline as an ordinary new file</dd>
+      </dl>
+    </div>
+
+    <h2 id="backfills"><span class="num">05</span>Backfills</h2>
+    <p class="section-sub">All manual or scheduled, all resumable, all mutually exclusive with the nightly processor via the same GPU lock.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Workflow</th><th>Trigger</th><th>Scope</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="key">classification-backfill</td><td>webhook</td><td>6 core collections</td><td>Re-classifies, migrates misfiled documents between types</td></tr>
+        <tr><td class="key">language-backfill</td><td>webhook</td><td>6 core collections</td><td>Corrects English-leakage in title/summary</td></tr>
+        <tr><td class="key">image-description-backfill</td><td>cron ×2 + webhook</td><td>Image (extraction_failed)</td><td>Retries failed Ollama Vision descriptions, self-continues</td></tr>
+        <tr><td class="key">thumbnailer-backfill</td><td>webhook</td><td>all 8 collections</td><td>Generates thumbnails for objects missing one</td></tr>
+        <tr><td class="key">mail-attachment-backfill</td><td>webhook</td><td>indexed Email objects</td><td>Retroactively imports attachments to NAS folders</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="flag"><b>Confirmed gap → PROJ-95</b>thumbnailer-backfill has no lock key and no time limit, unlike its four siblings — it never grabs <code>processor:lock:run</code> and can't be started with a duration like the others. Both are being added as part of PROJ-95.</div>
+
+    <h2 id="redis"><span class="num">06</span>Redis key inventory</h2>
+    <p class="section-sub">Grouped by what the state represents. All keys are prefixed <code>alice:</code>.</p>
+
+    <p class="storelabel">Locks</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Key</th><th>Written by</th><th>Read/shared by</th></tr></thead>
+      <tbody>
+        <tr><td class="key">dms:scanner:lock:folder:&lt;id&gt;</td><td>dms-scanner (acquire, NX+PX 180s)</td><td>dms-path-worker (renews, releases)</td></tr>
+        <tr><td class="key">dms:processor:lock:run</td><td>dms-processor</td><td>classification-backfill, language-backfill, mail-attachment-processor, mail-attachment-backfill — all wait on it to avoid concurrent Ollama/GPU use</td></tr>
+        <tr><td class="key">dms:image-description-backfill:lock:run</td><td>image-description-backfill</td><td>itself only (self-invocation chain)</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="storelabel">Dedup / lifecycle state</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Key</th><th>Type</th><th>Written by</th><th>Read by</th></tr></thead>
+      <tbody>
+        <tr><td class="key">dms:processed</td><td>Set</td><td>dms-processor</td><td>dms-path-worker, dms-scanner</td></tr>
+        <tr><td class="key">dms:queued_files</td><td>Set</td><td>dms-path-worker, dms-processor</td><td>dms-path-worker</td></tr>
+        <tr><td class="key">dms:path_to_hash</td><td>Hash</td><td>dms-lifecycle, dms-processor</td><td>dms-path-worker, dms-scanner, chat-stream (admin dashboard)</td></tr>
+        <tr><td class="key">dms:hash_to_paths:&lt;hash&gt;</td><td>Set</td><td>dms-lifecycle, dms-processor</td><td>dms-path-worker, dms-scanner</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="storelabel">Queues</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Key</th><th>Pushed by</th><th>Drained by</th></tr></thead>
+      <tbody>
+        <tr><td class="key">dms:plaintext</td><td>extractor-pdf / -txt / -office / -ocr</td><td>dms-processor</td></tr>
+        <tr><td class="key">dms:image</td><td>extractor-image</td><td>dms-processor</td></tr>
+        <tr><td class="key">dms:geocode_pending</td><td>extractor-image</td><td>dms-processor (geocode sub-flow)</td></tr>
+        <tr><td class="key">mail:attachment_queue</td><td>mail-sync</td><td>mail-attachment-processor</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="storelabel">Per-extractor in-flight dedup (TTL 3600s)</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Key pattern</th><th>Owner</th></tr></thead>
+      <tbody>
+        <tr><td class="key">dms:pdf:processing:&lt;field&gt;</td><td>extractor-pdf</td></tr>
+        <tr><td class="key">dms:txt:processing:&lt;field&gt;</td><td>extractor-txt</td></tr>
+        <tr><td class="key">dms:office:processing:&lt;field&gt;</td><td>extractor-office</td></tr>
+        <tr><td class="key">dms:ocr:processing:&lt;field&gt;</td><td>extractor-ocr</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="storelabel">Run counters / stats</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Key</th><th>Owner</th></tr></thead>
+      <tbody>
+        <tr><td class="key">dms:scanner:dispatch:run_start / :stats:dispatched / :stats:skipped_locked</td><td>dms-scanner</td></tr>
+        <tr><td class="key">dms:scanner:stats:folder:&lt;id&gt;:{scanned_files,new_files,skipped_files,lifecycle_files,errors,run_start}</td><td>dms-path-worker</td></tr>
+        <tr><td class="key">dms:run:start_time / dms:run:stats</td><td>dms-processor</td></tr>
+        <tr><td class="key">dms:geocode_quota:&lt;YYYY-MM-DD&gt;</td><td>dms-processor</td></tr>
+        <tr><td class="key">dms:backfill:run:deviations / :start_time / :stats</td><td>classification-backfill</td></tr>
+        <tr><td class="key">dms:language-backfill:run:hits / :start_time / :stats</td><td>language-backfill</td></tr>
+        <tr><td class="key">mail:backfill:mailboxes / mail:backfill:run:start_time / :stats</td><td>mail-attachment-backfill</td></tr>
+        <tr><td class="key">mail:attachment_run:start_time / :stats</td><td>mail-attachment-processor</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="mqtt"><span class="num">07</span>MQTT topic inventory</h2>
+    <p class="section-sub">Broker is Mosquitto with password auth, no anonymous access. Topics marked <span class="pill stat">no known subscriber</span> are published but not consumed anywhere in the reviewed workflows — likely monitoring/HA hooks outside this repo slice.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Topic</th><th>Publisher(s)</th><th>Subscriber(s)</th><th>Payload gist</th></tr></thead>
+      <tbody>
+        <tr><td class="key">alice/dms/pdf</td><td>dms-path-worker</td><td>extractor-pdf</td><td>file_path, hash, type, action</td></tr>
+        <tr><td class="key">alice/dms/ocr</td><td>dms-path-worker</td><td>extractor-ocr</td><td>same shape</td></tr>
+        <tr><td class="key">alice/dms/txt</td><td>dms-path-worker</td><td>extractor-txt</td><td>same shape</td></tr>
+        <tr><td class="key">alice/dms/office</td><td>dms-path-worker</td><td>extractor-office</td><td>same shape</td></tr>
+        <tr><td class="key">alice/dms/image</td><td>dms-path-worker</td><td>extractor-image</td><td>same shape</td></tr>
+        <tr><td class="key">alice/dms/lifecycle</td><td>dms-path-worker, dms-scanner</td><td>dms-lifecycle</td><td>action: add_path / update_path / delete_file</td></tr>
+        <tr><td class="key">alice/dms/done</td><td>dms-lifecycle, dms-processor, mail-sync</td><td>dms-thumbnailer</td><td>weaviate_uuid, document_type, inserted</td></tr>
+        <tr><td class="key">alice/dms/error</td><td>dms-lifecycle, dms-processor</td><td><span class="pill stat">none found</span></td><td>file_path, error, timestamp</td></tr>
+        <tr><td class="key">alice/dms/scanner/stats</td><td>dms-scanner</td><td><span class="pill stat">none found</span></td><td>dispatch run summary</td></tr>
+        <tr><td class="key">alice/dms/scanner/path_stats</td><td>dms-path-worker</td><td><span class="pill stat">none found</span></td><td>per-folder run summary</td></tr>
+        <tr><td class="key">alice/dms/thumb_error</td><td>dms-thumbnailer</td><td><span class="pill stat">none found</span></td><td>weaviate_uuid, file_path, error</td></tr>
+        <tr><td class="key">alice/debug/tool-search</td><td>alice-tool-search</td><td><span class="pill stat">unknown</span></td><td>diagnostic only, not pipeline</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="stores"><span class="num">08</span>Postgres &amp; Weaviate</h2>
+    <p class="section-sub">Postgres holds <em>configuration</em>; Weaviate holds <em>documents</em>. The core pipeline touches exactly one Postgres table.</p>
+
+    <p class="storelabel">PostgreSQL</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Table</th><th>Written by</th><th>Read by</th></tr></thead>
+      <tbody>
+        <tr><td class="key">alice.dms_watched_folders</td><td>dms-folder-api</td><td>dms-scanner, dms-folder-conflict-check, chat-stream dashboard</td></tr>
+        <tr><td class="key">alice.permissions_dms</td><td><i>(managed elsewhere)</i></td><td>alice-tool-search (ACL filtering for document search)</td></tr>
+        <tr><td class="key">alice.imap_mailboxes / imap_mailbox_access</td><td>mail-api, mail-sync</td><td>mail-attachment-backfill, mail-tools</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="storelabel">Weaviate collections</p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Collection</th><th>Written by</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="key">Invoice</td><td>dms-processor, dms-lifecycle</td><td>issuer, amounts, lineItems, fullText</td></tr>
+        <tr><td class="key">BankStatement</td><td>dms-processor, dms-lifecycle</td><td>parent of BankTransaction children</td></tr>
+        <tr><td class="key">BankTransaction</td><td>dms-processor "Phase B" only</td><td>child rows, cascade-deleted with parent</td></tr>
+        <tr><td class="key">Document</td><td>dms-processor, dms-lifecycle</td><td>generic fallback type</td></tr>
+        <tr><td class="key">Email</td><td>mail-sync (primary path), dms-processor (fallback)</td><td>thumbnailer reads body text for rendering</td></tr>
+        <tr><td class="key">SecuritySettlement</td><td>dms-processor, dms-lifecycle</td><td>depot/ISIN/settlement fields</td></tr>
+        <tr><td class="key">Contract</td><td>dms-processor, dms-lifecycle</td><td>partner, terms, cost fields</td></tr>
+        <tr><td class="key">Image</td><td>dms-processor image branch, image-description-backfill (patch)</td><td>excluded from classification/language backfill scope</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="section-sub"><b style="color:var(--text)">Read-only consumers:</b> alice-tool-search (assistant document search, permission-filtered across all 8 collections) and the alice-chat-stream admin dashboard (coverage aggregates).</p>
+
+    <h2 id="open"><span class="num">09</span>Resolved &amp; tracked</h2>
+    <p class="section-sub">Follow-up from 2026-08-30 review — all four items below are now scoped into <b>PROJ-95</b> (Roadmap).</p>
+    <div class="flag"><b>Dead MQTT topics — confirmed</b><code>alice/dms/error</code>, <code>scanner/stats</code>, <code>scanner/path_stats</code>, <code>thumb_error</code> were debugging aids from before winston logging was adopted. No longer needed; safe to treat as dead.</div>
+    <div class="flag"><b>alice-dms-thumbnailer never covers BankTransaction</b>Emails get thumbnails (PROJ-93), but BankTransaction objects (no <code>file_path</code>, generated from a BankStatement) are never rendered. Needs the same text-rendering mode PROJ-93 gave Email, built from <code>purpose</code>/<code>counterparty</code>/<code>amount</code> plus a <code>parentStatementId</code> lookup.</div>
+    <div class="flag"><b>alice-dms-thumbnailer-backfill drops every filePath-less object</b>Both Email and BankTransaction are discarded outright, so neither ever gets a thumbnail retroactively — same root cause as above, but in the backfill path. Also missing: the <code>processor:lock:run</code> lock every other backfill takes, and a time-limit/auto-continue mechanism (so a run can't be started with a duration like the others). The unconnected <b>"Split: Per collection"</b> node (no input or output edges) should be removed while this workflow is touched.</div>
+
+    <footer>Compiled from workflows/*.json, docker/compose/automations/*, sql/init-schema.sql — 2026-08-30</footer>
+  </main>
+</div>

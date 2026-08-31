@@ -30,6 +30,15 @@ paths:
 - **Only when necessary** - Use code node as last resort
 - **AI tool capability** - ANY node can be an AI tool (not just marked ones)
 
+### Loops: No Loop-in-Loop
+
+n8n does not support nesting a Split In Batches / loop node inside another loop node within the same workflow.
+
+- **Prefer no loop at all**: if the per-item work can happen in a single pass of standard/Code nodes over the full item list, skip the loop entirely (e.g. fetch all records in one query, transform in one Code node, write in one batch call) rather than looping just because a collection of items is involved.
+- **One loop is fine**: iterating a flat list of items in a single loop node is the normal case.
+- **Need a second, independent loop dimension?** (e.g. loop over collections, then loop over records per collection) — do not nest a second loop node in the same workflow. Instead call a sub-workflow (Execute Workflow node) from inside the outer loop, and put the inner loop inside that sub-workflow. This is the established pattern in this repo (see `alice-dms-processor`'s Phase B / BankTransaction extraction).
+- **Workflows with a time limit** (`time_limit_seconds` pattern, see PROJ-92/94/96/95) require a real loop node — the time check runs once per iteration, after each individual item is processed. Don't try to replace this loop with a single bulk pass; the time check needs a per-item checkpoint to stop cleanly mid-run.
+
 ### Most Popular n8n Nodes (for get_node_essentials):
 
 1. **n8n-nodes-base.code** - JavaScript/Python scripting
