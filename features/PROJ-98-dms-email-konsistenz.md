@@ -557,12 +557,35 @@ Zähler-Semantik „planned-or-done" wie [[PROJ-97]]: `deleted_orphan_mailbox` /
 - **Production Ready:** **JA** — kein Critical/High offen (BUG-2 behoben), BUG-1 akzeptiert. → Status **Approved**.
 
 ### Offene Deploy-Voraussetzungen (kein QA-Blocker, aber vor Live-Betrieb nötig)
-1. `alice-mail-reader` Container-Rebuild + Deploy (`/list-uids` sonst 404 → jedes Postfach `unreachable` → nur Fall (a) wirkt).
-2. `Deploy n8n-workflow alice-mail-reconcile`.
-3. Empfohlen: 1 Dry-Run über den Webhook (`time_limit_seconds` optional) zur Sichtprüfung der Zähler vor dem ersten `confirm`-Lauf — analog PROJ-97-Vorgehen.
+1. `alice-mail-reader` Container-Rebuild + Deploy (`/list-uids` sonst 404 → jedes Postfach `unreachable` → nur Fall (a) wirkt). — ✅ erledigt 2026-08-31.
+2. `Deploy n8n-workflow alice-mail-reconcile`. — ✅ erledigt 2026-08-31.
+3. Empfohlen: 1 Dry-Run über den Webhook zur Sichtprüfung der Zähler vor dem ersten `confirm`-Lauf. — ✅ durchgeführt (siehe unten).
 
-## Deployment
-_To be added by /deploy_
+### Live-Verifikation (Dry-Run, 2026-08-31)
+
+`POST /webhook/alice-mail-reconcile` mit `time_limit_seconds=180`, ohne `confirm`:
+
+```json
+{
+  "status": "ok", "mode": "dry-run", "trigger": "webhook",
+  "stopped_reason": "time_limit",
+  "checked": 382, "remaining": 4905,
+  "deleted_orphan_mailbox": 2, "deleted_orphan_message": 2,
+  "thumbnail_files_removed": 0, "redis_hashes_cleaned": 0,
+  "skipped_ok": 378,
+  "skipped_mailbox_unreachable": 0, "skipped_mailbox_empty": 0, "skipped_mailbox_syncing": 0,
+  "mailboxes_checked": 1
+}
+```
+
+**Bewertung — alles wie spezifiziert:**
+- `stopped_reason: time_limit` nach 382 von ~5287 Objekten, `remaining=4905` = `total − checked` ✓
+- `mailboxes_checked: 1` — `list-uids` erfolgreich und nicht-leer für das eine Postfach ✓
+- `skipped_mailbox_*` alle 0 — kein IMAP-Fehler, kein leeres/syncing Postfach ✓
+- 4 Waisen im ersten 180s-Fenster identifiziert (2× `orphan_mailbox`, 2× `orphan_message`), im Dry-Run **nichts gelöscht** (`thumbnail_files_removed`/`redis_hashes_cleaned` = 0) ✓
+- „planned-or-done"-Semantik korrekt: `deleted_*` zählt die geplanten Löschungen, `skipped_ok=378` die gesunden/behaltenen ✓
+
+**Hinweis für den vollständigen Lauf:** Bei ~5287 `Email`-Objekten reicht ein 180s-Dry-Run nur für ~7 % des Bestands. Ein voller Dry-Run braucht `time_limit_seconds` deutlich höher (Hochrechnung ~2500s) — über der nginx-300s-Grenze, d.h. der HTTP-Client bekommt ein 504, der Workflow läuft aber durch (Zahlen im n8n-Execution-Log + winston). Für den `confirm`-Lauf unkritisch: idempotent, und der monatliche Schedule (3600s-Fenster) zieht den Rest nach.
 
 ## Deployment
 _To be added by /deploy_
