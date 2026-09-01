@@ -96,6 +96,11 @@ voller Verhaltensparität nach außen.
       den heutigen Ollama-Modellen (gleiche Quants).
 - [ ] `ollama-titan` bleibt unverändert lauffähig und von dieser Umstellung
       unberührt.
+- [ ] Der Router entlädt ein geladenes Modell **nicht** im Leerlauf (Ersatz für
+      Ollamas `OLLAMA_KEEP_ALIVE=-1`); ein Modell weicht nur, wenn das andere
+      angefragt wird. Ein Schedule-Workflow (`alice-llm-model-warmup`, 07:00
+      Europe/Berlin) lädt das Chat-Modell nach dem nächtlichen DMS-Lauf vor, so
+      dass die erste Chat-Anfrage am Tag keine Kaltstart-Verzögerung hat.
 - [ ] Neue nginx-Config `conf.d/llama-3090.conf` mit
       `server_name llama3090.happy-mining.de` proxyt auf den llama.cpp-Container
       (WebSocket-Header, großzügige `proxy_read_timeout`, ausreichende
@@ -315,7 +320,8 @@ für die Karenzzeit erhalten, wird nur gestoppt).
 | **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
 | **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
 | **Modelle** | Zwei GGUF-Dateien im Modell-Ordner: das Chat-/Vision-Modell (`qwen3.5:27b`-Äquivalent, q4_K_M, **mit** zugehörigem Vision-Projektor/mmproj) und das DMS-Text-Modell (`mistral-small3.2:24b`-Äquivalent, q4_K_M). Gleiche Quantisierung wie heute. | Verhaltensparität: identischer Modellstand, identische Quant-Stufe → gleiche Antwortqualität, nur schneller. |
-| **VRAM-Strategie** | Es ist **immer nur ein Modell** aktiv geladen. Wechselt die Last vom Chat aufs DMS-Modell (oder umgekehrt), entlädt/lädt der Server (Sekunden bis ~1 min). | 27b-q4 + 24b-q4 + Kontext passen **nicht sicher gleichzeitig** in 24 GB. „Ein Modell aktiv" ist die robuste Lösung; die Ladezeiten werden dokumentiert, nicht wegoptimiert (siehe Edge Case „Modell-Wechsel unter Last"). |
+| **VRAM-Strategie** | Es ist **immer nur ein Modell** aktiv geladen (`--models-max 1`). **Kein Idle-Unload** — ein Modell bleibt geladen, bis ein Request für das *andere* Modell es verdrängt (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Der nächtliche DMS-Lauf (02:00 UTC) lädt mistral; ein neuer Mini-Workflow `alice-llm-model-warmup` (Schedule 05:00 UTC = 07:00 Europe/Berlin) schaltet vor Arbeitsbeginn zurück auf qwen. | 27b-q4 + 24b-q4 + Kontext passen **nicht sicher gleichzeitig** in 24 GB. Ohne Idle-Unload muss qwen im Tagesverlauf nicht bei jedem Chat neu laden; die eine Modell-Ladephase pro Tag (mistral→qwen) fällt in das leere 05:00-Fenster. |
+| **Warmup-Workflow** | `alice-llm-model-warmup` (n8n): Schedule `0 5 * * *` (UTC) → ein `POST /v1/chat/completions` an qwen mit `max_tokens: 1`. Lädt qwen (verdrängt mistral). `onError: continueRegularOutput` + Winston-Log; kein Retry, kein Blocker. `load-on-startup = true` in `presets.ini` wärmt qwen zusätzlich nach jedem Container-Neustart. | Erste Morgen-Chat-Antwort ohne Kaltstart-Verzögerung. Zeitpunkt liegt nach dem 02:00-DMS-Lauf und vor dem 06:00-Image-Description-Backfill — keine Cron-Kollision. |
 | **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
 | **Betrieb** | Eigener Container `llama-3090`, `restart: unless-stopped`, GPU fest auf die RTX 3090 gepinnt (dieselbe `device_ids`-Zuweisung wie `ollama-3090` heute), Healthcheck gegen die Modell-Liste (`/v1/models`). | Gleiche Betriebs-Garantien wie beim alten Dienst. |
 | **Netzwerk & Sicherheit** | Container hängt in **denselben Docker-Netzen** wie `ollama-3090` heute (`frontend`, `app_int`) plus dem Netz von `dms-extractor-image` (`backend`), damit alle bisherigen Konsumenten ihn erreichen. Kein Port nach außen; extern nur über den nginx-Vhost hinter VPN. | Keine neue Angriffsfläche; „VPN-only" bleibt. |
@@ -436,9 +442,12 @@ _Implementiert am 2026-09-01. Router-Ansatz: **llama.cpp nativer Router-Modus**
   `--models-preset /models/presets.ini --models-max 1 --sleep-idle-seconds 900
   --api-key-file /run/secrets/llama_api_key`. Healthcheck gegen `/health`.
 - **`presets.ini.example`** — zwei Sektionen, Sektionsname = Modell-ID im
-  Request: `qwen3.5:27b-q4_K_M` (mit `mmproj`, `reasoning-format = deepseek`)
-  und `mistral-small3.2:24b`. Real-Datei liegt auf dem Volume
-  `/srv/hot/models/llama-cpp/presets.ini` (nicht gesynct).
+  Request: `qwen3.5:27b-q4_K_M` (mit `mmproj`, `reasoning-format = deepseek`,
+  `load-on-startup = true`) und `mistral-small3.2:24b`. **Kein** `stop-timeout`
+  / Idle-Unload (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Real-Datei liegt auf
+  dem Volume `/srv/hot/models/llama-cpp/presets.ini` (nicht gesynct).
+- **`compose.yml`** — `--sleep-idle-seconds` **nicht** gesetzt: der Router
+  entlädt nie von selbst, ein Modell weicht nur, wenn das andere angefragt wird.
 - **`README.md`** (Service-Ordner) — Endpoint, Modelle, Server-Dateien, Secret,
   Rollback.
 - **`docker/compose/scripts/Makefile`** — `ai/llama-3090` in `STACKS` ergänzt.
@@ -512,6 +521,14 @@ jeweils die eine Downstream-Parse-Zeile:
 | `alice-mail-sync` | `Process + Classify + Store Emails` (Shim) |
 | `alice-dms-image-description-backfill` | `HTTP: Ollama Vision` (OpenAI-Vision-Body+Auth), `Code: Extract Description` (Parse) |
 
+**Neuer Workflow `alice-llm-model-warmup.json`** (4 Nodes): Schedule
+`0 5 * * *` (UTC = 07:00 Europe/Berlin MESZ / 06:00 MEZ) → `HTTP: Warm qwen`
+(`POST /v1/chat/completions`, `model=$env.OLLAMA_MODEL`, `max_tokens:1`,
+`onError: continueRegularOutput`) → `Code: Log Result` (Winston). Lädt qwen
+vor Arbeitsbeginn (verdrängt das nachts geladene mistral), damit der erste
+Chat des Tages keine Kaltstart-Verzögerung hat. n8n-mcp-Validierung: 0 Fehler.
+Zu deployen via `Deploy n8n-workflow alice-llm-model-warmup`.
+
 Modellwahl (`$env.OLLAMA_MODEL_DMS`, `$env.OLLAMA_VISION_MODEL`), Prompts,
 Retry-/Lock-/Zeitlimit-Logik: **unverändert**. Alle 9 Dateien: `node --check`
 grün, JSON valide, Diff minimal (nur die betroffenen `jsCode`-Strings +
@@ -536,7 +553,10 @@ HTTP-Node-Parameter).
 - GGUF-Dateien beschaffen (q4_K_M, gleiche Quants) + `presets.ini` schreiben.
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
 - Cutover-Reihenfolge + Vorher/Nachher-Benchmark (§7 Tech Design).
-- n8n-Workflows via `Deploy n8n-workflow {name}` (9×).
+- n8n-Workflows via `Deploy n8n-workflow {name}` (9× migriert + 1× neu:
+  `alice-llm-model-warmup`).
+- Warmup-Zeitpunkt `0 5 * * *` UTC ggf. an eine geänderte DMS-Startzeit
+  anpassen (muss nach dem 02:00-DMS-Lauf und vor Arbeitsbeginn liegen).
 
 ## QA Test Results
 
@@ -557,6 +577,7 @@ nginx-Klammerbilanz, Secret-Scan der `.env.example`._
 | 2 | Ein Endpoint, dynamischer Router, beide Modelle | **Code bereit** | `--models-preset` + `--models-max 1` + `--sleep-idle-seconds 900`, kein separater Router-Container (Nutzerentscheidung). |
 | 3 | Gleiche Quants wie Ollama | **Nicht prüfbar (statisch)** | Abhängig von den tatsächlich beschafften GGUF-Dateien — `/deploy`-Aufgabe. |
 | 4 | `ollama-titan` unangetastet | **PASS** | `docker/compose/ai/ollama/compose.yml` nicht verändert (git diff leer); `llama-3090` ist eine neue, eigenständige Compose-Datei. |
+| 4b | Kein Idle-Unload + Morgen-Warmup | **PASS (Code)** | `compose.yml` ohne `--sleep-idle-seconds`; `presets.ini.example` ohne `stop-timeout`, mit `load-on-startup=true` für qwen. Neuer Workflow `alice-llm-model-warmup` (Schedule `0 5 * * *` UTC): n8n-mcp-Validierung 0 Fehler, JS `node --check` grün. Live-Verifikation (qwen nach 07:00 resident) = `/deploy`. |
 | 5 | `conf.d/llama-3090.conf` analog alter Config | **PASS** | Header/Timeouts/Body-Size 1:1 aus `ollama-3090.conf` übernommen, Klammern ausbalanciert. |
 | 6 | Alter Vhost → dauerhafter 301 (HTTP+HTTPS) | **PASS** | Beide Server-Blöcke in `ollama-3090.conf` liefern `301` auf `https://llama3090.happy-mining.de$request_uri`. |
 | 7 | Externe Clients funktionieren übergangsweise per Redirect | **Code bereit** | Redirect-Logik korrekt; Live-Verifikation = `/deploy`. |
@@ -612,9 +633,17 @@ nginx-Klammerbilanz, Secret-Scan der `.env.example`._
 | 32 | Rollback schließt nginx-Ebene ein | **PASS** | Dokumentiert in Tech Design §8 + Service-README. |
 | 33 | n8n-Workflows über Standard-Deploy-Weg | **PASS** | Kein direkter Live-Edit vorgenommen; JSONs liegen in `workflows/` zum Deploy über `Deploy n8n-workflow {name}`. |
 
-**Zusammenfassung AC:** 33 Kriterien geprüft — 24× PASS (Code), 1× PASS mit
-Live-Test ausstehend explizit vermerkt, 8× als reine Cutover-/Messwert-Aufgaben
-korrekt an `/deploy` delegiert (kein Bug, kein offener Punkt im Code).
+**Zusammenfassung AC:** 34 Kriterien geprüft (inkl. AC 4b Idle-Unload/Warmup) —
+25× PASS (Code), 1× PASS mit Live-Test ausstehend explizit vermerkt, 8× als
+reine Cutover-/Messwert-Aufgaben korrekt an `/deploy` delegiert (kein Bug, kein
+offener Punkt im Code).
+
+**Nachtrag 2026-09-01:** Idle-Unload aus dem `llama-3090`-compose entfernt
+(`--sleep-idle-seconds` gestrichen) + `presets.ini` ohne `stop-timeout` +
+neuer Workflow `alice-llm-model-warmup` (Schedule `0 5 * * *` UTC = 07:00
+Europe/Berlin) — verhindert, dass qwen im Tagesverlauf bei jedem Chat neu lädt
+(Ersatz für Ollamas `OLLAMA_KEEP_ALIVE=-1`). n8n-mcp-Validierung: 0 Fehler.
+Kein neuer Bug.
 
 ### Edge Cases (9, aus der Spec)
 

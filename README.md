@@ -103,7 +103,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 | `n8n`                   | Workflow engine: HA + DMS + mail tools, DMS pipeline, auth/session webhooks                 |
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
 | `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
-| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads qwen3.5:27b-q4_K_M / mistral-small3.2:24b. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
+| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads qwen3.5:27b-q4_K_M / mistral-small3.2:24b (one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00). External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
 | `ollama-titan`          | Ollama on the TITAN X — Jupyter / GPU experiments only, not in the Alice request path       |
 | `weaviate`              | Vector search                                                                               |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                  |
@@ -148,6 +148,7 @@ Workflows live in `workflows/`. The streaming endpoint is `POST /api/stream/chat
 | `alice-dms-thumbnailer-backfill` | Webhook POST (manual)          | Generate thumbnails for all existing Weaviate objects |
 | `alice-dms-reconcile`            | Webhook POST + Schedule (monthly) | Reconcile Weaviate vs. Redis path map: repair drift, delete orphans |
 | `alice-dms-folder-api`           | Webhook `/webhook/dms/folders` | Admin CRUD for NAS watched folders                    |
+| `alice-llm-model-warmup`         | Schedule (daily 05:00 UTC)     | Reload the chat model into llama-3090 after the night DMS run |
 
 ---
 

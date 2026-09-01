@@ -14,14 +14,26 @@ Alice consumers. `ollama-titan` (TITAN X, Jupyter) is unaffected.
 
 ## Models (dynamic, one resident at a time)
 
-Router loads a model on first request and unloads it after 15 min idle
-(`--sleep-idle-seconds 900`, `--models-max 1`). Request a model by its
-preset section name in the `model` field:
+Router keeps ONE model resident (`--models-max 1`) and has **no idle-unload**
+(replaces Ollama's `OLLAMA_KEEP_ALIVE=-1`): a model stays loaded until a request
+for the *other* model evicts it. Request a model by its preset section name in
+the `model` field:
 
 | Model ID (`model` field) | Role |
 | --- | --- |
 | `qwen3.5:27b-q4_K_M` | chat/agent + vision (matches old Ollama name) |
 | `mistral-small3.2:24b` | DMS text extraction (matches old Ollama name) |
+
+### Daily model timeline (all UTC — n8n cron runs UTC)
+
+| ~Time | Trigger | Resident model after |
+| --- | --- | --- |
+| 02:00 | `alice-dms-processor` (nightly DMS run) | mistral |
+| 05:00 | `alice-llm-model-warmup` (this feature) | **qwen** — warmed before the working day so the first morning chat has no cold-load delay |
+| daytime | chat / agent requests | qwen (stays resident, no idle-unload) |
+
+`load-on-startup = true` on qwen in `presets.ini` also warms it right after a
+container (re)start.
 
 ## Files on the server (Docker volume `/srv/hot/models/llama-cpp/`)
 
