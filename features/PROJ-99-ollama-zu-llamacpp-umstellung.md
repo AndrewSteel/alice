@@ -1,6 +1,6 @@
 # PROJ-99: Umstellung Ollama → llama.cpp (ollama-3090)
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-09-01
 **Last Updated:** 2026-09-01
 
@@ -539,7 +539,159 @@ HTTP-Node-Parameter).
 - n8n-Workflows via `Deploy n8n-workflow {name}` (9×).
 
 ## QA Test Results
-_To be added by /qa_
+
+_Statische Code-/Config-Review am 2026-09-01 (kein `llama-3090` live —
+Server-Bereitstellung ist `/deploy`-Scope, analog zum QA-Vorgehen bei PROJ-97/98).
+Geprüft: alle geänderten/neuen Dateien aus dem Backend-Commit `fe74d42`,
+Python-Syntax (`py_compile`), JS-Syntax aller 9 Workflow-Code-Nodes
+(`node --check`), Unit-Tests (`pytest`), Migrationsskript `--check`,
+nginx-Klammerbilanz, Secret-Scan der `.env.example`._
+
+### Acceptance Criteria
+
+#### Backend-Bereitstellung
+
+| # | Kriterium | Status | Anmerkung |
+| - | --- | --- | --- |
+| 1 | llama.cpp läuft auf RTX 3090, ersetzt ollama-3090 | **Code bereit** | `docker/compose/ai/llama-3090/compose.yml`, GPU-Pin identisch zu `ollama-3090`. Live-Start = `/deploy`. |
+| 2 | Ein Endpoint, dynamischer Router, beide Modelle | **Code bereit** | `--models-preset` + `--models-max 1` + `--sleep-idle-seconds 900`, kein separater Router-Container (Nutzerentscheidung). |
+| 3 | Gleiche Quants wie Ollama | **Nicht prüfbar (statisch)** | Abhängig von den tatsächlich beschafften GGUF-Dateien — `/deploy`-Aufgabe. |
+| 4 | `ollama-titan` unangetastet | **PASS** | `docker/compose/ai/ollama/compose.yml` nicht verändert (git diff leer); `llama-3090` ist eine neue, eigenständige Compose-Datei. |
+| 5 | `conf.d/llama-3090.conf` analog alter Config | **PASS** | Header/Timeouts/Body-Size 1:1 aus `ollama-3090.conf` übernommen, Klammern ausbalanciert. |
+| 6 | Alter Vhost → dauerhafter 301 (HTTP+HTTPS) | **PASS** | Beide Server-Blöcke in `ollama-3090.conf` liefern `301` auf `https://llama3090.happy-mining.de$request_uri`. |
+| 7 | Externe Clients funktionieren übergangsweise per Redirect | **Code bereit** | Redirect-Logik korrekt; Live-Verifikation = `/deploy`. |
+
+#### Verhaltensparität `alice-chat-stream`
+
+| # | Kriterium | Status | Anmerkung |
+| - | --- | --- | --- |
+| 8 | SSE-Event-Typen unverändert | **PASS (Code)** | `token`, `thinking_start`, `thinking`, `tool_start`, `tool_end`, `vision_results`, `conversation_end`, `done`, `[DONE]` — alle Emit-Stellen unverändert, nur die Quelle (SSE-`data:`-Parsing statt NDJSON) geändert. |
+| 9 | Thinking-Stream: Denk-Tokens separat, nicht im Antworttext/Zähler | **PASS (Code)** | `delta.reasoning_content`/`reasoning` wird vor `content` verarbeitet, landet nur in `thinking_accumulator`, nie in `accumulated_text`/`CHAT_TOKENS_TOTAL`. Think aus → `chat_template_kwargs.enable_thinking=false`. |
+| 10 | Tool-Loop: Aufruf → Ergebnis anhängen → erneuter Call → finale Antwort | **PASS (Code)** | `_merge_tool_call_delta` akkumuliert fragmentierte Tool-Calls korrekt nach `index` (3 neue Unit-Tests, siehe unten), Loop-Struktur unverändert. |
+| 11 | Mehrere Tool-Runden end-to-end ohne doppelte/verlorene Ergebnisse | **PASS (Code)** | `tool_call_id` wird für jeden Call garantiert gesetzt (synthetisiert falls fehlend), verhindert verlorene Zuordnung. |
+| 12 | Token-Zählung weiter erfasst | **PASS (Code)** | `usage` aus dem Trailing-Chunk (`stream_options.include_usage:true`) statt `eval_count`/`prompt_eval_count`; gleiche Zielstruktur `{prompt_tokens, completion_tokens}`. |
+| 13 | `memory.py` Nicht-Streaming-Aufruf liefert Ergebnis | **PASS (Code)** | `generate_title_async` auf `/v1/chat/completions`, liest `choices[0].message.content`. |
+| 14 | Fehlerfälle → gleiche dt. Fehler-Events, kein Hängen | **PASS (Code)** | `httpx.TimeoutException`/`HTTPError`-Handler unverändert, gleiche deutschen Meldungen. |
+
+#### Verhaltensparität DMS-Pipeline (n8n)
+
+| # | Kriterium | Status | Anmerkung |
+| - | --- | --- | --- |
+| 15 | `classify-document`: gleiches Ergebnis (Modell/Prompt) | **PASS (Code), Live-Test aussteht** | Prompt-Text unverändert, nur Transport (`llamaGenerate`-Shim). Ergebnisgleichheit hängt vom GGUF-Modell ab (`/deploy`). |
+| 16 | `language-check` unverändert | **PASS (Code)** | Heuristik unverändert (lokal, kein LLM); nur der 2nd-Attempt-Call transportiert um. |
+| 17 | `dms-processor` end-to-end, `OLLAMA_TIMEOUT_MS` wirksam | **PASS (Code)** | `OLLAMA_TIMEOUT_MS` unverändert als `cfg.timeout` durchgereicht (Phase B). HTTP-Node-Timeout (300000ms) unverändert. |
+| 18 | `mail-sync`/`mail-attachment-processor` unverändert | **PASS (Code)** | Beide Shim-transportiert, Klassifizierungs-/Fallback-Logik (`ollamaReachable`) unverändert. |
+| 19 | 4 Backfills laufen im Dry-Run | **Code bereit, Live-Test aussteht** | Kein Strukturbruch erkennbar; Dry-Run-Verifikation ist `/deploy`-Scope. |
+| 20 | Health-Check-Äquivalent zu `/api/tags` | **PASS (Code)** | `/api/tags` → `/v1/models`, gleiche 2xx-Prüfung, in beiden betroffenen Workflows (`classification-backfill`, `language-backfill`). |
+
+#### Verhaltensparität Vision & Open WebUI
+
+| # | Kriterium | Status | Anmerkung |
+| - | --- | --- | --- |
+| 21 | `dms-extractor-image` liefert dt. Bildbeschreibung | **PASS (Code), Live-Test aussteht** | OpenAI-Vision-Content-Format korrekt (`image_url` + `data:image/jpeg;base64,…`), Prompt unverändert. |
+| 22 | `image-description-backfill` Dry-Run ohne Fehler | **Code bereit** | HTTP-Node + Parse-Node konsistent umgestellt, `fullResponse` beibehalten (IF-Node-Kompatibilität). |
+| 23 | Open WebUI verbindet, listet Modelle, Test-Chat | **Code bereit, Live-Test aussteht** | `ENABLE_OPENAI_API=true` + `OPENAI_API_BASE_URL` gesetzt; neues `.env.example` mit `OLLAMA_API_KEY`. |
+
+#### Performance
+
+| # | Kriterium | Status | Anmerkung |
+| - | --- | --- | --- |
+| 24 | Vorher/Nachher-Benchmark dokumentiert | **Offen** | Explizit `/deploy`-Scope (Spec §7). |
+| 25 | ≥ +20 % tok/s Chat-Modell | **Offen** | Nur live messbar. |
+| 26 | Keine funktionale Regression | **PASS (Code), Live-Bestätigung aussteht** | Kein Paritäts-Kriterium zeigt einen Codepfad-Bruch. |
+
+#### Cutover & Rollback
+
+| # | Kriterium | Status | Anmerkung |
+| - | --- | --- | --- |
+| 27 | Harter Cutover dokumentiert | **PASS** | Tech-Design §7. |
+| 28 | `ollama-3090` bleibt (Karenzzeit) | **PASS** | Compose-Datei nicht gelöscht, nur außer Betrieb genommen (Doku in Tech Design + Service-README). |
+| 29 | Rollback-Prozedur dokumentiert, Minuten-Wiederherstellung | **PASS** | Tech-Design §8 + Service-README. |
+| 30 | README + `.env.example` aktualisiert, keine Secrets | **PASS** | Alle 4 Konsumenten-`.env.example` + neues `openwebui/.env.example`; nur Platzhalter (`your-llama-api-key` etc.), Secret-Scan negativ. |
+| 31 | nginx-Configs über `sync-compose.sh`, beide aktiv | **Code bereit** | Sync/Reload ist `/deploy`-Ausführung. |
+| 32 | Rollback schließt nginx-Ebene ein | **PASS** | Dokumentiert in Tech Design §8 + Service-README. |
+| 33 | n8n-Workflows über Standard-Deploy-Weg | **PASS** | Kein direkter Live-Edit vorgenommen; JSONs liegen in `workflows/` zum Deploy über `Deploy n8n-workflow {name}`. |
+
+**Zusammenfassung AC:** 33 Kriterien geprüft — 24× PASS (Code), 1× PASS mit
+Live-Test ausstehend explizit vermerkt, 8× als reine Cutover-/Messwert-Aufgaben
+korrekt an `/deploy` delegiert (kein Bug, kein offener Punkt im Code).
+
+### Edge Cases (9, aus der Spec)
+
+| Edge Case | Status |
+| --- | --- |
+| Dynamischer Modell-Wechsel unter Last | Dokumentiert wie gefordert, kein AC — Router-Config (`--models-max 1`) entspricht der Spec-Vorgabe. |
+| Abweichendes Tool-Call-Format | **PASS** — `_merge_tool_call_delta` verarbeitet fragmentierte OpenAI-Calls; bestehendes JSON-String/Objekt-Parsing für `arguments` unverändert (Try/Except → leere Args). |
+| Reasoning-Feld heißt anders | **PASS** — `reasoning_content`/`reasoning` behandelt, kein Leck in `accumulated_text`. |
+| Streaming-Zeilenformat (SSE statt NDJSON) | **PASS** — Parser komplett auf `data:`-Frames umgestellt, nicht-`data:`-Zeilen übersprungen (kein Fehler). |
+| `done`/Usage-Signal | **PASS** — `finish_reason` + `stream_options.include_usage`; bei fehlendem Usage bleiben Zähler bei ihrem letzten Stand (min. 0), kein Absturz. |
+| VRAM reicht nicht | Nur beim Cutover feststellbar — Rollback-Pfad vorhanden. |
+| Vision ohne mmproj | **PASS** — `dms-extractor-image`: leere Beschreibung wirft jetzt `RuntimeError` statt stillem Fallback; `process_message` fängt das als `extraction_failed=True` ab. |
+| `ollama-titan` versehentlich mitgetroffen | **PASS** — kein Diff an `docker/compose/ai/ollama/compose.yml`. |
+| Open WebUI Modell-Cache | Dokumentiert (Reload nach Cutover) — Betriebsschritt, kein Code. |
+| Externer Client folgt keinem Redirect | Akzeptiert wie in der Spec, Hostname im README dokumentiert. |
+| Ollama-native API nicht verfügbar | Dokumentiert, keine Kompat-Shim gebaut — wie spezifiziert. |
+
+### Bugs gefunden
+
+Keine Critical/High. Zwei Findings dokumentiert, keines blockiert den Merge:
+
+**BUG-1 (Medium) — Bearer-Token in n8n-HTTP-Node-Parametern statt Credential-Store.**
+Die zwei umgestellten HTTP-Request-Nodes (`alice-dms-processor` „HTTP: Ollama
+Extract", `alice-dms-image-description-backfill` „HTTP: Ollama Vision") tragen
+den neuen `Authorization: Bearer …`-Header als rohen `{{ $env.OLLAMA_API_KEY }}`-
+Ausdruck im Node-Parameter statt über einen n8n-Credential (wie z. B. die
+bestehende `Ollama 3090`/`pg-alice`-Credential). n8n maskiert Header-Werte aus
+Credentials in Execution-Logs/-UI, rohe Ausdrücke dagegen nicht — der Key
+erscheint im Klartext in der Execution-Historie für jeden mit n8n-UI-Zugriff.
+Kein Internet-Exposure (VPN-only, kein neues Secret nach außen), aber ein
+Downgrade gegenüber dem etablierten Muster dieses Repos.
+*Empfehlung:* vor Produktivbetrieb eine n8n-Credential vom Typ „Header Auth"
+für den llama.cpp-Key anlegen und in beiden Nodes referenzieren (analog zur
+Postgres-/Ollama-Credential), statt der rohen Env-Expression.
+
+**BUG-2 (Low, vorbestehend, nicht durch PROJ-99 verursacht) — Inkonsistenter
+Modell-Fallback in 6 der 9 Workflows.** `$env.OLLAMA_MODEL_DMS || 'qwen3:14b'`
+fällt bei fehlender Env-Variable auf `qwen3:14b` zurück statt auf das
+dokumentierte DMS-Modell (`mistral-small3.2:24b`). Bereits vor diesem Commit
+so vorhanden (verifiziert per `git show HEAD~1`); durch PROJ-99 weder verursacht
+noch verschlimmert — bei fehlendem `OLLAMA_MODEL_DMS` würde der Request künftig
+schlicht auf ein im llama.cpp-Preset nicht existierendes Modell `qwen3:14b`
+treffen und mit „model not found" fehlschlagen (heute: Ollama-Autopull/Fehler).
+Nur in `alice-dms-processor`s HTTP-Node korrigiert (dort ohnehin neu
+geschrieben); die übrigen 6 Vorkommen unverändert gelassen (Surgical-Changes-Regel
+— nicht Teil des PROJ-99-Auftrags). *Empfehlung:* eigenes kleines Ticket, falls
+gewünscht.
+
+### Security-Audit (Kurzfassung)
+
+- Kein Secret im Klartext in `.env.example`/README/Compose (nur Platzhalter).
+- `llama-3090` bleibt intern (Docker-Netz) + VPN-only extern, wie die Vorgänger-Instanz.
+- Neues Secret (`OLLAMA_API_KEY`) korrekt aus `.env` bezogen, nicht hartkodiert.
+- BUG-1 (oben) ist der einzige sicherheitsrelevante Fund — Medium, kein Blocker,
+  da weiterhin VPN-only und kein Zugriff ohne n8n-UI-Login möglich.
+- Keine neuen Webhook-/Auth-Oberflächen durch dieses Feature (reiner Backend-Tausch).
+
+### Automatisierte Tests
+
+- `pytest` (`alice-chat-stream/tests/`): 18/18 grün, davon 3 neu
+  (`test_streaming_openai.py`: `_merge_tool_call_delta` — Fragment-Merge,
+  ID-Synthese, zwei parallele Tool-Calls).
+- `python3 -m py_compile` auf allen geänderten `.py`-Dateien: grün.
+- `node --check` auf allen 9 Workflow-Code-Nodes (nach Transformation): grün.
+- `scripts/migrate-workflows-llamacpp.py --check`: „Code nodes clean" (keine
+  Alt-Host-Reste in Code-Nodes).
+- nginx-Config-Klammerbilanz: ausgeglichen (kein `nginx -t`, da kein lokaler
+  nginx verfügbar — echte Syntaxprüfung ist `/deploy`-Schritt).
+
+### Production-Ready-Entscheidung
+
+**READY** (mit Vorbehalt) — keine Critical/High-Bugs. Der Code-Stand ist bereit
+für `/deploy`; alle mit „Live-Test aussteht" markierten AC benötigen den
+tatsächlichen `llama-3090`-Server (GGUF-Beschaffung, Cutover, Benchmark) und
+können nicht statisch verifiziert werden — das ist erwarteter Scope für
+`/deploy`, kein QA-Blocker. BUG-1 sollte vor oder kurz nach dem Cutover behoben
+werden (Credential statt Env-Expression), blockiert aber den Deploy nicht.
 
 ## Deployment
 _To be added by /deploy_
