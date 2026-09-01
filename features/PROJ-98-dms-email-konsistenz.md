@@ -1,8 +1,8 @@
 # PROJ-98: DMS Email-Konsistenz — IMAP-basierte Waisen-Erkennung
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-08-31
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-01
 
 ## Dependencies
 
@@ -587,5 +587,16 @@ Zähler-Semantik „planned-or-done" wie [[PROJ-97]]: `deleted_orphan_mailbox` /
 
 **Hinweis für den vollständigen Lauf:** Bei ~5287 `Email`-Objekten reicht ein 180s-Dry-Run nur für ~7 % des Bestands. Ein voller Dry-Run braucht `time_limit_seconds` deutlich höher (Hochrechnung ~2500s) — über der nginx-300s-Grenze, d.h. der HTTP-Client bekommt ein 504, der Workflow läuft aber durch (Zahlen im n8n-Execution-Log + winston). Für den `confirm`-Lauf unkritisch: idempotent, und der monatliche Schedule (3600s-Fenster) zieht den Rest nach.
 
+### Live-Verifikation (confirm-Lauf, 2026-09-01)
+
+`confirm`-Lauf über den Webhook durchgeführt — **erfolgreich, Verhalten wie spezifiziert** (Waisen gelöscht inkl. Thumbnail-/Redis-Nebenwirkungen, Fail-safe-Zähler wie im Dry-Run, sauberer Lock-Release, vollständige Zähler-Response). Der monatliche Schedule (erster Montag 01:00 UTC, 3600s-Fenster) hält den Bestand ab jetzt automatisch konsistent.
+
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-09-01
+
+- **Service `alice-mail-reader`:** Container-Rebuild + Deploy mit dem neuen `POST /list-uids`-Endpoint (`docker/compose/automations/alice-mail-reader/app.py`).
+- **n8n-Workflow `alice-mail-reconcile`:** deployed und aktiv. Trigger: `POST /webhook/alice-mail-reconcile` (manuell, `confirm`-Gate + optional `time_limit_seconds`) + `Schedule Trigger: Monthly` (Cron `0 1 1-7 * 1`, erster Montag 01:00 UTC, implizites `confirm`, 3600s-Fenster).
+- **Wiederverwendet unverändert:** `DELETE /thumbnail/{uuid}` im `alice-dms-thumbnailer` (aus PROJ-97), geteilter Redis-Lock `alice:dms:processor:lock:run`.
+- **Verifikation:** Dry-Run (2026-08-31) + `confirm`-Lauf (2026-09-01) beide erfolgreich, Verhalten wie spezifiziert.
+- **Keine Schema-/Compose-Sync-Änderung** — nur `app.py` im Service, kein neuer Redis-Key, keine Weaviate-Schema-Änderung.
