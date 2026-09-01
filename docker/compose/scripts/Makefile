@@ -26,6 +26,7 @@ STACKS ?= \
   automations/alice-mail-reader \
   automations/alice-dms-thumbnailer \
   ai/ollama \
+  ai/llama-3090 \
   ai/openwebui \
   ai/piper \
   ai/jupyter

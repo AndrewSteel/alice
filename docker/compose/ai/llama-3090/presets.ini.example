@@ -1,0 +1,31 @@
+; llama.cpp router presets for llama-3090 (PROJ-99)
+; -------------------------------------------------------------------
+; Deploy the real file to the mounted volume as:
+;   /srv/hot/models/llama-cpp/presets.ini
+; It is NOT synced by scripts/sync-compose.sh (lives on a Docker volume).
+;
+; Section name  = the model ID clients send in the OpenAI `model` field.
+;                 Keep these EXACTLY equal to the retired Ollama model names
+;                 so no consumer prompt/config has to change:
+;                   qwen3.5:27b-q4_K_M      → chat + vision
+;                   mistral-small3.2:24b    → DMS text extraction
+; -relative paths are resolved against --models-dir / the preset file dir.
+
+[*]
+; Global defaults applied to every model below.
+ctx-size    = 16384
+n-gpu-layers = 999
+flash-attn  = on
+; Unload this model after 15 min idle so the other model can take the GPU.
+; Router-level --models-max 1 guarantees only one is ever resident.
+stop-timeout = 900
+
+[qwen3.5:27b-q4_K_M]
+model      = qwen3.5-27b-instruct-q4_k_m.gguf
+mmproj     = qwen3.5-27b-mmproj-f16.gguf
+; Qwen thinking models emit reasoning in a <think> block; expose it as the
+; OpenAI `reasoning_content` field (consumed by alice-chat-stream, PROJ-37).
+reasoning-format = deepseek
+
+[mistral-small3.2:24b]
+model = mistral-small-3.2-24b-instruct-q4_k_m.gguf

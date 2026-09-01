@@ -250,19 +250,23 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.OLLAMA_URL + '/api/generate' }}",
+        "url": "={{ (($env.OLLAMA_URL || 'http://llama-3090:11434').replace(/\\/$/, '')) + '/v1/chat/completions' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.OLLAMA_API_KEY ? ('Bearer ' + $env.OLLAMA_API_KEY) : undefined }}"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_VISION_MODEL, prompt: 'Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung.', images: [$json.image_b64], stream: false, options: { temperature: 0.3 } }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_VISION_MODEL, messages: [{ role: 'user', content: [ { type: 'text', text: 'Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung.' }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + $json.image_b64 } } ] }], stream: false, temperature: 0.3 }) }}",
         "options": {
           "timeout": 300000,
           "response": {
@@ -322,7 +326,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\nconst ai_description = (body?.response || '').slice(0, 50000);\nreturn [{ json: { weaviate_uuid, ai_description } }];"
+        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\n// PROJ-99: OpenAI shape from llama.cpp; keep the old Ollama field as a fallback.\nconst content = (body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || (body && body.response) || '';\nconst ai_description = String(content).slice(0, 50000);\nreturn [{ json: { weaviate_uuid, ai_description } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

@@ -1,0 +1,52 @@
+services:
+  llama-3090:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: llama-3090
+    restart: unless-stopped
+    # Same reachability as the retired ollama-3090 plus the two nets its other
+    # consumers live on: frontend (n8n, openwebui), backend (dms-extractor-image),
+    # automation (alice-chat-stream).
+    networks: [frontend, backend, automation]
+    # Router mode: no fixed model. --models-preset points at an INI whose
+    # section names become the model IDs clients request in the `model` field.
+    # --models-max 1 keeps only ONE model resident in the 24 GB of the 3090;
+    # --sleep-idle-seconds unloads an idle model so the next model can load.
+    command: >
+      --host 0.0.0.0
+      --port 11434
+      --models-preset /models/presets.ini
+      --models-max 1
+      --sleep-idle-seconds 900
+      --api-key-file /run/secrets/llama_api_key
+    environment:
+      - LLAMA_CACHE=/models/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-c15bd736-8523-5516-2468-3fb450250bab"] # RTX 3090
+              capabilities: ["gpu"]
+    volumes:
+      # GGUF files + presets.ini + HF download cache, on fast storage.
+      - /srv/hot/models/llama-cpp:/models
+      # Single-line API key (also referenced by consumers' OLLAMA_API_KEY).
+      - /srv/warm/llama-3090/llama_api_key:/run/secrets/llama_api_key:ro
+    healthcheck:
+      # Router answers /health once it is up; individual models load on demand.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/health >/dev/null 2>&1 || exit 1"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+networks:
+  frontend:
+    external: true
+    name: frontend
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

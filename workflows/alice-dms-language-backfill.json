@@ -111,7 +111,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const axios = require('axios');\nconst trigger = $input.first().json;\n// Dry-run never calls Ollama (pure heuristic) \u2014 health check only matters for confirm runs.\nif (!trigger.confirm) {\n  return [{ json: { ...trigger, _ollama_ok: true } }];\n}\nlet ollamaOk = false;\ntry {\n  const r = await axios.get('http://ollama-3090:11434/api/tags', { timeout: 5000, validateStatus: () => true });\n  ollamaOk = (r.status >= 200 && r.status < 300);\n} catch(e) {\n  ollamaOk = false;\n}\nreturn [{ json: { ...trigger, _ollama_ok: ollamaOk } }];"
+        "jsCode": "const axios = require('axios');\nconst trigger = $input.first().json;\n// Dry-run never calls Ollama (pure heuristic) \u2014 health check only matters for confirm runs.\nif (!trigger.confirm) {\n  return [{ json: { ...trigger, _ollama_ok: true } }];\n}\nlet ollamaOk = false;\ntry {\n  const r = await axios.get((($env.OLLAMA_URL || 'http://llama-3090:11434').replace(/\\/$/, '')) + '/v1/models', { timeout: 5000, validateStatus: () => true });\n  ollamaOk = (r.status >= 200 && r.status < 300);\n} catch(e) {\n  ollamaOk = false;\n}\nreturn [{ json: { ...trigger, _ollama_ok: ollamaOk } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
