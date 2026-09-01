@@ -215,9 +215,11 @@ voller Verhaltensparität nach außen.
 - **`done`-/Usage-Signal:** Ollama markiert das Ende per `done` + `eval_count` /
   `prompt_eval_count`. → Es braucht ein Äquivalent für Abschluss-Erkennung und
   Token-Zählung; fehlt es, dürfen die Zähler höchstens 0 sein, nicht abstürzen.
-- **VRAM reicht nicht für ein 27b-Modell + Kontext:** Wenn ein großer Quant plus
-  Kontext die 24 GB der 3090 sprengt. → Muss beim Cutover auffallen (Modell lädt
-  nicht); Fallback ist die dokumentierte Rollback-Prozedur.
+- **VRAM reicht nicht für das geladene Modell + Kontext:** Qwen3-VL-30B-A3B-Q4
+  (~18,6 GB + mmproj) bzw. Mistral-Small-24B-Q4 (~14 GB) je einzeln plus
+  KV-Cache. Bei zu großem `ctx-size` könnte qwen die 24 GB sprengen. → Muss
+  beim Cutover auffallen (Modell lädt nicht); `ctx-size` in `presets.ini`
+  reduzieren (Default 16384), Fallback ist die Rollback-Prozedur.
 - **Vision-Request ohne mmproj geladen:** Bild-Anfrage an ein Modell, dessen
   Projektor nicht mitgeladen wurde. → `dms-extractor-image` muss einen klaren
   Fehler bekommen (kein stiller Text-only-Fallback, der eine sinnlose
@@ -259,7 +261,7 @@ voller Verhaltensparität nach außen.
 
 | Metrik | Zielwert |
 | --- | --- |
-| Token-Generierungsrate Chat-Modell (`qwen3.5:27b`), llama.cpp vs. Ollama | ≥ +20 % tok/s |
+| Token-Generierungsrate Chat-Modell (Qwen3-VL-30B-A3B, Tag `qwen3.5:27b-q4_K_M`), llama.cpp vs. Ollama | ≥ +20 % tok/s |
 | Token-Generierungsrate DMS-Modell (`mistral-small3.2:24b`), Vorher/Nachher dokumentiert | gemessen, kein Rückschritt |
 | Funktionale Regressionen bei Konsumenten (Chat, DMS, Vision, Open WebUI) | 0 |
 | Reasoning-/Thinking-Stream (PROJ-37) funktionsgleich | ja |
@@ -319,8 +321,8 @@ für die Karenzzeit erhalten, wird nur gestoppt).
 | --- | --- | --- |
 | **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
 | **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
-| **Modelle** | Zwei GGUF-Dateien im Modell-Ordner: das Chat-/Vision-Modell (`qwen3.5:27b`-Äquivalent, q4_K_M, **mit** zugehörigem Vision-Projektor/mmproj) und das DMS-Text-Modell (`mistral-small3.2:24b`-Äquivalent, q4_K_M). Gleiche Quantisierung wie heute. | Verhaltensparität: identischer Modellstand, identische Quant-Stufe → gleiche Antwortqualität, nur schneller. |
-| **VRAM-Strategie** | Es ist **immer nur ein Modell** aktiv geladen (`--models-max 1`). **Kein Idle-Unload** — ein Modell bleibt geladen, bis ein Request für das *andere* Modell es verdrängt (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Der nächtliche DMS-Lauf (02:00 UTC) lädt mistral; ein neuer Mini-Workflow `alice-llm-model-warmup` (Schedule 05:00 UTC = 07:00 Europe/Berlin) schaltet vor Arbeitsbeginn zurück auf qwen. | 27b-q4 + 24b-q4 + Kontext passen **nicht sicher gleichzeitig** in 24 GB. Ohne Idle-Unload muss qwen im Tagesverlauf nicht bei jedem Chat neu laden; die eine Modell-Ladephase pro Tag (mistral→qwen) fällt in das leere 05:00-Fenster. |
+| **Modelle** | Zwei Modelle, gleiche Quant-Stufe wie heute. Chat/Vision: **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B aktiv), Q4_K_M-Sprachgewichte (~18,6 GB) **+** F16-Vision-Projektor `mmproj` (~1,1 GB) — offizielles Repo `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF`. DMS-Text: **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M (~14 GB), **kein** mmproj (reiner Textpfad). Der lokale Ollama-Tag `qwen3.5:27b-q4_K_M` (Ollama meldet `27.8B`, `arch qwen35`) meint genau dieses MoE. | Verhaltensparität: identischer Modellstand + Quant → gleiche Antwortqualität, nur schneller. Die `model`-Feld-Strings bleiben die alten Ollama-Tags → kein Konsument ändert sich. |
+| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** — ein Modell bleibt geladen, bis ein Request für das *andere* es verdrängt (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC = 07:00 Europe/Berlin) schaltet vor Arbeitsbeginn zurück auf qwen. | qwen-Q4 (~18,6 GB) + mmproj + KV **oder** mistral-Q4 (~14 GB) passen je **einzeln** in die 24 GB der 3090 — **beide zusammen nicht**. Ohne Idle-Unload lädt qwen im Tagesverlauf nicht bei jedem Chat neu; der einzige Wechsel pro Tag (mistral→qwen) fällt ins leere 05:00-Fenster. Das Qwen-**MoE** lädt/entlädt spürbar schneller als ein Dense-Modell vergleichbarer Größe — entschärft die Modell-Wechsel-Latenz. |
 | **Warmup-Workflow** | `alice-llm-model-warmup` (n8n): Schedule `0 5 * * *` (UTC) → ein `POST /v1/chat/completions` an qwen mit `max_tokens: 1`. Lädt qwen (verdrängt mistral). `onError: continueRegularOutput` + Winston-Log; kein Retry, kein Blocker. `load-on-startup = true` in `presets.ini` wärmt qwen zusätzlich nach jedem Container-Neustart. | Erste Morgen-Chat-Antwort ohne Kaltstart-Verzögerung. Zeitpunkt liegt nach dem 02:00-DMS-Lauf und vor dem 06:00-Image-Description-Backfill — keine Cron-Kollision. |
 | **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
 | **Betrieb** | Eigener Container `llama-3090`, `restart: unless-stopped`, GPU fest auf die RTX 3090 gepinnt (dieselbe `device_ids`-Zuweisung wie `ollama-3090` heute), Healthcheck gegen die Modell-Liste (`/v1/models`). | Gleiche Betriebs-Garantien wie beim alten Dienst. |
@@ -406,7 +408,7 @@ Wochen-Review) erhalten und werden erst danach abgeräumt.
 
 | Risiko | Umgang |
 | --- | --- |
-| 27b-Modell + Kontext sprengt die 24 GB | Fällt beim Cutover-Check auf (Modell lädt nicht) → Rollback. Ggf. Kontextgröße begrenzen. |
+| Geladenes Modell + Kontext sprengt die 24 GB (v. a. qwen bei großem `ctx-size`) | Fällt beim Cutover-Check auf (Modell lädt nicht) → `ctx-size` senken / Rollback. |
 | Modell-Wechsel-Latenz bei geteilter Nutzung Chat ↔ DMS | Wird dokumentiert, kein Akzeptanzkriterium. Batch-Timeouts (`OLLAMA_TIMEOUT_MS`) müssen eine Ladephase überdauern. |
 | Tool-Call-/Thinking-Feld heißt im OpenAI-Format anders | `/backend` passt Parser an; robustes Parsen beider Argument-Formen bleibt erhalten; kein Denk-Text im Antworttext. |
 | Vision ohne geladenen Projektor → sinnlose Beschreibung | `dms-extractor-image` muss einen **klaren Fehler** bekommen, keinen stillen Text-only-Fallback. |
@@ -439,13 +441,18 @@ _Implementiert am 2026-09-01. Router-Ansatz: **llama.cpp nativer Router-Modus**
   Container `llama-3090`, Port `11434`, GPU auf die RTX 3090 gepinnt (gleiche
   `device_ids` wie `ollama-3090`). Networks: `frontend, backend, automation`
   (Superset der Netze aller Konsumenten). Command:
-  `--models-preset /models/presets.ini --models-max 1 --sleep-idle-seconds 900
-  --api-key-file /run/secrets/llama_api_key`. Healthcheck gegen `/health`.
-- **`presets.ini.example`** — zwei Sektionen, Sektionsname = Modell-ID im
-  Request: `qwen3.5:27b-q4_K_M` (mit `mmproj`, `reasoning-format = deepseek`,
-  `load-on-startup = true`) und `mistral-small3.2:24b`. **Kein** `stop-timeout`
-  / Idle-Unload (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Real-Datei liegt auf
-  dem Volume `/srv/hot/models/llama-cpp/presets.ini` (nicht gesynct).
+  `--models-preset /models/presets.ini --models-max 1
+  --api-key-file /run/secrets/llama_api_key` (kein `--sleep-idle-seconds`).
+  Healthcheck gegen `/health`.
+- **`presets.ini.example`** — zwei Sektionen, Sektionsname = Modell-ID
+  (= alter Ollama-Tag) im Request: `qwen3.5:27b-q4_K_M` →
+  `Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` + `mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf`,
+  `reasoning-format = deepseek`, `load-on-startup = true`;
+  `mistral-small3.2:24b` → `mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf`
+  (bartowski-Requant, kein HF-Login; offizielles gated Repo als Kommentar).
+  **Kein** `stop-timeout` / Idle-Unload (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`).
+  Real-Datei liegt auf dem Volume `/srv/hot/models/llama-cpp/presets.ini`
+  (nicht gesynct).
 - **`compose.yml`** — `--sleep-idle-seconds` **nicht** gesetzt: der Router
   entlädt nie von selbst, ein Modell weicht nur, wenn das andere angefragt wird.
 - **`README.md`** (Service-Ordner) — Endpoint, Modelle, Server-Dateien, Secret,
@@ -550,15 +557,19 @@ HTTP-Node-Parameter).
 
 ### Offen für /deploy (kein Code)
 
-- GGUF-Dateien beschaffen (q4_K_M, gleiche Quants) + `presets.ini` schreiben.
-  llama.cpp hat **keine Registry / kein `ollama pull`** und das Image bringt
-  **kein `huggingface-cli`** mit — Download auf dem **Host** ins Volume
-  `/srv/hot/models/llama-cpp/`. Schritt-für-Schritt inkl. `ollama show` zur
-  Herkunftsbestimmung und der `hf:`-Auto-Download-Alternative:
+- GGUF-Dateien beschaffen + `presets.ini` schreiben. llama.cpp hat **keine
+  Registry / kein `ollama pull`** und das Image bringt **kein `huggingface-cli`**
+  mit — Download auf dem **Host** ins Volume `/srv/hot/models/llama-cpp/`.
+  Konkrete Kommandos + `hf:`-Alternative:
   `docker/compose/ai/llama-3090/README.md` → „Getting the GGUF files".
-  **qwen** = Sprachgewichte **+** `mmproj` (Vision-Projektor, für
-  `dms-extractor-image` / `image-description-backfill`); **mistral** = nur
-  Sprachgewichte (reiner Textpfad, keine Vision-Nutzung).
+  - **Chat/Vision:** `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF` →
+    `Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` (~18,6 GB) **+**
+    `mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf` (~1,1 GB, Vision-Projektor für
+    `dms-extractor-image` / `image-description-backfill`).
+  - **DMS-Text:** `Mistral-Small-3.2-24B-Instruct-2506` Q4_K_M (~14 GB), nur
+    Sprachgewichte, kein mmproj. Offizielles `mistralai/…-GGUF` ist **gated**
+    (`huggingface-cli login`); offene Alternative:
+    `bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF`.
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
 - Cutover-Reihenfolge + Vorher/Nachher-Benchmark (§7 Tech Design).
 - n8n-Workflows via `Deploy n8n-workflow {name}` (9× migriert + 1× neu:
@@ -652,6 +663,17 @@ neuer Workflow `alice-llm-model-warmup` (Schedule `0 5 * * *` UTC = 07:00
 Europe/Berlin) — verhindert, dass qwen im Tagesverlauf bei jedem Chat neu lädt
 (Ersatz für Ollamas `OLLAMA_KEEP_ALIVE=-1`). n8n-mcp-Validierung: 0 Fehler.
 Kein neuer Bug.
+
+**Nachtrag 2026-09-01 (Modell-Identifikation):** Der Ollama-Tag
+`qwen3.5:27b-q4_K_M` wurde per `ollama show` aufgelöst → **Qwen3-VL-30B-A3B-
+Instruct** (MoE, `arch qwen35`, `27.8B`, vision+tools+thinking), **nicht** ein
+Dense-27B. `mistral-small3.2:24b` → Standard **Mistral-Small-3.2-24B-Instruct-
+2506**. Der Tag-String bleibt als `model`-Feld (kein Konsument ändert sich);
+Doku/Preset auf die echten GGUF-Repos + Dateinamen präzisiert. VRAM-Formulierung
+entschärft: qwen-Q4 (~18,6 GB) **oder** mistral-Q4 (~14 GB) je einzeln in 24 GB,
+zusammen nicht → `--models-max 1` bestätigt korrekt. MoE lädt schneller als ein
+Dense-27B → Modell-Wechsel-Latenz geringer als ursprünglich angenommen. Kein
+neuer Bug.
 
 ### Edge Cases (9, aus der Spec)
 

@@ -4,18 +4,16 @@
 ;   /srv/hot/models/llama-cpp/presets.ini
 ; It is NOT synced by scripts/sync-compose.sh (lives on a Docker volume).
 ;
-; Section name  = the model ID clients send in the OpenAI `model` field.
-;                 Keep these EXACTLY equal to the retired Ollama model names
-;                 so no consumer prompt/config has to change:
-;                   qwen3.5:27b-q4_K_M      → chat + vision  (weights + mmproj)
-;                   mistral-small3.2:24b    → DMS text extraction  (weights only)
+; Section name = the model ID clients send in the OpenAI `model` field.
+;   Kept EXACTLY equal to the retired Ollama tag names so no consumer
+;   prompt/config changes. The tags are local names; the real models are:
+;     qwen3.5:27b-q4_K_M    -> Qwen3-VL-30B-A3B-Instruct  (MoE, weights + mmproj)
+;     mistral-small3.2:24b  -> Mistral-Small-3.2-24B-Instruct-2506  (dense, text only)
+;
 ; - relative paths are resolved against the preset file dir.
-; - GGUF filenames below are PLACEHOLDERS — replace with the real ones after
-;   `huggingface-cli download` (see README.md → "Getting the GGUF files").
-;   Or reference Hugging Face directly (auto-download into cache/ on first use):
-;       model  = hf:<HF_REPO_QWEN>:<Q4_K_M_TAG>
-;       mmproj = hf:<HF_REPO_QWEN>:<MMPROJ_TAG>
-;   (needs container internet + HF_TOKEN for gated repos — README has trade-offs)
+; - GGUF filenames below match the official Qwen repo and bartowski's Mistral
+;   re-quant. See README.md ("Getting the GGUF files") for the download commands
+;   and the `hf:` auto-download alternative.
 
 [*]
 ; Global defaults applied to every model below.
@@ -27,8 +25,8 @@ flash-attn  = on
 ; OLLAMA_KEEP_ALIVE=-1 so qwen does not drop out during the working day.
 
 [qwen3.5:27b-q4_K_M]
-model      = REPLACE-qwen-instruct-q4_k_m.gguf
-mmproj     = REPLACE-qwen-mmproj-f16.gguf
+model      = Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
+mmproj     = mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
 ; Warm qwen right after a container (re)start so the first chat is instant.
 load-on-startup = true
 ; Qwen thinking models emit reasoning in a <think> block; expose it as the
@@ -36,4 +34,6 @@ load-on-startup = true
 reasoning-format = deepseek
 
 [mistral-small3.2:24b]
-model = REPLACE-mistral-small-instruct-q4_k_m.gguf
+; bartowski re-quant (no HF login). Official gated repo:
+;   model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf  (from mistralai/...-GGUF)
+model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf

@@ -17,12 +17,21 @@ Alice consumers. `ollama-titan` (TITAN X, Jupyter) is unaffected.
 Router keeps ONE model resident (`--models-max 1`) and has **no idle-unload**
 (replaces Ollama's `OLLAMA_KEEP_ALIVE=-1`): a model stays loaded until a request
 for the *other* model evicts it. Request a model by its preset section name in
-the `model` field:
+the `model` field.
 
-| Model ID (`model` field) | Role |
-| --- | --- |
-| `qwen3.5:27b-q4_K_M` | chat/agent + vision (matches old Ollama name) |
-| `mistral-small3.2:24b` | DMS text extraction (matches old Ollama name) |
+The **model IDs keep the old Ollama tag strings** (`qwen3.5:27b-q4_K_M`,
+`mistral-small3.2:24b`) so no consumer prompt/config changes — but those tags
+are local names, the actual upstream models are:
+
+| Model ID (`model` field) | Actual model | Role |
+| --- | --- | --- |
+| `qwen3.5:27b-q4_K_M` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | chat/agent + vision |
+| `mistral-small3.2:24b` | **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M, text only | DMS text extraction |
+
+VRAM: Qwen3-VL-30B-A3B Q4_K_M ≈ 18.6 GB weights + 1.1 GB mmproj + KV-cache;
+Mistral-Small-24B Q4_K_M ≈ 14 GB. Either fits the 3090's 24 GB alone; both at
+once do not — hence `--models-max 1`. The Qwen MoE loads/unloads noticeably
+faster than a dense model of similar size, which softens the model-switch gap.
 
 ### Daily model timeline (all UTC — n8n cron runs UTC)
 
@@ -62,62 +71,70 @@ without it the model silently ignores images.
 - **mistral** is only used for DMS **text** extraction (classification, field
   extraction from plaintext) → `model` only, no `mmproj`.
 
-### Step 1 — find the exact upstream models
-
-The Ollama tags `qwen3.5:27b-q4_K_M` / `mistral-small3.2:24b` are local tags;
-check what they actually are:
+If you ever need to re-check what the Ollama tags map to:
 
 ```bash
 # on ki.lan
-docker exec ollama-3090 ollama show qwen3.5:27b-q4_K_M --modelfile
-docker exec ollama-3090 ollama show qwen3.5:27b-q4_K_M          # arch, params, quant, projector
-docker exec ollama-3090 ollama show mistral-small3.2:24b --modelfile
+docker exec ollama-3090 ollama show qwen3.5:27b-q4_K_M          # arch qwen35, 27.8B, vision, Q4_K_M
+docker exec ollama-3090 ollama show mistral-small3.2:24b        # Mistral Small 3.2
 ```
 
-Note the architecture / parameter count / quant, then pick the matching GGUF
-repo on Hugging Face (official `Qwen/…-GGUF` / `mistralai/…` repos, or a known
-re-quant like `bartowski/…`). Fill the two `<HF_REPO_*>` placeholders below.
-
-### Step 2 — download to the model volume (on the host)
+### Download to the model volume (on the host)
 
 ```bash
 # one-time: huggingface CLI on the HOST (not the container)
 pipx install "huggingface_hub[cli]"        # or: pip install -U "huggingface_hub[cli]"
-# for gated repos (some Mistral repos): huggingface-cli login   # needs an HF token
 
 cd /srv/hot/models/llama-cpp
 
-# --- chat / vision model (qwen): language weights + vision projector ---
-huggingface-cli download <HF_REPO_QWEN> \
-  <QWEN_Q4_K_M_FILENAME>.gguf \
-  <QWEN_MMPROJ_FILENAME>.gguf \
+# --- chat / vision model: Qwen3-VL-30B-A3B-Instruct (weights + vision projector) ---
+huggingface-cli download Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF \
+  Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf \
+  mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf \
   --local-dir .
 
-# --- DMS text model (mistral): language weights only ---
-huggingface-cli download <HF_REPO_MISTRAL> \
-  <MISTRAL_Q4_K_M_FILENAME>.gguf \
-  --local-dir .
+# --- DMS text model: Mistral-Small-3.2-24B-Instruct-2506, weights only ---
+# Option A: official repo (GATED — needs `huggingface-cli login` + accepting the
+#           licence at https://huggingface.co/mistralai/Mistral-Small-3.2-24B-Instruct-2506)
+huggingface-cli download mistralai/Mistral-Small-3.2-24B-Instruct-2506-GGUF \
+  <official-Q4_K_M-filename>.gguf --local-dir .
+# Option B: open community re-quant (no login) — recommended if you don't want
+#           to deal with the gate. Same base model, Q4_K_M:
+huggingface-cli download bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF \
+  mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf --local-dir .
 ```
 
-Then set the real filenames in `presets.ini` (`model =` / `mmproj =`).
-Verify: `ls -lh /srv/hot/models/llama-cpp/*.gguf` — the qwen weights should be
-~18–20 GB (Q4_K_M of a ~30 B model), mistral ~14 GB, the mmproj ~1–2 GB.
-
-### Alternative — let llama.cpp pull from HF on first request
-
-Instead of downloading, `presets.ini` can reference a repo directly; the router
-fetches into `cache/` on the first request for that model:
+Then set the filenames in `presets.ini`:
 
 ```ini
 [qwen3.5:27b-q4_K_M]
-model  = hf:<HF_REPO_QWEN>:<Q4_K_M_TAG>
-mmproj = hf:<HF_REPO_QWEN>:<MMPROJ_TAG>
+model  = Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
+mmproj = mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
+load-on-startup  = true
+reasoning-format = deepseek
+
+[mistral-small3.2:24b]
+model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
+```
+
+Verify: `ls -lh /srv/hot/models/llama-cpp/*.gguf` — Qwen Q4_K_M ≈ 18.6 GB,
+mmproj-F16 ≈ 1.1 GB, Mistral Q4_K_M ≈ 14 GB.
+
+### Alternative — let llama.cpp pull from HF on first request
+
+Instead of downloading, reference the repo directly; the router fetches into
+`cache/` on the first request for that model:
+
+```ini
+[qwen3.5:27b-q4_K_M]
+model  = hf:Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF:Q4_K_M
+mmproj = hf:Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF:mmproj-F16
 ```
 
 Trade-offs: the container then needs outbound internet (and an `HF_TOKEN` env
-for gated repos), and the **first** request blocks for the full ~20 GB
-download. For the cutover, prefer Step 2 so the download happens up front and
-you can verify quant parity before the hard switch.
+for the gated Mistral repo), and the **first** request blocks for the full
+~20 GB download. For the cutover, prefer the explicit download above so it
+happens up front and you can verify quant parity before the hard switch.
 
 ## Secret
 
