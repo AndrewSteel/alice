@@ -31,6 +31,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P1       | HA-Agent Area-Context-Weitergabe (PROJ-84)                                                                         | 3.3       | Roadmap |
 | P1       | Timer-Agent (PROJ-85)                                                                                              | 3.3       | Roadmap |
 | P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Roadmap |
+| P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
 | P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Roadmap |
 | P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Roadmap |
 | P2       | Kontakte-Agent — inkl. Settings-Tab „Kontakte", mehrere Google-Kontaktbücher pro User (PROJ-89)                    | 3.4       | Roadmap |
