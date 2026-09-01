@@ -215,11 +215,13 @@ voller Verhaltensparität nach außen.
 - **`done`-/Usage-Signal:** Ollama markiert das Ende per `done` + `eval_count` /
   `prompt_eval_count`. → Es braucht ein Äquivalent für Abschluss-Erkennung und
   Token-Zählung; fehlt es, dürfen die Zähler höchstens 0 sein, nicht abstürzen.
-- **VRAM reicht nicht für das geladene Modell + Kontext:** Qwen3-VL-30B-A3B-Q4
-  (~18,6 GB + mmproj) bzw. Mistral-Small-24B-Q4 (~14 GB) je einzeln plus
-  KV-Cache. Bei zu großem `ctx-size` könnte qwen die 24 GB sprengen. → Muss
-  beim Cutover auffallen (Modell lädt nicht); `ctx-size` in `presets.ini`
-  reduzieren (Default 16384), Fallback ist die Rollback-Prozedur.
+- **VRAM reicht nicht für qwen (ctx 16384 + mmproj) neben Weaviate:** Die 3090
+  ist mit `weaviate-transformers` + `multi2vec-clip` geteilt. qwen-Q4 (~18,6 GB)
+  + mmproj (~1,1 GB) + KV bei ctx 16384 ≈ ~21 GB. → `weaviate-transformers` gibt
+  VRAM zurück (`PYTORCH_CUDA_ALLOC_CONF`-Cap; Fallback CPU). Lädt qwen dann
+  trotzdem nicht: `ctx-size` gestuft senken (16384→12288→8192) — 8192 ist die
+  Untergrenze, darunter leidet der Agenten-Tool-Loop. Letzter Fallback:
+  Rollback. `mistral` (~16 GB) ist unkritisch.
 - **Vision-Request ohne mmproj geladen:** Bild-Anfrage an ein Modell, dessen
   Projektor nicht mitgeladen wurde. → `dms-extractor-image` muss einen klaren
   Fehler bekommen (kein stiller Text-only-Fallback, der eine sinnlose
@@ -322,7 +324,7 @@ für die Karenzzeit erhalten, wird nur gestoppt).
 | **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
 | **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
 | **Modelle** | Zwei Modelle, gleiche Quant-Stufe wie heute. Chat/Vision: **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B aktiv), Q4_K_M-Sprachgewichte (~18,6 GB) **+** F16-Vision-Projektor `mmproj` (~1,1 GB) — offizielles Repo `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF`. DMS-Text: **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M (~14 GB), **kein** mmproj (reiner Textpfad). Der lokale Ollama-Tag `qwen3.5:27b-q4_K_M` (Ollama meldet `27.8B`, `arch qwen35`) meint genau dieses MoE. | Verhaltensparität: identischer Modellstand + Quant → gleiche Antwortqualität, nur schneller. Die `model`-Feld-Strings bleiben die alten Ollama-Tags → kein Konsument ändert sich. |
-| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** — ein Modell bleibt geladen, bis ein Request für das *andere* es verdrängt (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC = 07:00 Europe/Berlin) schaltet vor Arbeitsbeginn zurück auf qwen. `ctx-size = 8192` im Preset (statt 262k des Modells). | **Die 24 GB der 3090 sind geteilt:** `weaviate-transformers` (~3,3 GB) + `multi2vec-clip` (~1,4 GB) = **~4,7 GB dauerhaft** → ~19 GB für llama.cpp. qwen-Q4 (~18,6 GB) + mmproj (~1,1 GB) + KV bei ctx 8192 ≈ **~20 GB — der Engpass**; mistral-Q4 (~14 GB) ist entspannt. **Beide LLMs zusammen passen nicht** → `--models-max 1`. Unter Ollama lief qwen+Weaviate bereits bei ~23,7/24 GB (0,9 GB frei) — funktioniert, aber ohne Reserve, daher kleiner Kontext. Qwen-**MoE** lädt/entlädt schneller als ein Dense-Modell → Wechsel-Latenz geringer. |
+| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC) schaltet vor Arbeitsbeginn zurück auf qwen. **`ctx-size = 16384`** im Preset — Arbeits-Minimum für den Agenten-Tool-Loop (letzte 20 Turns + System-Prompt + 7-Tool-Schema + bis 4 Runden Tool-Ergebnis-JSON; Suchtreffer können groß sein). 8192 läuft über, sobald eine Suche viele Treffer liefert — und der Agenten-Loop ist der Grund der Umstellung. | **Die 24 GB der 3090 sind geteilt.** Damit qwen-Q4 (~18,6 GB) + mmproj (~1,1 GB) + KV bei ctx 16384 (≈ **~21 GB**) neben Weaviate passt, muss **`weaviate-transformers` VRAM zurückgeben**: (1) committed = CUDA-Allocator via `PYTORCH_CUDA_ALLOC_CONF` deckeln (MiniLM ist ~470 MB, die 3,3 GB sind Allocator-Reserve → ~1–1,5 GB); (2) Fallback = `t2v-transformers` auf **CPU** (`ENABLE_CUDA=0`, +50–150 ms/Text-Embedding, Chat-Pfad ist LLM-Zeit-dominiert). `multi2vec-clip` bleibt GPU (CPU-Bild-Encoding zu langsam). mistral-Q4 (~16 GB) ist entspannt. **Beide LLMs zusammen passen nicht** → `--models-max 1`. Qwen-**MoE** lädt/entlädt schneller als Dense → Wechsel-Latenz geringer. |
 | **Warmup-Workflow** | `alice-llm-model-warmup` (n8n): Schedule `0 5 * * *` (UTC) → ein `POST /v1/chat/completions` an qwen mit `max_tokens: 1`. Lädt qwen (verdrängt mistral). `onError: continueRegularOutput` + Winston-Log; kein Retry, kein Blocker. `load-on-startup = true` in `presets.ini` wärmt qwen zusätzlich nach jedem Container-Neustart. | Erste Morgen-Chat-Antwort ohne Kaltstart-Verzögerung. Zeitpunkt liegt nach dem 02:00-DMS-Lauf und vor dem 06:00-Image-Description-Backfill — keine Cron-Kollision. |
 | **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
 | **Betrieb** | Eigener Container `llama-3090`, `restart: unless-stopped`, GPU fest auf die RTX 3090 gepinnt (dieselbe `device_ids`-Zuweisung wie `ollama-3090` heute), Healthcheck gegen die Modell-Liste (`/v1/models`). | Gleiche Betriebs-Garantien wie beim alten Dienst. |
@@ -373,27 +375,32 @@ Neue bzw. geänderte Variablen (Werte in den jeweiligen `.env`, Beispiele in
 
 ### 7. Cutover-Ablauf (harter Schnitt)
 
-1. **Vorbereiten (ohne Live-Wirkung):** GGUF-Modelle in den neuen Modell-Ordner
-   legen; Compose-Datei für `llama-3090` anlegen; neue nginx-Config
-   `llama-3090.conf` schreiben; alte `ollama-3090.conf` auf Redirect umbauen;
-   Konsumenten-`.env` mit neuen Werten vorbereiten.
-2. **Baseline messen:** Token/s für Chat-Modell und DMS-Modell **unter Ollama**
-   festhalten (Vorher-Wert für den Benchmark). Zusätzlich `nvidia-smi` notieren
-   (Ist: weaviate ~4,7 GB + Ollama-qwen ~19 GB ≈ 23,7/24 GB).
-3. **Schnitt:** `ollama-3090` stoppen → `llama-3090` starten → warten bis
-   `/v1/models` beide Modelle listet → **`nvidia-smi` prüfen: lädt qwen
-   (`load-on-startup`) neben den beiden Weaviate-Containern in die 24 GB?**
-   Falls nicht (OOM beim Laden): `ctx-size` in `presets.ini` senken (8192 → 4096)
-   und `llama-3090` neu starten. → alle Konsumenten mit neuer Config neu starten
-   → n8n-Workflows deployen (10×) → nginx-Configs syncen (`sync-compose.sh`) und
-   nginx neu laden.
-4. **Paritäts-Checks:** die Prüfliste aus den Acceptance Criteria abarbeiten
-   (Chat inkl. Thinking + mehrstufigem Tool-Loop; je ein DMS-Workflow live + ein
-   Backfill im Dry-Run; Vision-Testbild; Open WebUI Test-Chat; externer
-   Redirect). **Modell-Wechsel-Test:** einen DMS-Request (mistral) auslösen,
-   danach einen Chat (qwen) — beide müssen laden, `nvidia-smi` darf in keinem
-   der beiden Zustände über 24 GB gehen.
-5. **Nachher messen:** Token/s erneut, Vorher/Nachher dokumentieren
+1. **Vorbereiten (ohne Live-Wirkung):** GGUF-Modelle in den Modell-Ordner legen;
+   Compose-Datei für `llama-3090` anlegen; neue nginx-Config `llama-3090.conf`
+   schreiben; alte `ollama-3090.conf` auf Redirect umbauen; Konsumenten-`.env`
+   vorbereiten.
+2. **VRAM für Weaviate zurückholen:** `t2v-transformers` mit dem
+   `PYTORCH_CUDA_ALLOC_CONF`-Cap neu starten (`make recreate s=automations/weaviate
+   svc=t2v-transformers` o.ä.), `nvidia-smi` prüfen — Ziel: `weaviate-transformers`
+   von ~3,3 GB auf ~1–1,5 GB. Greift der Cap nicht ausreichend: `ENABLE_CUDA=0`
+   plus `deploy.resources`-Block entfernen (CPU-Betrieb).
+3. **Baseline messen:** Token/s Chat- und DMS-Modell **unter Ollama** festhalten;
+   `nvidia-smi` notieren.
+4. **Schnitt:** `ollama-3090` stoppen → `llama-3090` starten → warten bis
+   `/v1/models` beide Modelle listet → **`nvidia-smi`: lädt qwen
+   (`load-on-startup`, ctx 16384 + mmproj) neben den beiden Weaviate-Containern
+   in die 24 GB?** Falls OOM: `ctx-size` gestuft senken (16384 → 12288 → 8192)
+   **oder** `t2v-transformers` doch auf CPU. → alle Konsumenten mit neuer Config
+   neu starten → n8n-Workflows deployen (10×) → nginx-Configs syncen
+   (`sync-compose.sh`) und nginx neu laden.
+5. **Paritäts-Checks:** die Prüfliste aus den Acceptance Criteria abarbeiten
+   (Chat inkl. Thinking + mehrstufigem Tool-Loop mit einer Dokumentensuche, die
+   viele Treffer liefert → prüft, dass ctx 16384 im Loop reicht; je ein
+   DMS-Workflow live + ein Backfill im Dry-Run; Vision-Testbild; Open WebUI
+   Test-Chat; externer Redirect). **Modell-Wechsel-Test:** einen DMS-Request
+   (mistral) auslösen, danach einen Chat (qwen) — beide müssen laden, `nvidia-smi`
+   darf in keinem der beiden Zustände über 24 GB gehen.
+6. **Nachher messen:** Token/s erneut, Vorher/Nachher dokumentieren
    (Ziel Chat-Modell ≥ +20 %).
 
 ### 8. Rollback (Ziel: wenige Minuten)
@@ -414,7 +421,8 @@ Wochen-Review) erhalten und werden erst danach abgeräumt.
 
 | Risiko | Umgang |
 | --- | --- |
-| Geladenes Modell + Kontext sprengt die 24 GB (v. a. qwen bei großem `ctx-size`) | Fällt beim Cutover-Check auf (Modell lädt nicht) → `ctx-size` senken / Rollback. |
+| **qwen (ctx 16384 + mmproj) passt nicht neben Weaviate in die 24 GB** | `weaviate-transformers` gibt VRAM zurück: `PYTORCH_CUDA_ALLOC_CONF`-Cap (committed) bzw. CPU-Fallback (`ENABLE_CUDA=0`). `nvidia-smi`-Check + gestuftes `ctx-size` (16384→12288→8192) beim Cutover. Kein Datenverlust. |
+| Kleineres `ctx-size` (8192) würde den Agenten-Tool-Loop begrenzen | Deshalb **nicht** akzeptiert — 16384 ist das Minimum; die VRAM-Zeile oben löst das Platzproblem stattdessen. |
 | Modell-Wechsel-Latenz bei geteilter Nutzung Chat ↔ DMS | Wird dokumentiert, kein Akzeptanzkriterium. Batch-Timeouts (`OLLAMA_TIMEOUT_MS`) müssen eine Ladephase überdauern. |
 | Tool-Call-/Thinking-Feld heißt im OpenAI-Format anders | `/backend` passt Parser an; robustes Parsen beider Argument-Formen bleibt erhalten; kein Denk-Text im Antworttext. |
 | Vision ohne geladenen Projektor → sinnlose Beschreibung | `dms-extractor-image` muss einen **klaren Fehler** bekommen, keinen stillen Text-only-Fallback. |
@@ -561,6 +569,15 @@ HTTP-Node-Parameter).
 - Server-seitig zusätzlich: `/srv/warm/llama-3090/llama_api_key` (1 Zeile),
   `/srv/hot/models/llama-cpp/` (GGUF + `presets.ini` + `cache/`).
 
+### Weaviate-VRAM (geteilte 3090)
+
+- **`docker/compose/automations/weaviate/compose.yml`** — `t2v-transformers`
+  bekommt `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64,garbage_collection_threshold:0.6`,
+  um den CUDA-Allocator zu deckeln (~3,3 GB → erwartet ~1–1,5 GB), damit qwen
+  mit `ctx-size 16384` + mmproj neben Weaviate in die 24 GB passt. Kommentar im
+  compose beschreibt den CPU-Fallback (`ENABLE_CUDA=0`). `multi2vec-clip`
+  unverändert (GPU).
+
 ### Offen für /deploy (kein Code)
 
 - GGUF-Dateien beschaffen + `presets.ini` schreiben. llama.cpp hat **keine
@@ -577,10 +594,15 @@ HTTP-Node-Parameter).
     (`huggingface-cli login`); offene Alternative:
     `bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF`.
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
-- **VRAM-Check beim Schnitt** (§7 Schritt 3): `nvidia-smi` bestätigen, dass qwen
-  neben `weaviate-transformers` (~3,3 GB) + `multi2vec-clip` (~1,4 GB) in die
-  24 GB der 3090 lädt. Preset-Default `ctx-size = 8192` ist konservativ gesetzt;
-  bei OOM auf 4096 senken. mistral ist unkritisch (~5 GB kleiner).
+- **`weaviate-transformers` VRAM-Cap verifizieren** (§7 Schritt 2): mit
+  `PYTORCH_CUDA_ALLOC_CONF` (bereits im `weaviate/compose.yml`, committed) sollte
+  der Container von ~3,3 GB auf ~1–1,5 GB fallen. Greift der Cap nicht: auf CPU
+  umstellen (`ENABLE_CUDA=0` + `deploy.resources` raus). Ziel: ~2–3 GB frei für
+  qwen mit `ctx-size 16384`.
+- **VRAM-Check beim Schnitt** (§7 Schritt 4): `nvidia-smi` bestätigen, dass qwen
+  (ctx 16384 + mmproj) neben Weaviate in die 24 GB lädt. Preset `ctx-size 16384`
+  ist das Agenten-Loop-Minimum; bei OOM gestuft 16384→12288→8192 **oder**
+  `t2v-transformers` auf CPU. mistral unkritisch.
 - Cutover-Reihenfolge + Vorher/Nachher-Benchmark (§7 Tech Design).
 - n8n-Workflows via `Deploy n8n-workflow {name}` (9× migriert + 1× neu:
   `alice-llm-model-warmup`).
@@ -684,16 +706,26 @@ Doku/Preset auf die echten GGUF-Repos + Dateinamen präzisiert.
 **Nachtrag 2026-09-01 (VRAM-Bilanz, echte `nvidia-smi`-Zahlen):** Die RTX 3090
 (24 GB) ist geteilt — `weaviate-transformers` **3290 MiB** + `multi2vec-clip`
 **1418 MiB** = **~4,7 GB dauerhaft**. Ollama fuhr qwen bereits **auf der 3090**
-(nicht TITAN X) mit **18968 MiB** → zusammen ~23,7/24 GB, ~0,9 GB frei. D. h.
-qwen + Weaviate ist **schon heute grenzwertig**; unter llama.cpp kommt der F16-
-mmproj (~1,1 GB) obendrauf. **Maßnahme:** Preset-Default `ctx-size` von 16384 →
-**8192** gesenkt (KV-Cache halbiert), plus ein expliziter `nvidia-smi`-Check +
-`ctx-size 4096`-Fallback als Cutover-Schritt (§7). mistral (~14 GB) ist
-unkritisch. `--models-max 1` bleibt korrekt (beide LLMs zusammen ~34 GB).
-**Risiko (Medium, Deploy-verifizierbar):** qwen könnte bei `ctx-size 8192` +
-mmproj + Weaviate die 24 GB trotzdem knapp reißen — fällt beim Cutover sofort
-auf (Modell lädt nicht), Fix ist `ctx-size` runter, kein Datenverlust. Kein
-Code-Bug.
+(nicht TITAN X) mit **18968 MiB** → zusammen ~23,7/24 GB, ~0,9 GB frei.
+
+**Iteration 2 (ctx-size vs. Agenten-Loop):** Ein erster Ansatz `ctx-size 8192`
+zur VRAM-Schonung wurde **verworfen** — Alice sendet im Tool-Loop System-Prompt
++ 7-Tool-Schema + letzte 20 Turns + bis 4 Runden Tool-Ergebnis-JSON (Suchtreffer
+können groß sein); 8192 läuft über, sobald eine Suche viele Treffer liefert, und
+der Agenten-Loop ist das Kern-Ziel der Umstellung. **`ctx-size 16384`** ist das
+Arbeits-Minimum (Preset-Default). Damit qwen (~21 GB mit mmproj + 16k-KV) neben
+Weaviate passt, gibt **`weaviate-transformers` VRAM zurück**:
+`PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64,…` im `weaviate/compose.yml`
+(committed; MiniLM ist ~470 MB, die 3,3 GB sind Allocator-Reserve → erwartet
+~1–1,5 GB) — Fallback: `t2v-transformers` auf CPU (`ENABLE_CUDA=0`,
++50–150 ms/Text-Embedding, Chat-Pfad ist LLM-Zeit-dominiert). `multi2vec-clip`
+bleibt GPU. `--models-max 1` bleibt korrekt (beide LLMs zusammen ~34 GB).
+
+**Risiko (Medium, Deploy-verifizierbar):** Reicht der Allocator-Cap nicht und
+lädt qwen mit ctx 16384 trotzdem nicht neben Weaviate, ist der Fix (a)
+`t2v-transformers` auf CPU oder (b) `ctx-size` gestuft 16384→12288→8192. Fällt
+beim Cutover sofort auf (Modell lädt nicht), kein Datenverlust, kein Code-Bug.
+`nvidia-smi`-Checks in §7 Schritt 2 + 4.
 
 ### Edge Cases (9, aus der Spec)
 
@@ -773,10 +805,12 @@ können nicht statisch verifiziert werden — das ist erwarteter Scope für
 werden (Credential statt Env-Expression), blockiert aber den Deploy nicht.
 
 **Vorbehalt VRAM (Deploy-verifizierbar):** qwen + beide Weaviate-Container liefen
-unter Ollama schon bei ~23,7/24 GB. Mit dem zusätzlichen mmproj unter llama.cpp
-ist `ctx-size = 8192` konservativ gesetzt; falls qwen beim Cutover nicht lädt,
-ist der Fix `ctx-size 4096` (§7 Schritt 3), kein Datenverlust. Als
-Cutover-Schritt mit `nvidia-smi`-Check dokumentiert.
+unter Ollama schon bei ~23,7/24 GB. `ctx-size` bleibt auf **16384** (Agenten-
+Loop-Minimum, nicht verhandelbar); dafür gibt `weaviate-transformers` VRAM
+zurück (Allocator-Cap committed, CPU-Fallback dokumentiert). Falls qwen beim
+Cutover trotzdem nicht lädt: `t2v-transformers` auf CPU **oder** `ctx-size`
+gestuft senken (§7 Schritt 2 + 4). Kein Datenverlust, kein Code-Bug — reine
+Betriebs-Tuning-Frage beim Cutover.
 
 ## Deployment
 _To be added by /deploy_

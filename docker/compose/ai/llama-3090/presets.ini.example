@@ -17,13 +17,19 @@
 
 [*]
 ; Global defaults applied to every model below.
-; ctx-size 8192: the RTX 3090's 24 GB is SHARED with the two Weaviate inference
-; containers (t2v-transformers ~3.3 GB + multi2vec-clip ~1.4 GB = ~4.7 GB
-; always resident). Under Ollama, qwen + Weaviate already sat at ~23.7 / 24 GB
-; with only ~0.9 GB free. Qwen3-VL-30B-A3B-Q4 (~18.6 GB) + F16 mmproj (~1.1 GB)
-; leaves almost no room for the KV cache, so keep the context small. Raise this
-; per-model only after `nvidia-smi` at cutover shows headroom.
-ctx-size    = 8192
+;
+; ctx-size 16384: this is the working minimum for the agent tool loop — Alice
+; sends the last 20 turns + the system prompt + the 7-tool schema + up to 4
+; rounds of tool-result JSON (search hits can be large). 8192 overflows as soon
+; as a search returns many results, and the agent loop is the whole point of
+; this migration. 8192 would only be safe for plain chat with no tool calls.
+;
+; VRAM: the RTX 3090's 24 GB is SHARED with the two Weaviate inference
+; containers. To make 16384 fit next to Qwen3-VL-30B-A3B-Q4 (~18.6 GB) + F16
+; mmproj (~1.1 GB), t2v-transformers must be moved OFF the GPU (CPU, or a
+; PyTorch allocator cap) — see the llama-3090 README and the PROJ-99 spec.
+; If qwen still OOMs at cutover, step down: 16384 -> 12288 -> 8192.
+ctx-size    = 16384
 n-gpu-layers = 999
 flash-attn  = on
 ; NO stop-timeout / idle-unload: a model stays resident until a request for the
@@ -43,6 +49,6 @@ reasoning-format = deepseek
 ; bartowski re-quant (no HF login). Official gated repo:
 ;   model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf  (from mistralai/...-GGUF)
 model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
-; ~5 GB smaller than qwen and only used for short extraction prompts, so it can
-; take a bigger window if a workflow ever needs it — uncomment and raise:
-; ctx-size = 16384
+; ~5 GB smaller than qwen and only used for short DMS extraction prompts (the
+; text is chunked at 8000 chars upstream), so the global 16384 is already more
+; than enough — no per-model override needed.
