@@ -32,25 +32,40 @@ are local names, the actual upstream models are:
 
 Permanently resident on the RTX 3090, independent of llama.cpp:
 
-| Container | Model | VRAM |
+| Container | Model | VRAM (before / after PROJ-99) |
 | --- | --- | --- |
-| `weaviate-transformers` | paraphrase-multilingual-MiniLM-L12-v2 | ~3.3 GB |
-| `weaviate-multi2vec` | CLIP-ViT-B-32-multilingual-v1 | ~1.4 GB |
-| **Weaviate total** | | **~4.7 GB** → leaves **~19 GB** for llama.cpp |
+| `weaviate-transformers` | paraphrase-multilingual-MiniLM-L12-v2 (~470 MB weights) | **~3.3 GB → ~1–1.5 GB** (CUDA allocator capped, `PYTORCH_CUDA_ALLOC_CONF`) |
+| `weaviate-multi2vec` | CLIP-ViT-B-32-multilingual-v1 | ~1.4 GB (unchanged — vision encoder, kept on GPU) |
+| **Weaviate total** | | ~4.7 GB → **~2.5–3 GB** → leaves **~21 GB** for llama.cpp |
 
 | llama.cpp model (one at a time) | VRAM |
 | --- | --- |
-| Qwen3-VL-30B-A3B Q4_K_M (~18.6 GB) + F16 mmproj (~1.1 GB) + KV @ ctx 8192 | **~20 GB** — tight, this is the constraint |
-| Mistral-Small-24B Q4_K_M (~14 GB) + KV | ~15 GB — comfortable |
+| Qwen3-VL-30B-A3B Q4_K_M (~18.6 GB) + F16 mmproj (~1.1 GB) + KV @ **ctx 16384** | **~21 GB** — this is the constraint |
+| Mistral-Small-24B Q4_K_M (~14 GB) + KV | ~16 GB — comfortable |
 
-Under Ollama this exact pairing (qwen + both Weaviate modules) already ran at
-**~23.7 / 24 GB** with ~0.9 GB free — so it works, but there is no slack.
-`presets.ini` therefore ships `ctx-size = 8192` (vs. the model's 262 k max); the
-DMS extraction prompts and the chat agent loop stay well under that. If qwen
-fails to load at cutover, drop `ctx-size` further (4096) before touching
-anything else. Both models at once do **not** fit → `--models-max 1`. The Qwen
-MoE loads/unloads noticeably faster than a dense model of similar size, which
-softens the model-switch gap.
+`ctx-size = 16384` is the **working minimum for the agent tool loop** (last 20
+turns + system prompt + 7-tool schema + up to 4 rounds of tool-result JSON;
+search hits can be large). 8192 overflows the moment a search returns many
+results — and the agent loop is the whole reason for this migration.
+
+To fit ctx 16384 next to qwen, `weaviate-transformers` must give VRAM back:
+
+1. **First choice (committed):** `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64,…`
+   on the `t2v-transformers` container caps the CUDA caching allocator. MiniLM
+   is tiny (~470 MB); the 3.3 GB is mostly allocator reserve. Expect it to drop
+   to ~1–1.5 GB with no speed loss. Verify with `nvidia-smi` at cutover.
+2. **Fallback:** run `t2v-transformers` on **CPU** — `ENABLE_CUDA=0`, drop its
+   `deploy.resources` block. Costs ~50–150 ms per text embedding (query
+   embedding in the chat search tools + long-term-memory recall; nightly sync
+   batches get slower but aren't latency-critical). The chat path is
+   LLM-generation-bound, so this is acceptable. `multi2vec-clip` stays on the
+   GPU (CPU image encoding would be ~300–800 ms/image — too slow for the DMS
+   image pipeline).
+
+If qwen still OOMs at cutover after step 1, step `ctx-size` down
+(16384 → 12288 → 8192) or do step 2. Both LLMs at once do **not** fit →
+`--models-max 1`. The Qwen MoE loads/unloads faster than a dense model of
+similar size, which softens the model-switch gap.
 
 ### Daily model timeline (all UTC — n8n cron runs UTC)
 

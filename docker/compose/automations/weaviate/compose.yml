@@ -65,6 +65,14 @@ services:
     environment:
       ENABLE_CUDA: "1"
       # NVIDIA_DISABLE_REQUIRE: "1"  # Falls nötig
+      # PROJ-99: the RTX 3090's 24 GB is shared with llama-3090 (Qwen3-VL needs
+      # ~20 GB + 16k KV cache). MiniLM-L12-v2 is ~470 MB but the CUDA caching
+      # allocator reserves ~3.3 GB. Cap it so llama.cpp gets that headroom back.
+      # If this still isn't enough, run this model on CPU instead: set
+      # ENABLE_CUDA=0 and delete the deploy.resources block below (adds
+      # ~50-150 ms per text embedding — acceptable; the chat path is
+      # LLM-generation-bound, and batch sync runs at night).
+      PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:64,garbage_collection_threshold:0.6"
     # RTX 3090 (sm_86) — PyTorch im Image benötigt min. sm_70, TITAN X (sm_61) inkompatibel
     deploy:
       resources:

@@ -71,18 +71,18 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| llama-3090 (llama.cpp router) | RTX 3090 | ~20 GB   | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, tag `qwen3.5:27b-q4_K_M`) OR Mistral-Small-3.2-24B Q4_K_M ~14 GB (DMS, tag `mistral-small3.2:24b`) — one model resident at a time, ctx-size 8192 to fit alongside Weaviate |
-| weaviate-transformers         | RTX 3090 | ~3.3 GB | text2vec embeddings (MiniLM-L12-v2)     |
-| weaviate-multi2vec            | RTX 3090 | ~1.4 GB | CLIP image+text embeddings              |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~21 GB   | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, tag `qwen3.5:27b-q4_K_M`) OR Mistral-Small-3.2-24B Q4_K_M ~16 GB (DMS, tag `mistral-small3.2:24b`) — one model resident at a time, ctx-size 16384 |
+| weaviate-transformers         | RTX 3090 | ~1–1.5 GB | text2vec embeddings (MiniLM-L12-v2); CUDA allocator capped so llama.cpp gets the headroom (fallback: run on CPU) |
+| weaviate-multi2vec            | RTX 3090 | ~1.4 GB | CLIP image+text embeddings (kept on GPU)|
 | alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
 | wyoming-whisper               | TITAN X  | shared  | Whisper large-v3 STT                   |
 | ollama-titan                  | TITAN X  | shared  | Ollama for Jupyter / GPU experiments (not in the Alice request path) |
 
-The RTX 3090's 24 GB is shared: the two Weaviate inference containers hold
-~4.7 GB permanently, leaving ~19 GB for `llama-3090` — just enough for
-Qwen3-VL-30B-A3B-Q4 + mmproj with a small (8192) context. Under Ollama this
-pairing already ran at ~23.7 / 24 GB. Verify with `nvidia-smi` after cutover;
-if qwen won't load, lower `ctx-size` further in `presets.ini`.
+The RTX 3090's 24 GB is shared. `ctx-size 16384` is the working minimum for the
+agent tool loop; to make Qwen3-VL-30B-A3B-Q4 + mmproj + KV (~21 GB) fit next to
+Weaviate, `weaviate-transformers` gives VRAM back via a CUDA-allocator cap
+(`PYTORCH_CUDA_ALLOC_CONF`), with a CPU fallback if that isn't enough. Verify
+with `nvidia-smi` at cutover. Details: `docker/compose/ai/llama-3090/README.md`.
 
 ### Storage
 
