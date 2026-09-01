@@ -322,7 +322,7 @@ für die Karenzzeit erhalten, wird nur gestoppt).
 | **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
 | **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
 | **Modelle** | Zwei Modelle, gleiche Quant-Stufe wie heute. Chat/Vision: **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B aktiv), Q4_K_M-Sprachgewichte (~18,6 GB) **+** F16-Vision-Projektor `mmproj` (~1,1 GB) — offizielles Repo `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF`. DMS-Text: **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M (~14 GB), **kein** mmproj (reiner Textpfad). Der lokale Ollama-Tag `qwen3.5:27b-q4_K_M` (Ollama meldet `27.8B`, `arch qwen35`) meint genau dieses MoE. | Verhaltensparität: identischer Modellstand + Quant → gleiche Antwortqualität, nur schneller. Die `model`-Feld-Strings bleiben die alten Ollama-Tags → kein Konsument ändert sich. |
-| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** — ein Modell bleibt geladen, bis ein Request für das *andere* es verdrängt (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC = 07:00 Europe/Berlin) schaltet vor Arbeitsbeginn zurück auf qwen. | qwen-Q4 (~18,6 GB) + mmproj + KV **oder** mistral-Q4 (~14 GB) passen je **einzeln** in die 24 GB der 3090 — **beide zusammen nicht**. Ohne Idle-Unload lädt qwen im Tagesverlauf nicht bei jedem Chat neu; der einzige Wechsel pro Tag (mistral→qwen) fällt ins leere 05:00-Fenster. Das Qwen-**MoE** lädt/entlädt spürbar schneller als ein Dense-Modell vergleichbarer Größe — entschärft die Modell-Wechsel-Latenz. |
+| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** — ein Modell bleibt geladen, bis ein Request für das *andere* es verdrängt (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC = 07:00 Europe/Berlin) schaltet vor Arbeitsbeginn zurück auf qwen. `ctx-size = 8192` im Preset (statt 262k des Modells). | **Die 24 GB der 3090 sind geteilt:** `weaviate-transformers` (~3,3 GB) + `multi2vec-clip` (~1,4 GB) = **~4,7 GB dauerhaft** → ~19 GB für llama.cpp. qwen-Q4 (~18,6 GB) + mmproj (~1,1 GB) + KV bei ctx 8192 ≈ **~20 GB — der Engpass**; mistral-Q4 (~14 GB) ist entspannt. **Beide LLMs zusammen passen nicht** → `--models-max 1`. Unter Ollama lief qwen+Weaviate bereits bei ~23,7/24 GB (0,9 GB frei) — funktioniert, aber ohne Reserve, daher kleiner Kontext. Qwen-**MoE** lädt/entlädt schneller als ein Dense-Modell → Wechsel-Latenz geringer. |
 | **Warmup-Workflow** | `alice-llm-model-warmup` (n8n): Schedule `0 5 * * *` (UTC) → ein `POST /v1/chat/completions` an qwen mit `max_tokens: 1`. Lädt qwen (verdrängt mistral). `onError: continueRegularOutput` + Winston-Log; kein Retry, kein Blocker. `load-on-startup = true` in `presets.ini` wärmt qwen zusätzlich nach jedem Container-Neustart. | Erste Morgen-Chat-Antwort ohne Kaltstart-Verzögerung. Zeitpunkt liegt nach dem 02:00-DMS-Lauf und vor dem 06:00-Image-Description-Backfill — keine Cron-Kollision. |
 | **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
 | **Betrieb** | Eigener Container `llama-3090`, `restart: unless-stopped`, GPU fest auf die RTX 3090 gepinnt (dieselbe `device_ids`-Zuweisung wie `ollama-3090` heute), Healthcheck gegen die Modell-Liste (`/v1/models`). | Gleiche Betriebs-Garantien wie beim alten Dienst. |
@@ -378,15 +378,21 @@ Neue bzw. geänderte Variablen (Werte in den jeweiligen `.env`, Beispiele in
    `llama-3090.conf` schreiben; alte `ollama-3090.conf` auf Redirect umbauen;
    Konsumenten-`.env` mit neuen Werten vorbereiten.
 2. **Baseline messen:** Token/s für Chat-Modell und DMS-Modell **unter Ollama**
-   festhalten (Vorher-Wert für den Benchmark).
+   festhalten (Vorher-Wert für den Benchmark). Zusätzlich `nvidia-smi` notieren
+   (Ist: weaviate ~4,7 GB + Ollama-qwen ~19 GB ≈ 23,7/24 GB).
 3. **Schnitt:** `ollama-3090` stoppen → `llama-3090` starten → warten bis
-   `/v1/models` beide Modelle listet → alle Konsumenten mit neuer Config neu
-   starten → n8n-Workflows deployen → nginx-Configs syncen (`sync-compose.sh`)
-   und nginx neu laden.
+   `/v1/models` beide Modelle listet → **`nvidia-smi` prüfen: lädt qwen
+   (`load-on-startup`) neben den beiden Weaviate-Containern in die 24 GB?**
+   Falls nicht (OOM beim Laden): `ctx-size` in `presets.ini` senken (8192 → 4096)
+   und `llama-3090` neu starten. → alle Konsumenten mit neuer Config neu starten
+   → n8n-Workflows deployen (10×) → nginx-Configs syncen (`sync-compose.sh`) und
+   nginx neu laden.
 4. **Paritäts-Checks:** die Prüfliste aus den Acceptance Criteria abarbeiten
    (Chat inkl. Thinking + mehrstufigem Tool-Loop; je ein DMS-Workflow live + ein
    Backfill im Dry-Run; Vision-Testbild; Open WebUI Test-Chat; externer
-   Redirect).
+   Redirect). **Modell-Wechsel-Test:** einen DMS-Request (mistral) auslösen,
+   danach einen Chat (qwen) — beide müssen laden, `nvidia-smi` darf in keinem
+   der beiden Zustände über 24 GB gehen.
 5. **Nachher messen:** Token/s erneut, Vorher/Nachher dokumentieren
    (Ziel Chat-Modell ≥ +20 %).
 
@@ -571,6 +577,10 @@ HTTP-Node-Parameter).
     (`huggingface-cli login`); offene Alternative:
     `bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF`.
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
+- **VRAM-Check beim Schnitt** (§7 Schritt 3): `nvidia-smi` bestätigen, dass qwen
+  neben `weaviate-transformers` (~3,3 GB) + `multi2vec-clip` (~1,4 GB) in die
+  24 GB der 3090 lädt. Preset-Default `ctx-size = 8192` ist konservativ gesetzt;
+  bei OOM auf 4096 senken. mistral ist unkritisch (~5 GB kleiner).
 - Cutover-Reihenfolge + Vorher/Nachher-Benchmark (§7 Tech Design).
 - n8n-Workflows via `Deploy n8n-workflow {name}` (9× migriert + 1× neu:
   `alice-llm-model-warmup`).
@@ -669,11 +679,21 @@ Kein neuer Bug.
 Instruct** (MoE, `arch qwen35`, `27.8B`, vision+tools+thinking), **nicht** ein
 Dense-27B. `mistral-small3.2:24b` → Standard **Mistral-Small-3.2-24B-Instruct-
 2506**. Der Tag-String bleibt als `model`-Feld (kein Konsument ändert sich);
-Doku/Preset auf die echten GGUF-Repos + Dateinamen präzisiert. VRAM-Formulierung
-entschärft: qwen-Q4 (~18,6 GB) **oder** mistral-Q4 (~14 GB) je einzeln in 24 GB,
-zusammen nicht → `--models-max 1` bestätigt korrekt. MoE lädt schneller als ein
-Dense-27B → Modell-Wechsel-Latenz geringer als ursprünglich angenommen. Kein
-neuer Bug.
+Doku/Preset auf die echten GGUF-Repos + Dateinamen präzisiert.
+
+**Nachtrag 2026-09-01 (VRAM-Bilanz, echte `nvidia-smi`-Zahlen):** Die RTX 3090
+(24 GB) ist geteilt — `weaviate-transformers` **3290 MiB** + `multi2vec-clip`
+**1418 MiB** = **~4,7 GB dauerhaft**. Ollama fuhr qwen bereits **auf der 3090**
+(nicht TITAN X) mit **18968 MiB** → zusammen ~23,7/24 GB, ~0,9 GB frei. D. h.
+qwen + Weaviate ist **schon heute grenzwertig**; unter llama.cpp kommt der F16-
+mmproj (~1,1 GB) obendrauf. **Maßnahme:** Preset-Default `ctx-size` von 16384 →
+**8192** gesenkt (KV-Cache halbiert), plus ein expliziter `nvidia-smi`-Check +
+`ctx-size 4096`-Fallback als Cutover-Schritt (§7). mistral (~14 GB) ist
+unkritisch. `--models-max 1` bleibt korrekt (beide LLMs zusammen ~34 GB).
+**Risiko (Medium, Deploy-verifizierbar):** qwen könnte bei `ctx-size 8192` +
+mmproj + Weaviate die 24 GB trotzdem knapp reißen — fällt beim Cutover sofort
+auf (Modell lädt nicht), Fix ist `ctx-size` runter, kein Datenverlust. Kein
+Code-Bug.
 
 ### Edge Cases (9, aus der Spec)
 
@@ -751,6 +771,12 @@ tatsächlichen `llama-3090`-Server (GGUF-Beschaffung, Cutover, Benchmark) und
 können nicht statisch verifiziert werden — das ist erwarteter Scope für
 `/deploy`, kein QA-Blocker. BUG-1 sollte vor oder kurz nach dem Cutover behoben
 werden (Credential statt Env-Expression), blockiert aber den Deploy nicht.
+
+**Vorbehalt VRAM (Deploy-verifizierbar):** qwen + beide Weaviate-Container liefen
+unter Ollama schon bei ~23,7/24 GB. Mit dem zusätzlichen mmproj unter llama.cpp
+ist `ctx-size = 8192` konservativ gesetzt; falls qwen beim Cutover nicht lädt,
+ist der Fix `ctx-size 4096` (§7 Schritt 3), kein Datenverlust. Als
+Cutover-Schritt mit `nvidia-smi`-Check dokumentiert.
 
 ## Deployment
 _To be added by /deploy_

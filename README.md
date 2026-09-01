@@ -71,12 +71,18 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| llama-3090 (llama.cpp router) | RTX 3090 | ~15–20 GB | Qwen3-VL-30B-A3B-Instruct Q4_K_M (chat/vision, tag `qwen3.5:27b-q4_K_M`) + Mistral-Small-3.2-24B Q4_K_M (DMS, tag `mistral-small3.2:24b`), one model resident at a time |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~20 GB   | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, tag `qwen3.5:27b-q4_K_M`) OR Mistral-Small-3.2-24B Q4_K_M ~14 GB (DMS, tag `mistral-small3.2:24b`) — one model resident at a time, ctx-size 8192 to fit alongside Weaviate |
+| weaviate-transformers         | RTX 3090 | ~3.3 GB | text2vec embeddings (MiniLM-L12-v2)     |
+| weaviate-multi2vec            | RTX 3090 | ~1.4 GB | CLIP image+text embeddings              |
 | alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
 | wyoming-whisper               | TITAN X  | shared  | Whisper large-v3 STT                   |
 | ollama-titan                  | TITAN X  | shared  | Ollama for Jupyter / GPU experiments (not in the Alice request path) |
-| weaviate-transformers         | RTX 3090 | ~1.5 GB | text2vec embeddings                    |
-| weaviate-multi2vec            | RTX 3090 | ~0.8 GB | CLIP image+text embeddings             |
+
+The RTX 3090's 24 GB is shared: the two Weaviate inference containers hold
+~4.7 GB permanently, leaving ~19 GB for `llama-3090` — just enough for
+Qwen3-VL-30B-A3B-Q4 + mmproj with a small (8192) context. Under Ollama this
+pairing already ran at ~23.7 / 24 GB. Verify with `nvidia-smi` after cutover;
+if qwen won't load, lower `ctx-size` further in `presets.ini`.
 
 ### Storage
 
