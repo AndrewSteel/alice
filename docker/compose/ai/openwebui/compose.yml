@@ -4,13 +4,17 @@ services:
     container_name: openwebui
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
     environment:
-      # Spricht mit deinem Ollama-Container
-      - OLLAMA_BASE_URL=http://ollama-3090:11434
+      # PROJ-99: llama.cpp router speaks the OpenAI API, not Ollama's.
+      - ENABLE_OLLAMA_API=false
+      - ENABLE_OPENAI_API=true
+      - OPENAI_API_BASE_URL=http://llama-3090:11434/v1
+      # Bearer token for the llama.cpp router (--api-key-file). Set in .env.
+      - OPENAI_API_KEY=${OLLAMA_API_KEY:-}
       # Zeitzone & Basis-Setup
       - TZ=Europe/Berlin
-      # Optional: Wenn du KEIN OpenAI-Proxy brauchst, false lassen
-      - ENABLE_OPENAI_API=false
       # (Optional) Name/Branding der Weboberfläche
       - WEBUI_NAME=OpenWebUI
     volumes:

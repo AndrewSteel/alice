@@ -51,8 +51,10 @@ REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD") or None
 REDIS_KEY = "alice:dms:image"
 GEOCODE_PENDING_KEY = "alice:dms:geocode_pending"
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
+# PROJ-99: llama.cpp OpenAI-compatible endpoint. Base URL WITHOUT /v1.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://llama-3090:11434")
 OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen3.5:27b-q4_K_M")
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
 
 AI_DESCRIPTION_MAX_CHARS = 50000
 OLLAMA_MAX_IMAGE_PX = 1024  # resize before sending to Ollama
@@ -265,7 +267,12 @@ def extract_exif(file_path: str) -> dict:
 # Ollama Vision — AI description
 # ---------------------------------------------------------------------------
 def get_ai_description(file_path: str) -> str:
-    """Generate German image description via Ollama Vision. Raises on failure."""
+    """Generate German image description via the llama.cpp vision model.
+
+    Raises on failure — a failed/empty description must NOT be swallowed into a
+    text-only fallback that would produce a meaningless description (PROJ-99
+    edge case: vision request without an mmproj-capable model).
+    """
     with Image.open(file_path) as img:
         # Ensure RGB for JPEG encoding
         if img.mode not in ("RGB", "RGBA"):
@@ -283,22 +290,46 @@ def get_ai_description(file_path: str) -> str:
         img.save(buf, format="JPEG", quality=85)
         image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+    headers = {"Content-Type": "application/json"}
+    if OLLAMA_API_KEY:
+        headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+
     resp = requests.post(
-        f"{OLLAMA_URL}/api/generate",
+        f"{OLLAMA_URL}/v1/chat/completions",
+        headers=headers,
         json={
             "model": OLLAMA_VISION_MODEL,
-            "prompt": (
-                "Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. "
-                "Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung."
-            ),
-            "images": [image_b64],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. "
+                                "Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                        },
+                    ],
+                }
+            ],
             "stream": False,
-            "options": {"temperature": 0.3},
+            "temperature": 0.3,
         },
         timeout=300,
     )
     resp.raise_for_status()
-    description = resp.json().get("response", "")
+    description = (
+        (resp.json().get("choices") or [{}])[0]
+        .get("message", {})
+        .get("content", "")
+    )
+    if not description.strip():
+        raise RuntimeError("vision model returned an empty description")
     return description[:AI_DESCRIPTION_MAX_CHARS]
 
 

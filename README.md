@@ -31,7 +31,7 @@ SPEECH GATEWAY (alice-speech-gateway — Python: Whisper large-v3 STT, Piper TTS
     ↓
 CHAT SERVICE (alice-chat-stream — Python/FastAPI, SSE streaming)
     ↓
-ORCHESTRATION (Ollama qwen3.5:27b-q4_K_M via native tool-use;
+ORCHESTRATION (llama.cpp qwen3.5:27b-q4_K_M via native tool-use;
     n8n sub-workflows for HA, DMS, Mail tools)
     ↓
 DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
@@ -71,8 +71,10 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| Ollama / alice-speech-gateway | RTX 3090 | ~14 GB  | qwen3.5:27b-q4_K_M inference + STT/TTS |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~14–18 GB | qwen3.5:27b-q4_K_M (chat/vision) + mistral-small3.2:24b (DMS), one model resident at a time |
+| alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
 | wyoming-whisper               | TITAN X  | shared  | Whisper large-v3 STT                   |
+| ollama-titan                  | TITAN X  | shared  | Ollama for Jupyter / GPU experiments (not in the Alice request path) |
 | weaviate-transformers         | RTX 3090 | ~1.5 GB | text2vec embeddings                    |
 | weaviate-multi2vec            | RTX 3090 | ~0.8 GB | CLIP image+text embeddings             |
 
@@ -101,8 +103,8 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 | `n8n`                   | Workflow engine: HA + DMS + mail tools, DMS pipeline, auth/session webhooks                 |
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
 | `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
-| `ollama-titan`          | LLM inference — qwen3.5:27b-q4_K_M (TITAN X GPU)                                            |
-| `ollama-3090`           | Secondary Ollama instance (RTX 3090, e.g. embedding tasks)                                  |
+| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads qwen3.5:27b-q4_K_M / mistral-small3.2:24b. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
+| `ollama-titan`          | Ollama on the TITAN X — Jupyter / GPU experiments only, not in the Alice request path       |
 | `weaviate`              | Vector search                                                                               |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                  |
 | `weaviate-multi2vec`    | CLIP multimodal embeddings (RTX 3090)                                                       |
@@ -165,7 +167,7 @@ alice-dms-{pdf,ocr,txt,office}             alice-dms-lifecycle (n8n)
     ↓
 MQTT alice/dms/extracted
     ↓ nightly — alice-dms-processor (n8n)
-    → LLM classification (qwen3.5:27b, 1× retry)
+    → LLM classification (mistral-small3.2:24b via llama.cpp, 1× retry)
     → field extraction per document type
     → Weaviate storage (per-collection)
     → BankTransaction chunking for bank statements
@@ -254,7 +256,7 @@ Speaker recognition identifies the active user from voice embeddings stored in P
 ```text
 alice/
 ├── docker/compose/          # Docker Compose files per service category
-│   ├── ai/                  # Ollama, Whisper, Piper, OpenWebUI
+│   ├── ai/                  # llama-3090 (llama.cpp), Ollama (Jupyter), Whisper, Piper, OpenWebUI
 │   ├── automations/         # alice-chat-stream, alice-speech-gateway,
 │   │                        #   alice-mail-reader, alice-dms-thumbnailer,
 │   │                        #   alice-ha-sync, n8n, Weaviate, MQTT, DMS extractors

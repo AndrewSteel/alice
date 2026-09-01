@@ -25,8 +25,17 @@ logger = logging.getLogger("alice-chat-stream.memory")
 
 POSTGRES_DSN = os.environ.get("POSTGRES_DSN", "")
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate:8080").rstrip("/")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
+# PROJ-99: llama.cpp OpenAI-compatible endpoint. Base URL WITHOUT /v1.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://llama-3090:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:27b-q4_K_M")
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+
+
+def _llm_headers() -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    if OLLAMA_API_KEY:
+        h["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+    return h
 
 WORKING_MEMORY_LIMIT = 20
 LONG_TERM_MEMORY_LIMIT = 5
@@ -479,16 +488,21 @@ async def generate_title_async(session_id: str, user_message: str, llm_response:
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
+                f"{OLLAMA_URL}/v1/chat/completions",
+                headers=_llm_headers(),
                 json={
                     "model": OLLAMA_MODEL,
-                    "prompt": prompt,
+                    "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
-                    "think": False,
+                    "chat_template_kwargs": {"enable_thinking": False},
                 },
             )
             data = resp.json()
-            title = (data.get("response") or "").strip()
+            title = (
+                (data.get("choices") or [{}])[0]
+                .get("message", {})
+                .get("content") or ""
+            ).strip()
             if len(title) > 60:
                 title = title[:60].rstrip()
             if title:

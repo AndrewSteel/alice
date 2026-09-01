@@ -1,6 +1,6 @@
 # PROJ-99: Umstellung Ollama → llama.cpp (ollama-3090)
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-09-01
 **Last Updated:** 2026-09-01
 
@@ -267,7 +267,276 @@ voller Verhaltensparität nach außen.
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+_Erstellt am 2026-09-01. Zielgruppe: Produkt-/Betriebssicht — kein Code, nur
+Architektur-Entscheidungen._
+
+### 1. Grundidee in einem Satz
+
+`ollama-3090` (Ollama auf der RTX 3090) wird durch **einen einzigen
+llama.cpp-Server** ersetzt, der auf ein **Modell-Verzeichnis** zeigt und die
+zwei benötigten Modelle (Chat/Vision + DMS-Text) **bei Bedarf selbst lädt und
+wieder entlädt**. Nach außen verhält sich alles gleich; intern ist die
+Token-Generierung schneller.
+
+### 2. Ziel-Topologie (Übersicht)
+
+```text
+                         RTX 3090 (GPU c15bd736…)
+                    ┌──────────────────────────────────┐
+                    │   llama-3090  (neuer Container)   │
+                    │   llama.cpp-Server, Modell-Ordner │
+                    │   /v1/chat/completions, /v1/models│
+                    │   lädt/entlädt Modelle dynamisch  │
+                    └──────────────────────────────────┘
+                          ▲            ▲            ▲
+          ┌───────────────┘            │            └───────────────┐
+          │                            │                            │
+   alice-chat-stream          9 n8n-DMS-Workflows          dms-extractor-image
+   (Chat/Agent, Stream,        (Klassifizierung,           (Vision / Bild-
+    Tool-Loop, Thinking)        Sprachprüfung, …)            beschreibung)
+          │                            │                            │
+          └──────────── openwebui ─────┴──── nginx-Vhost ───────────┘
+                    (Direkt-Test-UI)      llama3090.happy-mining.de
+                                          (extern, über VPN)
+
+   ollama-titan  (TITAN X, Ollama)  ──►  UNVERÄNDERT, nur für Jupyter
+```
+
+**Was neu ist:** ein Container `llama-3090`.
+**Was wegfällt:** der Container `ollama-3090` (Definition + Modell-Volume bleiben
+für die Karenzzeit erhalten, wird nur gestoppt).
+**Was unberührt bleibt:** `ollama-titan`.
+
+### 3. Der neue Dienst: llama.cpp mit dynamischer Modell-Registry
+
+| Eigenschaft | Entscheidung | Warum (PM-Sicht) |
+| --- | --- | --- |
+| **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
+| **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
+| **Modelle** | Zwei GGUF-Dateien im Modell-Ordner: das Chat-/Vision-Modell (`qwen3.5:27b`-Äquivalent, q4_K_M, **mit** zugehörigem Vision-Projektor/mmproj) und das DMS-Text-Modell (`mistral-small3.2:24b`-Äquivalent, q4_K_M). Gleiche Quantisierung wie heute. | Verhaltensparität: identischer Modellstand, identische Quant-Stufe → gleiche Antwortqualität, nur schneller. |
+| **VRAM-Strategie** | Es ist **immer nur ein Modell** aktiv geladen. Wechselt die Last vom Chat aufs DMS-Modell (oder umgekehrt), entlädt/lädt der Server (Sekunden bis ~1 min). | 27b-q4 + 24b-q4 + Kontext passen **nicht sicher gleichzeitig** in 24 GB. „Ein Modell aktiv" ist die robuste Lösung; die Ladezeiten werden dokumentiert, nicht wegoptimiert (siehe Edge Case „Modell-Wechsel unter Last"). |
+| **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
+| **Betrieb** | Eigener Container `llama-3090`, `restart: unless-stopped`, GPU fest auf die RTX 3090 gepinnt (dieselbe `device_ids`-Zuweisung wie `ollama-3090` heute), Healthcheck gegen die Modell-Liste (`/v1/models`). | Gleiche Betriebs-Garantien wie beim alten Dienst. |
+| **Netzwerk & Sicherheit** | Container hängt in **denselben Docker-Netzen** wie `ollama-3090` heute (`frontend`, `app_int`) plus dem Netz von `dms-extractor-image` (`backend`), damit alle bisherigen Konsumenten ihn erreichen. Kein Port nach außen; extern nur über den nginx-Vhost hinter VPN. | Keine neue Angriffsfläche; „VPN-only" bleibt. |
+
+### 4. Betroffene Konsumenten — was sich je Konsument ändert
+
+Alle Änderungen sind **Konfiguration**, keine Logik. Modell-Auswahl, Prompts und
+Agenten-Verhalten bleiben unverändert.
+
+| Konsument | Heute | Nach der Umstellung |
+| --- | --- | --- |
+| **`alice-chat-stream`** (Chat/Agent) | Streaming über Ollamas `/api/chat` (NDJSON), Tool-Loop, Reasoning-Stream über `message.thinking`, Abschluss über `done` + `eval_count` | Streaming über `/v1/chat/completions` (SSE/`data:`-Format). Der Streaming-Parser, die Tool-Call-Auswertung, die Denk-Token-Extraktion und die Token-Zählung werden auf das OpenAI-Format umgestellt (Details: Edge-Case-Liste der Spec). **Verhalten nach außen — SSE-Event-Typen, Thinking vor Antwort, Tool-Runden — bleibt identisch.** |
+| **`alice-chat-stream` / `memory.py`** | Ein Nicht-Streaming-Call über `/api/generate` (Titel-/Profil-Logik) | Nicht-Streaming-Call über `/v1/chat/completions` |
+| **9 n8n-DMS-Workflows** | Code-Nodes rufen **hardcodiert** `http://ollama-3090:11434/api/generate`; Modellname aus `$env.OLLAMA_MODEL_DMS` | Code-Nodes rufen den neuen Endpoint über `/v1/chat/completions`; Hostname wird auf eine **Environment-Variable** gezogen (kein Hardcode mehr). Response-Auswertung wechselt vom Ollama-Feld `response` auf das OpenAI-Feld `choices[0].message.content`. Umsetzung im `/backend`-Schritt, Deploy über `Deploy n8n-workflow {name}`. |
+| **`dms-extractor-image`** (Vision) | `/api/generate` mit `images: [base64]` | `/v1/chat/completions` mit Bild als Content-Part (OpenAI-Vision-Format); Endpoint/Modell aus den bestehenden `OLLAMA_*`-Variablen (Werte angepasst) |
+| **`openwebui`** | `OLLAMA_BASE_URL=http://ollama-3090:11434` | Auf den OpenAI-kompatiblen Modus des neuen Endpoints umgestellt (`OPENAI_API_BASE_URL` auf `http://llama-3090:.../v1`, Ollama-Anbindung deaktiviert). Nach dem Wechsel einmal neu laden/neu starten, damit die Modell-Liste frisch gezogen wird. |
+| **nginx-Vhost** | `ollama-3090.conf`: Proxy `ollama3090.happy-mining.de` → `ollama-3090:11434` | **Neu** `llama-3090.conf`: `llama3090.happy-mining.de` → `llama-3090:<port>` (WebSocket-Header, `proxy_read_timeout 3600s`, `client_max_body_size 50m` — 1:1 wie die alte Config). **Alt** `ollama-3090.conf` bleibt als Server-Block, liefert aber nur noch **301-Redirect** auf den neuen Hostnamen (HTTP + HTTPS). |
+
+### 5. Namens- und Endpoint-Konvention
+
+| | Alt | Neu |
+| --- | --- | --- |
+| Container / interner Hostname | `ollama-3090` | `llama-3090` |
+| Interner Endpoint | `http://ollama-3090:11434` | `http://llama-3090:<port>` (OpenAI-Pfade unter `/v1`) |
+| Externer Hostname (nginx) | `ollama3090.happy-mining.de` | `llama3090.happy-mining.de` (alt → 301) |
+| Modell-Ordner | `/srv/hot/models/ollama` | eigener Unterordner unter `/srv/hot/models` für llama.cpp |
+
+Neuer Name = sauberer Cutover und eindeutiger Rollback: „alte URL zeigt auf alten
+Dienst, neue URL auf neuen Dienst".
+
+### 6. Konfiguration / Environment (keine Secrets)
+
+Neue bzw. geänderte Variablen (Werte in den jeweiligen `.env`, Beispiele in
+`.env.example`):
+
+- **`alice-chat-stream`**: `OLLAMA_URL` → neuer Endpoint; `OLLAMA_MODEL` →
+  GGUF-Modellname des Chat-Modells. `OLLAMA_THINK`, `OLLAMA_TIMEOUT_SECONDS`
+  bleiben.
+- **n8n**: neue Variable für den DMS-Inferenz-Endpoint (ersetzt den Hardcode);
+  `OLLAMA_MODEL_DMS` → GGUF-Modellname des DMS-Modells; `OLLAMA_TIMEOUT_MS`
+  bleibt (muss ≥ Modell-Ladezeit sein).
+- **`dms-extractor-image`**: `OLLAMA_URL` / `OLLAMA_VISION_MODEL` → neue Werte.
+- **`openwebui`**: `OLLAMA_BASE_URL` entfällt, `OPENAI_API_BASE_URL` +
+  `ENABLE_OPENAI_API=true` hinzu.
+- **`README.md`**: `ollama-3090`-Zeile ersetzen, neuer Hostname + Modell-Ordner
+  dokumentiert, Redirect-Hinweis für externe Skripte.
+
+### 7. Cutover-Ablauf (harter Schnitt)
+
+1. **Vorbereiten (ohne Live-Wirkung):** GGUF-Modelle in den neuen Modell-Ordner
+   legen; Compose-Datei für `llama-3090` anlegen; neue nginx-Config
+   `llama-3090.conf` schreiben; alte `ollama-3090.conf` auf Redirect umbauen;
+   Konsumenten-`.env` mit neuen Werten vorbereiten.
+2. **Baseline messen:** Token/s für Chat-Modell und DMS-Modell **unter Ollama**
+   festhalten (Vorher-Wert für den Benchmark).
+3. **Schnitt:** `ollama-3090` stoppen → `llama-3090` starten → warten bis
+   `/v1/models` beide Modelle listet → alle Konsumenten mit neuer Config neu
+   starten → n8n-Workflows deployen → nginx-Configs syncen (`sync-compose.sh`)
+   und nginx neu laden.
+4. **Paritäts-Checks:** die Prüfliste aus den Acceptance Criteria abarbeiten
+   (Chat inkl. Thinking + mehrstufigem Tool-Loop; je ein DMS-Workflow live + ein
+   Backfill im Dry-Run; Vision-Testbild; Open WebUI Test-Chat; externer
+   Redirect).
+5. **Nachher messen:** Token/s erneut, Vorher/Nachher dokumentieren
+   (Ziel Chat-Modell ≥ +20 %).
+
+### 8. Rollback (Ziel: wenige Minuten)
+
+1. Konsumenten-`.env` auf die alten Werte zurück (`ollama-3090:11434`,
+   Ollama-Modellnamen).
+2. `llama-3090` stoppen, `ollama-3090` starten.
+3. Konsumenten + n8n-Workflows (alte Versionen) neu starten/deployen.
+4. **nginx:** `ollama-3090.conf` wieder als Proxy herstellen,
+   `llama-3090.conf` deaktivieren, syncen, neu laden.
+5. Ollama-Modell-Volume ist unangetastet → keine Datenwiederherstellung nötig.
+
+Die `ollama-3090`-Container-Definition und das Modell-Volume bleiben eine
+**dokumentierte Karenzzeit** (Vorschlag: bis zum nächsten stabilen
+Wochen-Review) erhalten und werden erst danach abgeräumt.
+
+### 9. Wesentliche Risiken (aus der Edge-Case-Liste, PM-Kurzfassung)
+
+| Risiko | Umgang |
+| --- | --- |
+| 27b-Modell + Kontext sprengt die 24 GB | Fällt beim Cutover-Check auf (Modell lädt nicht) → Rollback. Ggf. Kontextgröße begrenzen. |
+| Modell-Wechsel-Latenz bei geteilter Nutzung Chat ↔ DMS | Wird dokumentiert, kein Akzeptanzkriterium. Batch-Timeouts (`OLLAMA_TIMEOUT_MS`) müssen eine Ladephase überdauern. |
+| Tool-Call-/Thinking-Feld heißt im OpenAI-Format anders | `/backend` passt Parser an; robustes Parsen beider Argument-Formen bleibt erhalten; kein Denk-Text im Antworttext. |
+| Vision ohne geladenen Projektor → sinnlose Beschreibung | `dms-extractor-image` muss einen **klaren Fehler** bekommen, keinen stillen Text-only-Fallback. |
+| Externe Notebooks rufen Ollama-native Pfade (`/api/generate`, `/api/tags`) | Redirect fängt den Hostname; die Pfade selbst müssen auf `/v1/...` umgestellt werden. In der Spec dokumentiert, **keine** Kompat-Shim-Pflicht. |
+| `ollama-titan` versehentlich mit angefasst | Umstellung berührt nur den `ollama-3090`-Block; `ollama-titan` bleibt in seiner Compose-Datei unverändert und muss nach dem Cutover weiter erreichbar sein. |
+
+### 10. Was dieses Design NICHT festlegt (bleibt `/backend` / `/deploy`)
+
+- Exakte llama.cpp-Startparameter (Kontextgröße, GPU-Layer, Leerlauf-Unload-TTL,
+  Port).
+- Die konkreten GGUF-Bezugsquellen/Dateinamen der beiden Modelle.
+- Das genaue Bild-Content-Format für den Vision-Request.
+- Die exakten Code-Anpassungen in `streaming.py` und den n8n-Code-Nodes.
+
+### 11. Abhängigkeiten / Reihenfolge
+
+`/backend` baut: llama-3090-Compose + Healthcheck, `streaming.py`- und
+`memory.py`-Anpassung, 9 n8n-Workflow-Anpassungen, `dms-extractor-image`-Anpassung,
+zwei nginx-Configs, alle `.env.example`. Danach `/qa` gegen die Paritäts- und
+Performance-Kriterien, dann `/deploy` als Cutover mit dokumentiertem Rollback.
+
+## Implementation Notes (Backend)
+
+_Implementiert am 2026-09-01. Router-Ansatz: **llama.cpp nativer Router-Modus**
+(kein separater Router-Container) — vom Nutzer bestätigt._
+
+### Neuer Dienst
+
+- **`docker/compose/ai/llama-3090/compose.yml`** — `ghcr.io/ggml-org/llama.cpp:server-cuda`,
+  Container `llama-3090`, Port `11434`, GPU auf die RTX 3090 gepinnt (gleiche
+  `device_ids` wie `ollama-3090`). Networks: `frontend, backend, automation`
+  (Superset der Netze aller Konsumenten). Command:
+  `--models-preset /models/presets.ini --models-max 1 --sleep-idle-seconds 900
+  --api-key-file /run/secrets/llama_api_key`. Healthcheck gegen `/health`.
+- **`presets.ini.example`** — zwei Sektionen, Sektionsname = Modell-ID im
+  Request: `qwen3.5:27b-q4_K_M` (mit `mmproj`, `reasoning-format = deepseek`)
+  und `mistral-small3.2:24b`. Real-Datei liegt auf dem Volume
+  `/srv/hot/models/llama-cpp/presets.ini` (nicht gesynct).
+- **`README.md`** (Service-Ordner) — Endpoint, Modelle, Server-Dateien, Secret,
+  Rollback.
+- **`docker/compose/scripts/Makefile`** — `ai/llama-3090` in `STACKS` ergänzt.
+  `ai/ollama` bleibt (läuft in der Karenzzeit nur noch `ollama-titan`;
+  `ollama-3090`-Service wird gestoppt, nicht entfernt).
+
+### nginx
+
+- **`conf.d/llama-3090.conf`** (neu) — `llama3090.happy-mining.de` →
+  `http://llama-3090:11434`, Header/Timeouts 1:1 aus `ollama-3090.conf`.
+- **`conf.d/ollama-3090.conf`** (umgebaut) — beide Server-Blöcke (80 + 443)
+  liefern nur noch `301` auf `https://llama3090.happy-mining.de$request_uri`.
+
+### API-Format-Umstellung (Ollama → OpenAI)
+
+Einheitlicher Ziel-Endpoint: `POST {OLLAMA_URL}/v1/chat/completions`, Header
+`Authorization: Bearer {OLLAMA_API_KEY}` (wenn gesetzt). `OLLAMA_URL` ist überall
+die Basis-URL **ohne** `/v1`.
+
+| Alt (Ollama) | Neu (OpenAI / llama.cpp) |
+| --- | --- |
+| `POST /api/generate` `{model, prompt, stream:false, format:'json', options:{temperature, num_predict}}` | `POST /v1/chat/completions` `{model, messages:[{role:'user',content:prompt}], stream:false, temperature, max_tokens:num_predict, response_format:{type:'json_object'}}` |
+| Antwort: `resp.data.response` | Antwort: `resp.data.choices[0].message.content` |
+| `POST /api/chat` NDJSON-Stream, `message.thinking`, `message.tool_calls`, `done`+`eval_count` | `POST /v1/chat/completions` SSE `data:`-Frames, `choices[0].delta.reasoning_content`, `choices[0].delta.tool_calls` (fragmentiert nach `index`), `[DONE]`, `usage` via `stream_options.include_usage` |
+| `/api/tags` (Health) | `/v1/models` (gleiche 2xx-Semantik) |
+| Vision: `images:[b64]` | `content:[{type:'text',…},{type:'image_url',image_url:{url:'data:image/jpeg;base64,…'}}]` |
+| Think aus: top-level `think:false` | `chat_template_kwargs:{enable_thinking:false}` |
+
+### `alice-chat-stream` (Python)
+
+- **`app/streaming.py`** — `stream_chat` komplett auf SSE-`data:`-Parsing
+  umgestellt. Neu: `_merge_tool_call_delta()` akkumuliert fragmentierte
+  OpenAI-Tool-Calls nach `index`, synthetisiert fehlende IDs (`call_<n>`).
+  Reasoning aus `delta.reasoning_content`/`reasoning`, nie in `accumulated_text`
+  oder Token-Zähler. `usage` aus dem Trailing-Chunk. Fehler-Events unverändert
+  (deutschsprachig). `OLLAMA_TIMEOUT_SECONDS` Default 60 → 120 (Cold-Load).
+- **`app/memory.py`** — `generate_title_async` von `/api/generate` auf
+  `/v1/chat/completions` (non-streaming) + `_llm_headers()`.
+- **`tests/test_streaming_openai.py`** (neu) — 3 Tests für `_merge_tool_call_delta`.
+  Bestehender `test_extract_vision_results.py` unverändert grün.
+- `_extract_vision_results`, alle `_build_*`-Helfer und `tools.tool_schema()`
+  (schon OpenAI-Function-Format) **unverändert**.
+
+### `dms-extractor-image` (Python)
+
+- **`main.py`** — `get_ai_description` auf `/v1/chat/completions` mit
+  `image_url`-Content-Part. Leere Beschreibung → `RuntimeError` (kein stiller
+  Text-only-Fallback, Spec-Edge-Case).
+
+### n8n-Workflows (9)
+
+Skript **`scripts/migrate-workflows-llamacpp.py`** (idempotent, `--check`):
+Code-Nodes bekommen einen vorangestellten Shim `llamaGenerate(body, cfg)`, der
+den **alten** Ollama-Body annimmt und ein `{ data: { response } }`-förmiges
+Ergebnis zurückgibt — jede Call-Site ändert sich nur zu
+`await llamaGenerate(BODY, CFG)`. Hardcodierter Host `http://ollama-3090:11434`
+→ `$env.OLLAMA_URL`. `/api/tags` → `/v1/models`.
+
+Die 2 HTTP-Request-Nodes von Hand umgestellt (OpenAI-Body + Auth-Header) +
+jeweils die eine Downstream-Parse-Zeile:
+
+| Workflow | Geänderte Nodes |
+| --- | --- |
+| `alice-dms-classify-document` | `Code: Two-Attempt Classification` (Shim) |
+| `alice-dms-classification-backfill` | `Code: Ollama Health Check` (→ `/v1/models`), `Code: Compare & Handle` (Shim, 2 Call-Sites) |
+| `alice-dms-language-check` | `Code: Language Heuristic + Retry` (Shim) |
+| `alice-dms-language-backfill` | `Code: Ollama Health Check` (→ `/v1/models`) |
+| `alice-dms-processor` | `HTTP: Ollama Extract` (OpenAI-Body+Auth), `Code: Parse Extract Result` (Parse + Shim für Retry), `Code: BankTransaction Phase B` (Shim) |
+| `alice-mail-attachment-processor` | `Code: Process Queue Item` (Shim, `callOllama`) |
+| `alice-mail-attachment-backfill` | `Code: Import Mail Attachments` (Shim, `callOllama`) |
+| `alice-mail-sync` | `Process + Classify + Store Emails` (Shim) |
+| `alice-dms-image-description-backfill` | `HTTP: Ollama Vision` (OpenAI-Vision-Body+Auth), `Code: Extract Description` (Parse) |
+
+Modellwahl (`$env.OLLAMA_MODEL_DMS`, `$env.OLLAMA_VISION_MODEL`), Prompts,
+Retry-/Lock-/Zeitlimit-Logik: **unverändert**. Alle 9 Dateien: `node --check`
+grün, JSON valide, Diff minimal (nur die betroffenen `jsCode`-Strings +
+HTTP-Node-Parameter).
+
+### Environment (`.env.example`, keine Secrets)
+
+- `alice-chat-stream`: `OLLAMA_URL=http://llama-3090:11434`,
+  `OLLAMA_MODEL=qwen3.5:27b-q4_K_M`, neu `OLLAMA_API_KEY`,
+  `OLLAMA_TIMEOUT_SECONDS=120`.
+- `dms-extractor-image`: `OLLAMA_URL=http://llama-3090:11434`, neu `OLLAMA_API_KEY`.
+- `n8n`: `OLLAMA_URL=http://llama-3090:11434`, neu `OLLAMA_API_KEY`,
+  `OLLAMA_MODEL`/`OLLAMA_MODEL_DMS`/`OLLAMA_VISION_MODEL` auf die Preset-Namen.
+- `openwebui`: neues `.env.example` + `env_file`, compose auf
+  `ENABLE_OPENAI_API=true` / `OPENAI_API_BASE_URL=http://llama-3090:11434/v1` /
+  `OPENAI_API_KEY=${OLLAMA_API_KEY}` / `ENABLE_OLLAMA_API=false`.
+- Server-seitig zusätzlich: `/srv/warm/llama-3090/llama_api_key` (1 Zeile),
+  `/srv/hot/models/llama-cpp/` (GGUF + `presets.ini` + `cache/`).
+
+### Offen für /deploy (kein Code)
+
+- GGUF-Dateien beschaffen (q4_K_M, gleiche Quants) + `presets.ini` schreiben.
+- `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
+- Cutover-Reihenfolge + Vorher/Nachher-Benchmark (§7 Tech Design).
+- n8n-Workflows via `Deploy n8n-workflow {name}` (9×).
 
 ## QA Test Results
 _To be added by /qa_

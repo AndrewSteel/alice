@@ -1,5 +1,9 @@
 """
-Ollama streaming generator with tool-use.
+LLM streaming generator with tool-use.
+
+PROJ-99: the inference backend is llama.cpp's OpenAI-compatible endpoint
+(`/v1/chat/completions`, SSE `data:` frames), replacing Ollama's `/api/chat`
+NDJSON stream. Behaviour towards the client is unchanged.
 
 Outputs SSE events:
   data: {"type":"token","content":"..."}        — every text chunk
@@ -10,8 +14,8 @@ Outputs SSE events:
   data: {"type":"done","usage":{...}}
   data: [DONE]
 
-The generator may loop: when Ollama emits a tool_call, we execute it,
-append the tool result to the message list, and re-invoke /api/chat.
+The generator may loop: when the model emits a tool_call, we execute it,
+append the tool result to the message list, and re-invoke the model.
 We cap the number of tool rounds to avoid infinite loops.
 """
 from __future__ import annotations
@@ -27,12 +31,25 @@ from . import metrics, tools
 
 logger = logging.getLogger("alice-chat-stream.streaming")
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
-OLLAMA_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60"))
+# Base URL WITHOUT the /v1 suffix — we append the OpenAI path ourselves.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://llama-3090:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:27b-q4_K_M")
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+OLLAMA_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "120"))
 
-# PROJ-37: stream Ollama reasoning tokens (message.thinking) to the client.
-# Set to "false" / "0" / "no" to disable without a code change.
+CHAT_COMPLETIONS_URL = f"{OLLAMA_URL}/v1/chat/completions"
+
+
+def _auth_headers() -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    if OLLAMA_API_KEY:
+        h["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+    return h
+
+
+# PROJ-37: stream the model's reasoning tokens (delta.reasoning_content) to the
+# client. Set to "false" / "0" / "no" to disable without a code change; that
+# also asks the chat template to skip the thinking phase entirely.
 OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "true").strip().lower() not in (
     "0",
     "false",
@@ -181,6 +198,32 @@ def _build_tool_summary(tool_name: str, ok: bool, result: dict[str, Any]) -> str
     return ""
 
 
+def _merge_tool_call_delta(pending: list[dict], tc_delta: dict) -> None:
+    """
+    Accumulate an OpenAI streaming tool_call fragment into `pending`.
+
+    Fragments are keyed by `index`; the first fragment for an index carries
+    id/type/function.name, later fragments append to function.arguments.
+    """
+    idx = tc_delta.get("index", 0)
+    while len(pending) <= idx:
+        # Synthesise a stable id so the follow-up tool message can reference it
+        # even if the backend omits ids in the stream.
+        pending.append({
+            "id": f"call_{len(pending)}",
+            "type": "function",
+            "function": {"name": "", "arguments": ""},
+        })
+    slot = pending[idx]
+    if tc_delta.get("id"):
+        slot["id"] = tc_delta["id"]
+    fn = tc_delta.get("function") or {}
+    if fn.get("name"):
+        slot["function"]["name"] = fn["name"]
+    if fn.get("arguments"):
+        slot["function"]["arguments"] += fn["arguments"]
+
+
 async def stream_chat(
     *,
     user_message: str,
@@ -209,15 +252,19 @@ async def stream_chat(
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
         while rounds <= MAX_TOOL_ROUNDS:
             rounds += 1
-            payload = {
+            payload: dict[str, Any] = {
                 "model": OLLAMA_MODEL,
                 "messages": messages,
                 "stream": True,
+                # OpenAI streaming only returns usage if we ask for it.
+                "stream_options": {"include_usage": True},
                 "tools": tools.tool_schema(),
-                # PROJ-37: top-level `think` toggles Ollama's reasoning stream.
-                # We emit message.thinking chunks as a separate SSE event.
-                "think": OLLAMA_THINK,
             }
+            # PROJ-37: llama.cpp streams reasoning as delta.reasoning_content on
+            # its own; when thinking is disabled we ask the chat template to skip
+            # the phase entirely (qwen3 template honours enable_thinking).
+            if not OLLAMA_THINK:
+                payload["chat_template_kwargs"] = {"enable_thinking": False}
 
             pending_tool_calls: list[dict] = []
             assistant_chunk_text = ""
@@ -225,30 +272,51 @@ async def stream_chat(
             try:
                 async with client.stream(
                     "POST",
-                    f"{OLLAMA_URL}/api/chat",
+                    CHAT_COMPLETIONS_URL,
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers=_auth_headers(),
                 ) as resp:
                     if resp.status_code != 200:
                         body = (await resp.aread()).decode("utf-8", errors="replace")[:500]
-                        logger.error("Ollama HTTP %s: %s", resp.status_code, body)
-                        yield (_sse({"type": "error", "message": f"Ollama error {resp.status_code}"}), {})
+                        logger.error("LLM HTTP %s: %s", resp.status_code, body)
+                        yield (_sse({"type": "error", "message": f"LLM error {resp.status_code}"}), {})
                         return
 
                     async for line in resp.aiter_lines():
                         if not line:
                             continue
+                        # llama.cpp streams SSE frames: "data: {json}" / "data: [DONE]".
+                        # Non-data lines (event:, comments, blanks) are skipped.
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if not data:
+                            continue
+                        if data == "[DONE]":
+                            done_flag = True
+                            break
                         try:
-                            chunk = json.loads(line)
+                            chunk = json.loads(data)
                         except json.JSONDecodeError:
-                            logger.warning("Ollama non-JSON line: %s", line[:200])
+                            logger.warning("LLM non-JSON SSE data: %s", data[:200])
                             continue
 
-                        msg = chunk.get("message") or {}
-                        # PROJ-37: emit thinking BEFORE content (Ollama orders them this way).
-                        # Thinking tokens are NEVER added to accumulated_text and NEVER counted
-                        # in chat_tokens_total — they are flushed to the client and forgotten.
-                        thinking = msg.get("thinking") or ""
+                        # Usage arrives on a trailing chunk with an empty choices list.
+                        chunk_usage = chunk.get("usage") or {}
+                        if chunk_usage:
+                            usage["prompt_tokens"] = int(chunk_usage.get("prompt_tokens") or usage["prompt_tokens"])
+                            usage["completion_tokens"] = int(chunk_usage.get("completion_tokens") or usage["completion_tokens"])
+
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        choice = choices[0]
+                        delta = choice.get("delta") or {}
+
+                        # PROJ-37: emit reasoning BEFORE content. Reasoning tokens are
+                        # NEVER added to accumulated_text and NEVER counted in
+                        # chat_tokens_total — flushed to the client and forgotten.
+                        thinking = delta.get("reasoning_content") or delta.get("reasoning") or ""
                         if thinking:
                             thinking_accumulator.append(thinking)
                             if not thinking_start_sent:
@@ -256,31 +324,27 @@ async def stream_chat(
                                 yield (_sse({"type": "thinking_start", "anrede": anrede}), {})
                             yield (_sse({"type": "thinking", "content": thinking}), {})
 
-                        content = msg.get("content") or ""
+                        content = delta.get("content") or ""
                         if content:
                             assistant_chunk_text += content
                             accumulated_text += content
                             metrics.CHAT_TOKENS_TOTAL.inc()
                             yield (_sse({"type": "token", "content": content}), {})
 
-                        # Ollama may emit tool_calls inside the streaming chunks
-                        tcs = msg.get("tool_calls")
-                        if tcs:
-                            for tc in tcs:
-                                pending_tool_calls.append(tc)
+                        # OpenAI streams tool_calls as fragments keyed by `index`.
+                        for tc_delta in (delta.get("tool_calls") or []):
+                            _merge_tool_call_delta(pending_tool_calls, tc_delta)
 
-                        if chunk.get("done"):
+                        if choice.get("finish_reason"):
                             done_flag = True
-                            usage["prompt_tokens"] += int(chunk.get("prompt_eval_count") or 0)
-                            usage["completion_tokens"] += int(chunk.get("eval_count") or 0)
-                            break
+                            # don't break — a usage-only chunk may still follow
 
             except httpx.TimeoutException:
-                logger.warning("Ollama stream timed out after %ss", OLLAMA_TIMEOUT_SECONDS)
+                logger.warning("LLM stream timed out after %ss", OLLAMA_TIMEOUT_SECONDS)
                 yield (_sse({"type": "error", "message": "Zeitüberschreitung beim LLM."}), {})
                 return
             except httpx.HTTPError as exc:
-                logger.error("Ollama HTTP error: %s", exc)
+                logger.error("LLM HTTP error: %s", exc)
                 yield (_sse({"type": "error", "message": "Verbindungsfehler zum LLM."}), {})
                 return
 
@@ -352,10 +416,10 @@ async def stream_chat(
                     "role": "tool",
                     "name": tool_name,
                     "content": json.dumps(result_for_llm, ensure_ascii=False),
+                    # OpenAI format requires tool_call_id; _merge_tool_call_delta
+                    # guarantees a non-empty id.
+                    "tool_call_id": tc.get("id") or "call_0",
                 }
-                tc_id = tc.get("id")
-                if tc_id:
-                    tool_msg["tool_call_id"] = tc_id
                 messages.append(tool_msg)
 
                 # PROJ-37: short German outcome summary in the tool_end event.
