@@ -551,6 +551,14 @@ HTTP-Node-Parameter).
 ### Offen für /deploy (kein Code)
 
 - GGUF-Dateien beschaffen (q4_K_M, gleiche Quants) + `presets.ini` schreiben.
+  llama.cpp hat **keine Registry / kein `ollama pull`** und das Image bringt
+  **kein `huggingface-cli`** mit — Download auf dem **Host** ins Volume
+  `/srv/hot/models/llama-cpp/`. Schritt-für-Schritt inkl. `ollama show` zur
+  Herkunftsbestimmung und der `hf:`-Auto-Download-Alternative:
+  `docker/compose/ai/llama-3090/README.md` → „Getting the GGUF files".
+  **qwen** = Sprachgewichte **+** `mmproj` (Vision-Projektor, für
+  `dms-extractor-image` / `image-description-backfill`); **mistral** = nur
+  Sprachgewichte (reiner Textpfad, keine Vision-Nutzung).
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
 - Cutover-Reihenfolge + Vorher/Nachher-Benchmark (§7 Tech Design).
 - n8n-Workflows via `Deploy n8n-workflow {name}` (9× migriert + 1× neu:

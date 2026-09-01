@@ -39,9 +39,85 @@ container (re)start.
 
 - `presets.ini` — copy from `presets.ini.example`, fill in the real GGUF
   filenames. NOT synced by `sync-compose.sh`.
-- `*.gguf` + `*-mmproj-*.gguf` — the quantised model + vision projector.
-  Same quant level (q4_K_M) as the retired Ollama models.
-- `cache/` — llama.cpp HF download cache.
+- `*.gguf` + `mmproj-*.gguf` — the quantised model + (qwen only) the vision
+  projector. Same quant level (q4_K_M) as the retired Ollama models.
+- `cache/` — llama.cpp HF download cache (only used by the `hf:` preset form).
+
+## Getting the GGUF files onto the server
+
+Unlike Ollama, `llama-server` has **no model registry and no `ollama pull`**.
+The `ghcr.io/ggml-org/llama.cpp:server-cuda` image also ships **no Python and no
+`huggingface-cli`** — download on the host, not inside the container.
+
+### About the vision projector (`mmproj`)
+
+A vision model is two GGUF files: the **language weights** (`*-q4_k_m.gguf`) and
+a separate **multimodal projector** (`mmproj-*.gguf`, the image encoder).
+Ollama bundles both in one manifest, which is why you never saw a separate file.
+llama.cpp needs the projector passed explicitly (`mmproj =` in the preset) —
+without it the model silently ignores images.
+
+- **qwen** is used for chat **and** vision (`dms-extractor-image`,
+  `alice-dms-image-description-backfill`) → needs `model` **+** `mmproj`.
+- **mistral** is only used for DMS **text** extraction (classification, field
+  extraction from plaintext) → `model` only, no `mmproj`.
+
+### Step 1 — find the exact upstream models
+
+The Ollama tags `qwen3.5:27b-q4_K_M` / `mistral-small3.2:24b` are local tags;
+check what they actually are:
+
+```bash
+# on ki.lan
+docker exec ollama-3090 ollama show qwen3.5:27b-q4_K_M --modelfile
+docker exec ollama-3090 ollama show qwen3.5:27b-q4_K_M          # arch, params, quant, projector
+docker exec ollama-3090 ollama show mistral-small3.2:24b --modelfile
+```
+
+Note the architecture / parameter count / quant, then pick the matching GGUF
+repo on Hugging Face (official `Qwen/…-GGUF` / `mistralai/…` repos, or a known
+re-quant like `bartowski/…`). Fill the two `<HF_REPO_*>` placeholders below.
+
+### Step 2 — download to the model volume (on the host)
+
+```bash
+# one-time: huggingface CLI on the HOST (not the container)
+pipx install "huggingface_hub[cli]"        # or: pip install -U "huggingface_hub[cli]"
+# for gated repos (some Mistral repos): huggingface-cli login   # needs an HF token
+
+cd /srv/hot/models/llama-cpp
+
+# --- chat / vision model (qwen): language weights + vision projector ---
+huggingface-cli download <HF_REPO_QWEN> \
+  <QWEN_Q4_K_M_FILENAME>.gguf \
+  <QWEN_MMPROJ_FILENAME>.gguf \
+  --local-dir .
+
+# --- DMS text model (mistral): language weights only ---
+huggingface-cli download <HF_REPO_MISTRAL> \
+  <MISTRAL_Q4_K_M_FILENAME>.gguf \
+  --local-dir .
+```
+
+Then set the real filenames in `presets.ini` (`model =` / `mmproj =`).
+Verify: `ls -lh /srv/hot/models/llama-cpp/*.gguf` — the qwen weights should be
+~18–20 GB (Q4_K_M of a ~30 B model), mistral ~14 GB, the mmproj ~1–2 GB.
+
+### Alternative — let llama.cpp pull from HF on first request
+
+Instead of downloading, `presets.ini` can reference a repo directly; the router
+fetches into `cache/` on the first request for that model:
+
+```ini
+[qwen3.5:27b-q4_K_M]
+model  = hf:<HF_REPO_QWEN>:<Q4_K_M_TAG>
+mmproj = hf:<HF_REPO_QWEN>:<MMPROJ_TAG>
+```
+
+Trade-offs: the container then needs outbound internet (and an `HF_TOKEN` env
+for gated repos), and the **first** request blocks for the full ~20 GB
+download. For the cutover, prefer Step 2 so the download happens up front and
+you can verify quant parity before the hard switch.
 
 ## Secret
 
