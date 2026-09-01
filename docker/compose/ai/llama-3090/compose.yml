@@ -9,14 +9,17 @@ services:
     networks: [frontend, backend, automation]
     # Router mode: no fixed model. --models-preset points at an INI whose
     # section names become the model IDs clients request in the `model` field.
-    # --models-max 1 keeps only ONE model resident in the 24 GB of the 3090;
-    # --sleep-idle-seconds unloads an idle model so the next model can load.
+    # --models-max 1 keeps only ONE model resident in the 24 GB of the 3090.
+    # NO idle-unload: the model stays loaded until a request for the *other*
+    # model evicts it (replaces Ollama's OLLAMA_KEEP_ALIVE=-1). The night DMS
+    # run loads mistral; the alice-llm-model-warmup n8n workflow swaps back to
+    # qwen at 07:00 Europe/Berlin so the first morning chat has no cold-load
+    # delay. Model usage is time-separated by design (chat by day, DMS by night).
     command: >
       --host 0.0.0.0
       --port 11434
       --models-preset /models/presets.ini
       --models-max 1
-      --sleep-idle-seconds 900
       --api-key-file /run/secrets/llama_api_key
     environment:
       - LLAMA_CACHE=/models/cache

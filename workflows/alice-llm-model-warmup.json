@@ -1,0 +1,83 @@
+{
+  "name": "alice-llm-model-warmup",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## alice-llm-model-warmup (PROJ-99)\n\nSchedule 05:00 UTC (= 07:00 Europe/Berlin MESZ / 06:00 MEZ), i.e. after the\nnightly DMS run (02:00 UTC, loads mistral) and before the working day.\n\nFires ONE tiny /v1/chat/completions request against the chat model so the\nllama.cpp router loads qwen (evicting mistral, --models-max 1) — the first\nreal chat of the day then has no cold-load delay.\n\nThe llama.cpp router has no idle-unload (replaces Ollama OLLAMA_KEEP_ALIVE=-1),\nso once warmed qwen stays resident until the next night's mistral request.",
+        "height": 260,
+        "width": 460,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -300],
+      "id": "warmup-sticky",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "id": "warmup-schedule",
+      "name": "Schedule: Daily 05:00 UTC"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ (($env.OLLAMA_URL || 'http://llama-3090:11434').replace(/\\/$/, '')) + '/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ $env.OLLAMA_API_KEY ? ('Bearer ' + $env.OLLAMA_API_KEY) : undefined }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:27b-q4_K_M', messages: [{ role: 'user', content: 'ping' }], stream: false, max_tokens: 1 }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": { "response": { "responseFormat": "json", "fullResponse": true } }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 0],
+      "id": "warmup-http",
+      "name": "HTTP: Warm qwen",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-llm-model-warmup\", node: \"Code: Log Result\" } });\nconst resp = $input.first().json;\nconst status = resp.statusCode || 0;\nconst model = (() => { try { return $env.OLLAMA_MODEL || 'qwen3.5:27b-q4_K_M'; } catch(e) { return 'qwen3.5:27b-q4_K_M'; } })();\nif (status >= 200 && status < 300) {\n  logger.info(`[warmup] ${model} warmed OK (HTTP ${status})`);\n  return [{ json: { warmed: true, model, status } }];\n}\nlogger.warn(`[warmup] ${model} warmup failed (HTTP ${status}) - first morning chat may see a cold load`);\nreturn [{ json: { warmed: false, model, status } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 0],
+      "id": "warmup-log",
+      "name": "Code: Log Result"
+    }
+  ],
+  "connections": {
+    "Schedule: Daily 05:00 UTC": {
+      "main": [[{ "node": "HTTP: Warm qwen", "type": "main", "index": 0 }]]
+    },
+    "HTTP: Warm qwen": {
+      "main": [[{ "node": "Code: Log Result", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

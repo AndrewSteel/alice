@@ -16,13 +16,15 @@
 ctx-size    = 16384
 n-gpu-layers = 999
 flash-attn  = on
-; Unload this model after 15 min idle so the other model can take the GPU.
-; Router-level --models-max 1 guarantees only one is ever resident.
-stop-timeout = 900
+; NO stop-timeout / idle-unload: a model stays resident until a request for the
+; other model evicts it (router --models-max 1). This mirrors the old Ollama
+; OLLAMA_KEEP_ALIVE=-1 so qwen does not drop out during the working day.
 
 [qwen3.5:27b-q4_K_M]
 model      = qwen3.5-27b-instruct-q4_k_m.gguf
 mmproj     = qwen3.5-27b-mmproj-f16.gguf
+; Warm qwen right after a container (re)start so the first chat is instant.
+load-on-startup = true
 ; Qwen thinking models emit reasoning in a <think> block; expose it as the
 ; OpenAI `reasoning_content` field (consumed by alice-chat-stream, PROJ-37).
 reasoning-format = deepseek
