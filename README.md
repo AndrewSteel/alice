@@ -31,7 +31,7 @@ SPEECH GATEWAY (alice-speech-gateway — Python: Whisper large-v3 STT, Piper TTS
     ↓
 CHAT SERVICE (alice-chat-stream — Python/FastAPI, SSE streaming)
     ↓
-ORCHESTRATION (llama.cpp qwen3.5:27b-q4_K_M via native tool-use;
+ORCHESTRATION (llama.cpp — Qwen3-VL-30B-A3B-Instruct via native tool-use;
     n8n sub-workflows for HA, DMS, Mail tools)
     ↓
 DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
@@ -71,7 +71,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| llama-3090 (llama.cpp router) | RTX 3090 | ~14–18 GB | qwen3.5:27b-q4_K_M (chat/vision) + mistral-small3.2:24b (DMS), one model resident at a time |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~15–20 GB | Qwen3-VL-30B-A3B-Instruct Q4_K_M (chat/vision, tag `qwen3.5:27b-q4_K_M`) + Mistral-Small-3.2-24B Q4_K_M (DMS, tag `mistral-small3.2:24b`), one model resident at a time |
 | alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
 | wyoming-whisper               | TITAN X  | shared  | Whisper large-v3 STT                   |
 | ollama-titan                  | TITAN X  | shared  | Ollama for Jupyter / GPU experiments (not in the Alice request path) |
@@ -103,7 +103,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 | `n8n`                   | Workflow engine: HA + DMS + mail tools, DMS pipeline, auth/session webhooks                 |
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
 | `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
-| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads qwen3.5:27b-q4_K_M / mistral-small3.2:24b (one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00). External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
+| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads Qwen3-VL-30B-A3B (tag `qwen3.5:27b-q4_K_M`) / Mistral-Small-3.2-24B (tag `mistral-small3.2:24b`), one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
 | `ollama-titan`          | Ollama on the TITAN X — Jupyter / GPU experiments only, not in the Alice request path       |
 | `weaviate`              | Vector search                                                                               |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                  |
