@@ -28,10 +28,29 @@ are local names, the actual upstream models are:
 | `qwen3.5:27b-q4_K_M` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | chat/agent + vision |
 | `mistral-small3.2:24b` | **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M, text only | DMS text extraction |
 
-VRAM: Qwen3-VL-30B-A3B Q4_K_M ≈ 18.6 GB weights + 1.1 GB mmproj + KV-cache;
-Mistral-Small-24B Q4_K_M ≈ 14 GB. Either fits the 3090's 24 GB alone; both at
-once do not — hence `--models-max 1`. The Qwen MoE loads/unloads noticeably
-faster than a dense model of similar size, which softens the model-switch gap.
+### VRAM budget (the 3090's 24 GB is shared)
+
+Permanently resident on the RTX 3090, independent of llama.cpp:
+
+| Container | Model | VRAM |
+| --- | --- | --- |
+| `weaviate-transformers` | paraphrase-multilingual-MiniLM-L12-v2 | ~3.3 GB |
+| `weaviate-multi2vec` | CLIP-ViT-B-32-multilingual-v1 | ~1.4 GB |
+| **Weaviate total** | | **~4.7 GB** → leaves **~19 GB** for llama.cpp |
+
+| llama.cpp model (one at a time) | VRAM |
+| --- | --- |
+| Qwen3-VL-30B-A3B Q4_K_M (~18.6 GB) + F16 mmproj (~1.1 GB) + KV @ ctx 8192 | **~20 GB** — tight, this is the constraint |
+| Mistral-Small-24B Q4_K_M (~14 GB) + KV | ~15 GB — comfortable |
+
+Under Ollama this exact pairing (qwen + both Weaviate modules) already ran at
+**~23.7 / 24 GB** with ~0.9 GB free — so it works, but there is no slack.
+`presets.ini` therefore ships `ctx-size = 8192` (vs. the model's 262 k max); the
+DMS extraction prompts and the chat agent loop stay well under that. If qwen
+fails to load at cutover, drop `ctx-size` further (4096) before touching
+anything else. Both models at once do **not** fit → `--models-max 1`. The Qwen
+MoE loads/unloads noticeably faster than a dense model of similar size, which
+softens the model-switch gap.
 
 ### Daily model timeline (all UTC — n8n cron runs UTC)
 
