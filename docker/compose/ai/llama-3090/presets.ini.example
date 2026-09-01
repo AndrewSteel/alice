@@ -7,9 +7,15 @@
 ; Section name  = the model ID clients send in the OpenAI `model` field.
 ;                 Keep these EXACTLY equal to the retired Ollama model names
 ;                 so no consumer prompt/config has to change:
-;                   qwen3.5:27b-q4_K_M      → chat + vision
-;                   mistral-small3.2:24b    → DMS text extraction
-; -relative paths are resolved against --models-dir / the preset file dir.
+;                   qwen3.5:27b-q4_K_M      → chat + vision  (weights + mmproj)
+;                   mistral-small3.2:24b    → DMS text extraction  (weights only)
+; - relative paths are resolved against the preset file dir.
+; - GGUF filenames below are PLACEHOLDERS — replace with the real ones after
+;   `huggingface-cli download` (see README.md → "Getting the GGUF files").
+;   Or reference Hugging Face directly (auto-download into cache/ on first use):
+;       model  = hf:<HF_REPO_QWEN>:<Q4_K_M_TAG>
+;       mmproj = hf:<HF_REPO_QWEN>:<MMPROJ_TAG>
+;   (needs container internet + HF_TOKEN for gated repos — README has trade-offs)
 
 [*]
 ; Global defaults applied to every model below.
@@ -21,8 +27,8 @@ flash-attn  = on
 ; OLLAMA_KEEP_ALIVE=-1 so qwen does not drop out during the working day.
 
 [qwen3.5:27b-q4_K_M]
-model      = qwen3.5-27b-instruct-q4_k_m.gguf
-mmproj     = qwen3.5-27b-mmproj-f16.gguf
+model      = REPLACE-qwen-instruct-q4_k_m.gguf
+mmproj     = REPLACE-qwen-mmproj-f16.gguf
 ; Warm qwen right after a container (re)start so the first chat is instant.
 load-on-startup = true
 ; Qwen thinking models emit reasoning in a <think> block; expose it as the
@@ -30,4 +36,4 @@ load-on-startup = true
 reasoning-format = deepseek
 
 [mistral-small3.2:24b]
-model = mistral-small-3.2-24b-instruct-q4_k_m.gguf
+model = REPLACE-mistral-small-instruct-q4_k_m.gguf
