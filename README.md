@@ -71,18 +71,19 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| llama-3090 (llama.cpp router) | RTX 3090 | ~21 GB   | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, id `qwen3-vl-30b`) OR Mistral-Small-3.2-24B Q4_K_M ~16 GB (DMS, id `mistral-small-3.2-24b`) — one model resident at a time, ctx-size 16384 |
-| weaviate-transformers         | RTX 3090 | ~1–1.5 GB | text2vec embeddings (MiniLM-L12-v2); CUDA allocator capped so llama.cpp gets the headroom (fallback: run on CPU) |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~20.9 GB | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, id `qwen3-vl-30b`, ctx 16384, parallel 1) OR Mistral-Small-3.2-24B Q4_K_M ~14 GB (DMS, id `mistral-small-3.2-24b`) — one model resident at a time |
+| weaviate-transformers         | RTX 3090 | ~0.8 GB | text2vec embeddings (MiniLM-L12-v2); CUDA allocator capped (`PYTORCH_CUDA_ALLOC_CONF`) — was ~3.3 GB |
 | weaviate-multi2vec            | RTX 3090 | ~1.4 GB | CLIP image+text embeddings (kept on GPU)|
 | alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
 | wyoming-whisper               | TITAN X  | shared  | Whisper large-v3 STT                   |
 | ollama-titan                  | TITAN X  | shared  | Ollama for Jupyter / GPU experiments (not in the Alice request path) |
 
-The RTX 3090's 24 GB is shared. `ctx-size 16384` is the working minimum for the
-agent tool loop; to make Qwen3-VL-30B-A3B-Q4 + mmproj + KV (~21 GB) fit next to
-Weaviate, `weaviate-transformers` gives VRAM back via a CUDA-allocator cap
-(`PYTORCH_CUDA_ALLOC_CONF`), with a CPU fallback if that isn't enough. Verify
-with `nvidia-smi` at cutover. Details: `docker/compose/ai/llama-3090/README.md`.
+The RTX 3090's 24 GB is shared: qwen (~20.9 GB) + the two Weaviate inference
+containers (~2.2 GB) sit at ~23.1 / 24 GB, ~1.5 GB free. `parallel = 1` (one KV
+slot) and the allocator cap on `weaviate-transformers` are what make it fit;
+`ctx-size 16384` is the agent-tool-loop minimum. If qwen OOMs under load, drop
+`ctx-size` to 12288 or move `weaviate-transformers` to CPU. Details:
+`docker/compose/ai/llama-3090/README.md`.
 
 ### Storage
 

@@ -324,7 +324,7 @@ für die Karenzzeit erhalten, wird nur gestoppt).
 | **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
 | **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
 | **Modelle** | Zwei Modelle, gleiche Quant-Stufe wie heute. Chat/Vision: **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B aktiv, `arch qwen35`, Ollama meldete `27.8B`), Q4_K_M-Sprachgewichte (~18,6 GB) **+** F16-Vision-Projektor `mmproj` (~1,1 GB) — Repo `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF`. DMS-Text: **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M (~14 GB), **kein** mmproj. Model-IDs (Preset-Sektionsnamen = `$env.OLLAMA_MODEL*`): **`qwen3-vl-30b`** und **`mistral-small-3.2-24b`** — **`:`-frei** (llama.cpp schreibt `:` im Sektionsnamen um). GGUF-Pfade in `presets.ini` **absolut** (`/models/…`). | Verhaltensparität: identischer Modellstand + Quant → gleiche Antwortqualität, nur schneller. Prompts/Modellwahl-Logik unverändert; nur die Modell-**Namen** in `.env` + 9 Workflow-Fallbacks von den alten Ollama-Tags auf die neuen `:`-freien IDs gezogen. |
-| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC) schaltet vor Arbeitsbeginn zurück auf qwen. **`ctx-size = 16384`** im Preset — Arbeits-Minimum für den Agenten-Tool-Loop (letzte 20 Turns + System-Prompt + 7-Tool-Schema + bis 4 Runden Tool-Ergebnis-JSON; Suchtreffer können groß sein). 8192 läuft über, sobald eine Suche viele Treffer liefert — und der Agenten-Loop ist der Grund der Umstellung. | **Die 24 GB der 3090 sind geteilt.** Damit qwen-Q4 (~18,6 GB) + mmproj (~1,1 GB) + KV bei ctx 16384 (≈ **~21 GB**) neben Weaviate passt, muss **`weaviate-transformers` VRAM zurückgeben**: (1) committed = CUDA-Allocator via `PYTORCH_CUDA_ALLOC_CONF` deckeln (MiniLM ist ~470 MB, die 3,3 GB sind Allocator-Reserve → ~1–1,5 GB); (2) Fallback = `t2v-transformers` auf **CPU** (`ENABLE_CUDA=0`, +50–150 ms/Text-Embedding, Chat-Pfad ist LLM-Zeit-dominiert). `multi2vec-clip` bleibt GPU (CPU-Bild-Encoding zu langsam). mistral-Q4 (~16 GB) ist entspannt. **Beide LLMs zusammen passen nicht** → `--models-max 1`. Qwen-**MoE** lädt/entlädt schneller als Dense → Wechsel-Latenz geringer. |
+| **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC) schaltet vor Arbeitsbeginn zurück auf qwen. **`ctx-size = 16384`** (Agenten-Tool-Loop-Minimum), **`parallel = 1`** (1 KV-Slot statt 4), **`image-min-tokens = 1024`** (Qwen3-VL-Grounding). | **Gemessen 2026-09-02:** qwen (ctx 16384, mmproj, parallel 1) **~20,9 GB** + `weaviate-transformers` **~0,8 GB** (von ~3,3 GB via `PYTORCH_CUDA_ALLOC_CONF`-Cap) + `multi2vec-clip` **~1,4 GB** = **~23,1/24 GB, ~1,5 GB frei**. `parallel = 1` spart ~3–4 GB (Alice = 1 sequ. Chat-Stream/Nutzer). mistral statt qwen: ~16 GB, entspannt. **Beide LLMs zusammen passen nicht** → `--models-max 1`. Puffer dünn — bei OOM unter Last: `ctx-size` 16384→12288 oder `t2v-transformers` auf CPU. |
 | **Warmup-Workflow** | `alice-llm-model-warmup` (n8n): Schedule `0 5 * * *` (UTC) → ein `POST /v1/chat/completions` an qwen mit `max_tokens: 1`. Lädt qwen (verdrängt mistral). `onError: continueRegularOutput` + Winston-Log; kein Retry, kein Blocker. `load-on-startup = true` in `presets.ini` wärmt qwen zusätzlich nach jedem Container-Neustart. | Erste Morgen-Chat-Antwort ohne Kaltstart-Verzögerung. Zeitpunkt liegt nach dem 02:00-DMS-Lauf und vor dem 06:00-Image-Description-Backfill — keine Cron-Kollision. |
 | **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
 | **Betrieb** | Eigener Container `llama-3090`, `restart: unless-stopped`, GPU fest auf die RTX 3090 gepinnt (dieselbe `device_ids`-Zuweisung wie `ollama-3090` heute), Healthcheck gegen die Modell-Liste (`/v1/models`). | Gleiche Betriebs-Garantien wie beim alten Dienst. |
@@ -756,9 +756,25 @@ behoben):**
 2. **Relative GGUF-Pfade greifen nicht.** `failed to open GGUF file
    'Qwen3VL-…gguf' (No such file or directory)` — der Router-Subprozess hat ein
    anderes CWD als `/models`. → `presets.ini` nutzt **absolute** Pfade
-   (`/models/…`); `presets.ini.example` + README entsprechend.
-   Die `LLAMA_ARG_HOST`-Warnung im Log ist harmlos (Image-Default, von `--host`
-   überschrieben).
+   (`/models/…`).
+
+Harmlose Log-Meldungen (kein Handlungsbedarf): `LLAMA_ARG_HOST … overwritten
+by --host` (Image-Default), `control-looking token 128247 '</s>' was not
+control-type` (Tokenizer-Metadaten, llama.cpp korrigiert selbst), zwei
+`listening on`-Zeilen (Router `0.0.0.0:11434` + interner Modell-Subserver auf
+`127.0.0.1:<random>` — nur der Router-Port ist der Endpoint).
+
+**Nachtrag 2026-09-02 (VRAM-Tuning nach echtem `nvidia-smi`):** qwen mit
+`ctx 16384` + mmproj lud zunächst mit **20864 MiB** (Default `n_slots = 4`) →
+zusammen mit Weaviate ~23,1/24 GB. Zwei Preset-Settings ergänzt:
+`parallel = 1` (1 KV-Slot statt 4, spart ~3–4 GB; Alice = 1 sequ.
+Chat-Stream/Nutzer) und `image-min-tokens = 1024` (Qwen3-VL braucht ≥1024
+Bild-Tokens für zuverlässiges Grounding — sonst werden die ≤1024-px-DMS-Bilder
+zu stark heruntergerechnet, Beschreibungen unscharf). Der
+`PYTORCH_CUDA_ALLOC_CONF`-Cap auf `t2v-transformers` hat gewirkt: **3290 → 792
+MiB**. Endstand: qwen ~20,9 GB + weaviate ~2,2 GB = **~23,1/24 GB, ~1,5 GB
+frei** — läuft, aber dünner Puffer. Fallback dokumentiert (`ctx-size 12288`
+bzw. `t2v-transformers` auf CPU). Kein Code-Bug.
 
 ### Edge Cases (9, aus der Spec)
 
