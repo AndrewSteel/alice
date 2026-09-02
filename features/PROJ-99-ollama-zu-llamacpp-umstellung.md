@@ -913,9 +913,10 @@ kein Idle-Unload. Modell-Wechsel qwen ↔ mistral automatisch über das
 
 ### Betrieb
 
-- `llama-3090`: `restart: unless-stopped`,
-  `com.centurylinklabs.watchtower.enable=false` (Router-Modus bewegt sich zu
-  schnell für Auto-Updates — Updates kontrolliert).
+- `llama-3090`: `restart: unless-stopped`, kein
+  `watchtower.enable=false` — Watchtower **benachrichtigt** hier nur (gotify),
+  Updates werden manuell eingespielt. Nach jedem llama.cpp-Update `presets.ini`
+  gegentesten (Router-Modus bewegt sich schnell).
 - `ollama-3090`: Container-Definition + Modell-Volume bleiben während der
   Karenzzeit erhalten (gestoppt, nicht gelöscht). Rollback-Prozedur: Tech Design
   §8.
