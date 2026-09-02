@@ -1,8 +1,8 @@
 # PROJ-99: Umstellung Ollama → llama.cpp (ollama-3090)
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-09-01
-**Last Updated:** 2026-09-01
+**Last Updated:** 2026-09-02
 
 ## Kontext & Motivation
 
@@ -853,20 +853,78 @@ hartkodiertes Modell env-getrieben gemacht. Kein offener Punkt mehr.
 
 ### Production-Ready-Entscheidung
 
-**READY** (mit Vorbehalt) — keine Critical/High-Bugs. Der Code-Stand ist bereit
-für `/deploy`; alle mit „Live-Test aussteht" markierten AC benötigen den
-tatsächlichen `llama-3090`-Server (GGUF-Beschaffung, Cutover, Benchmark) und
-können nicht statisch verifiziert werden — das ist erwarteter Scope für
-`/deploy`, kein QA-Blocker. BUG-1 sollte vor oder kurz nach dem Cutover behoben
-werden (Credential statt Env-Expression), blockiert aber den Deploy nicht.
+**DEPLOYED 2026-09-02.** Der Cutover verlief ohne Zwischenfall. Die statische
+QA (34 AC) hielt beim Live-Test stand; die drei Deploy-Bugs (BUG-3 n8n-Env,
+Preset-`:`-Namen, relative Pfade) wurden während des Cutovers behoben. Kein
+Critical/High-Bug offen.
 
-**Vorbehalt VRAM (Deploy-verifizierbar):** qwen + beide Weaviate-Container liefen
-unter Ollama schon bei ~23,7/24 GB. `ctx-size` bleibt auf **16384** (Agenten-
-Loop-Minimum, nicht verhandelbar); dafür gibt `weaviate-transformers` VRAM
-zurück (Allocator-Cap committed, CPU-Fallback dokumentiert). Falls qwen beim
-Cutover trotzdem nicht lädt: `t2v-transformers` auf CPU **oder** `ctx-size`
-gestuft senken (§7 Schritt 2 + 4). Kein Datenverlust, kein Code-Bug — reine
-Betriebs-Tuning-Frage beim Cutover.
+- **Performance:** Chat-Modell ~31,9 → **~178 tok/s** (~5,6×, Ziel war ≥ +20 %).
+- **VRAM-Vorbehalt aufgelöst:** `parallel = 1` + Allocator-Cap → qwen + Weaviate
+  bei ~23,1/24 GB, läuft stabil. `t2v-transformers` blieb auf der GPU (CPU-
+  Fallback nicht nötig).
+- **BUG-1 (Bearer-Token als rohe n8n-Env-Expression statt Credential):** weiter
+  offen als Low/Medium-Nachlauf — funktional korrekt, nur nicht in Execution-
+  Logs maskiert. Eigenes Ticket, falls gewünscht; kein Blocker.
+- **Nachlauf:** Andreas prüft die restlichen DMS-/Mail-Workflows im Laufe der
+  Tage live.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed 2026-09-02 — harter Cutover, voller Erfolg.**
+
+### Ablauf (wie durchgeführt)
+
+1. Vorbereitung: GGUF-Modelle nach `/srv/hot/models/llama-cpp/`
+   (`Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` + `mmproj-…-F16.gguf`,
+   `mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf`), `presets.ini`
+   mit **absoluten** Pfaden + `:`-freien Sektionsnamen, `llama_api_key` erzeugt
+   + in alle Konsumenten-`.env`, Container auf den Server gesynct.
+2. `weaviate-transformers` mit `PYTORCH_CUDA_ALLOC_CONF`-Cap neu erzeugt →
+   3290 → 792 MiB VRAM.
+3. `ollama-3090` gestoppt, `llama-3090` gestartet. Zwei Preset-Fixes aus dem
+   ersten Start-Log (`:`-Sektionsnamen, relative Pfade — s. QA-Nachträge),
+   dann `parallel = 1` + `image-min-tokens = 1024` ergänzt.
+4. `alice-chat-stream`, `dms-extractor-image`, `n8n` (+ `OLLAMA_API_KEY`-Zeile,
+   BUG-3), `openwebui` neu erzeugt.
+5. Alle 10 n8n-Workflows deployed + published (9 migriert +
+   `alice-llm-model-warmup`).
+6. nginx-Configs gesynct + reloaded (`llama-3090.conf` aktiv,
+   `ollama-3090.conf` = 301-Redirect).
+
+### Performance (Kern-Ziel — massiv übertroffen)
+
+| Metrik | Ollama (qwen3.5:27b, dense) | llama.cpp (qwen3-vl-30b, MoE ~3B aktiv) | Faktor |
+| --- | --- | --- | --- |
+| **Token-Generierung Chat-Modell** | **~31,9 tok/s** | **~178 tok/s** | **~5,6×** (Ziel war ≥ +20 %) |
+| Prompt-Eval Chat-Modell | ~1150 tok/s | ~3450 tok/s | ~3,0× |
+
+Beispiel: eine 1874-Token-Antwort in **10,7 s** statt ~59 s. Der Agenten-Tool-Loop
+(mehrere LLM-Runden pro Anfrage) profitiert am stärksten — genau das Spec-Ziel.
+Grund für den Faktor: dense-27B → 30B-A3B-**MoE**.
+`truncated = 0` bei 7888-Token-Kontext bestätigt: `ctx-size 16384` reicht für den
+Tool-Loop.
+
+### VRAM (RTX 3090, geteilt mit Weaviate)
+
+qwen (ctx 16384, mmproj, `parallel 1`) ~20,9 GB + `weaviate-transformers`
+~0,8 GB + `multi2vec-clip` ~1,4 GB ≈ **~23,1 / 24 GB**. `--models-max 1`,
+kein Idle-Unload. Modell-Wechsel qwen ↔ mistral automatisch über das
+`model`-Feld; `alice-llm-model-warmup` lädt qwen täglich 05:00 UTC vor.
+
+### Betrieb
+
+- `llama-3090`: `restart: unless-stopped`,
+  `com.centurylinklabs.watchtower.enable=false` (Router-Modus bewegt sich zu
+  schnell für Auto-Updates — Updates kontrolliert).
+- `ollama-3090`: Container-Definition + Modell-Volume bleiben während der
+  Karenzzeit erhalten (gestoppt, nicht gelöscht). Rollback-Prozedur: Tech Design
+  §8.
+- Nachlauf: Andreas prüft im Laufe der Tage die restlichen DMS-/Mail-Workflows
+  live (Klassifizierung, Sprachprüfung, Bildbeschreibung, Backfills).
+
+### Bugs beim Deploy (alle behoben)
+
+- **BUG-3** — `OLLAMA_API_KEY` fehlte in `n8n/compose.yml` (n8n hat kein
+  `env_file`). Fix: `environment:`-Zeile ergänzt.
+- Preset-`:`-Sektionsnamen + relative Pfade (s. QA-Nachträge 2026-09-02).
+- `parallel = 4` (Default) → `parallel = 1` fürs VRAM-Budget.
