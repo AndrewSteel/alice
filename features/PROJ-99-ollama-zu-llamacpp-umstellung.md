@@ -263,8 +263,8 @@ voller Verhaltensparität nach außen.
 
 | Metrik | Zielwert |
 | --- | --- |
-| Token-Generierungsrate Chat-Modell (Qwen3-VL-30B-A3B, Tag `qwen3.5:27b-q4_K_M`), llama.cpp vs. Ollama | ≥ +20 % tok/s |
-| Token-Generierungsrate DMS-Modell (`mistral-small3.2:24b`), Vorher/Nachher dokumentiert | gemessen, kein Rückschritt |
+| Token-Generierungsrate Chat-Modell (Qwen3-VL-30B-A3B, ID `qwen3-vl-30b`), llama.cpp vs. Ollama | ≥ +20 % tok/s |
+| Token-Generierungsrate DMS-Modell (Mistral-Small-3.2-24B, ID `mistral-small-3.2-24b`), Vorher/Nachher dokumentiert | gemessen, kein Rückschritt |
 | Funktionale Regressionen bei Konsumenten (Chat, DMS, Vision, Open WebUI) | 0 |
 | Reasoning-/Thinking-Stream (PROJ-37) funktionsgleich | ja |
 | Agenten-Tool-Loop (mehrere Runden) funktionsgleich | ja |
@@ -323,7 +323,7 @@ für die Karenzzeit erhalten, wird nur gestoppt).
 | --- | --- | --- |
 | **Ein Endpoint, mehrere Modelle** | llama.cpp-Server wird **ohne festes Modell** gestartet und bekommt stattdessen einen **Modell-Ordner** genannt. Jeder Request nennt im `model`-Feld den gewünschten Modellnamen; der Server lädt ihn in die GPU und entlädt nicht mehr gebrauchte Modelle nach einer Leerlaufzeit selbst. | Erfüllt die Spec-Vorgabe „ein Endpoint, dynamischer Router" **ohne** zusätzlichen Router-Container oder Eigenentwicklung. Weniger bewegliche Teile = weniger Betriebsrisiko. |
 | **API-Format** | Der Server spricht das **OpenAI-kompatible Format** (`/v1/chat/completions`, `/v1/models`). Das ist der Pfad, den alle Konsumenten künftig nutzen. | Ein einheitliches, dokumentiertes Format statt Ollamas Eigen-API. Open WebUI und viele Tools sprechen es nativ. |
-| **Modelle** | Zwei Modelle, gleiche Quant-Stufe wie heute. Chat/Vision: **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B aktiv), Q4_K_M-Sprachgewichte (~18,6 GB) **+** F16-Vision-Projektor `mmproj` (~1,1 GB) — offizielles Repo `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF`. DMS-Text: **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M (~14 GB), **kein** mmproj (reiner Textpfad). Der lokale Ollama-Tag `qwen3.5:27b-q4_K_M` (Ollama meldet `27.8B`, `arch qwen35`) meint genau dieses MoE. | Verhaltensparität: identischer Modellstand + Quant → gleiche Antwortqualität, nur schneller. Die `model`-Feld-Strings bleiben die alten Ollama-Tags → kein Konsument ändert sich. |
+| **Modelle** | Zwei Modelle, gleiche Quant-Stufe wie heute. Chat/Vision: **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B aktiv, `arch qwen35`, Ollama meldete `27.8B`), Q4_K_M-Sprachgewichte (~18,6 GB) **+** F16-Vision-Projektor `mmproj` (~1,1 GB) — Repo `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF`. DMS-Text: **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M (~14 GB), **kein** mmproj. Model-IDs (Preset-Sektionsnamen = `$env.OLLAMA_MODEL*`): **`qwen3-vl-30b`** und **`mistral-small-3.2-24b`** — **`:`-frei** (llama.cpp schreibt `:` im Sektionsnamen um). GGUF-Pfade in `presets.ini` **absolut** (`/models/…`). | Verhaltensparität: identischer Modellstand + Quant → gleiche Antwortqualität, nur schneller. Prompts/Modellwahl-Logik unverändert; nur die Modell-**Namen** in `.env` + 9 Workflow-Fallbacks von den alten Ollama-Tags auf die neuen `:`-freien IDs gezogen. |
 | **VRAM-Strategie** | **Immer nur ein Modell** aktiv (`--models-max 1`). **Kein Idle-Unload** (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`). Nächtlicher DMS-Lauf (02:00 UTC) lädt mistral; `alice-llm-model-warmup` (05:00 UTC) schaltet vor Arbeitsbeginn zurück auf qwen. **`ctx-size = 16384`** im Preset — Arbeits-Minimum für den Agenten-Tool-Loop (letzte 20 Turns + System-Prompt + 7-Tool-Schema + bis 4 Runden Tool-Ergebnis-JSON; Suchtreffer können groß sein). 8192 läuft über, sobald eine Suche viele Treffer liefert — und der Agenten-Loop ist der Grund der Umstellung. | **Die 24 GB der 3090 sind geteilt.** Damit qwen-Q4 (~18,6 GB) + mmproj (~1,1 GB) + KV bei ctx 16384 (≈ **~21 GB**) neben Weaviate passt, muss **`weaviate-transformers` VRAM zurückgeben**: (1) committed = CUDA-Allocator via `PYTORCH_CUDA_ALLOC_CONF` deckeln (MiniLM ist ~470 MB, die 3,3 GB sind Allocator-Reserve → ~1–1,5 GB); (2) Fallback = `t2v-transformers` auf **CPU** (`ENABLE_CUDA=0`, +50–150 ms/Text-Embedding, Chat-Pfad ist LLM-Zeit-dominiert). `multi2vec-clip` bleibt GPU (CPU-Bild-Encoding zu langsam). mistral-Q4 (~16 GB) ist entspannt. **Beide LLMs zusammen passen nicht** → `--models-max 1`. Qwen-**MoE** lädt/entlädt schneller als Dense → Wechsel-Latenz geringer. |
 | **Warmup-Workflow** | `alice-llm-model-warmup` (n8n): Schedule `0 5 * * *` (UTC) → ein `POST /v1/chat/completions` an qwen mit `max_tokens: 1`. Lädt qwen (verdrängt mistral). `onError: continueRegularOutput` + Winston-Log; kein Retry, kein Blocker. `load-on-startup = true` in `presets.ini` wärmt qwen zusätzlich nach jedem Container-Neustart. | Erste Morgen-Chat-Antwort ohne Kaltstart-Verzögerung. Zeitpunkt liegt nach dem 02:00-DMS-Lauf und vor dem 06:00-Image-Description-Backfill — keine Cron-Kollision. |
 | **Modell-Storage** | Modell-Ordner auf schnellem Storage, analog `/srv/hot/models` (eigener Unterordner für llama.cpp, getrennt von Ollamas Ordner). | Schnelles Nachladen beim Modell-Wechsel; keine Kollision mit den erhalten bleibenden Ollama-Modellen. |
@@ -458,15 +458,15 @@ _Implementiert am 2026-09-01. Router-Ansatz: **llama.cpp nativer Router-Modus**
   `--models-preset /models/presets.ini --models-max 1
   --api-key-file /run/secrets/llama_api_key` (kein `--sleep-idle-seconds`).
   Healthcheck gegen `/health`.
-- **`presets.ini.example`** — zwei Sektionen, Sektionsname = Modell-ID
-  (= alter Ollama-Tag) im Request: `qwen3.5:27b-q4_K_M` →
-  `Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` + `mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf`,
-  `reasoning-format = deepseek`, `load-on-startup = true`;
-  `mistral-small3.2:24b` → `mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf`
-  (bartowski-Requant, kein HF-Login; offizielles gated Repo als Kommentar).
-  **Kein** `stop-timeout` / Idle-Unload (ersetzt Ollamas `OLLAMA_KEEP_ALIVE=-1`).
-  Real-Datei liegt auf dem Volume `/srv/hot/models/llama-cpp/presets.ini`
-  (nicht gesynct).
+- **`presets.ini.example`** — zwei Sektionen, Sektionsname = Model-ID im Request
+  (**`:`-frei**, sonst schreibt llama.cpp sie um — im Log verifiziert):
+  `[qwen3-vl-30b]` → `/models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` +
+  `/models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf`, `reasoning-format = deepseek`,
+  `load-on-startup = true`; `[mistral-small-3.2-24b]` →
+  `/models/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf`
+  (bartowski-Requant, kein HF-Login). Pfade **absolut** (Router-Subprozess-CWD
+  ≠ `/models`). **Kein** `stop-timeout` / Idle-Unload. Real-Datei liegt auf dem
+  Volume `/srv/hot/models/llama-cpp/presets.ini` (nicht gesynct).
 - **`compose.yml`** — `--sleep-idle-seconds` **nicht** gesetzt: der Router
   entlädt nie von selbst, ein Modell weicht nur, wenn das andere angefragt wird.
 - **`README.md`** (Service-Ordner) — Endpoint, Modelle, Server-Dateien, Secret,
@@ -550,19 +550,23 @@ vor Arbeitsbeginn (verdrängt das nachts geladene mistral), damit der erste
 Chat des Tages keine Kaltstart-Verzögerung hat. n8n-mcp-Validierung: 0 Fehler.
 Zu deployen via `Deploy n8n-workflow alice-llm-model-warmup`.
 
-Modellwahl (`$env.OLLAMA_MODEL_DMS`, `$env.OLLAMA_VISION_MODEL`), Prompts,
-Retry-/Lock-/Zeitlimit-Logik: **unverändert**. Alle 9 Dateien: `node --check`
-grün, JSON valide, Diff minimal (nur die betroffenen `jsCode`-Strings +
-HTTP-Node-Parameter).
+Prompts, Retry-/Lock-/Zeitlimit-Logik: **unverändert**. Die Modell-**Namen** in
+den Code-Node-Fallbacks wurden auf die neuen `:`-freien IDs gezogen —
+`'qwen3.5:27b-q4_K_M'` / `'qwen3:14b'` → `'mistral-small-3.2-24b'` an allen
+DMS-Call-Sites (behebt nebenbei den vorbestehenden `qwen3:14b`-Fallback,
+BUG-2), `alice-mail-sync`s hartkodiertes Klassifizierungs-Modell → env-getrieben
+(`$env.OLLAMA_MODEL_DMS`). Alle Dateien: `node --check` grün, JSON valide,
+`migrate-workflows-llamacpp.py --check` sauber.
 
 ### Environment (`.env.example`, keine Secrets)
 
 - `alice-chat-stream`: `OLLAMA_URL=http://llama-3090:11434`,
-  `OLLAMA_MODEL=qwen3.5:27b-q4_K_M`, neu `OLLAMA_API_KEY`,
-  `OLLAMA_TIMEOUT_SECONDS=120`.
-- `dms-extractor-image`: `OLLAMA_URL=http://llama-3090:11434`, neu `OLLAMA_API_KEY`.
+  `OLLAMA_MODEL=qwen3-vl-30b`, neu `OLLAMA_API_KEY`, `OLLAMA_TIMEOUT_SECONDS=120`.
+- `dms-extractor-image`: `OLLAMA_URL=http://llama-3090:11434`,
+  `OLLAMA_VISION_MODEL=qwen3-vl-30b`, neu `OLLAMA_API_KEY`.
 - `n8n`: `OLLAMA_URL=http://llama-3090:11434`, neu `OLLAMA_API_KEY`,
-  `OLLAMA_MODEL`/`OLLAMA_MODEL_DMS`/`OLLAMA_VISION_MODEL` auf die Preset-Namen.
+  `OLLAMA_MODEL`/`OLLAMA_VISION_MODEL` = `qwen3-vl-30b`,
+  `OLLAMA_MODEL_DMS` = `mistral-small-3.2-24b`.
 - `openwebui`: neues `.env.example` + `env_file`, compose auf
   `ENABLE_OPENAI_API=true` / `OPENAI_API_BASE_URL=http://llama-3090:11434/v1` /
   `OPENAI_API_KEY=${OLLAMA_API_KEY}` / `ENABLE_OLLAMA_API=false`.
@@ -599,6 +603,11 @@ HTTP-Node-Parameter).
   `/srv/warm/llama-3090/` `700 root:root`, `llama_api_key` `600 root:root`
   (**Secret**, Container liest als root).
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
+- **Prod-`.env` Modell-Namen** auf die `:`-freien IDs setzen:
+  `OLLAMA_MODEL` / `OLLAMA_VISION_MODEL` = `qwen3-vl-30b`,
+  `OLLAMA_MODEL_DMS` = `mistral-small-3.2-24b` (alice-chat-stream,
+  dms-extractor-image, n8n). Müssen exakt den `presets.ini`-Sektionsnamen
+  entsprechen. `presets.ini`: absolute `/models/…`-Pfade.
 - **`weaviate-transformers` VRAM-Cap verifizieren** (§7 Schritt 2): mit
   `PYTORCH_CUDA_ALLOC_CONF` (bereits im `weaviate/compose.yml`, committed) sollte
   der Container von ~3,3 GB auf ~1–1,5 GB fallen. Greift der Cap nicht: auf CPU
@@ -732,6 +741,25 @@ lädt qwen mit ctx 16384 trotzdem nicht neben Weaviate, ist der Fix (a)
 beim Cutover sofort auf (Modell lädt nicht), kein Datenverlust, kein Code-Bug.
 `nvidia-smi`-Checks in §7 Schritt 2 + 4.
 
+**Nachtrag 2026-09-02 (erster `llama-3090`-Start, zwei Blocker aus dem Log
+behoben):**
+
+1. **`:` im Preset-Sektionsnamen wird umgeschrieben.** `[qwen3.5:27b-q4_K_M]`
+   wurde als Model-ID `qwen3.5:Q4_K_M` exponiert, `[mistral-small3.2:24b]` als
+   `mistral-small3.2:24B` — llama.cpp behandelt alles nach dem ersten `:` als
+   `tag` inkl. Case-Normalisierung. → Model-IDs auf **`qwen3-vl-30b`** /
+   **`mistral-small-3.2-24b`** (`:`-frei) umgestellt: `presets.ini.example`,
+   3× `.env.example`, 9 Workflow-Code-Fallbacks, `alice-llm-model-warmup`,
+   README, Tech Design. Prod-`.env` müssen entsprechend angepasst werden
+   (`OLLAMA_MODEL`/`OLLAMA_VISION_MODEL`=`qwen3-vl-30b`,
+   `OLLAMA_MODEL_DMS`=`mistral-small-3.2-24b`).
+2. **Relative GGUF-Pfade greifen nicht.** `failed to open GGUF file
+   'Qwen3VL-…gguf' (No such file or directory)` — der Router-Subprozess hat ein
+   anderes CWD als `/models`. → `presets.ini` nutzt **absolute** Pfade
+   (`/models/…`); `presets.ini.example` + README entsprechend.
+   Die `LLAMA_ARG_HOST`-Warnung im Log ist harmlos (Image-Default, von `--host`
+   überschrieben).
+
 ### Edge Cases (9, aus der Spec)
 
 | Edge Case | Status |
@@ -766,18 +794,13 @@ Downgrade gegenüber dem etablierten Muster dieses Repos.
 für den llama.cpp-Key anlegen und in beiden Nodes referenzieren (analog zur
 Postgres-/Ollama-Credential), statt der rohen Env-Expression.
 
-**BUG-2 (Low, vorbestehend, nicht durch PROJ-99 verursacht) — Inkonsistenter
-Modell-Fallback in 6 der 9 Workflows.** `$env.OLLAMA_MODEL_DMS || 'qwen3:14b'`
-fällt bei fehlender Env-Variable auf `qwen3:14b` zurück statt auf das
-dokumentierte DMS-Modell (`mistral-small3.2:24b`). Bereits vor diesem Commit
-so vorhanden (verifiziert per `git show HEAD~1`); durch PROJ-99 weder verursacht
-noch verschlimmert — bei fehlendem `OLLAMA_MODEL_DMS` würde der Request künftig
-schlicht auf ein im llama.cpp-Preset nicht existierendes Modell `qwen3:14b`
-treffen und mit „model not found" fehlschlagen (heute: Ollama-Autopull/Fehler).
-Nur in `alice-dms-processor`s HTTP-Node korrigiert (dort ohnehin neu
-geschrieben); die übrigen 6 Vorkommen unverändert gelassen (Surgical-Changes-Regel
-— nicht Teil des PROJ-99-Auftrags). *Empfehlung:* eigenes kleines Ticket, falls
-gewünscht.
+**BUG-2 (Low, vorbestehend) — inkonsistenter Modell-Fallback — BEHOBEN.** Die
+Code-Nodes hatten `$env.OLLAMA_MODEL_DMS || 'qwen3:14b'` (Fallback ≠
+dokumentiertes DMS-Modell, vorbestehend seit vor diesem Feature). Da der
+Model-ID-Wechsel auf `:`-freie Namen (`ollama show`-Fund, s. u.) ohnehin **alle**
+`.env` + Workflow-Fallbacks anfassen musste, wurden die Fallbacks bei der
+Gelegenheit auf `'mistral-small-3.2-24b'` konsolidiert und `alice-mail-sync`s
+hartkodiertes Modell env-getrieben gemacht. Kein offener Punkt mehr.
 
 ### Security-Audit (Kurzfassung)
 

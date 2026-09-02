@@ -4,31 +4,28 @@
 ;   /srv/hot/models/llama-cpp/presets.ini
 ; It is NOT synced by scripts/sync-compose.sh (lives on a Docker volume).
 ;
-; Section name = the model ID clients send in the OpenAI `model` field.
-;   Kept EXACTLY equal to the retired Ollama tag names so no consumer
-;   prompt/config changes. The tags are local names; the real models are:
-;     qwen3.5:27b-q4_K_M    -> Qwen3-VL-30B-A3B-Instruct  (MoE, weights + mmproj)
-;     mistral-small3.2:24b  -> Mistral-Small-3.2-24B-Instruct-2506  (dense, text only)
+; Section name = the model ID clients send in the OpenAI `model` field
+;   (== $env.OLLAMA_MODEL / OLLAMA_MODEL_DMS / OLLAMA_VISION_MODEL).
+;   NOTE: llama.cpp treats a ':' in the section name as a name:tag split and
+;   rewrites it (e.g. [qwen3.5:27b-q4_K_M] was exposed as "qwen3.5:Q4_K_M").
+;   So the IDs must be colon-free — hence the plain names below.
 ;
-; - relative paths are resolved against the preset file dir.
-; - GGUF filenames below match the official Qwen repo and bartowski's Mistral
-;   re-quant. See README.md ("Getting the GGUF files") for the download commands
-;   and the `hf:` auto-download alternative.
+;   qwen3-vl-30b           -> Qwen3-VL-30B-A3B-Instruct  (MoE, weights + mmproj)
+;   mistral-small-3.2-24b  -> Mistral-Small-3.2-24B-Instruct-2506  (dense, text)
+;
+; PATHS: must be ABSOLUTE. The router spawns each sub-server with a working
+;   directory that is NOT /models, so relative filenames fail with
+;   "failed to open GGUF file ... (No such file or directory)". The volume is
+;   mounted at /models, so use /models/<file>.gguf.
 
 [*]
 ; Global defaults applied to every model below.
 ;
-; ctx-size 16384: this is the working minimum for the agent tool loop — Alice
-; sends the last 20 turns + the system prompt + the 7-tool schema + up to 4
-; rounds of tool-result JSON (search hits can be large). 8192 overflows as soon
-; as a search returns many results, and the agent loop is the whole point of
-; this migration. 8192 would only be safe for plain chat with no tool calls.
-;
-; VRAM: the RTX 3090's 24 GB is SHARED with the two Weaviate inference
-; containers. To make 16384 fit next to Qwen3-VL-30B-A3B-Q4 (~18.6 GB) + F16
-; mmproj (~1.1 GB), t2v-transformers must be moved OFF the GPU (CPU, or a
-; PyTorch allocator cap) — see the llama-3090 README and the PROJ-99 spec.
-; If qwen still OOMs at cutover, step down: 16384 -> 12288 -> 8192.
+; ctx-size 16384: working minimum for the agent tool loop — Alice sends the
+; last 20 turns + system prompt + 7-tool schema + up to 4 rounds of tool-result
+; JSON (search hits can be large). 8192 overflows as soon as a search returns
+; many results. If qwen OOMs next to Weaviate, step down 16384 -> 12288 -> 8192
+; (and/or move t2v-transformers off the GPU — see the README).
 ctx-size    = 16384
 n-gpu-layers = 999
 flash-attn  = on
@@ -36,19 +33,17 @@ flash-attn  = on
 ; other model evicts it (router --models-max 1). This mirrors the old Ollama
 ; OLLAMA_KEEP_ALIVE=-1 so qwen does not drop out during the working day.
 
-[qwen3.5:27b-q4_K_M]
-model      = Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
-mmproj     = mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
+[qwen3-vl-30b]
+model      = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
+mmproj     = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
 ; Warm qwen right after a container (re)start so the first chat is instant.
 load-on-startup = true
 ; Qwen thinking models emit reasoning in a <think> block; expose it as the
 ; OpenAI `reasoning_content` field (consumed by alice-chat-stream, PROJ-37).
 reasoning-format = deepseek
 
-[mistral-small3.2:24b]
-; bartowski re-quant (no HF login). Official gated repo:
-;   model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf  (from mistralai/...-GGUF)
-model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
-; ~5 GB smaller than qwen and only used for short DMS extraction prompts (the
-; text is chunked at 8000 chars upstream), so the global 16384 is already more
-; than enough — no per-model override needed.
+[mistral-small-3.2-24b]
+; bartowski re-quant (no HF login). Official gated repo file name may differ.
+model = /models/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
+; ~5 GB smaller than qwen and only used for short DMS extraction prompts, so
+; the global 16384 is plenty — no per-model override needed.
