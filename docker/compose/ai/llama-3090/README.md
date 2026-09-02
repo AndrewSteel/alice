@@ -19,14 +19,16 @@ Router keeps ONE model resident (`--models-max 1`) and has **no idle-unload**
 for the *other* model evicts it. Request a model by its preset section name in
 the `model` field.
 
-The **model IDs keep the old Ollama tag strings** (`qwen3.5:27b-q4_K_M`,
-`mistral-small3.2:24b`) so no consumer prompt/config changes — but those tags
-are local names, the actual upstream models are:
+The model IDs are the **preset section names** and must be **colon-free** —
+llama.cpp parses a `:` in a section name as a `name:tag` split and rewrites it
+(`[qwen3.5:27b-q4_K_M]` got exposed as `qwen3.5:Q4_K_M`). Consumers send these
+strings in the `model` field (`$env.OLLAMA_MODEL` / `OLLAMA_MODEL_DMS` /
+`OLLAMA_VISION_MODEL`):
 
 | Model ID (`model` field) | Actual model | Role |
 | --- | --- | --- |
-| `qwen3.5:27b-q4_K_M` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | chat/agent + vision |
-| `mistral-small3.2:24b` | **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M, text only | DMS text extraction |
+| `qwen3-vl-30b` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | chat/agent + vision |
+| `mistral-small-3.2-24b` | **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M, text only | DMS text extraction |
 
 ### VRAM budget (the 3090's 24 GB is shared)
 
@@ -151,21 +153,26 @@ hf download bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF \
   mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf --local-dir .
 ```
 
-Then set the filenames in `presets.ini`:
+Then set the presets in `presets.ini`. **Section names must be colon-free**
+(they are the model IDs consumers send) and **paths must be absolute** — the
+router spawns each sub-server with a working directory that is not `/models`,
+so a bare filename fails with "No such file or directory":
 
 ```ini
-[qwen3.5:27b-q4_K_M]
-model  = Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
-mmproj = mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
+[qwen3-vl-30b]
+model  = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
+mmproj = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
 load-on-startup  = true
 reasoning-format = deepseek
 
-[mistral-small3.2:24b]
-model = mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
+[mistral-small-3.2-24b]
+model = /models/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
 ```
 
-Verify: `ls -lh /srv/hot/models/llama-cpp/*.gguf` — Qwen Q4_K_M ≈ 18.6 GB,
-mmproj-F16 ≈ 1.1 GB, Mistral Q4_K_M ≈ 14 GB.
+Check the file names first: `docker exec llama-3090 ls -la /models/`.
+Verify sizes: Qwen Q4_K_M ≈ 18.6 GB, mmproj-F16 ≈ 1.1 GB, Mistral Q4_K_M ≈ 14 GB.
+After (re)start, `GET /v1/models` (with the bearer token) must list exactly
+`qwen3-vl-30b` and `mistral-small-3.2-24b`.
 
 ### Alternative — let llama.cpp pull from HF on first request
 
@@ -173,7 +180,7 @@ Instead of downloading, reference the repo directly; the router fetches into
 `cache/` on the first request for that model:
 
 ```ini
-[qwen3.5:27b-q4_K_M]
+[qwen3-vl-30b]
 model  = hf:Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF:Q4_K_M
 mmproj = hf:Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF:mmproj-F16
 ```

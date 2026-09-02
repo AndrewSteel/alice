@@ -44,7 +44,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:27b-q4_K_M', messages: [{ role: 'user', content: 'ping' }], stream: false, max_tokens: 1 }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3-vl-30b', messages: [{ role: 'user', content: 'ping' }], stream: false, max_tokens: 1 }) }}",
         "options": {
           "timeout": 300000,
           "response": { "response": { "responseFormat": "json", "fullResponse": true } }
@@ -59,7 +59,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-llm-model-warmup\", node: \"Code: Log Result\" } });\nconst resp = $input.first().json;\nconst status = resp.statusCode || 0;\nconst model = (() => { try { return $env.OLLAMA_MODEL || 'qwen3.5:27b-q4_K_M'; } catch(e) { return 'qwen3.5:27b-q4_K_M'; } })();\nif (status >= 200 && status < 300) {\n  logger.info(`[warmup] ${model} warmed OK (HTTP ${status})`);\n  return [{ json: { warmed: true, model, status } }];\n}\nlogger.warn(`[warmup] ${model} warmup failed (HTTP ${status}) - first morning chat may see a cold load`);\nreturn [{ json: { warmed: false, model, status } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-llm-model-warmup\", node: \"Code: Log Result\" } });\nconst resp = $input.first().json;\nconst status = resp.statusCode || 0;\nconst model = (() => { try { return $env.OLLAMA_MODEL || 'qwen3-vl-30b'; } catch(e) { return 'qwen3-vl-30b'; } })();\nif (status >= 200 && status < 300) {\n  logger.info(`[warmup] ${model} warmed OK (HTTP ${status})`);\n  return [{ json: { warmed: true, model, status } }];\n}\nlogger.warn(`[warmup] ${model} warmup failed (HTTP ${status}) - first morning chat may see a cold load`);\nreturn [{ json: { warmed: false, model, status } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

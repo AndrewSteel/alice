@@ -71,7 +71,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| llama-3090 (llama.cpp router) | RTX 3090 | ~21 GB   | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, tag `qwen3.5:27b-q4_K_M`) OR Mistral-Small-3.2-24B Q4_K_M ~16 GB (DMS, tag `mistral-small3.2:24b`) — one model resident at a time, ctx-size 16384 |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~21 GB   | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, id `qwen3-vl-30b`) OR Mistral-Small-3.2-24B Q4_K_M ~16 GB (DMS, id `mistral-small-3.2-24b`) — one model resident at a time, ctx-size 16384 |
 | weaviate-transformers         | RTX 3090 | ~1–1.5 GB | text2vec embeddings (MiniLM-L12-v2); CUDA allocator capped so llama.cpp gets the headroom (fallback: run on CPU) |
 | weaviate-multi2vec            | RTX 3090 | ~1.4 GB | CLIP image+text embeddings (kept on GPU)|
 | alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
@@ -109,7 +109,7 @@ with `nvidia-smi` at cutover. Details: `docker/compose/ai/llama-3090/README.md`.
 | `n8n`                   | Workflow engine: HA + DMS + mail tools, DMS pipeline, auth/session webhooks                 |
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
 | `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
-| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads Qwen3-VL-30B-A3B (tag `qwen3.5:27b-q4_K_M`) / Mistral-Small-3.2-24B (tag `mistral-small3.2:24b`), one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
+| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads Qwen3-VL-30B-A3B (id `qwen3-vl-30b`) / Mistral-Small-3.2-24B (id `mistral-small-3.2-24b`), one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
 | `ollama-titan`          | Ollama on the TITAN X — Jupyter / GPU experiments only, not in the Alice request path       |
 | `weaviate`              | Vector search                                                                               |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                  |
@@ -174,7 +174,7 @@ alice-dms-{pdf,ocr,txt,office}             alice-dms-lifecycle (n8n)
     ↓
 MQTT alice/dms/extracted
     ↓ nightly — alice-dms-processor (n8n)
-    → LLM classification (mistral-small3.2:24b via llama.cpp, 1× retry)
+    → LLM classification (Mistral-Small-3.2-24B via llama.cpp, 1× retry)
     → field extraction per document type
     → Weaviate storage (per-collection)
     → BankTransaction chunking for bank statements
