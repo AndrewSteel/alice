@@ -24,8 +24,7 @@
 ; ctx-size 16384: working minimum for the agent tool loop — Alice sends the
 ; last 20 turns + system prompt + 7-tool schema + up to 4 rounds of tool-result
 ; JSON (search hits can be large). 8192 overflows as soon as a search returns
-; many results. If qwen OOMs next to Weaviate, step down 16384 -> 12288 -> 8192
-; (and/or move t2v-transformers off the GPU — see the README).
+; many results. If qwen ever OOMs next to Weaviate, step down 16384 -> 12288.
 ctx-size    = 16384
 n-gpu-layers = 999
 flash-attn  = on
@@ -38,6 +37,15 @@ model      = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
 mmproj     = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
 ; Warm qwen right after a container (re)start so the first chat is instant.
 load-on-startup = true
+; Qwen3-VL needs >=1024 image tokens for reliable grounding; without this it
+; down-samples the (already <=1024 px) DMS images too far and the descriptions
+; get vague. See https://github.com/ggml-org/llama.cpp/issues/16842
+image-min-tokens = 1024
+; parallel = 1: one KV-cache slot instead of the default 4. Alice runs one
+; sequential chat stream per user; 4 slots x 16k ctx would cost ~3-4 GB extra
+; and OOM next to Weaviate on the shared 3090. Concurrent chats serialise
+; (fine for 1-2 users).
+parallel = 1
 ; Qwen thinking models emit reasoning in a <think> block; expose it as the
 ; OpenAI `reasoning_content` field (consumed by alice-chat-stream, PROJ-37).
 reasoning-format = deepseek

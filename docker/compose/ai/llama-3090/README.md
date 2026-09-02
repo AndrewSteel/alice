@@ -32,42 +32,44 @@ strings in the `model` field (`$env.OLLAMA_MODEL` / `OLLAMA_MODEL_DMS` /
 
 ### VRAM budget (the 3090's 24 GB is shared)
 
-Permanently resident on the RTX 3090, independent of llama.cpp:
+Measured on 2026-09-02 with qwen loaded and `parallel = 1`:
 
-| Container | Model | VRAM (before / after PROJ-99) |
+| Process | VRAM | Note |
 | --- | --- | --- |
-| `weaviate-transformers` | paraphrase-multilingual-MiniLM-L12-v2 (~470 MB weights) | **~3.3 GB → ~1–1.5 GB** (CUDA allocator capped, `PYTORCH_CUDA_ALLOC_CONF`) |
-| `weaviate-multi2vec` | CLIP-ViT-B-32-multilingual-v1 | ~1.4 GB (unchanged — vision encoder, kept on GPU) |
-| **Weaviate total** | | ~4.7 GB → **~2.5–3 GB** → leaves **~21 GB** for llama.cpp |
-
-| llama.cpp model (one at a time) | VRAM |
-| --- | --- |
-| Qwen3-VL-30B-A3B Q4_K_M (~18.6 GB) + F16 mmproj (~1.1 GB) + KV @ **ctx 16384** | **~21 GB** — this is the constraint |
-| Mistral-Small-24B Q4_K_M (~14 GB) + KV | ~16 GB — comfortable |
+| `llama-server` (qwen3-vl-30b, ctx 16384, mmproj, image-min-tokens 1024, parallel 1) | **~20.9 GB** | one model resident |
+| `weaviate-transformers` (MiniLM) | ~0.8 GB | was ~3.3 GB → `PYTORCH_CUDA_ALLOC_CONF` cap on the container brought it down |
+| `weaviate-multi2vec` (CLIP) | ~1.4 GB | unchanged — vision encoder, kept on GPU |
+| **Total** | **~23.1 / 24 GB** | ~1.5 GB free |
+| — Mistral-Small-24B instead of qwen | ~14 GB + Weaviate → ~16 GB | comfortable |
 
 `ctx-size = 16384` is the **working minimum for the agent tool loop** (last 20
 turns + system prompt + 7-tool schema + up to 4 rounds of tool-result JSON;
 search hits can be large). 8192 overflows the moment a search returns many
 results — and the agent loop is the whole reason for this migration.
 
-To fit ctx 16384 next to qwen, `weaviate-transformers` must give VRAM back:
+Two settings keep qwen inside the shared budget:
 
-1. **First choice (committed):** `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64,…`
-   on the `t2v-transformers` container caps the CUDA caching allocator. MiniLM
-   is tiny (~470 MB); the 3.3 GB is mostly allocator reserve. Expect it to drop
-   to ~1–1.5 GB with no speed loss. Verify with `nvidia-smi` at cutover.
-2. **Fallback:** run `t2v-transformers` on **CPU** — `ENABLE_CUDA=0`, drop its
-   `deploy.resources` block. Costs ~50–150 ms per text embedding (query
-   embedding in the chat search tools + long-term-memory recall; nightly sync
-   batches get slower but aren't latency-critical). The chat path is
-   LLM-generation-bound, so this is acceptable. `multi2vec-clip` stays on the
-   GPU (CPU image encoding would be ~300–800 ms/image — too slow for the DMS
-   image pipeline).
+- **`parallel = 1`** in the qwen preset — one KV-cache slot instead of the
+  default 4. Alice runs one sequential chat stream per user; 4 slots × 16k ctx
+  would cost ~3–4 GB extra and OOM. Concurrent chats serialise (fine for 1–2
+  users).
+- **`PYTORCH_CUDA_ALLOC_CONF`** on `t2v-transformers` (in
+  `weaviate/compose.yml`) — caps the CUDA caching allocator; MiniLM is ~470 MB,
+  the 3.3 GB was mostly reserve, now ~0.8 GB.
 
-If qwen still OOMs at cutover after step 1, step `ctx-size` down
-(16384 → 12288 → 8192) or do step 2. Both LLMs at once do **not** fit →
-`--models-max 1`. The Qwen MoE loads/unloads faster than a dense model of
-similar size, which softens the model-switch gap.
+`image-min-tokens = 1024` (also in the qwen preset) is a quality setting, not a
+VRAM one: Qwen3-VL needs ≥1024 image tokens for reliable grounding, otherwise it
+down-samples the (already ≤1024 px) DMS images too far and the descriptions get
+vague.
+
+**Headroom is thin (~1.5 GB).** If qwen OOMs under load:
+`ctx-size 16384 → 12288` in the preset, or run `t2v-transformers` on CPU
+(`ENABLE_CUDA=0` + drop its `deploy.resources` block; costs ~50–150 ms per text
+embedding, acceptable — the chat path is LLM-generation-bound). `multi2vec-clip`
+must stay on the GPU (CPU image encoding ≈ 300–800 ms/image, too slow for the
+DMS image pipeline). Both LLMs at once do **not** fit → `--models-max 1`. The
+Qwen MoE loads/unloads faster than a dense model of similar size, which softens
+the model-switch gap.
 
 ### Daily model timeline (all UTC — n8n cron runs UTC)
 
@@ -163,6 +165,8 @@ so a bare filename fails with "No such file or directory":
 model  = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
 mmproj = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
 load-on-startup  = true
+image-min-tokens = 1024   ; Qwen3-VL grounding quality
+parallel         = 1      ; one KV slot — VRAM (see VRAM budget above)
 reasoning-format = deepseek
 
 [mistral-small-3.2-24b]
