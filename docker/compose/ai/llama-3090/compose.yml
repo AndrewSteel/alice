@@ -2,10 +2,9 @@ services:
   llama-3090:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: llama-3090
-    labels:
-      # Router mode moves fast (preset parsing, key semantics) — pin updates,
-      # don't let Watchtower auto-pull a rolling :server-cuda at night.
-      - "com.centurylinklabs.watchtower.enable=false"
+    # No watchtower.enable=false: Watchtower here only notifies (via gotify),
+    # updates are applied manually. Router mode moves fast — it is useful to be
+    # told when a new :server-cuda is out. Test presets.ini after each update.
     restart: unless-stopped
     # Same reachability as the retired ollama-3090 plus the two nets its other
     # consumers live on: frontend (n8n, openwebui), backend (dms-extractor-image),
