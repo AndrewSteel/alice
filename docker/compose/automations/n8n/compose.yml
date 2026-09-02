@@ -40,6 +40,7 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL_DMS=${OLLAMA_MODEL_DMS}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
       # PROJ-76: image description backfill (same vision model as dms-extractor-image)
       - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL}
       - WEAVIATE_URL=${WEAVIATE_URL}

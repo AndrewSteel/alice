@@ -566,7 +566,9 @@ BUG-2), `alice-mail-sync`s hartkodiertes Klassifizierungs-Modell → env-getrieb
   `OLLAMA_VISION_MODEL=qwen3-vl-30b`, neu `OLLAMA_API_KEY`.
 - `n8n`: `OLLAMA_URL=http://llama-3090:11434`, neu `OLLAMA_API_KEY`,
   `OLLAMA_MODEL`/`OLLAMA_VISION_MODEL` = `qwen3-vl-30b`,
-  `OLLAMA_MODEL_DMS` = `mistral-small-3.2-24b`.
+  `OLLAMA_MODEL_DMS` = `mistral-small-3.2-24b`. **n8n hat kein `env_file`** —
+  `OLLAMA_API_KEY` musste zusätzlich als `environment:`-Zeile in
+  `n8n/compose.yml` ergänzt werden (BUG-3, s. u.).
 - `openwebui`: neues `.env.example` + `env_file`, compose auf
   `ENABLE_OPENAI_API=true` / `OPENAI_API_BASE_URL=http://llama-3090:11434/v1` /
   `OPENAI_API_KEY=${OLLAMA_API_KEY}` / `ENABLE_OLLAMA_API=false`.
@@ -763,6 +765,16 @@ by --host` (Image-Default), `control-looking token 128247 '</s>' was not
 control-type` (Tokenizer-Metadaten, llama.cpp korrigiert selbst), zwei
 `listening on`-Zeilen (Router `0.0.0.0:11434` + interner Modell-Subserver auf
 `127.0.0.1:<random>` — nur der Router-Port ist der Endpoint).
+
+**BUG-3 (beim Deploy gefunden, behoben) — `OLLAMA_API_KEY` fehlte in
+`n8n/compose.yml`.** Anders als die anderen Konsumenten nutzt `n8n` **kein**
+`env_file` — jede Variable wird einzeln unter `environment:` durchgereicht. Der
+Backend-Commit hatte `OLLAMA_API_KEY` in `.env.example` ergänzt, aber die
+`environment:`-Zeile `- OLLAMA_API_KEY=${OLLAMA_API_KEY}` vergessen → die 9
+migrierten Workflows hätten `$env.OLLAMA_API_KEY` als `undefined` gesehen und
+401 vom Router bekommen. Fix: die eine Zeile ergänzt. (`OLLAMA_URL`/
+`OLLAMA_MODEL`/`OLLAMA_MODEL_DMS`/`OLLAMA_VISION_MODEL` waren schon vorher
+durchgereicht.)
 
 **Nachtrag 2026-09-02 (VRAM-Tuning nach echtem `nvidia-smi`):** qwen mit
 `ctx 16384` + mmproj lud zunächst mit **20864 MiB** (Default `n_slots = 4`) →
