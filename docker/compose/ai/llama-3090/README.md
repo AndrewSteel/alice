@@ -86,11 +86,23 @@ container (re)start.
   projector. Same quant level (q4_K_M) as the retired Ollama models.
 - `cache/` — llama.cpp HF download cache (only used by the `hf:` preset form).
 
+Permissions (the container runs as **root** — no `user:` in the compose):
+
+| Path | Mode | Owner | Why |
+| --- | --- | --- | --- |
+| `/srv/hot/models/llama-cpp/` | `750` | `root:docker` | mirrors `…/models/ollama`; not a secret |
+| `*.gguf`, `presets.ini` | `640` | `root:docker` | public weights / filenames + params only |
+| `/srv/warm/llama-3090/` | `700` | `root:root` | holds the API key |
+| `/srv/warm/llama-3090/llama_api_key` | `600` | `root:root` | **secret** — only the container (root) reads it |
+
 ## Getting the GGUF files onto the server
 
 Unlike Ollama, `llama-server` has **no model registry and no `ollama pull`**.
 The `ghcr.io/ggml-org/llama.cpp:server-cuda` image also ships **no Python and no
-`huggingface-cli`** — download on the host, not inside the container.
+Hugging Face CLI** — download on the host, not inside the container.
+
+> The CLI is `hf` (from the `huggingface_hub` package). The old
+> `huggingface-cli` entrypoint is deprecated and no longer works — use `hf`.
 
 ### About the vision projector (`mmproj`)
 
@@ -116,25 +128,26 @@ docker exec ollama-3090 ollama show mistral-small3.2:24b        # Mistral Small 
 ### Download to the model volume (on the host)
 
 ```bash
-# one-time: huggingface CLI on the HOST (not the container)
+# one-time: the Hugging Face CLI on the HOST (not the container)
 pipx install "huggingface_hub[cli]"        # or: pip install -U "huggingface_hub[cli]"
+# provides the `hf` command (NOT the deprecated `huggingface-cli`)
 
 cd /srv/hot/models/llama-cpp
 
 # --- chat / vision model: Qwen3-VL-30B-A3B-Instruct (weights + vision projector) ---
-huggingface-cli download Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF \
+hf download Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF \
   Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf \
   mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf \
   --local-dir .
 
 # --- DMS text model: Mistral-Small-3.2-24B-Instruct-2506, weights only ---
-# Option A: official repo (GATED — needs `huggingface-cli login` + accepting the
+# Option A: official repo (GATED — run `hf auth login` first + accept the
 #           licence at https://huggingface.co/mistralai/Mistral-Small-3.2-24B-Instruct-2506)
-huggingface-cli download mistralai/Mistral-Small-3.2-24B-Instruct-2506-GGUF \
+hf download mistralai/Mistral-Small-3.2-24B-Instruct-2506-GGUF \
   <official-Q4_K_M-filename>.gguf --local-dir .
 # Option B: open community re-quant (no login) — recommended if you don't want
 #           to deal with the gate. Same base model, Q4_K_M:
-huggingface-cli download bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF \
+hf download bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF \
   mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf --local-dir .
 ```
 
@@ -174,7 +187,19 @@ happens up front and you can verify quant parity before the hard switch.
 
 `/srv/warm/llama-3090/llama_api_key` — single line, the bearer token every
 consumer sends as `Authorization: Bearer <key>` (`OLLAMA_API_KEY` in consumer
-`.env`). Server-side only, never committed.
+`.env`). Server-side only, never committed. `600 root:root` — see the
+permissions table above.
+
+Generate it as any high-entropy string (no format requirement):
+
+```bash
+sudo mkdir -p /srv/warm/llama-3090 && sudo chmod 700 /srv/warm/llama-3090
+printf '%s' "$(openssl rand -hex 32)" | sudo tee /srv/warm/llama-3090/llama_api_key >/dev/null
+sudo chmod 600 /srv/warm/llama-3090/llama_api_key
+```
+
+Then put the **same** value as `OLLAMA_API_KEY=` into every consumer `.env`
+(alice-chat-stream, dms-extractor-image, n8n, openwebui).
 
 ## Rollback
 
