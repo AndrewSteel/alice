@@ -581,9 +581,10 @@ HTTP-Node-Parameter).
 ### Offen für /deploy (kein Code)
 
 - GGUF-Dateien beschaffen + `presets.ini` schreiben. llama.cpp hat **keine
-  Registry / kein `ollama pull`** und das Image bringt **kein `huggingface-cli`**
-  mit — Download auf dem **Host** ins Volume `/srv/hot/models/llama-cpp/`.
-  Konkrete Kommandos + `hf:`-Alternative:
+  Registry / kein `ollama pull`** und das Image bringt **keine HF-CLI** mit —
+  Download auf dem **Host** ins Volume `/srv/hot/models/llama-cpp/` mit dem
+  `hf`-Kommando (`pipx install "huggingface_hub[cli]"`; **nicht** das veraltete
+  `huggingface-cli`). Konkrete Kommandos + `hf:`-Alternative:
   `docker/compose/ai/llama-3090/README.md` → „Getting the GGUF files".
   - **Chat/Vision:** `Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF` →
     `Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf` (~18,6 GB) **+**
@@ -591,8 +592,12 @@ HTTP-Node-Parameter).
     `dms-extractor-image` / `image-description-backfill`).
   - **DMS-Text:** `Mistral-Small-3.2-24B-Instruct-2506` Q4_K_M (~14 GB), nur
     Sprachgewichte, kein mmproj. Offizielles `mistralai/…-GGUF` ist **gated**
-    (`huggingface-cli login`); offene Alternative:
+    (`hf auth login`); offene Alternative:
     `bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF`.
+- Rechte auf dem Server: `/srv/hot/models/llama-cpp/` `750 root:docker`
+  (analog `…/ollama`), GGUF + `presets.ini` `640 root:docker` (kein Secret);
+  `/srv/warm/llama-3090/` `700 root:root`, `llama_api_key` `600 root:root`
+  (**Secret**, Container liest als root).
 - `llama_api_key` erzeugen + in alle Konsumenten-`.env` eintragen.
 - **`weaviate-transformers` VRAM-Cap verifizieren** (§7 Schritt 2): mit
   `PYTORCH_CUDA_ALLOC_CONF` (bereits im `weaviate/compose.yml`, committed) sollte
