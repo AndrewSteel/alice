@@ -1,6 +1,6 @@
 # PROJ-83: HA-Agent variable Intents — Prozent-Werte, Temperatur, Listen-Eintrag
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-09-03
 **Last Updated:** 2026-09-03
 
@@ -300,6 +300,56 @@ alice-ha-sync  (bestehender Worker)
 | Wertbehaftete Befehle < 200 ms, kein LLM | Regex-Extraktion ist in-Prozess (µs). Der einzige Zusatz-Call ist **ein** `GET /api/states/<entity>` und **nur** bei Heizungs-Befehlen — Licht/Rolladen brauchen ihn nicht (feste 0–100). Alle HA-Calls laufen weiterhin parallel. |
 | Multi-Befehl | Sentence Splitter + parallele Ausführung unverändert; die Regex-Schleife fügt vernachlässigbare Zeit hinzu. |
 | Kein Regressionsrisiko für wertlose Befehle | Die Nachbearbeitung ist an wertbehaftete Services gebunden; „Licht einschalten", „Rolladen hoch" nehmen den unveränderten Pfad. |
+
+## Implementation Notes (Backend Developer)
+
+**Implemented 2026-09-03.** Four building blocks per the tech design.
+
+### Artefakte
+
+| Datei | Änderung |
+|---|---|
+| `docker/compose/automations/alice-chat-stream/app/ha_path.py` | Werterkennung, Range-Check, Einkaufslisten-Erkennung, `execute_ha_intents()` erweitert |
+| `docker/compose/automations/alice-chat-stream/app/main.py` | `parts` + `shopping_items` an `execute_ha_intents()` weitergereicht; `path_label="HA_FAST"` erst **nach** erfolgreicher Ausführung gesetzt (Fallback bei fehlender Zahl) |
+| `docker/compose/automations/alice-ha-sync/main.py` | `_DOMAIN_VALUE_EXPANSIONS["cover"] = ("position", PERCENT_VALUES)` — expandiert `{value}`-Cover-Patterns mit Param-Key `position` |
+| `sql/migrations/068-proj83-cover-set-position-intent.sql` | Neue Zeile `cover / set_position / cover.set_cover_position` in `alice.ha_intent_templates` (idempotent, `ON CONFLICT … DO UPDATE`) |
+| `homeassistant/alice_sync_on_expose_changed.yaml` | Neue Automation (additiv) |
+| `homeassistant/alice_resync.yaml` | Neues manuelles Script (additiv) |
+| `docker/compose/automations/alice-chat-stream/tests/test_ha_path_values.py` | 28 Unit-Tests: Extraktion, Rundung, führende Nullen, Klassifikation, Einkaufslisten-Regex |
+| `docker/compose/automations/alice-chat-stream/tests/test_ha_path_execute.py` | 13 Tests: exakter Wert, Grenzwerte, Bereichsüberschreitung, Temperatur mit Live-Bounds, fehlende Zahl → Raise, Multi-Befehl, Einkaufsliste |
+| `docker/compose/automations/alice-chat-stream/tests/test_ha_path_decide.py` | 4 Tests: Routing Einkaufsliste / Wert-Befehl / Multi-Befehl |
+
+Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schlägt vorbestehend fehl — lokal fehlt `redis`, nicht PROJ-83-bezogen).
+
+### Baustein 1 & 2 — Werterkennung
+
+- `classify_value_type(service, parameters)` → `("percent", key)` | `("temperature", "temperature")` | `None`. Percent-Keys: `brightness_pct`, `position`, `value`. `cover.set_cover_position` mit leeren Params wird per Service-Name klassifiziert.
+- `extract_numeric_value(text)` — erste Ziffern-Gruppe, Komma/Punkt-Dezimal → kaufmännische Rundung (`floor(x+0.5)`, nicht Pythons Banker's Rounding), führende Nullen via `float()`. Zahlwörter bewusst nicht unterstützt.
+- **Pass 1** in `execute_ha_intents()` löst **alle** wertbehafteten Intents auf, bevor **ein** HA-Call rausgeht → fehlt in einem Teilbefehl die Zahl, wird `ValueError` geworfen → `main.py` fällt komplett auf LLM zurück, **keine** Teilausführung.
+- Prozent: feste Grenzen 0–100 inkl. Temperatur: `GET /api/states/<entity>` → `attributes.min_temp`/`max_temp`. GET schlägt fehl → Wert wird akzeptiert (keine Blockade eines gültigen Befehls; dokumentierte Entscheidung).
+- Bereichsüberschreitung → kein HA-Call, deutsche Antwort mit den **tatsächlichen** Grenzen der Entity.
+
+### Baustein 3 — Einkaufsliste
+
+- `detect_shopping_list_item(part)` — Regex, erkennt „<Artikel> auf/zu/zur/in die/der/meine(r) Einkaufsliste/Einkaufszettel [hinzufügen/schreiben/…]" sowie optionalen Imperativ-Präfix („schreib/setz/pack/füg"). Artikeltext = alles vor dem Auslöser, verbatim, inkl. Menge.
+- Erkennung in `decide_path()` **vor** dem Weaviate-Lookup; ein erkannter Einkaufslisten-Teil bekommt einen Platzhalter-`IntentMatch(matched=True, domain="todo")`, damit der Gesamt-Request HA_FAST bleibt.
+- Ziel-Liste: `SELECT entity_id FROM alice.ha_entities WHERE domain='todo' AND is_active ORDER BY entity_id LIMIT 1` → `todo.add_item`. Keine Liste → deutsche Fehlermeldung „Es ist keine Einkaufsliste für Alice freigegeben."
+
+### Baustein 4 — Sync bei Freischaltungs-Änderung
+
+**Abweichung von der Architektur-Empfehlung** (dort: `entity_created`/`entity_removed` wiederverwenden): Der Assist-Expose-Status liegt in `homeassistant.exposed_entities`, **nicht** in der Entity Registry — er ist aus einem Automations-Template nicht lesbar, die Richtung (freigeschaltet vs. entzogen) also nicht entscheidbar. Deshalb published die neue Automation `alice_sync_on_expose_changed.yaml` bei `entity_registry_updated / action: update` ein **Full-Sync**-Event (`ha_start` / `sync_type: full`). `full_sync()` liest die frische Expose-Liste per WebSocket und gleicht **beide** Richtungen ab (`added` → Weaviate + `alice.ha_entities`; `removed_ids` → `deactivate_entities()` + Weaviate-Delete). `full_sync` ist idempotent und gegen Parallelläufe geschützt (`check_concurrent_sync()`), ein Full-Sync bei unrelevanten Registry-Updates (Umbenennung) ist harmlos. Debounce: `mode: single` + 10 s Delay. **Kein Worker-Code-Change.**
+
+`alice_resync.yaml` (manuelles Script) published dasselbe Full-Sync-Event — garantierter Fallback für jeden Fall, den der automatische Trigger verpasst.
+
+> **QA-Verifikationspunkt:** Ob HA beim Assist-Toggle tatsächlich `entity_registry_updated / action: update` feuert, ist gegen die Live-Instanz zu prüfen. Falls nicht → das manuelle Script deckt es ab; ggf. Trigger auf einen anderen Event-Typ umstellen.
+
+### Deploy-Schritte (für /deploy)
+
+1. `alice-chat-stream` neu bauen + deployen (nur Code, keine neuen Deps).
+2. `alice-ha-sync` neu bauen + deployen (nur `main.py`, keine neuen Deps).
+3. Migration anwenden: `docker exec -i postgres psql -U user -d alice < sql/migrations/068-proj83-cover-set-position-intent.sql`
+4. MQTT `alice/ha/sync` → `{"event":"templates_updated"}` publishen (Full re-sync, damit die neuen `cover`-Positions-Utterances in Weaviate landen).
+5. HA: `alice_sync_on_expose_changed.yaml` als Automation + `alice_resync.yaml` als Script registrieren (via `sync-compose.sh`-Äquivalent / HA-Config-Sync).
 
 ## QA Test Results
 _To be added by /qa_

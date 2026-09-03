@@ -1,0 +1,34 @@
+# alice_resync.yaml
+# PROJ-83 — Manual full HA→Alice re-sync trigger.
+#
+# Register as a script in HA (Settings -> Automations & Scenes -> Scripts, or
+# scripts.yaml). Run it from the HA UI or as a service action
+# (script.alice_resync) whenever the automatic expose-change detection
+# (alice_sync_on_expose_changed.yaml) missed a case — e.g. an exposure toggle
+# that did not emit an entity_registry_updated event.
+#
+# It publishes the same full-sync event the HA-start automation uses, so the
+# alice-ha-sync worker rebuilds the intent registry from the current expose
+# list. Safe to run any time; full_sync is idempotent and guarded against
+# concurrent runs.
+#
+# Required: MQTT broker integration enabled in HA (broker: mqtt-alice)
+# Topic: alice/ha/sync
+
+alias: Alice Re-Sync
+icon: mdi:sync
+description: >
+  Publishes a full sync event to alice/ha/sync. Use to force Alice to re-read
+  the HA Assist expose list and rebuild the intent registry without an HA
+  restart.
+sequence:
+  - action: mqtt.publish
+    metadata: {}
+    data:
+      qos: "1"
+      retain: false
+      topic: alice/ha/sync
+      payload: >-
+        {"event": "ha_start", "sync_type": "full", "trigger": "manual_resync",
+        "timestamp": "{{ now().isoformat() }}"}
+mode: single
