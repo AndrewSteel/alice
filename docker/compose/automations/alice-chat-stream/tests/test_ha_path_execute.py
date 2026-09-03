@@ -174,6 +174,36 @@ def test_multi_command_independent_values():
     assert client.posts[1]["json"]["brightness_pct"] == 30
 
 
+def test_temperature_exact_min_and_max_allowed():
+    for spoken, expected in [("auf 5 Grad", 5), ("auf 30 Grad", 30)]:
+        intent = IntentMatch(matched=True, certainty=0.9, entity_id="climate.ht_buro",
+                             domain="climate", service="climate.set_temperature",
+                             parameters={"temperature": 20})
+        client = FakeClient(states={"climate.ht_buro": {"min_temp": 5, "max_temp": 30}})
+        _, results = run(execute_ha_intents([intent], client, parts=[spoken]))
+        assert results[0]["success"] is True
+        assert client.posts[0]["json"]["temperature"] == expected
+
+
+def test_leading_zeros_in_execute():
+    intent = IntentMatch(matched=True, certainty=0.9, entity_id="light.wz",
+                         domain="light", service="light.turn_on",
+                         parameters={"brightness_pct": 50})
+    client = FakeClient()
+    run(execute_ha_intents([intent], client, parts=["Licht auf 050 Prozent"]))
+    assert client.posts[0]["json"]["brightness_pct"] == 50
+
+
+def test_entity_offline_error_is_friendly():
+    intent = IntentMatch(matched=True, certainty=0.9, entity_id="cover.buro",
+                         domain="cover", service="cover.set_cover_position",
+                         parameters={"position": 50})
+    client = FakeClient(post_status=500)
+    text, results = run(execute_ha_intents([intent], client, parts=["Rolladen auf 40 Prozent"]))
+    assert results[0]["success"] is False
+    assert "HTTP 500" in text or "Fehler" in text
+
+
 # ---------------------------------------------------------------------------
 # Shopping list
 # ---------------------------------------------------------------------------
@@ -200,6 +230,27 @@ def test_shopping_list_add_item(monkeypatch):
         shopping_items=["2 Packungen Milch"]))
     assert client.posts[0]["url"].endswith("/api/services/todo/add_item")
     assert client.posts[0]["json"] == {"entity_id": "todo.einkaufsliste", "item": "2 Packungen Milch"}
+    assert results[0]["success"] is True
+
+
+def test_shopping_list_very_long_item_not_truncated(monkeypatch):
+    _patch_pool(monkeypatch, {"entity_id": "todo.einkaufsliste"})
+    shop_intent = IntentMatch(matched=True, certainty=1.0, domain="todo")
+    client = FakeClient()
+    long_item = "einen großen Sack Bio-Kartoffeln festkochend für das Wochenende"
+    run(execute_ha_intents(
+        [shop_intent], client, parts=[long_item + " zur Einkaufsliste hinzufügen"],
+        shopping_items=[long_item]))
+    assert client.posts[0]["json"]["item"] == long_item
+
+
+def test_shopping_list_duplicate_still_added(monkeypatch):
+    # No dedup — follows HA default behaviour.
+    _patch_pool(monkeypatch, {"entity_id": "todo.einkaufsliste"})
+    shop_intent = IntentMatch(matched=True, certainty=1.0, domain="todo")
+    client = FakeClient()
+    _, results = run(execute_ha_intents(
+        [shop_intent], client, parts=["Milch zur Einkaufsliste"], shopping_items=["Milch"]))
     assert results[0]["success"] is True
 
 
