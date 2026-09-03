@@ -377,10 +377,15 @@ async def stream_chat_endpoint(
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     decision = await ha_path.decide_path(user_message, client)
                     if decision.path == "HA_FAST":
-                        path_label = "HA_FAST"
                         text, ha_results = await ha_path.execute_ha_intents(
-                            decision.intents, client
+                            decision.intents, client,
+                            parts=decision.parts,
+                            shopping_items=decision.shopping_items,
                         )
+                        # Only commit to HA_FAST once execution succeeded — a
+                        # value-bearing intent with no spoken number raises and
+                        # we fall through to the LLM (PROJ-83).
+                        path_label = "HA_FAST"
                         # Stream HA result as a single token + done
                         yield f'data: {{"type":"token","content":{json.dumps(text, ensure_ascii=False)}}}\n\n'.encode("utf-8")
                         usage = {"prompt_tokens": 0, "completion_tokens": len(text)}

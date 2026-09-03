@@ -737,6 +737,8 @@ _DOMAIN_VALUE_EXPANSIONS: dict[str, tuple[str, tuple[int, ...]]] = {
     "climate": ("temperature", TEMPERATURE_VALUES),
     "light": ("brightness_pct", PERCENT_VALUES),
     "media_player": ("volume_level_pct", PERCENT_VALUES),
+    # PROJ-83 — cover position: {value} percent -> cover.set_cover_position(position=)
+    "cover": ("position", PERCENT_VALUES),
 }
 
 

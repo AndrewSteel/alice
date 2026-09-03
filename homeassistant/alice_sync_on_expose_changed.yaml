@@ -1,0 +1,54 @@
+# alice_sync_on_expose_changed.yaml
+# PROJ-83 — Triggers a full HA→Alice sync when an entity's Assist-conversation
+# exposure is toggled on an ALREADY REGISTERED entity.
+#
+# Why a full sync (and not the lighter entity_created/entity_removed path):
+#   The Assist exposure flag lives in homeassistant.exposed_entities, NOT in the
+#   entity registry, so it is not readable from an automation template and its
+#   direction (exposed vs. un-exposed) cannot be decided here. A full sync reads
+#   the fresh expose list over WebSocket and reconciles BOTH directions:
+#     - newly exposed entity  -> added to Weaviate + alice.ha_entities
+#     - exposure revoked       -> removed from Weaviate, marked inactive in PG
+#   (see alice-ha-sync full_sync(): added / removed_ids handling).
+#   full_sync is idempotent, so firing it on unrelated registry updates (rename,
+#   area change) is harmless.
+#
+# Trigger: entity_registry_updated / action: update. HA does not emit a
+#   dedicated event for the expose toggle in all versions; the registry-update
+#   event is the closest reliable signal and covers the common case where the
+#   expose change is saved together with other entity settings in the UI.
+#   The manual fallback (alice_resync.yaml) covers any case this misses.
+#
+# Required: MQTT broker integration enabled in HA (broker: mqtt-alice)
+# Topic: alice/ha/sync
+# Consumer: n8n workflow alice-ha-intent-sync -> alice-ha-sync worker (full sync)
+
+alias: Sync on Expose Changed
+description: >
+  Publishes a full sync event when an existing entity is updated in the entity
+  registry, so a newly Assist-exposed (or newly un-exposed) entity becomes
+  available to the HA_FAST path without an HA restart or manual full sync.
+  Debounced via mode:single + a 10s settle delay.
+triggers:
+  - trigger: event
+    event_type: entity_registry_updated
+    event_data:
+      action: update
+conditions: []
+actions:
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 10
+      milliseconds: 0
+  - action: mqtt.publish
+    metadata: {}
+    data:
+      qos: "1"
+      retain: false
+      topic: alice/ha/sync
+      payload: >-
+        {"event": "ha_start", "sync_type": "full", "trigger": "expose_changed",
+        "entity_id": "{{ trigger.event.data.entity_id }}", "timestamp": "{{
+        now().isoformat() }}"}
+mode: single
