@@ -1,8 +1,8 @@
 # PROJ-83: HA-Agent variable Intents — Prozent-Werte, Temperatur, Listen-Eintrag
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-09-03
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-04
 
 ## Dependencies
 - Requires: PROJ-1 (HA Intent Infrastructure) — Weaviate `HAIntent`-Collection
@@ -374,7 +374,7 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 #### AC-1: Rolladen-Position exakt (0–100, nicht die 5 Diskretstufen)
 - [x] `extract_numeric_value` zieht die exakte Zahl aus dem Originaltext, `execute_ha_intents` schreibt `position` in den HA-Call (`test_cover_exact_position`: "auf 37 Prozent" → POST `position=37`)
 - [x] Diskretstufen-Anker in Weaviate werden ignoriert (Wert kommt aus dem Text, nicht aus `intent.parameters`)
-- [⚠] **Live-Verifikation nötig:** dass "Rolladen im Büro auf 37 Prozent stellen" das neue `cover.set_cover_position`-Template mit certainty ≥ 0.82 matcht — hängt an Migration 068 + `templates_updated`-Full-Sync
+- [x] **Live-verifiziert 2026-09-04:** Rolladen-Befehl mit beliebigem Prozentwert funktioniert wie erwartet (Migration 068 + `templates_updated`-Full-Sync per `mosquitto_pub` ausgelöst)
 
 #### AC-2: Licht-Helligkeit exakt (0–100)
 - [x] `test_light_exact_brightness`: "auf 30 Prozent dimmen" → POST `brightness_pct=30`
@@ -383,7 +383,7 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 #### AC-3: Heizungs-Temperatur exakt, dynamischer min/max-Bereich
 - [x] `test_temperature_within_dynamic_range`: Live-`GET /api/states/<entity>` liest `min_temp`/`max_temp`, Wert wird als `temperature` gesetzt
 - [x] `test_temperature_bounds_unavailable_accepts_value`: GET schlägt fehl → Wert wird akzeptiert (bewusste Entscheidung, blockiert keinen gültigen Befehl)
-- [⚠] **Live:** nur `climate.ht_buro` ist aktuell aktiv — restliche Climate-Entities müssen für Assist freigegeben werden, bevor sie funktionieren (bekanntes Spec-Limit)
+- [x] **Live-verifiziert 2026-09-04:** Heizungsbefehl gegen `climate.ht_buro` funktioniert wie erwartet. Restliche Climate-Entities weiterhin nicht für Assist freigegeben (bekanntes Spec-Limit, kein PROJ-83-Blocker)
 
 #### AC-4: Werte außerhalb des Bereichs werden NICHT ausgeführt, deutsche Bereichsangabe
 - [x] `test_percent_out_of_range_not_executed`: "auf 150 Prozent" → kein HA-Call, Antwort "… nur zwischen 0 und 100 Prozent einstellen."
@@ -426,7 +426,7 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 #### AC-13 / AC-14: Sync bei Assist-Freischaltung / -Entzug
 - [x] Neue Automation `alice_sync_on_expose_changed.yaml` + Script `alice_resync.yaml` sind valide YAML, Struktur 1:1 an den bestehenden Automationen
 - [x] `full_sync()` gleicht **beide** Richtungen ab (`added` → indexieren; `removed_ids` → `deactivate_entities()` + Weaviate-Delete) — kein Worker-Code-Change
-- [ ] **BUG-2 (Medium, Live-Verifikation):** Ob HA beim Assist-Toggle einer **bestehenden** Entity tatsächlich `entity_registry_updated / action: update` feuert, ist **nicht verifiziert** (kein Live-HA). Der Expose-Status liegt in `homeassistant.exposed_entities`, separat von der Entity Registry — möglich, dass **kein** Registry-Event feuert und die Automation nie triggert. Mitigation: das manuelle Script `alice_resync.yaml` deckt den Fall zu 100 % ab (AC-15 erfüllt). Falls die Automation nicht triggert, ist AC-13/AC-14 **nur** über das Script erfüllt, nicht automatisch.
+- [x] **BUG-2 aufgelöst — Live-verifiziert 2026-09-04:** HA feuert `entity_registry_updated / action: update` zuverlässig beim Assist-Freischalten, beim Alias-Vergeben **und** beim Entziehen der Freigabe einer bestehenden Entity — alle drei Fälle live getestet, `alice_sync_on_expose_changed` löst in jedem Fall einen `ha_start`-Event mit `trigger: expose_changed` aus. Die automatische Erkennung funktioniert wie in der Architektur vorgesehen, ohne auf das manuelle Script angewiesen zu sein.
 
 #### AC-15: Manuelles HA-Script mit gleicher Wirkung
 - [x] `alice_resync.yaml` published `{"event":"ha_start","sync_type":"full",…}` → voller Re-Sync mit frischen Expose-Daten, auslösbar über HA-UI / `script.alice_resync`
@@ -475,15 +475,10 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - **Fix-Vorschlag:** Einkaufslisten-Erkennung auf der **Gesamt-Nachricht** vor dem Split versuchen; matcht sie, den ganzen Text (minus Trigger) als ein Item nehmen.
 - **Priority:** Fix in next sprint (Workaround: Artikel einzeln nennen; Single-Item — der Haupt-Use-Case — funktioniert)
 
-#### BUG-2: Automatischer Expose-Change-Trigger nicht live-verifiziert
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. Bestehende, registrierte HA-Entity für Assist freischalten
-  2. Erwartet: `alice_sync_on_expose_changed` feuert → Full-Sync → Entity in Weaviate
-  3. Tatsächlich: **unbekannt** — HA feuert `entity_registry_updated/update` möglicherweise **nicht** beim reinen Expose-Toggle (Status liegt in `homeassistant.exposed_entities`, nicht in der Entity Registry)
-- **Root Cause:** Offene Architektur-Frage (in der Spec unter "Technical Requirements" als zu verifizieren markiert). Kein Live-HA in der QA-Umgebung.
-- **Mitigation:** Das manuelle Script `alice_resync.yaml` (AC-15) deckt den Fall vollständig ab.
-- **Priority:** Vor Deployment gegen Live-HA prüfen. Falls die Automation nicht triggert: Trigger-Typ anpassen (z. B. auf einen Zustands-/Template-Trigger) oder als "nur manuell (Script)" dokumentieren.
+#### BUG-2: ~~Automatischer Expose-Change-Trigger nicht live-verifiziert~~ — RESOLVED 2026-09-04
+- **Severity:** war Medium, jetzt geschlossen
+- **Live-Test (Andreas, 2026-09-04):** Assist-Freischaltung einer bestehenden Entity, Alias-Vergabe und Entzug der Freigabe — alle drei Fälle lösen zuverlässig `entity_registry_updated/action:update` aus, `alice_sync_on_expose_changed` published in jedem Fall den erwarteten `ha_start`-Event mit `trigger: expose_changed`.
+- **Ergebnis:** Kein Fallback auf das manuelle Script nötig — die automatische Erkennung funktioniert wie in der Architektur vorgesehen.
 
 #### BUG-3: Bereichs-/Erfolgsmeldung nutzt entity_id statt Friendly Name
 - **Severity:** Medium
@@ -505,16 +500,35 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - **Priority:** Nice to have (Zieltemperaturen ≤ 0 °C sind praktisch irrelevant; Whisper liefert "minus" als Wort)
 
 ### Summary
-- **Acceptance Criteria:** 16/16 mit Code abgedeckt; **12 vollständig grün**, 4 mit Anmerkung (AC-1/AC-3/AC-6 brauchen Live-HA/Weaviate-Verifikation, AC-13/AC-14 via BUG-2)
+- **Acceptance Criteria:** 16/16 mit Code abgedeckt; **15 vollständig grün** (inkl. Live-Verifikation AC-1/AC-3/AC-13/AC-14), 1 mit offener Anmerkung (AC-6 — harte < 200 ms-Messung nicht gesondert gemessen, aber kein LLM-Aufruf im Pfad bestätigt)
 - **Edge Cases:** 13/14 grün, 1 Bug (BUG-4 Low), 1 Anmerkung (Bulk-Freigabe → Full-Sync statt Pro-Entity)
-- **Bugs Found:** 4 total (0 Critical, 0 High, 3 Medium, 1 Low)
+- **Bugs Found:** 4 total (0 Critical, 0 High, 2 Medium offen, 1 Medium **resolved** [BUG-2], 1 Low)
 - **Security:** PASS — keine neuen Schwachstellen
 - **Production Ready:** **YES** (keine Critical/High Bugs)
-- **Recommendation:** Deploybar. Die 3 Medium-Bugs sind kein Blocker:
+- **Live-Verifikation 2026-09-04 (Andreas):** Rolladen, Heizung, Einkaufsliste, Assist-Freigabe/-Entzug, Alias-Vergabe — alle wie erwartet. BUG-2 dadurch geschlossen.
+- **Recommendation:** Deployed. Die 2 verbleibenden Medium-Bugs (BUG-1, BUG-3) sind kein Blocker und für einen Folge-Sprint vorgemerkt:
   - BUG-1: Single-Item (Haupt-Use-Case) funktioniert; Multi-Item ist kein expliziter AC.
-  - BUG-2: manuelles Script als Fallback vorhanden; **nach dem Deploy gegen Live-HA verifizieren** und Ergebnis in der Spec nachtragen.
   - BUG-3: rein sprachlich, AC-Beispiel ist "z. B."-formuliert.
-  BUG-1 und BUG-3 für einen Folge-Sprint einplanen.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-09-04 (Andreas)
+
+| Schritt | Ausgeführt |
+|---|---|
+| `alice-chat-stream` neu gebaut + deployed | ✅ |
+| `alice-ha-sync` neu gebaut + deployed | ✅ |
+| Migration `068-proj83-cover-set-position-intent.sql` angewendet | ✅ |
+| `templates_updated`-Event auf `alice/ha/sync` published (`mosquitto_pub` im `mqtt`-Container) → Full-Re-Sync mit `force_all=True`, damit das neue `cover.set_cover_position`-Template auf die bestehenden Cover-Entities angewendet wird | ✅ |
+| `alice_sync_on_expose_changed.yaml` + `alice_resync.yaml` in Home Assistant registriert | ✅ |
+
+**Live-Verifikation (2026-09-04):**
+- Rolladen auf beliebigen Prozentwert stellen — funktioniert exakt
+- Heizung (`climate.ht_buro`) auf beliebigen Temperaturwert stellen — funktioniert exakt
+- Einkaufslisten-Eintrag (Freitext) — funktioniert
+- Bestehende Entity für Assist freischalten → automatischer Sync ohne HA-Neustart — funktioniert
+- Bestehende Entity mit Alias versehen → automatischer Sync — funktioniert
+- Assist-Freigabe einer Entity entziehen → automatischer Sync (Entfernung) — funktioniert
+- In allen drei Fällen löst `alice_sync_on_expose_changed` zuverlässig einen `ha_start`-Event mit `trigger: expose_changed` aus (siehe BUG-2, resolved)
+
+Keine Regressionen an den drei bestehenden Sync-Automationen oder an wertlosen Befehlen festgestellt.
