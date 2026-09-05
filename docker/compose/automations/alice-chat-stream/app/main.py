@@ -467,6 +467,9 @@ async def stream_chat_endpoint(
                             asyncio.create_task(
                                 memory.generate_title_async(session_id, user_message, final_text)
                             )
+            except asyncio.CancelledError:
+                logger.warning("DEBUG-PROJ83: persist step got CancelledError (client disconnect race)", extra=log_extra)
+                raise
             except Exception as exc:
                 logger.error("Failed to persist response: %s", exc, extra=log_extra)
 
