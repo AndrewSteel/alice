@@ -397,7 +397,7 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 #### AC-6: HA_FAST-Pfad, < 200 ms, kein LLM
 - [x] Werterkennung ist reine Regex/In-Prozess-Logik, kein LLM-Aufruf im Pfad
 - [x] Einziger Zusatz-Call: **ein** `GET /api/states/<entity>` und **nur** bei Heizungs-Befehlen (Licht/Rolladen: feste 0–100, kein GET)
-- [x] **Live-verifiziert 2026-09-05:** `chat_latency_seconds{path="HA_FAST"}` via Prometheus (`/metrics` an `alice-chat-stream:8003`) — erste Messung 160 ms End-to-End (inkl. nginx/JWT/Weaviate-Match/HA-REST-Call), unter dem 200-ms-Ziel. Einzelmessung; für p50/p95 über mehrere Befehlstypen (Rolladen/Licht/Heizung/Einkaufsliste) empfiehlt sich eine längere Beobachtung in Grafana/Prometheus.
+- [x] **Live-verifiziert 2026-09-05:** `chat_latency_seconds{path="HA_FAST"}` via Prometheus (`/metrics` an `alice-chat-stream:8003`) — nach 10 Requests `count=10`, `sum=1.636s` → Ø **163,6 ms** End-to-End (inkl. nginx/JWT/Weaviate-Match/HA-REST-Call), stabil unter dem 200-ms-Ziel, kein Ausreißer gegenüber der ersten Einzelmessung (160 ms).
 
 #### AC-7: Einkaufslisten-Eintrag als Freitext, inkl. Menge, keine Extraktion
 - [x] `test_shopping_list_add_item`: "2 Packungen Milch zur Einkaufsliste hinzufügen" → POST `todo/add_item {item: "2 Packungen Milch"}`
@@ -550,4 +550,4 @@ Keine Regressionen an den drei bestehenden Sync-Automationen oder an wertlosen B
 | `chat_requests_total`/`chat_latency_seconds` blieben trotzdem leer → Diagnose per temporärem Debug-Logging (Commits `ce5b930`, `0e2b0f6`) | ✅ |
 | BUG-5 gefunden (Client-Disconnect-Race verschluckt Persistierung + Metriken, siehe Bugs-Sektion) und behoben (`asyncio.shield()`, Commit `cf64c51`) | ✅ |
 | `alice-chat-stream` mit dem Fix neu gebaut + deployed | ✅ |
-| AC-6 live gemessen: `chat_latency_seconds{path="HA_FAST"}` = 160 ms (< 200-ms-Ziel) | ✅ |
+| AC-6 live gemessen: `chat_latency_seconds{path="HA_FAST"}` — Ø 163,6 ms über 10 Requests (< 200-ms-Ziel) | ✅ |
