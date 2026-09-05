@@ -480,11 +480,11 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - **Live-Test (Andreas, 2026-09-04):** Assist-Freischaltung einer bestehenden Entity, Alias-Vergabe und Entzug der Freigabe — alle drei Fälle lösen zuverlässig `entity_registry_updated/action:update` aus, `alice_sync_on_expose_changed` published in jedem Fall den erwarteten `ha_start`-Event mit `trigger: expose_changed`.
 - **Ergebnis:** Kein Fallback auf das manuelle Script nötig — die automatische Erkennung funktioniert wie in der Architektur vorgesehen.
 
-#### BUG-3: ~~Bereichs-/Erfolgsmeldung nutzt entity_id statt Friendly Name~~ — RESOLVED 2026-09-05
+#### BUG-3: ~~Bereichs-/Erfolgsmeldung nutzt entity_id statt Friendly Name~~ — RESOLVED + DEPLOYED 2026-09-05
 - **Severity:** war Medium, jetzt geschlossen
 - **War:** "Ht buro lässt sich nur zwischen 5 und 30 Grad einstellen." statt "HT Büro …"
 - **Fix:** `_entity_label()` nimmt jetzt den `friendly_name` aus `alice.ha_entities` (Batch-Lookup `_load_friendly_names()` zu Beginn von `execute_ha_intents()`), Fallback auf den `entity_id`-Slug wenn kein DB-Eintrag. Gilt für Bereichs-**und** Erfolgsmeldungen (Wert-Befehle). Neue Tests: `test_friendly_name_used_in_messages_when_available`, `test_entity_id_slug_fallback_when_no_friendly_name`.
-- **Ergebnis:** "HT Büro auf 21 Grad gestellt." / "HT Büro lässt sich nur zwischen 5 und 30 Grad einstellen."
+- **Ergebnis (live verifiziert 2026-09-05):** "HT Büro auf 21 Grad gestellt." / "HT Büro lässt sich nur zwischen 5 und 30 Grad einstellen."
 
 #### BUG-4: Negatives Vorzeichen bei Zahlen wird ignoriert
 - **Severity:** Low
@@ -520,7 +520,7 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - **Production Ready:** **YES** (keine offenen Critical/High Bugs)
 - **Live-Verifikation 2026-09-04 (Andreas):** Rolladen, Heizung, Einkaufsliste, Assist-Freigabe/-Entzug, Alias-Vergabe — alle wie erwartet. BUG-2 dadurch geschlossen.
 - **Live-Verifikation 2026-09-05:** AC-6 gemessen (Ø 163,6 ms über 10 Requests via Prometheus `chat_latency_seconds`), dabei BUG-5 gefunden und behoben (Client-Disconnect-Race) — betraf die Metrik-Sichtbarkeit **und** die Zuverlässigkeit der Chat-Historie-Persistierung.
-- **Nachlauf 2026-09-05:** BUG-3 (Friendly Name statt entity_id in Meldungen) **behoben**; BUG-1 als eigenständiges Thema nach **PROJ-102** verschoben (Multi-Intent-Zerlegung + LLM-Halluzinations-Schutz); ZUSATZ umgesetzt (persönliche Ansprache entfällt im HA_FAST-Pfad, `path`-SSE-Event).
+- **Nachlauf 2026-09-05:** BUG-3 (Friendly Name statt entity_id in Meldungen) **behoben + deployed + live verifiziert**; ZUSATZ umgesetzt + deployed + live verifiziert (persönliche Ansprache entfällt im HA_FAST-Pfad, `path`-SSE-Event); BUG-1 als eigenständiges Thema nach **PROJ-102** verschoben (Multi-Intent-Zerlegung + LLM-Halluzinations-Schutz).
 - **Recommendation:** Deployed. Offen bleibt nur BUG-4 (Low, negatives Vorzeichen) und das nach PROJ-102 ausgelagerte Multi-Intent-Thema.
 
 ## Deployment
@@ -560,15 +560,12 @@ Keine Regressionen an den drei bestehenden Sync-Automationen oder an wertlosen B
 
 | Schritt | Status |
 |---|---|
-| BUG-3: `_entity_label()` nutzt Friendly Name aus `alice.ha_entities` (Batch-Lookup), Fallback entity_id-Slug — für Bereichs- + Erfolgsmeldungen | ⏳ Deploy ausstehend |
-| ZUSATZ: `alice-chat-stream` sendet `{"type":"path", …}` als erstes SSE-Event; `alice-speech-gateway` verwirft die First-Turn-Begrüßung bei `path=HA_FAST` | ⏳ Deploy ausstehend |
+| BUG-3: `_entity_label()` nutzt Friendly Name aus `alice.ha_entities` (Batch-Lookup), Fallback entity_id-Slug — für Bereichs- + Erfolgsmeldungen | ✅ deployed 2026-09-05 |
+| ZUSATZ: `alice-chat-stream` sendet `{"type":"path", …}` als erstes SSE-Event; `alice-speech-gateway` verwirft die First-Turn-Begrüßung bei `path=HA_FAST` | ✅ deployed 2026-09-05 |
 | BUG-1 → PROJ-102 (neues Roadmap-Feature: Multi-Intent-Zerlegung + LLM-Halluzinations-Schutz) | ✅ INDEX.md |
+| `alice-chat-stream` + `alice-speech-gateway` neu gebaut + deployed | ✅ |
 
-**Deploy-Schritte für diesen Nachlauf:**
-1. `alice-chat-stream` neu bauen + deployen (BUG-3 in `ha_path.py`, `path`-Event in `main.py`).
-2. `alice-speech-gateway` neu bauen + deployen (`chat_client.py`, `pipeline.py`).
-   Rolling Deploy unkritisch — bei fehlendem `path`-Event greift im Gateway das bisherige Verhalten.
-3. Live-Test:
-   - Wert-Befehl außerhalb Bereich → Meldung nennt Friendly Name ("HT Büro …", nicht "Ht buro …").
-   - Erster Turn per Voice PE mit HA-Befehl → **keine** "Hallo {Name},"-Ansprache mehr, nur die reine Bestätigung.
-   - Erster Turn per Voice PE mit LLM-Frage → Ansprache bleibt.
+**Live-Verifikation 2026-09-05 (Andreas) — alles wie erwartet:**
+- Wert-Befehl außerhalb Bereich → Meldung nennt den Friendly Name ("HT Büro …", nicht "Ht buro …").
+- Erster Turn per Voice PE mit HA-Befehl → **keine** "Hallo {Name},"-Ansprache mehr, nur die reine Bestätigung.
+- Erster Turn per Voice PE mit LLM-Frage → Ansprache bleibt erhalten.
