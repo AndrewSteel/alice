@@ -397,7 +397,9 @@ async def stream_chat_endpoint(
                             "result_preview": json.dumps(ha_results, ensure_ascii=False)[:300],
                         }]
                         yield f'data: {{"type":"done","usage":{json.dumps(usage)}}}\n\n'.encode("utf-8")
+                        logger.warning("DEBUG-PROJ83: yielded done, about to yield [DONE]", extra=log_extra)
                         yield b"data: [DONE]\n\n"
+                        logger.warning("DEBUG-PROJ83: yielded [DONE], about to return", extra=log_extra)
                         return
             except Exception as exc:
                 logger.warning("HA fast-path errored, falling back to LLM: %s", exc, extra=log_extra)
@@ -431,6 +433,7 @@ async def stream_chat_endpoint(
             yield b"data: [DONE]\n\n"
             final_text = final_text or "Es ist ein Fehler aufgetreten."
         finally:
+            logger.warning("DEBUG-PROJ83: finally block entered, path=%s", path_label, extra=log_extra)
             # 3. Persist response — even if the client disconnected.
             latency_ms = int((time.monotonic() - request_start_ms) * 1000)
             tool_results_meta = {
@@ -469,6 +472,7 @@ async def stream_chat_endpoint(
 
             metrics.CHAT_REQUESTS_TOTAL.labels(path=path_label).inc()
             metrics.CHAT_LATENCY_SECONDS.labels(path=path_label).observe(latency_ms / 1000.0)
+            logger.warning("DEBUG-PROJ83: metrics recorded, path=%s, latency_ms=%s", path_label, latency_ms, extra=log_extra)
             logger.info(
                 "chat completed",
                 extra={**log_extra, "latency_ms": latency_ms, "path": path_label},
