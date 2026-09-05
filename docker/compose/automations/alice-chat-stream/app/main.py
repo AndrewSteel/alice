@@ -322,6 +322,73 @@ async def admin_dms_drilldown(
 # ---------------------------------------------------------------------------
 # /stream/chat
 # ---------------------------------------------------------------------------
+async def _persist_and_record_metrics(
+    *,
+    path_label: str,
+    request_start_ms: float,
+    session_id: str,
+    user_id: str,
+    user_message: str,
+    final_text: str,
+    tool_calls_log: list[dict],
+    usage: dict,
+    side: dict,
+    log_extra: dict,
+) -> None:
+    """
+    Persist the assistant's response and record Prometheus metrics.
+
+    Called via asyncio.shield() from event_generator()'s finally block: a
+    client that closes the SSE connection right after [DONE] (e.g.
+    alice-speech-gateway, which returns as soon as it reads [DONE]) can race
+    uvicorn's disconnect detection against that finally block and get the
+    streaming task cancelled mid-await. Running this as a shielded, independent
+    task means it still completes — otherwise the response is silently never
+    persisted and chat_requests_total/chat_latency_seconds are never recorded.
+    """
+    latency_ms = int((time.monotonic() - request_start_ms) * 1000)
+    tool_results_meta = {
+        "path_taken": path_label,
+        "latency_ms": latency_ms,
+        "llm_used": path_label != "HA_FAST",
+        "usage": usage,
+    }
+    try:
+        if path_label == "HA_FAST":
+            await memory.insert_ha_result(
+                session_id=session_id,
+                user_id=user_id,
+                content=final_text or "",
+                tool_results=tool_results_meta,
+            )
+        else:
+            thinking_text = side.get("thinking_text", "")
+            await memory.insert_llm_thinking(session_id, user_id, thinking_text)
+            await memory.insert_llm_response(
+                session_id=session_id,
+                user_id=user_id,
+                content=final_text or "",
+                tool_calls=tool_calls_log or None,
+                tool_results=tool_results_meta,
+                token_count=int(usage.get("completion_tokens") or 0),
+            )
+            if final_text:
+                llm_count = await memory.count_llm_responses(session_id)
+                if llm_count == 1:
+                    asyncio.create_task(
+                        memory.generate_title_async(session_id, user_message, final_text)
+                    )
+    except Exception as exc:
+        logger.error("Failed to persist response: %s", exc, extra=log_extra)
+
+    metrics.CHAT_REQUESTS_TOTAL.labels(path=path_label).inc()
+    metrics.CHAT_LATENCY_SECONDS.labels(path=path_label).observe(latency_ms / 1000.0)
+    logger.info(
+        "chat completed",
+        extra={**log_extra, "latency_ms": latency_ms, "path": path_label},
+    )
+
+
 @app.post("/stream/chat")
 async def stream_chat_endpoint(
     body: ChatRequest,
@@ -397,9 +464,7 @@ async def stream_chat_endpoint(
                             "result_preview": json.dumps(ha_results, ensure_ascii=False)[:300],
                         }]
                         yield f'data: {{"type":"done","usage":{json.dumps(usage)}}}\n\n'.encode("utf-8")
-                        logger.warning("DEBUG-PROJ83: yielded done, about to yield [DONE]", extra=log_extra)
                         yield b"data: [DONE]\n\n"
-                        logger.warning("DEBUG-PROJ83: yielded [DONE], about to return", extra=log_extra)
                         return
             except Exception as exc:
                 logger.warning("HA fast-path errored, falling back to LLM: %s", exc, extra=log_extra)
@@ -433,53 +498,30 @@ async def stream_chat_endpoint(
             yield b"data: [DONE]\n\n"
             final_text = final_text or "Es ist ein Fehler aufgetreten."
         finally:
-            logger.warning("DEBUG-PROJ83: finally block entered, path=%s", path_label, extra=log_extra)
-            # 3. Persist response — even if the client disconnected.
-            latency_ms = int((time.monotonic() - request_start_ms) * 1000)
-            tool_results_meta = {
-                "path_taken": path_label,
-                "latency_ms": latency_ms,
-                "llm_used": path_label != "HA_FAST",
-                "usage": usage,
-            }
+            # 3. Persist response + record metrics — even if the client already
+            # disconnected. A client that closes the connection right after
+            # [DONE] (e.g. alice-speech-gateway) can race uvicorn's disconnect
+            # detection against this finally block and get this task
+            # cancelled mid-await; asyncio.shield() runs the work as an
+            # independent task so it completes even if *this* task is
+            # cancelled (PROJ-83 — found via missing chat_latency_seconds).
             try:
-                if path_label == "HA_FAST":
-                    await memory.insert_ha_result(
-                        session_id=session_id,
-                        user_id=user_id,
-                        content=final_text or "",
-                        tool_results=tool_results_meta,
-                    )
-                else:
-                    thinking_text = side.get("thinking_text", "")
-                    await memory.insert_llm_thinking(session_id, user_id, thinking_text)
-                    await memory.insert_llm_response(
-                        session_id=session_id,
-                        user_id=user_id,
-                        content=final_text or "",
-                        tool_calls=tool_calls_log or None,
-                        tool_results=tool_results_meta,
-                        token_count=int(usage.get("completion_tokens") or 0),
-                    )
-                    if final_text:
-                        llm_count = await memory.count_llm_responses(session_id)
-                        if llm_count == 1:
-                            asyncio.create_task(
-                                memory.generate_title_async(session_id, user_message, final_text)
-                            )
+                await asyncio.shield(_persist_and_record_metrics(
+                    path_label=path_label,
+                    request_start_ms=request_start_ms,
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    final_text=final_text,
+                    tool_calls_log=tool_calls_log,
+                    usage=usage,
+                    side=side,
+                    log_extra=log_extra,
+                ))
             except asyncio.CancelledError:
-                logger.warning("DEBUG-PROJ83: persist step got CancelledError (client disconnect race)", extra=log_extra)
-                raise
-            except Exception as exc:
-                logger.error("Failed to persist response: %s", exc, extra=log_extra)
-
-            metrics.CHAT_REQUESTS_TOTAL.labels(path=path_label).inc()
-            metrics.CHAT_LATENCY_SECONDS.labels(path=path_label).observe(latency_ms / 1000.0)
-            logger.warning("DEBUG-PROJ83: metrics recorded, path=%s, latency_ms=%s", path_label, latency_ms, extra=log_extra)
-            logger.info(
-                "chat completed",
-                extra={**log_extra, "latency_ms": latency_ms, "path": path_label},
-            )
+                # Only the outer stream task was cancelled; the shielded
+                # persist/metrics work above already ran to completion.
+                pass
 
     headers = {
         "Cache-Control": "no-cache",
