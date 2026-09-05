@@ -465,30 +465,26 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 
 ### Bugs Found
 
-#### BUG-1: Mehr-Artikel-Einkaufslisten-Eintrag ("Milch und Butter …") bricht am Sentence-Splitter
+#### BUG-1: Mehr-Artikel-Einkaufslisten-Eintrag ("Milch und Butter …") bricht am Sentence-Splitter → **verschoben nach PROJ-102**
 - **Severity:** Medium
 - **Steps to Reproduce:**
-  1. Sage "Milch und Butter zur Einkaufsliste hinzufügen"
-  2. Erwartet: beide Artikel landen auf der Liste (oder "Milch und Butter" als ein Eintrag)
-  3. Tatsächlich: Splitter trennt an "und" → "Milch" wird zum Orphan-Teil, matcht kein Intent → **gesamter Request geht an den LLM** (langsamer, evtl. unerwartetes Verhalten)
-- **Root Cause:** `detect_shopping_list_item` läuft **nach** `split_message`. Der Splitter kennt den Einkaufslisten-Kontext nicht.
-- **Fix-Vorschlag:** Einkaufslisten-Erkennung auf der **Gesamt-Nachricht** vor dem Split versuchen; matcht sie, den ganzen Text (minus Trigger) als ein Item nehmen.
-- **Priority:** Fix in next sprint (Workaround: Artikel einzeln nennen; Single-Item — der Haupt-Use-Case — funktioniert)
+  1. Sage "Setze Milch und Butter auf die Einkaufsliste"
+  2. Erwartet: beide Artikel landen auf der Liste
+  3. Tatsächlich (Live-Test Andreas 2026-09-05): **kein Eintrag** wird erzeugt, aber der LLM antwortet "Ich habe Milch und Butter zur Einkaufsliste hinzugefügt" — **halluzinierte Erfolgsmeldung ohne tatsächliche Aktion**. Was stattdessen wirklich lief, ist für den Nutzer nicht nachvollziehbar.
+- **Root Cause:** `split_message` trennt an "und" → Orphan-Teil "Setze Milch" matcht nichts → gesamter Request an LLM_ONLY → LLM behauptet einen Tool-Erfolg, den es nicht ausgeführt hat.
+- **Entscheidung 2026-09-05 (Andreas):** Das ist ein größeres Thema (Multi-Intent-Zerlegung über Domänengrenzen hinweg + Schutz vor LLM-Aktions-Halluzination) und wird als **PROJ-102** gesondert behandelt. Nicht mehr Teil von PROJ-83.
+- **Restrisiko bis PROJ-102:** Einzeln genannte Artikel ("Setze Milch auf die Einkaufsliste") funktionieren korrekt (Haupt-Use-Case). Mehr-Artikel-Sätze führen zu einer irreführenden LLM-Antwort.
 
 #### BUG-2: ~~Automatischer Expose-Change-Trigger nicht live-verifiziert~~ — RESOLVED 2026-09-04
 - **Severity:** war Medium, jetzt geschlossen
 - **Live-Test (Andreas, 2026-09-04):** Assist-Freischaltung einer bestehenden Entity, Alias-Vergabe und Entzug der Freigabe — alle drei Fälle lösen zuverlässig `entity_registry_updated/action:update` aus, `alice_sync_on_expose_changed` published in jedem Fall den erwarteten `ha_start`-Event mit `trigger: expose_changed`.
 - **Ergebnis:** Kein Fallback auf das manuelle Script nötig — die automatische Erkennung funktioniert wie in der Architektur vorgesehen.
 
-#### BUG-3: Bereichs-/Erfolgsmeldung nutzt entity_id statt Friendly Name
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. Sage "Heizung im Büro auf 45 Grad" (außerhalb 5–30)
-  2. Erwartet (AC-4-Beispiel): "Die Heizung im Büro lässt sich nur zwischen 5 und 30 Grad einstellen."
-  3. Tatsächlich: "Ht buro lässt sich nur zwischen 5 und 30 Grad einstellen."
-- **Root Cause:** `_entity_label()` leitet den Namen aus `entity_id.split(".")[-1].replace("_"," ")` ab. Vorbestehend (auch Erfolgsmeldungen: "Buro geöffnet.").
-- **Fix-Vorschlag:** Friendly Name aus `alice.ha_entities` / dem Weaviate-Match (`name`) nutzen, wenn vorhanden.
-- **Priority:** Fix in next sprint (verständlich, nur sprachlich unschön; AC sagt "z. B.")
+#### BUG-3: ~~Bereichs-/Erfolgsmeldung nutzt entity_id statt Friendly Name~~ — RESOLVED 2026-09-05
+- **Severity:** war Medium, jetzt geschlossen
+- **War:** "Ht buro lässt sich nur zwischen 5 und 30 Grad einstellen." statt "HT Büro …"
+- **Fix:** `_entity_label()` nimmt jetzt den `friendly_name` aus `alice.ha_entities` (Batch-Lookup `_load_friendly_names()` zu Beginn von `execute_ha_intents()`), Fallback auf den `entity_id`-Slug wenn kein DB-Eintrag. Gilt für Bereichs-**und** Erfolgsmeldungen (Wert-Befehle). Neue Tests: `test_friendly_name_used_in_messages_when_available`, `test_entity_id_slug_fallback_when_no_friendly_name`.
+- **Ergebnis:** "HT Büro auf 21 Grad gestellt." / "HT Büro lässt sich nur zwischen 5 und 30 Grad einstellen."
 
 #### BUG-4: Negatives Vorzeichen bei Zahlen wird ignoriert
 - **Severity:** Low
@@ -507,17 +503,25 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - **Fix (Commit `cf64c51`):** Persist- und Metrik-Logik in `_persist_and_record_metrics()` ausgelagert, Aufruf im `finally`-Block über `asyncio.shield()` — läuft als unabhängige Task zu Ende, auch wenn die äußere Stream-Task gecancelt wird.
 - **Verifiziert:** `chat_requests_total{path="HA_FAST"}` und `chat_latency_seconds` liefern seither zuverlässig Daten (erste Messung: 160 ms).
 
+#### ZUSATZ 2026-09-05: Persönliche Ansprache ("Hallo Andreas,") im HA_FAST-Pfad entfällt
+- **Wunsch (Andreas):** Die per PROJ-43 eingeführte First-Turn-Begrüßung dient dazu, zu erkennen wer den Auftrag gestellt hat. Vor einer kurzen HA-Bestätigung ("Hallo Andreas, Rolladen Büro auf 40 Prozent gestellt.") klingt sie störend. Im LLM-Pfad bleibt sie (dort erfüllt sie ihren Zweck vor einer längeren Antwort).
+- **Umsetzung:**
+  - `alice-chat-stream` (`main.py`): sendet als **erstes** SSE-Event ein explizites `{"type":"path","path":"HA_FAST"|"LLM_ONLY"}` — sauberes Signal statt Heuristik im Gateway (ein LLM-Turn ohne Reasoning-Block sendet auch direkt `token`).
+  - `alice-speech-gateway` (`chat_client.py`, `pipeline.py`): bei `path=HA_FAST` wird `greeting_pending` verworfen. Der erkannte Sprecher wird weiterhin für Berechtigungen genutzt und von `alice-chat-stream` in `alice.messages` persistiert — nur nicht mehr vorgelesen.
+  - Frontend: unbekannter `type:"path"` wird vom SSE-Switch (`api.ts`) ohne `default`-Zweig still ignoriert — keine Regression.
+- **Tests:** `test_pipeline.py` — `test_ha_fast_path_drops_first_turn_greeting`, `test_llm_path_keeps_first_turn_greeting_via_thinking`, `test_llm_path_no_reasoning_keeps_greeting_prefix`, `test_ha_fast_greeting_dropped_for_guest_too`.
+- **Deploy:** `alice-chat-stream` **und** `alice-speech-gateway` neu bauen. Rolling Deploy unkritisch: fehlt das `path`-Event (alte chat-stream-Version), greift im Gateway das bisherige Verhalten (Begrüßung als Prefix / Thinking-Message).
+
 ### Summary
 - **Acceptance Criteria:** 16/16 mit Code abgedeckt; **16/16 vollständig grün** (inkl. Live-Verifikation AC-1/AC-3/AC-6/AC-13/AC-14)
 - **Edge Cases:** 13/14 grün, 1 Bug (BUG-4 Low), 1 Anmerkung (Bulk-Freigabe → Full-Sync statt Pro-Entity)
-- **Bugs Found:** 5 total (0 Critical, 0 High offen [1 High **resolved**: BUG-5], 2 Medium offen, 1 Medium **resolved** [BUG-2], 1 Low)
+- **Bugs Found:** 5 total (0 Critical, 0 High offen [1 High **resolved**: BUG-5], 0 Medium offen [BUG-2 + BUG-3 **resolved**, BUG-1 → **PROJ-102**], 1 Low offen [BUG-4]) + ZUSATZ (Ansprache im HA_FAST-Pfad) umgesetzt
 - **Security:** PASS — keine neuen Schwachstellen
 - **Production Ready:** **YES** (keine offenen Critical/High Bugs)
 - **Live-Verifikation 2026-09-04 (Andreas):** Rolladen, Heizung, Einkaufsliste, Assist-Freigabe/-Entzug, Alias-Vergabe — alle wie erwartet. BUG-2 dadurch geschlossen.
-- **Live-Verifikation 2026-09-05:** AC-6 gemessen (160 ms via Prometheus `chat_latency_seconds`), dabei BUG-5 gefunden und behoben (Client-Disconnect-Race, siehe oben) — betraf die Metrik-Sichtbarkeit **und** die Zuverlässigkeit der Chat-Historie-Persistierung.
-- **Recommendation:** Deployed. Die 2 verbleibenden Medium-Bugs (BUG-1, BUG-3) sind kein Blocker und für einen Folge-Sprint vorgemerkt:
-  - BUG-1: Single-Item (Haupt-Use-Case) funktioniert; Multi-Item ist kein expliziter AC.
-  - BUG-3: rein sprachlich, AC-Beispiel ist "z. B."-formuliert.
+- **Live-Verifikation 2026-09-05:** AC-6 gemessen (Ø 163,6 ms über 10 Requests via Prometheus `chat_latency_seconds`), dabei BUG-5 gefunden und behoben (Client-Disconnect-Race) — betraf die Metrik-Sichtbarkeit **und** die Zuverlässigkeit der Chat-Historie-Persistierung.
+- **Nachlauf 2026-09-05:** BUG-3 (Friendly Name statt entity_id in Meldungen) **behoben**; BUG-1 als eigenständiges Thema nach **PROJ-102** verschoben (Multi-Intent-Zerlegung + LLM-Halluzinations-Schutz); ZUSATZ umgesetzt (persönliche Ansprache entfällt im HA_FAST-Pfad, `path`-SSE-Event).
+- **Recommendation:** Deployed. Offen bleibt nur BUG-4 (Low, negatives Vorzeichen) und das nach PROJ-102 ausgelagerte Multi-Intent-Thema.
 
 ## Deployment
 
@@ -551,3 +555,20 @@ Keine Regressionen an den drei bestehenden Sync-Automationen oder an wertlosen B
 | BUG-5 gefunden (Client-Disconnect-Race verschluckt Persistierung + Metriken, siehe Bugs-Sektion) und behoben (`asyncio.shield()`, Commit `cf64c51`) | ✅ |
 | `alice-chat-stream` mit dem Fix neu gebaut + deployed | ✅ |
 | AC-6 live gemessen: `chat_latency_seconds{path="HA_FAST"}` — Ø 163,6 ms über 10 Requests (< 200-ms-Ziel) | ✅ |
+
+**Nachlauf 2026-09-05 — BUG-3 + ZUSATZ (nach Live-Feedback Andreas):**
+
+| Schritt | Status |
+|---|---|
+| BUG-3: `_entity_label()` nutzt Friendly Name aus `alice.ha_entities` (Batch-Lookup), Fallback entity_id-Slug — für Bereichs- + Erfolgsmeldungen | ⏳ Deploy ausstehend |
+| ZUSATZ: `alice-chat-stream` sendet `{"type":"path", …}` als erstes SSE-Event; `alice-speech-gateway` verwirft die First-Turn-Begrüßung bei `path=HA_FAST` | ⏳ Deploy ausstehend |
+| BUG-1 → PROJ-102 (neues Roadmap-Feature: Multi-Intent-Zerlegung + LLM-Halluzinations-Schutz) | ✅ INDEX.md |
+
+**Deploy-Schritte für diesen Nachlauf:**
+1. `alice-chat-stream` neu bauen + deployen (BUG-3 in `ha_path.py`, `path`-Event in `main.py`).
+2. `alice-speech-gateway` neu bauen + deployen (`chat_client.py`, `pipeline.py`).
+   Rolling Deploy unkritisch — bei fehlendem `path`-Event greift im Gateway das bisherige Verhalten.
+3. Live-Test:
+   - Wert-Befehl außerhalb Bereich → Meldung nennt Friendly Name ("HT Büro …", nicht "Ht buro …").
+   - Erster Turn per Voice PE mit HA-Befehl → **keine** "Hallo {Name},"-Ansprache mehr, nur die reine Bestätigung.
+   - Erster Turn per Voice PE mit LLM-Frage → Ansprache bleibt.
