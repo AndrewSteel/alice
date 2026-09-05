@@ -25,6 +25,8 @@ services:
         aliases: [alice-chat-stream]
       backend:
         aliases: [alice-chat-stream]
+      frontend:
+        aliases: [alice-chat-stream]
 
 networks:
   backend:
@@ -33,3 +35,6 @@ networks:
   automation:
     external: true
     name: automation
+  frontend:
+    external: true
+    name: frontend
