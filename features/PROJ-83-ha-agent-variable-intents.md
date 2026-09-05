@@ -397,7 +397,7 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 #### AC-6: HA_FAST-Pfad, < 200 ms, kein LLM
 - [x] Werterkennung ist reine Regex/In-Prozess-Logik, kein LLM-Aufruf im Pfad
 - [x] Einziger Zusatz-Call: **ein** `GET /api/states/<entity>` und **nur** bei Heizungs-Befehlen (Licht/Rolladen: feste 0–100, kein GET)
-- [⚠] **Live-Messung nötig** für die harte < 200 ms-Zahl (in dieser Umgebung nicht messbar)
+- [x] **Live-verifiziert 2026-09-05:** `chat_latency_seconds{path="HA_FAST"}` via Prometheus (`/metrics` an `alice-chat-stream:8003`) — erste Messung 160 ms End-to-End (inkl. nginx/JWT/Weaviate-Match/HA-REST-Call), unter dem 200-ms-Ziel. Einzelmessung; für p50/p95 über mehrere Befehlstypen (Rolladen/Licht/Heizung/Einkaufsliste) empfiehlt sich eine längere Beobachtung in Grafana/Prometheus.
 
 #### AC-7: Einkaufslisten-Eintrag als Freitext, inkl. Menge, keine Extraktion
 - [x] `test_shopping_list_add_item`: "2 Packungen Milch zur Einkaufsliste hinzufügen" → POST `todo/add_item {item: "2 Packungen Milch"}`
@@ -499,13 +499,22 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - **Root Cause:** `extract_numeric_value` matcht nur `\d+(?:[.,]\d+)?`.
 - **Priority:** Nice to have (Zieltemperaturen ≤ 0 °C sind praktisch irrelevant; Whisper liefert "minus" als Wort)
 
+#### BUG-5 (außerhalb PROJ-83-Scope, während AC-6-Messung gefunden + gefixt): Client-Disconnect-Race verschluckt Persistierung + Metriken
+- **Severity:** war High (stiller Datenverlust in `alice.messages`), **resolved 2026-09-05**
+- **Gefunden bei:** Versuch, AC-6 (< 200 ms) über `chat_latency_seconds` in Prometheus zu messen — die Metrik hatte trotz erfolgreicher HA-Ausführung nie einen Datenpunkt
+- **Root Cause:** `alice-speech-gateway` (Wyoming/Voice-PE-Pfad) schließt die SSE-Verbindung sofort nach dem Lesen von `[DONE]`, ohne zu warten. uvicorns Disconnect-Erkennung kann das gegen den `finally`-Block in `event_generator()` (`main.py`) racen und die Task genau während `await memory.insert_ha_result(...)`/`insert_llm_response(...)` canceln. `asyncio.CancelledError` ist ein `BaseException` und wird von `except Exception` nicht abgefangen → Persistierung **und** Metrik-Aufzeichnung wurden übersprungen, ohne Fehler-Log. Betrifft **nicht nur PROJ-83/HA_FAST**, sondern potenziell jeden Client, der die Verbindung direkt nach `[DONE]` schließt — Chat-Historie konnte für solche Requests unvollständig in `alice.messages` landen.
+- **Diagnose:** temporäres Debug-Logging (Commits `ce5b930`, `0e2b0f6`) zeigte: `finally` wird betreten, aber die Metrik-Zeile nie erreicht; explizites `except asyncio.CancelledError`-Log bestätigte die Ursache live über Voice PE.
+- **Fix (Commit `cf64c51`):** Persist- und Metrik-Logik in `_persist_and_record_metrics()` ausgelagert, Aufruf im `finally`-Block über `asyncio.shield()` — läuft als unabhängige Task zu Ende, auch wenn die äußere Stream-Task gecancelt wird.
+- **Verifiziert:** `chat_requests_total{path="HA_FAST"}` und `chat_latency_seconds` liefern seither zuverlässig Daten (erste Messung: 160 ms).
+
 ### Summary
-- **Acceptance Criteria:** 16/16 mit Code abgedeckt; **15 vollständig grün** (inkl. Live-Verifikation AC-1/AC-3/AC-13/AC-14), 1 mit offener Anmerkung (AC-6 — harte < 200 ms-Messung nicht gesondert gemessen, aber kein LLM-Aufruf im Pfad bestätigt)
+- **Acceptance Criteria:** 16/16 mit Code abgedeckt; **16/16 vollständig grün** (inkl. Live-Verifikation AC-1/AC-3/AC-6/AC-13/AC-14)
 - **Edge Cases:** 13/14 grün, 1 Bug (BUG-4 Low), 1 Anmerkung (Bulk-Freigabe → Full-Sync statt Pro-Entity)
-- **Bugs Found:** 4 total (0 Critical, 0 High, 2 Medium offen, 1 Medium **resolved** [BUG-2], 1 Low)
+- **Bugs Found:** 5 total (0 Critical, 0 High offen [1 High **resolved**: BUG-5], 2 Medium offen, 1 Medium **resolved** [BUG-2], 1 Low)
 - **Security:** PASS — keine neuen Schwachstellen
-- **Production Ready:** **YES** (keine Critical/High Bugs)
+- **Production Ready:** **YES** (keine offenen Critical/High Bugs)
 - **Live-Verifikation 2026-09-04 (Andreas):** Rolladen, Heizung, Einkaufsliste, Assist-Freigabe/-Entzug, Alias-Vergabe — alle wie erwartet. BUG-2 dadurch geschlossen.
+- **Live-Verifikation 2026-09-05:** AC-6 gemessen (160 ms via Prometheus `chat_latency_seconds`), dabei BUG-5 gefunden und behoben (Client-Disconnect-Race, siehe oben) — betraf die Metrik-Sichtbarkeit **und** die Zuverlässigkeit der Chat-Historie-Persistierung.
 - **Recommendation:** Deployed. Die 2 verbleibenden Medium-Bugs (BUG-1, BUG-3) sind kein Blocker und für einen Folge-Sprint vorgemerkt:
   - BUG-1: Single-Item (Haupt-Use-Case) funktioniert; Multi-Item ist kein expliziter AC.
   - BUG-3: rein sprachlich, AC-Beispiel ist "z. B."-formuliert.
@@ -532,3 +541,13 @@ Alle 63 Tests im `alice-chat-stream`-Paket grün (`test_admin_dashboard.py` schl
 - In allen drei Fällen löst `alice_sync_on_expose_changed` zuverlässig einen `ha_start`-Event mit `trigger: expose_changed` aus (siehe BUG-2, resolved)
 
 Keine Regressionen an den drei bestehenden Sync-Automationen oder an wertlosen Befehlen festgestellt.
+
+**Nachlauf 2026-09-05 — AC-6-Messung + BUG-5:**
+
+| Schritt | Ausgeführt |
+|---|---|
+| `frontend`-Netzwerk zu `alice-chat-stream` hinzugefügt (Commit `311deb0`), damit Prometheus den bereits in `prometheus.yml` eingetragenen `chatstream`-Job erreichen kann | ✅ |
+| `chat_requests_total`/`chat_latency_seconds` blieben trotzdem leer → Diagnose per temporärem Debug-Logging (Commits `ce5b930`, `0e2b0f6`) | ✅ |
+| BUG-5 gefunden (Client-Disconnect-Race verschluckt Persistierung + Metriken, siehe Bugs-Sektion) und behoben (`asyncio.shield()`, Commit `cf64c51`) | ✅ |
+| `alice-chat-stream` mit dem Fix neu gebaut + deployed | ✅ |
+| AC-6 live gemessen: `chat_latency_seconds{path="HA_FAST"}` = 160 ms (< 200-ms-Ziel) | ✅ |
