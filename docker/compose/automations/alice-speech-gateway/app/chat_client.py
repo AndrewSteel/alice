@@ -4,7 +4,8 @@ Chat client — consumes the alice-chat-stream SSE endpoint.
 alice-chat-stream owns conversation history; the gateway is stateless and
 just forwards `session_id` + user transcript and yields back text tokens.
 
-SSE event shapes produced by alice-chat-stream (see streaming.py):
+SSE event shapes produced by alice-chat-stream (see streaming.py / main.py):
+  data: {"type":"path","path":"HA_FAST"|"LLM_ONLY"}  — routing decision, first event
   data: {"type":"token","content":"..."}
   data: {"type":"thinking_start","anrede":"..."}  — first thinking token, triggers waiting message
   data: {"type":"thinking","content":"..."}        — reasoning, NOT spoken
@@ -42,7 +43,9 @@ class ChatEvent:
     __slots__ = ("kind", "text")
 
     def __init__(self, kind: str, text: str = "") -> None:
-        # kind: "token" | "conversation_end" | "error" | "done"
+        # kind: "path" | "token" | "thinking_start" | "conversation_end"
+        #       | "error" | "done"
+        # For "path", text is "HA_FAST" or "LLM_ONLY".
         self.kind = kind
         self.text = text
 
@@ -85,7 +88,9 @@ async def stream_reply(
                     except json.JSONDecodeError:
                         continue
                     etype = event.get("type")
-                    if etype == "token":
+                    if etype == "path":
+                        yield ChatEvent("path", event.get("path", ""))
+                    elif etype == "token":
                         yield ChatEvent("token", event.get("content", ""))
                     elif etype == "thinking_start":
                         yield ChatEvent("thinking_start", event.get("anrede", "du"))

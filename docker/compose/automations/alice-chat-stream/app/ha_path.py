@@ -294,10 +294,38 @@ def _action_text(service: str | None) -> str:
     return "ausgeführt"
 
 
-def _entity_label(intent: IntentMatch) -> str:
+def _entity_label(intent: IntentMatch, friendly_names: dict[str, str] | None = None) -> str:
+    """Human-readable entity label.
+
+    Prefers the HA friendly name from alice.ha_entities (PROJ-83 BUG-3 —
+    "HT Büro" instead of "Ht buro"); falls back to the entity_id slug.
+    """
+    if friendly_names and intent.entity_id:
+        fn = friendly_names.get(intent.entity_id)
+        if fn:
+            return fn
     raw = intent.entity_id or intent.domain or "Aktion"
     name = raw.split(".")[-1].replace("_", " ")
     return name[:1].upper() + name[1:]
+
+
+async def _load_friendly_names(entity_ids: list[str]) -> dict[str, str]:
+    """Look up friendly names for a batch of entity_ids from alice.ha_entities."""
+    ids = [e for e in entity_ids if e]
+    if not ids:
+        return {}
+    from . import memory
+
+    try:
+        rows = await memory.pool().fetch(
+            "SELECT entity_id, friendly_name FROM alice.ha_entities "
+            "WHERE entity_id = ANY($1::text[]) AND friendly_name IS NOT NULL",
+            ids,
+        )
+    except Exception as exc:
+        logger.warning("Friendly-name lookup failed: %s", exc)
+        return {}
+    return {r["entity_id"]: r["friendly_name"] for r in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +357,8 @@ def _fmt_num(n: float) -> str:
 
 
 async def _resolve_value(
-    intent: IntentMatch, part: str, headers: dict, client: httpx.AsyncClient
+    intent: IntentMatch, part: str, headers: dict, client: httpx.AsyncClient,
+    friendly_names: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Resolve the exact spoken value for a value-bearing intent.
 
@@ -347,7 +376,7 @@ async def _resolve_value(
     if value is None:
         return {"ok": False, "fallback": True}
 
-    label = _entity_label(intent)
+    label = _entity_label(intent, friendly_names)
     if value_type == "percent":
         if not (0 <= value <= 100):
             return {
@@ -450,13 +479,17 @@ async def execute_ha_intents(
         names = ", ".join(i.entity_id or i.domain or "?" for i in needs_confirmation)
         return (f'Bist du sicher? Ich soll {names} steuern. Bitte bestätige mit "Ja".', [])
 
+    # Friendly names for all involved entities (PROJ-83 BUG-3 — nicer German
+    # in success/range messages).
+    friendly_names = await _load_friendly_names([i.entity_id for i, _, _ in work if i.entity_id])
+
     # --- Pass 1: resolve every value-bearing intent BEFORE any HA call, so a
     # missing number aborts the whole HA_FAST path without partial execution. ---
     resolved_by_idx: dict[int, dict[str, Any]] = {}
     for idx, (intent, part, shop) in enumerate(work):
         if shop is not None or not intent.service or "." not in intent.service:
             continue
-        resolved = await _resolve_value(intent, part, headers, client)
+        resolved = await _resolve_value(intent, part, headers, client, friendly_names)
         if not resolved["ok"] and resolved.get("fallback"):
             raise ValueError(
                 f"value-bearing intent {intent.service} without a number in {part!r}"
@@ -500,7 +533,7 @@ async def execute_ha_intents(
                 r = {"entity": intent.entity_id, "success": True,
                      "status": resp.status_code, "params": call_params}
                 results.append(r)
-                out_parts.append(_value_action_text(intent, call_params))
+                out_parts.append(_value_action_text(intent, call_params, friendly_names))
             else:
                 err = "auth" if resp.status_code == 401 else "notfound" if resp.status_code == 404 else "unknown"
                 msg = (
@@ -531,9 +564,11 @@ async def execute_ha_intents(
     return (" ".join(out_parts) or "Erledigt.", results)
 
 
-def _value_action_text(intent: IntentMatch, params: dict[str, Any]) -> str:
+def _value_action_text(
+    intent: IntentMatch, params: dict[str, Any], friendly_names: dict[str, str] | None = None
+) -> str:
     """German confirmation line for a successful value-bearing call."""
-    label = _entity_label(intent)
+    label = _entity_label(intent, friendly_names)
     if "temperature" in params:
         return f"{label} auf {_fmt_num(params['temperature'])} Grad gestellt."
     for key in ("brightness_pct", "position", "value"):
