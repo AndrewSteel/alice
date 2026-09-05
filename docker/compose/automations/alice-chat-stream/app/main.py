@@ -453,6 +453,12 @@ async def stream_chat_endpoint(
                         # value-bearing intent with no spoken number raises and
                         # we fall through to the LLM (PROJ-83).
                         path_label = "HA_FAST"
+                        # Signal the routing decision before the first token so
+                        # downstream consumers (alice-speech-gateway) can react —
+                        # e.g. suppress the personal greeting on the HA_FAST path
+                        # (PROJ-83 ZUSATZ). Emitted only for HA_FAST; the LLM
+                        # branch below emits its own "path" event.
+                        yield b'data: {"type":"path","path":"HA_FAST"}\n\n'
                         # Stream HA result as a single token + done
                         yield f'data: {{"type":"token","content":{json.dumps(text, ensure_ascii=False)}}}\n\n'.encode("utf-8")
                         usage = {"prompt_tokens": 0, "completion_tokens": len(text)}
@@ -470,6 +476,9 @@ async def stream_chat_endpoint(
                 logger.warning("HA fast-path errored, falling back to LLM: %s", exc, extra=log_extra)
 
             # --- LLM streaming ---
+            # Counterpart to the HA_FAST "path" event above (PROJ-83 ZUSATZ):
+            # the gateway keeps the personal greeting on this path.
+            yield b'data: {"type":"path","path":"LLM_ONLY"}\n\n'
             async for sse_bytes, side_effect in streaming.stream_chat(
                 user_message=user_message,
                 history=history,

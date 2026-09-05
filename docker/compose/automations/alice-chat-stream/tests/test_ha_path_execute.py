@@ -125,6 +125,44 @@ def test_temperature_out_of_range_uses_actual_bounds():
     assert "zwischen 5 und 30 Grad" in text
 
 
+def test_friendly_name_used_in_messages_when_available(monkeypatch):
+    # PROJ-83 BUG-3 — range/success message uses the HA friendly name, not the
+    # entity_id slug ("HT Büro", not "Ht buro").
+    class _FN:
+        async def fetch(self, *a, **kw):
+            return [{"entity_id": "climate.ht_buro", "friendly_name": "HT Büro"}]
+
+    import app.memory as memory
+    monkeypatch.setattr(memory, "pool", lambda: _FN())
+
+    intent = IntentMatch(matched=True, certainty=0.9, entity_id="climate.ht_buro",
+                         domain="climate", service="climate.set_temperature",
+                         parameters={"temperature": 20})
+    client = FakeClient(states={"climate.ht_buro": {"min_temp": 5, "max_temp": 30}})
+    text, _ = run(execute_ha_intents([intent], client, parts=["auf 45 Grad"]))
+    assert text.startswith("HT Büro lässt sich nur")
+
+    client2 = FakeClient(states={"climate.ht_buro": {"min_temp": 5, "max_temp": 30}})
+    text2, _ = run(execute_ha_intents([intent], client2, parts=["auf 21 Grad"]))
+    assert text2 == "HT Büro auf 21 Grad gestellt."
+
+
+def test_entity_id_slug_fallback_when_no_friendly_name(monkeypatch):
+    class _Empty:
+        async def fetch(self, *a, **kw):
+            return []
+
+    import app.memory as memory
+    monkeypatch.setattr(memory, "pool", lambda: _Empty())
+
+    intent = IntentMatch(matched=True, certainty=0.9, entity_id="cover.buro",
+                         domain="cover", service="cover.set_cover_position",
+                         parameters={"position": 50})
+    client = FakeClient()
+    text, _ = run(execute_ha_intents([intent], client, parts=["auf 150 Prozent"]))
+    assert text.startswith("Buro lässt sich nur")
+
+
 def test_temperature_decimal_rounded():
     intent = IntentMatch(matched=True, certainty=0.9, entity_id="climate.ht_buro",
                          domain="climate", service="climate.set_temperature",

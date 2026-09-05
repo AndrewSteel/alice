@@ -217,3 +217,66 @@ async def test_tts_pipeline_parallelism(monkeypatch):
     second_synth = timeline.index("synth-start:Satz zwei.")
     last_send_s1 = timeline.index("send:AUDIO[Satz eins.#1]")
     assert second_synth < last_send_s1
+
+
+# ---------------------------------------------------------------------------
+# PROJ-83 ZUSATZ — greeting suppressed on the HA_FAST path only
+# ---------------------------------------------------------------------------
+async def test_ha_fast_path_drops_first_turn_greeting(make_pipeline, captured, monkeypatch):
+    monkeypatch.setattr(pipeline, "stream_reply", _fake_stream([
+        ChatEvent("path", "HA_FAST"),
+        ChatEvent("token", "Rolladen Büro auf 40 Prozent gestellt."),
+        ChatEvent("done"),
+    ]))
+    p = make_pipeline(FakeSTT("Rolladen Büro auf 40 Prozent"))
+    await p.run_text_turn(
+        "Rolladen Büro auf 40 Prozent",
+        speaker_display_name="Andreas",
+        is_first_turn=True,
+    )
+    spoken = b"".join(captured["audio"]).decode()
+    assert "Hallo" not in spoken
+    assert spoken == "AUDIO[Rolladen Büro auf 40 Prozent gestellt.]"
+
+
+async def test_llm_path_keeps_first_turn_greeting_via_thinking(make_pipeline, captured, monkeypatch):
+    monkeypatch.setattr(pipeline, "stream_reply", _fake_stream([
+        ChatEvent("path", "LLM_ONLY"),
+        ChatEvent("thinking_start", "du"),
+        ChatEvent("token", "Das Wetter morgen wird sonnig."),
+        ChatEvent("done"),
+    ]))
+    p = make_pipeline(FakeSTT("Wie wird das Wetter morgen"))
+    await p.run_text_turn(
+        "Wie wird das Wetter morgen",
+        speaker_display_name="Andreas",
+        is_first_turn=True,
+    )
+    spoken = b"".join(captured["audio"]).decode()
+    assert "Hallo Andreas" in spoken
+
+
+async def test_llm_path_no_reasoning_keeps_greeting_prefix(make_pipeline, captured, monkeypatch):
+    monkeypatch.setattr(pipeline, "stream_reply", _fake_stream([
+        ChatEvent("path", "LLM_ONLY"),
+        ChatEvent("token", "Direkte Antwort. "),
+        ChatEvent("done"),
+    ]))
+    p = make_pipeline(FakeSTT("Sag was"))
+    await p.run_text_turn(
+        "Sag was", speaker_display_name="Andreas", is_first_turn=True,
+    )
+    spoken = b"".join(captured["audio"]).decode()
+    assert spoken.startswith("AUDIO[Hallo Andreas,")
+
+
+async def test_ha_fast_greeting_dropped_for_guest_too(make_pipeline, captured, monkeypatch):
+    monkeypatch.setattr(pipeline, "stream_reply", _fake_stream([
+        ChatEvent("path", "HA_FAST"),
+        ChatEvent("token", "Licht Küche eingeschaltet."),
+        ChatEvent("done"),
+    ]))
+    p = make_pipeline(FakeSTT("Licht Küche an"))
+    await p.run_text_turn("Licht Küche an", speaker_display_name=None, is_first_turn=True)
+    spoken = b"".join(captured["audio"]).decode()
+    assert "Hallo" not in spoken

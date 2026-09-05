@@ -311,10 +311,20 @@ class VoicePipeline:
                     logger.info("Turn interrupted by barge-in", extra=self._log)
                     break
 
-                if event.kind == "token":
+                if event.kind == "path":
+                    # PROJ-83 ZUSATZ: on the HA_FAST path the personal greeting
+                    # ("Hallo Andreas,") sounds intrusive in front of a short
+                    # confirmation — drop it. The identified speaker is still
+                    # used for permissions and recorded in the chat history by
+                    # alice-chat-stream; it is just not spoken. The greeting
+                    # stays on the LLM path (its purpose there is to signal who
+                    # was recognised before a longer answer).
+                    if event.text == "HA_FAST":
+                        greeting_pending = None
+                elif event.kind == "token":
                     if greeting_pending:
-                        # ha_only path: inject greeting prefix into the accumulator
-                        # so the first sentence becomes "Hallo {name}, <HA result>."
+                        # llm path with no reasoning block (no thinking_start):
+                        # prepend the greeting to the first sentence.
                         accumulator.feed(greeting_pending + " ")
                         greeting_pending = None
                     for sentence in accumulator.feed(event.text):
