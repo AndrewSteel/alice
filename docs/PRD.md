@@ -28,7 +28,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P2       | Mail-Anhang DMS-Import (PROJ-53, verschoben aus Phase 4)                                                           | 3.2       | Planned |
 | P1       | HA-MCP-Server-Evaluierung — Spike (PROJ-82), Ergebnis: No-Go (zurückgestellt)                                      | 3.3       | Approved |
 | P1       | HA-Agent variable Intents — Prozent (Licht/Rolladen), Heizungs-Temperatur, Einkaufslisten-Eintrag (PROJ-83)        | 3.3       | Deployed |
-| P1       | HA-Agent Area-Context-Weitergabe (PROJ-84)                                                                         | 3.3       | Roadmap |
+| P1       | HA-Agent Area-Context-Weitergabe (PROJ-84)                                                                         | 3.3       | Deployed |
 | P1       | Timer-Agent (PROJ-85)                                                                                              | 3.3       | Roadmap |
 | P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Roadmap |
 | P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
