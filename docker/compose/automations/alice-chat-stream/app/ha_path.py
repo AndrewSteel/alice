@@ -234,6 +234,115 @@ async def lookup_intent(part: str, client: httpx.AsyncClient) -> IntentMatch:
 
 
 # ---------------------------------------------------------------------------
+# PROJ-84 — device-area context
+# ---------------------------------------------------------------------------
+def parse_device_room(source: str | None) -> str | None:
+    """Extract the speaking device's room from the request `source`.
+
+    `"esphome:Büro"` → `"Büro"`. The speech gateway replaces spaces in the room
+    name with underscores (`wyoming_transport.py`), so they are restored here
+    (`"esphome:Wohn_zimmer"` → `"Wohn zimmer"`). Plain `"esphome"`,
+    `"webapp_cc"`, `"webapp_mic"` and `None` carry no room → `None`.
+    """
+    if not source or ":" not in source:
+        return None
+    prefix, _, room = source.partition(":")
+    if prefix != "esphome":
+        return None
+    return room.strip().replace("_", " ") or None
+
+
+async def _load_area_names() -> list[str]:
+    """Distinct area_name values across all active entities."""
+    from . import memory
+
+    try:
+        rows = await memory.pool().fetch(
+            "SELECT DISTINCT area_name FROM alice.ha_entities "
+            "WHERE area_name IS NOT NULL AND is_active = TRUE"
+        )
+    except Exception as exc:
+        logger.warning("Area-name lookup failed: %s", exc)
+        return []
+    return [r["area_name"] for r in rows if r["area_name"]]
+
+
+async def _load_entity_name_index() -> list[tuple[str, str]]:
+    """(lowercased name, entity_id) for every active entity's friendly_name
+    and each of its aliases — used for the 'text names a device' check."""
+    from . import memory
+
+    try:
+        rows = await memory.pool().fetch(
+            "SELECT entity_id, friendly_name, aliases FROM alice.ha_entities "
+            "WHERE is_active = TRUE"
+        )
+    except Exception as exc:
+        logger.warning("Entity-name index lookup failed: %s", exc)
+        return []
+    index: list[tuple[str, str]] = []
+    for r in rows:
+        if r["friendly_name"]:
+            index.append((r["friendly_name"].lower(), r["entity_id"]))
+        raw = r["aliases"]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = []
+        for a in raw or []:
+            if isinstance(a, str) and a:
+                index.append((a.lower(), r["entity_id"]))
+    return index
+
+
+async def _load_area_entities(area_name: str, domain: str) -> list[str]:
+    """All active entity_ids of `domain` in `area_name` (case-insensitive)."""
+    from . import memory
+
+    try:
+        rows = await memory.pool().fetch(
+            "SELECT entity_id FROM alice.ha_entities "
+            "WHERE LOWER(area_name) = LOWER($1) AND domain = $2 AND is_active = TRUE "
+            "ORDER BY entity_id",
+            area_name,
+            domain,
+        )
+    except Exception as exc:
+        logger.warning("Area-entity lookup failed for %s/%s: %s", area_name, domain, exc)
+        return []
+    return [r["entity_id"] for r in rows if r["entity_id"]]
+
+
+@dataclass
+class AreaResolution:
+    """Per-part outcome of the PROJ-84 precedence.
+
+    mode:
+      "entity" — text named a device; use the Weaviate single-entity match as-is
+      "area"   — resolved to a room; `entity_ids` holds every target, `area` the room
+      "ask"    — no room anywhere; Alice must ask back (`domain` for the question)
+    """
+    mode: str
+    area: str | None = None
+    entity_ids: list[str] | None = None
+    domain: str | None = None
+
+
+def _text_names_area(part: str, area_names: list[str]) -> str | None:
+    low = part.lower()
+    for a in area_names:
+        if a.lower() in low:
+            return a
+    return None
+
+
+def _text_names_entity(part: str, entity_index: list[tuple[str, str]]) -> bool:
+    low = part.lower()
+    return any(name in low for name, _ in entity_index)
+
+
+# ---------------------------------------------------------------------------
 # Routing decision
 # ---------------------------------------------------------------------------
 @dataclass
@@ -243,14 +352,22 @@ class HARouteDecision:
     intents: list[IntentMatch]
     # PROJ-83 — shopping-list item text per part (None = not a shopping-list part).
     shopping_items: list[str | None] | None = None
+    # PROJ-84 — per-part area resolution (None = not applicable, e.g. shopping list).
+    area_targets: list[AreaResolution | None] | None = None
 
 
-async def decide_path(message: str, client: httpx.AsyncClient) -> HARouteDecision:
+async def decide_path(
+    message: str, client: httpx.AsyncClient, source: str | None = None
+) -> HARouteDecision:
     """
     Project decision: only HA_FAST vs LLM_ONLY (no HYBRID).
     A request is HA_FAST iff every part either matched a Weaviate intent with
     certainty >= threshold OR is a recognised shopping-list command,
     AND no Weaviate error occurred.
+
+    PROJ-84: for a matched part that names no device, the target entities are
+    re-resolved from the named room, else the speaking device's room (`source`),
+    else the part is marked for a room clarification.
     """
     parts = split_message(message)
 
@@ -268,9 +385,47 @@ async def decide_path(message: str, client: httpx.AsyncClient) -> HARouteDecisio
 
     any_error = any(i.weaviate_error for i in intents)
     all_matched = bool(intents) and all(i.matched for i in intents)
-    path = "HA_FAST" if (all_matched and not any_error) else "LLM_ONLY"
+
+    # --- PROJ-84 — area resolution per part ---
+    device_room = parse_device_room(source)
+    area_targets: list[AreaResolution | None] = [None] * len(parts)
+    area_lookup_failed = False
+    if all_matched and not any_error:
+        needs_area = any(
+            shop is None and i.domain and i.domain != "todo"
+            for i, shop in zip(intents, shopping_items)
+        )
+        area_names = await _load_area_names() if needs_area else []
+        entity_index = await _load_entity_name_index() if needs_area else []
+        for idx, (p, shop, intent) in enumerate(zip(parts, shopping_items, intents)):
+            if shop is not None or not intent.domain or intent.domain == "todo":
+                continue
+            if _text_names_entity(p, entity_index):
+                area_targets[idx] = AreaResolution(mode="entity")
+                continue
+            named = _text_names_area(p, area_names)
+            room = named or device_room
+            if room is None:
+                area_targets[idx] = AreaResolution(mode="ask", domain=intent.domain)
+                continue
+            ids = await _load_area_entities(room, intent.domain)
+            if not ids:
+                # Room known but no entity of this domain there → treat the part
+                # as an overall non-match, fall back to LLM (spec AC).
+                area_lookup_failed = True
+                break
+            area_targets[idx] = AreaResolution(
+                mode="area", area=room, entity_ids=ids, domain=intent.domain
+            )
+
+    path = (
+        "HA_FAST"
+        if (all_matched and not any_error and not area_lookup_failed)
+        else "LLM_ONLY"
+    )
     return HARouteDecision(
-        path=path, parts=parts, intents=intents, shopping_items=shopping_items
+        path=path, parts=parts, intents=intents, shopping_items=shopping_items,
+        area_targets=area_targets,
     )
 
 
@@ -441,11 +596,113 @@ async def _add_shopping_list_item(
                 "msg": f"Netzwerkfehler beim Eintrag auf die Einkaufsliste: {exc}"}
 
 
+async def _do_service_call(
+    entity_id: str | None, service: str, call_params: dict[str, Any],
+    headers: dict, client: httpx.AsyncClient, label: str,
+) -> dict[str, Any]:
+    """Single HA REST service call for one entity. Returns a per-entity result."""
+    domain, _, svc = service.partition(".")
+    url = f"{HA_URL}/api/services/{domain}/{svc}"
+    body = {"entity_id": entity_id, **call_params}
+    try:
+        resp = await client.post(url, json=body, headers=headers, timeout=10.0)
+        if 200 <= resp.status_code < 300:
+            return {"entity": entity_id, "success": True,
+                    "status": resp.status_code, "params": call_params}
+        err = "auth" if resp.status_code == 401 else "notfound" if resp.status_code == 404 else "unknown"
+        msg = (
+            "HA-Verbindung fehlgeschlagen, bitte Token prüfen." if err == "auth"
+            else f"Ich konnte {label} nicht finden." if err == "notfound"
+            else f"Fehler bei {label}: HTTP {resp.status_code}"
+        )
+        return {"entity": entity_id, "success": False,
+                "status": resp.status_code, "error": err, "msg": msg}
+    except httpx.TimeoutException:
+        return {"entity": entity_id, "success": False, "error": "timeout",
+                "msg": f"Zeitüberschreitung bei {label}."}
+    except Exception as exc:
+        return {"entity": entity_id, "success": False, "error": "network",
+                "msg": f"Netzwerkfehler bei {label}: {exc}"}
+
+
+_DOMAIN_NOUNS = {
+    "light": "das Licht", "cover": "die Rolladen", "switch": "den Schalter",
+    "climate": "die Heizung", "lock": "das Schloss", "media_player": "den Fernseher",
+    "vacuum": "den Staubsauger", "fan": "den Ventilator",
+}
+# Nominative noun for a domain, used to open a room-scoped sentence.
+_DOMAIN_SUBJECT = {
+    "light": "Licht", "cover": "Rolladen", "switch": "Schalter",
+    "climate": "Heizung", "lock": "Schloss", "media_player": "Fernseher",
+    "vacuum": "Staubsauger", "fan": "Ventilator",
+}
+# German room names that take "in der" instead of "im". Everything else → "im"
+# (covers the common neuter/masculine rooms: Büro, Wohnzimmer, Bad, Flur, …).
+_FEMININE_ROOMS = {
+    "küche", "werkstatt", "garage", "toilette", "diele", "waschküche",
+    "kammer", "abstellkammer", "speisekammer", "bibliothek", "sauna",
+}
+
+
+def _room_dat(room: str) -> str:
+    """Dative room phrase: 'im Büro' / 'in der Küche'."""
+    if room.lower() in _FEMININE_ROOMS:
+        return f"in der {room}"
+    return f"im {room}"
+
+
+def _room_question(domains: list[str]) -> str:
+    """German clarification when no room is known (PROJ-84 stage 4)."""
+    noun = _DOMAIN_NOUNS.get(domains[0], "das") if len(set(domains)) == 1 else "das"
+    return f"In welchem Raum möchtest du {noun} steuern?"
+
+
+def _fail_reason(r: dict[str, Any]) -> str:
+    err = r.get("error")
+    if err == "timeout":
+        return "nicht erreichbar"
+    if err == "notfound":
+        return "nicht gefunden"
+    if r.get("range_error"):
+        return "Wert außerhalb des Bereichs"
+    return "nicht erreichbar"
+
+
+def _area_message(area: str, domain: str | None, service: str | None,
+                  params: dict[str, Any], ok_labels: list[str],
+                  failed: list[tuple[str, str]]) -> str:
+    """One room-scoped line for a multi-entity area call (PROJ-84).
+
+    `failed` is a list of (label, reason) pairs. Example outputs:
+      "Licht im Büro eingeschaltet."
+      "Heizung in der Küche auf 21 Grad gestellt, außer Küche Süd (nur 5–28 Grad)."
+    """
+    subject = _DOMAIN_SUBJECT.get(domain or "", "")
+    where = _room_dat(area)
+    if "temperature" in params:
+        did = f"Heizung {where} auf {_fmt_num(params['temperature'])} Grad gestellt"
+    elif any(k in params for k in ("brightness_pct", "position", "value")):
+        v = next(params[k] for k in ("brightness_pct", "position", "value") if k in params)
+        head = f"{subject} {where}" if subject else where[0].upper() + where[1:]
+        did = f"{head} auf {int(v)} Prozent gestellt"
+    else:
+        head = f"{subject} {where}" if subject else where[0].upper() + where[1:]
+        did = f"{head} {_action_text(service)}"
+    if not failed:
+        return f"{did}."
+    fail_str = ", ".join(f"{lbl} ({why})" for lbl, why in failed)
+    if not ok_labels:
+        subj = f"{subject} {where}" if subject else where[0].upper() + where[1:]
+        return f"{subj}: nichts hat geklappt — {fail_str}."
+    return f"{did}, außer {fail_str}."
+
+
 async def execute_ha_intents(
     intents: list[IntentMatch],
     client: httpx.AsyncClient,
     parts: list[str] | None = None,
     shopping_items: list[str | None] | None = None,
+    area_targets: list[AreaResolution | None] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """
     Execute every HA_FAST intent. Returns (response_text, results).
@@ -453,6 +710,10 @@ async def execute_ha_intents(
     `parts` and `shopping_items` are parallel to `intents` (PROJ-83): `parts`
     supplies the original text for per-intent value re-extraction, and a
     non-None `shopping_items[i]` marks part i as a shopping-list command.
+
+    `area_targets` is parallel to `intents` (PROJ-84): a non-None entry with
+    mode "area" expands the call to every entity in a room; mode "ask" means the
+    room is unknown and Alice returns a clarification question instead.
     """
     if not HA_TOKEN:
         return ("HA_TOKEN fehlt. Bitte Umgebungsvariable setzen.", [])
@@ -460,18 +721,26 @@ async def execute_ha_intents(
     n = len(intents)
     parts = (parts or [""] * n)[:n] + [""] * max(0, n - len(parts or []))
     shopping_items = (shopping_items or [None] * n)[:n] + [None] * max(0, n - len(shopping_items or []))
+    area_targets = (area_targets or [None] * n)[:n] + [None] * max(0, n - len(area_targets or []))
 
     headers = {
         "Authorization": f"Bearer {HA_TOKEN}",
         "Content-Type": "application/json",
     }
 
+    # --- PROJ-84 — room unknown for at least one part: ask, execute nothing. ---
+    ask_domains = [
+        at.domain for at in area_targets if at is not None and at.mode == "ask"
+    ]
+    if ask_domains:
+        return (_room_question(ask_domains), [])
+
     needs_confirmation = [i for i in intents if i.requires_confirmation]
 
-    # Pair every intent with its text part / shopping flag.
+    # Pair every intent with its text part / shopping flag / area target.
     work = [
-        (intent, part, shop)
-        for intent, part, shop in zip(intents, parts, shopping_items)
+        (intent, part, shop, area)
+        for intent, part, shop, area in zip(intents, parts, shopping_items, area_targets)
         if not intent.requires_confirmation
     ]
 
@@ -479,15 +748,37 @@ async def execute_ha_intents(
         names = ", ".join(i.entity_id or i.domain or "?" for i in needs_confirmation)
         return (f'Bist du sicher? Ich soll {names} steuern. Bitte bestätige mit "Ja".', [])
 
+    # PROJ-84 — for area parts, the target entity_ids come from the room lookup,
+    # not from the single Weaviate match.
+    def _targets(intent: IntentMatch, area: AreaResolution | None) -> list[str | None]:
+        if area is not None and area.mode == "area":
+            return list(area.entity_ids or [])
+        return [intent.entity_id]
+
+    all_entity_ids = [
+        e for i, _, _, a in work for e in _targets(i, a) if e
+    ]
     # Friendly names for all involved entities (PROJ-83 BUG-3 — nicer German
     # in success/range messages).
-    friendly_names = await _load_friendly_names([i.entity_id for i, _, _ in work if i.entity_id])
+    friendly_names = await _load_friendly_names(all_entity_ids)
 
     # --- Pass 1: resolve every value-bearing intent BEFORE any HA call, so a
-    # missing number aborts the whole HA_FAST path without partial execution. ---
+    # missing number aborts the whole HA_FAST path without partial execution.
+    # Area parts are resolved per target entity in the area branch below — here
+    # they only get the "number present?" check (range checks need the real
+    # room entities, not the arbitrary Weaviate match). ---
     resolved_by_idx: dict[int, dict[str, Any]] = {}
-    for idx, (intent, part, shop) in enumerate(work):
+    for idx, (intent, part, shop, area) in enumerate(work):
         if shop is not None or not intent.service or "." not in intent.service:
+            continue
+        is_area = area is not None and area.mode == "area"
+        vt = classify_value_type(intent.service, intent.parameters)
+        if is_area and vt is not None:
+            if extract_numeric_value(part) is None:
+                raise ValueError(
+                    f"value-bearing intent {intent.service} without a number in {part!r}"
+                )
+            resolved_by_idx[idx] = {"ok": True, "params": dict(intent.parameters or {})}
             continue
         resolved = await _resolve_value(intent, part, headers, client, friendly_names)
         if not resolved["ok"] and resolved.get("fallback"):
@@ -499,7 +790,7 @@ async def execute_ha_intents(
     results: list[dict[str, Any]] = []
     out_parts: list[str] = []
 
-    for idx, (intent, part, shop) in enumerate(work):
+    for idx, (intent, part, shop, area) in enumerate(work):
         # --- Shopping-list branch (PROJ-83 baustein 3) ---
         if shop is not None:
             r = await _add_shopping_list_item(shop, headers, client)
@@ -524,38 +815,70 @@ async def execute_ha_intents(
             continue
 
         call_params = resolved["params"]
-        domain, _, service = intent.service.partition(".")
-        url = f"{HA_URL}/api/services/{domain}/{service}"
-        body = {"entity_id": intent.entity_id, **call_params}
-        try:
-            resp = await client.post(url, json=body, headers=headers, timeout=10.0)
-            if 200 <= resp.status_code < 300:
-                r = {"entity": intent.entity_id, "success": True,
-                     "status": resp.status_code, "params": call_params}
+        targets = _targets(intent, area)
+
+        # --- PROJ-84 area branch: one call per entity, one room-scoped line ---
+        if area is not None and area.mode == "area":
+            vt = classify_value_type(intent.service, intent.parameters)
+            spoken_value = extract_numeric_value(part) if vt else None
+            room = area.area or ""
+
+            # Universal 0–100 percent bounds — reject once, room-scoped, no call.
+            if vt and vt[0] == "percent" and spoken_value is not None \
+                    and not (0 <= spoken_value <= 100):
+                subject = _DOMAIN_SUBJECT.get(intent.domain or "", "")
+                head = f"{subject} {_room_dat(room)}" if subject \
+                    else _room_dat(room)[:1].upper() + _room_dat(room)[1:]
+                r = {"entity": None, "success": False, "range_error": True,
+                     "msg": f"{head} lässt sich nur zwischen 0 und 100 Prozent einstellen."}
                 results.append(r)
-                out_parts.append(_value_action_text(intent, call_params, friendly_names))
-            else:
-                err = "auth" if resp.status_code == 401 else "notfound" if resp.status_code == 404 else "unknown"
-                msg = (
-                    "HA-Verbindung fehlgeschlagen, bitte Token prüfen." if err == "auth"
-                    else f"Ich konnte {intent.entity_id or intent.domain} nicht finden." if err == "notfound"
-                    else f"Fehler bei {intent.entity_id or intent.domain}: HTTP {resp.status_code}"
+                out_parts.append(r["msg"])
+                continue
+
+            ok_labels: list[str] = []
+            failed: list[tuple[str, str]] = []
+            for eid in targets:
+                label = friendly_names.get(eid, eid) if eid else "?"
+                params_for_eid = call_params
+                if vt and spoken_value is not None and eid:
+                    if vt[0] == "temperature":
+                        # Per-entity live bounds (spec edge case).
+                        rng = await _fetch_temp_range(eid, headers, client)
+                        if rng and not (rng[0] <= spoken_value <= rng[1]):
+                            why = f"nur {_fmt_num(rng[0])}–{_fmt_num(rng[1])} Grad"
+                            results.append({"entity": eid, "success": False,
+                                            "range_error": True, "msg": f"{label}: {why}"})
+                            failed.append((label, why))
+                            continue
+                    params_for_eid = {**call_params, vt[1]: spoken_value}
+                r = await _do_service_call(
+                    eid, intent.service, params_for_eid, headers, client, label
                 )
-                results.append({
-                    "entity": intent.entity_id, "success": False,
-                    "status": resp.status_code, "error": err, "msg": msg,
-                })
-                out_parts.append(msg)
-        except httpx.TimeoutException:
-            msg = f"Zeitüberschreitung bei {intent.entity_id or intent.domain}."
-            results.append({"entity": intent.entity_id, "success": False,
-                            "error": "timeout", "msg": msg})
-            out_parts.append(msg)
-        except Exception as exc:
-            msg = f"Netzwerkfehler bei {intent.entity_id or intent.domain}: {exc}"
-            results.append({"entity": intent.entity_id, "success": False,
-                            "error": "network", "msg": msg})
-            out_parts.append(msg)
+                results.append(r)
+                if r.get("success"):
+                    ok_labels.append(label)
+                else:
+                    failed.append((label, _fail_reason(r)))
+            merged_params = (
+                {**call_params, vt[1]: spoken_value}
+                if vt and spoken_value is not None else call_params
+            )
+            out_parts.append(
+                _area_message(room, intent.domain, intent.service, merged_params,
+                              ok_labels, failed)
+            )
+            continue
+
+        # --- Single-entity branch (named device / Weaviate match) ---
+        label = _entity_label(intent, friendly_names)
+        r = await _do_service_call(
+            intent.entity_id, intent.service, call_params, headers, client, label
+        )
+        results.append(r)
+        if r.get("success"):
+            out_parts.append(_value_action_text(intent, call_params, friendly_names))
+        else:
+            out_parts.append(r.get("msg") or f"Fehler bei {label}.")
 
     if needs_confirmation:
         names = ", ".join(i.entity_id or i.domain or "?" for i in needs_confirmation)
