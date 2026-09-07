@@ -442,12 +442,13 @@ async def stream_chat_endpoint(
             # --- HA Fast-Path ---
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    decision = await ha_path.decide_path(user_message, client)
+                    decision = await ha_path.decide_path(user_message, client, source)
                     if decision.path == "HA_FAST":
                         text, ha_results = await ha_path.execute_ha_intents(
                             decision.intents, client,
                             parts=decision.parts,
                             shopping_items=decision.shopping_items,
+                            area_targets=decision.area_targets,
                         )
                         # Only commit to HA_FAST once execution succeeded — a
                         # value-bearing intent with no spoken number raises and
