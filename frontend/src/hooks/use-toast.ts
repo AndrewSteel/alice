@@ -8,7 +8,9 @@ import type {
   ToastProps,
 } from "@/components/ui/toast"
 
-const TOAST_LIMIT = 1
+// PROJ-85 — raised from 1 so several timers expiring close together each get
+// their own visible alarm toast.
+const TOAST_LIMIT = 3
 const TOAST_REMOVE_DELAY = 1000000
 
 type ToasterToast = ToastProps & {

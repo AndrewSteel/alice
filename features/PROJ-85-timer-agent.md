@@ -1,6 +1,6 @@
 # PROJ-85: Timer-Agent
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-09-07
 **Last Updated:** 2026-09-07
 
@@ -524,6 +524,113 @@ Einstellungen › Nutzer-Verwaltung  (NEU, einmalig)
 - **Rollen-Aktualität im Sprach-Pfad:** Der Timer-Handler liest die Rolle frisch aus der Datenbank (nicht nur aus dem Token), damit eine Rollen-Änderung sofort greift.
 - **Namensableitung „für Kartoffeln" → „Kartoffel Timer":** regelbasierte Vereinfachung (Genitiv/Plural) mit dokumentierten Grenzen; keine Wortliste.
 - **Melodie-Datei:** kurze, dezente Tonfolge; Ablage und Bereitstellung (HA-lokale Datei vs. vom Gateway ausgeliefert) in der Bau-Phase festlegen.
+
+## Implementation Notes (Backend + Frontend)
+
+**Build date:** 2026-09-07. No new Docker container, no n8n workflow.
+
+### Database — `sql/migrations/069-proj85-timer-agent.sql`
+- **`alice.system_settings`** — new global key/value table (first consumer:
+  `timer_default_role`, shipping value `"user"`). RLS enabled, permissive policy.
+- **`alice.timers`** — `id`, `owner_user_id` (nullable), `owner_role` (not null,
+  the scope key), `name`, `expires_at`, `status`
+  (`running`/`paused`/`expired`/`acknowledged`), `paused_remaining_seconds`,
+  `origin_channel` (`esphome:<Raum>` device key or `webapp`), `fired_at`,
+  timestamps. Indexes on `owner_role`, `status`, partial on `expires_at WHERE
+  status='running'`. RLS enabled; the chat-stream service scopes every query by
+  `owner_role` itself (same pattern as `alice.ha_entities`).
+- **`alice.role_templates.assistant_permissions`** gains `can_use_timers`,
+  `timer_max_active`, `timer_max_duration_seconds` (JSON keys). Defaults per spec
+  table (admin 20/24h, user 10/24h, child 3/2h, guest off).
+- **`alice.permissions_assistant.can_use_timers`** column added + backfilled;
+  `alice.init_user_permissions()` updated to copy it.
+- **Timer intent templates** (domain `timer`, entity-less) seeded into
+  `alice.ha_intent_templates` for provenance.
+
+### Weaviate — `scripts/seed-timer-intents.sh`
+Standalone, idempotent. Reads the domain=`timer` templates from PG and writes one
+`HAIntent` object per pattern (`entityId=""`, `domain="timer"`,
+`intentTemplate="timer:<action>"`). Deletes existing domain=timer objects first.
+`alice-ha-sync` never touches them (no HA entity), so a `templates_updated`
+force-resync leaves them intact. **Run after applying migration 069.**
+
+### `alice-chat-stream`
+- **`app/timers.py`** (new) — text parsing (duration incl. "1 Stunde 30 Minuten"
+  / "2,5 Minuten"; absolute "15 Uhr 40" with past→tomorrow; bare "auf 10" → 10
+  min; name "für Kartoffeln"→"Kartoffel", ref-name, delta, "alle Timer"),
+  role/limit resolution (`resolve_role` reads `alice.users` fresh; anonymous →
+  `timer_default_role`), and every DB mutation as a row-locked / conditional
+  transaction (`SELECT … FOR UPDATE`, `UPDATE … WHERE status='running'`).
+  `handle_timer_part()` returns a German `TimerReply`.
+- **`app/timer_scheduler.py`** (new) — `TimerScheduler` background asyncio task
+  started from the FastAPI lifespan. Startup reconcile fires overdue timers;
+  steady loop sleeps to the next `expires_at`, `wake()`d by the handler on any
+  change. `_fire_due()` claims due timers with a conditional UPDATE (idempotent
+  vs. the reconcile). Voice channels → HA REST `script.alice_timer_melody_start`;
+  `webapp` rows just get marked. `pending_announcement()` builds the "Der …
+  Timer ist abgelaufen." sentence and marks the rows acknowledged.
+  `stop_melody()` for delete-during-alarm.
+- **`app/ha_path.py`** — `decide_path()` recognises a `domain=="timer"` Weaviate
+  match, sets `timer_actions[i]`, and skips area resolution / HA execution for
+  those parts. `execute_ha_intents()` routes timer parts to
+  `timers.handle_timer_part()`, supports mixed timer + HA sentences, and calls
+  an `on_timer_change` hook (wakes the scheduler, collects created timers,
+  stops a melody on delete).
+- **`app/main.py`** — scheduler lifecycle; HA_FAST branch emits a `timer` SSE
+  event with each created timer's absolute `expires_at`; new endpoints under
+  `/stream/*` (no nginx change — GET+POST already allowed there):
+  `GET /stream/timers` (caller's role-scoped active timers),
+  `GET /stream/timers/pending?channel=` (speech-gateway poll),
+  `GET|POST /stream/timers/config` (admin: per-role limits + default role).
+- Env vars added to `.env.example`: `TIMER_COLLECT_WINDOW_SECONDS`,
+  `TIMER_MELODY_MAX_SECONDS`, `TIMER_MELODY_START/STOP_SCRIPT`,
+  `TIMER_MEDIA_PLAYER_MAP`.
+- Tests: `tests/test_timers.py` (49), `tests/test_timer_scheduler.py` (5),
+  timer routing cases added to `tests/test_ha_path_decide.py`. Full local
+  suite green (134 relevant tests).
+
+### `alice-speech-gateway`
+- **`app/wyoming_transport.py`** — after STT on each turn, polls
+  `GET /stream/timers/pending` for the device and speaks the expiry
+  announcement before processing the utterance. Best-effort (any error = nothing
+  to announce). No Wyoming timer protocol.
+
+### Home Assistant — `homeassistant/alice_timer_melody.yaml` (new)
+Companion package: `input_boolean`/`input_text`/`input_number` helpers +
+`script.alice_timer_melody_start` / `_stop` + two automations (self-stop after
+max time, stop on satellite wake). Alice only signals start/stop over REST.
+
+### Frontend (Vite SPA — no `app/api` routes)
+- **`src/services/timers.ts`** (new) — `getActiveTimers`, `getTimerConfig`,
+  `updateTimerConfig` via `fetchWithAuth` against `STREAM_API_URL`.
+- **`src/hooks/useTimerAlarm.ts`** + **`src/components/TimerAlarm.tsx`** (new) —
+  mounted in `(main)/layout.tsx`. Loads role-scoped active timers, counts down
+  to `expires_at`, shows a toast (stays until dismissed) + a WebAudio chime on
+  expiry while the tab is visible; catch-up toast on tab refocus within a 15-min
+  window; server is authoritative (re-syncs on focus / interval / the
+  `alice:timers-changed` event the chat fires on the `timer` SSE event).
+- **`src/components/Settings/TimerRolesSection.tsx`** (new) — rendered inside the
+  "Nutzer-Verwaltung" settings tab (admin-only via the existing tab guard):
+  per-role Switch + max-active + max-duration(h), and the default-role Select.
+- **`<Toaster />` mounted** in `(main)/layout.tsx` (it was missing entirely — a
+  pre-existing gap that made every `useToast()` call in Settings a silent no-op;
+  the timer alarm needs it). `TOAST_LIMIT` raised 1 → 3 so multiple timers each
+  show.
+- i18n: `settings.timers.*`, `timerAlarm.*` added to `de.ts` and `en.ts`.
+- `src/services/api.ts` `streamChat` gains an `onTimerCreated` callback + `timer`
+  SSE event; `useChatSessions` forwards it as a window event.
+- `npx tsc --noEmit` clean; `next build` succeeds.
+
+### Hardware-verify (open, per Tech-Design §G — could not be tested from dev)
+Marked `>>> HARDWARE-VERIFY` in `timer_scheduler.py` and
+`alice_timer_melody.yaml`:
+1. Voice PE `media_player` usable while the "Hey Jarvis" path is idle.
+2. Which HA state/event reliably signals "satellite is being addressed" (the
+   melody-stop automation trigger — currently
+   `assist_satellite_wake_word_detected`).
+3. Final melody asset location + `input_text.alice_timer_melody_url`.
+Fallback if these fail: fixed short repeating tone over the gateway TTS channel
+(no HA automation).
 
 ## QA Test Results
 _To be added by /qa_

@@ -60,3 +60,38 @@ def test_multi_command_value_plus_shopping(stub_lookup):
     assert d.path == "HA_FAST"
     assert d.shopping_items[-1] == "Butter"
     assert d.shopping_items[0] is None
+
+
+# ---------------------------------------------------------------------------
+# PROJ-85 — timer intents route HA_FAST and are marked in timer_actions
+# ---------------------------------------------------------------------------
+def test_timer_set_routes_ha_fast(stub_lookup):
+    stub_lookup({"timer": _match(domain="timer", service="timer.set",
+                                 intent_template="timer:set")})
+    d = run(decide_path("Setze einen Timer auf 20 Minuten", client=None))
+    assert d.path == "HA_FAST"
+    assert d.timer_actions == ["set"]
+    # no area resolution attempted for a timer part
+    assert d.area_targets == [None]
+
+
+def test_two_timers_one_sentence(stub_lookup):
+    stub_lookup({"timer": _match(domain="timer", service="timer.set",
+                                 intent_template="timer:set")})
+    d = run(decide_path("Setze einen Timer auf 10 und einen Timer auf 20 Minuten",
+                        client=None))
+    assert d.path == "HA_FAST"
+    assert d.timer_actions == ["set", "set"]
+
+
+def test_timer_plus_ha_command(stub_lookup):
+    stub_lookup({
+        "timer": _match(domain="timer", service="timer.delete",
+                        intent_template="timer:delete"),
+        "licht": _match(entity_id="light.wohnzimmer", domain="light",
+                        service="light.turn_on", parameters={}),
+    })
+    d = run(decide_path("Lösche alle Timer und Licht im Wohnzimmer an", client=None))
+    assert d.path == "HA_FAST"
+    assert d.timer_actions[0] == "delete"
+    assert d.timer_actions[1] is None

@@ -354,6 +354,9 @@ class HARouteDecision:
     shopping_items: list[str | None] | None = None
     # PROJ-84 — per-part area resolution (None = not applicable, e.g. shopping list).
     area_targets: list[AreaResolution | None] | None = None
+    # PROJ-85 — timer action per part ("set"/"extend"/… or None). A non-None
+    # entry means the timer handler owns this part, not Home Assistant.
+    timer_actions: list[str | None] | None = None
 
 
 async def decide_path(
@@ -369,6 +372,8 @@ async def decide_path(
     re-resolved from the named room, else the speaking device's room (`source`),
     else the part is marked for a room clarification.
     """
+    from . import timers as _timers
+
     parts = split_message(message)
 
     # PROJ-83 — shopping-list commands are free text and never match Weaviate;
@@ -383,6 +388,15 @@ async def decide_path(
         else:
             intents.append(await lookup_intent(p, client))
 
+    # PROJ-85 — a matched intent with domain "timer" is handled by the timer
+    # handler, not Home Assistant. Recognised here so area resolution and HA
+    # execution skip these parts.
+    timer_actions: list[str | None] = [
+        _timers.timer_action(i.service, i.intent_template)
+        if (i.matched and i.domain == "timer") else None
+        for i in intents
+    ]
+
     any_error = any(i.weaviate_error for i in intents)
     all_matched = bool(intents) and all(i.matched for i in intents)
 
@@ -392,13 +406,13 @@ async def decide_path(
     area_lookup_failed = False
     if all_matched and not any_error:
         needs_area = any(
-            shop is None and i.domain and i.domain != "todo"
+            shop is None and i.domain and i.domain not in ("todo", "timer")
             for i, shop in zip(intents, shopping_items)
         )
         area_names = await _load_area_names() if needs_area else []
         entity_index = await _load_entity_name_index() if needs_area else []
         for idx, (p, shop, intent) in enumerate(zip(parts, shopping_items, intents)):
-            if shop is not None or not intent.domain or intent.domain == "todo":
+            if shop is not None or not intent.domain or intent.domain in ("todo", "timer"):
                 continue
             if _text_names_entity(p, entity_index):
                 area_targets[idx] = AreaResolution(mode="entity")
@@ -425,7 +439,7 @@ async def decide_path(
     )
     return HARouteDecision(
         path=path, parts=parts, intents=intents, shopping_items=shopping_items,
-        area_targets=area_targets,
+        area_targets=area_targets, timer_actions=timer_actions,
     )
 
 
@@ -703,6 +717,10 @@ async def execute_ha_intents(
     parts: list[str] | None = None,
     shopping_items: list[str | None] | None = None,
     area_targets: list[AreaResolution | None] | None = None,
+    timer_actions: list[str | None] | None = None,
+    user_id: str | None = None,
+    source: str | None = None,
+    on_timer_change: Any = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """
     Execute every HA_FAST intent. Returns (response_text, results).
@@ -714,14 +732,49 @@ async def execute_ha_intents(
     `area_targets` is parallel to `intents` (PROJ-84): a non-None entry with
     mode "area" expands the call to every entity in a room; mode "ask" means the
     room is unknown and Alice returns a clarification question instead.
-    """
-    if not HA_TOKEN:
-        return ("HA_TOKEN fehlt. Bitte Umgebungsvariable setzen.", [])
 
+    `timer_actions` is parallel to `intents` (PROJ-85): a non-None entry routes
+    the part to the timer handler instead of Home Assistant. `on_timer_change`,
+    if given, is called with the TimerReply whenever a timer was created /
+    changed / deleted (the endpoint uses it to wake the scheduler and to carry
+    the new expiry back to the WebApp).
+    """
     n = len(intents)
     parts = (parts or [""] * n)[:n] + [""] * max(0, n - len(parts or []))
     shopping_items = (shopping_items or [None] * n)[:n] + [None] * max(0, n - len(shopping_items or []))
     area_targets = (area_targets or [None] * n)[:n] + [None] * max(0, n - len(area_targets or []))
+    timer_actions = (timer_actions or [None] * n)[:n] + [None] * max(0, n - len(timer_actions or []))
+
+    # --- PROJ-85 — timer parts: handled entirely by the timer module, no HA. ---
+    timer_out: list[str] = []
+    timer_results: list[dict[str, Any]] = []
+    if any(a is not None for a in timer_actions):
+        from . import memory
+        from . import timers as _timers
+        for intent, part, action in zip(intents, parts, timer_actions):
+            if action is None:
+                continue
+            reply = await _timers.handle_timer_part(
+                memory.pool(), part, action, user_id=user_id, source=source,
+            )
+            timer_out.append(reply.text)
+            timer_results.append({
+                "tool": "timer", "action": action, "ok": True,
+                "created": reply.created,
+            })
+            if on_timer_change is not None and (
+                reply.wake_scheduler or reply.created or reply.cancelled_channels
+            ):
+                try:
+                    await on_timer_change(reply)
+                except Exception as exc:  # never fail the reply on a wake hiccup
+                    logger.warning("on_timer_change failed: %s", exc)
+        # A request that is *only* timer parts is done here.
+        if all(a is not None for a in timer_actions):
+            return (" ".join(timer_out) or "Erledigt.", timer_results)
+
+    if not HA_TOKEN:
+        return ("HA_TOKEN fehlt. Bitte Umgebungsvariable setzen.", [])
 
     headers = {
         "Authorization": f"Bearer {HA_TOKEN}",
@@ -738,10 +791,13 @@ async def execute_ha_intents(
     needs_confirmation = [i for i in intents if i.requires_confirmation]
 
     # Pair every intent with its text part / shopping flag / area target.
+    # PROJ-85 — timer parts were already handled above; drop them here.
     work = [
         (intent, part, shop, area)
-        for intent, part, shop, area in zip(intents, parts, shopping_items, area_targets)
-        if not intent.requires_confirmation
+        for intent, part, shop, area, tmr in zip(
+            intents, parts, shopping_items, area_targets, timer_actions
+        )
+        if not intent.requires_confirmation and tmr is None
     ]
 
     if not work and needs_confirmation:
@@ -884,7 +940,8 @@ async def execute_ha_intents(
         names = ", ".join(i.entity_id or i.domain or "?" for i in needs_confirmation)
         out_parts.append(f"Für {names} benötige ich noch deine Bestätigung.")
 
-    return (" ".join(out_parts) or "Erledigt.", results)
+    # PROJ-85 — prepend any timer replies (mixed timer + HA request).
+    return (" ".join(timer_out + out_parts) or "Erledigt.", timer_results + results)
 
 
 def _value_action_text(

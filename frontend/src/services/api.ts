@@ -311,6 +311,8 @@ export interface StreamCallbacks {
   onToolEnd: (tool: string, summary?: string) => void;
   /** PROJ-54: structured document results for flip-card display. */
   onVisionResults?: (results: VisionResult[]) => void;
+  /** PROJ-85: one or more timers were just created; each carries its absolute expiry. */
+  onTimerCreated?: (created: Array<{ id: string; name: string; expires_at: string }>) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -326,6 +328,7 @@ interface SseEvent {
     | "tool_start"
     | "tool_end"
     | "vision_results"
+    | "timer"
     | "done"
     | "error";
   content?: string;
@@ -334,6 +337,7 @@ interface SseEvent {
   summary?: string;
   message?: string;
   results?: VisionResult[];
+  created?: Array<{ id: string; name: string; expires_at: string }>;
 }
 
 /**
@@ -475,6 +479,11 @@ export function streamChat(
             case "vision_results":
               if (Array.isArray(evt.results) && evt.results.length > 0) {
                 callbacks.onVisionResults?.(evt.results);
+              }
+              break;
+            case "timer":
+              if (Array.isArray(evt.created) && evt.created.length > 0) {
+                callbacks.onTimerCreated?.(evt.created);
               }
               break;
             case "error":

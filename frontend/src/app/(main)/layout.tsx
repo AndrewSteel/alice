@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { ProtectedRoute } from "@/components/Auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { ChatSessionsProvider } from "@/components/Chat/ChatSessionsProvider";
+import { TimerAlarm } from "@/components/TimerAlarm";
+import { Toaster } from "@/components/ui/toaster";
 
 /**
  * Decides the landing page once per full page load (PROJ-77 AC-A1/A3/A7):
@@ -58,7 +60,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   return (
     <ProtectedRoute>
       <ChatSessionsProvider>
+        <TimerAlarm />
         <LandingRedirect>{children}</LandingRedirect>
+        {/* PROJ-85 — mounts the toast viewport used by the timer alarm. */}
+        <Toaster />
       </ChatSessionsProvider>
     </ProtectedRoute>
   );
