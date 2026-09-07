@@ -26,6 +26,8 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, field_validator
 
 from . import admin_dashboard, ha_path, memory, metrics, streaming
+from . import timer_scheduler as _timer_scheduler
+from . import timers as _timers
 from .auth import verify_jwt
 
 # ---------------------------------------------------------------------------
@@ -63,12 +65,17 @@ logger = logging.getLogger("alice-chat-stream")
 # ---------------------------------------------------------------------------
 # App + lifespan
 # ---------------------------------------------------------------------------
+scheduler = _timer_scheduler.TimerScheduler(memory.pool)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await memory.init_pool()
+    scheduler.start()  # PROJ-85 — timer expiry watcher + startup reconcile
     try:
         yield
     finally:
+        await scheduler.stop()
         await memory.close_pool()
 
 
@@ -444,11 +451,25 @@ async def stream_chat_endpoint(
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     decision = await ha_path.decide_path(user_message, client, source)
                     if decision.path == "HA_FAST":
+                        created_timers: list[dict] = []
+
+                        async def _on_timer_change(reply) -> None:
+                            scheduler.wake()
+                            if reply.created:
+                                created_timers.append(reply.created)
+                            for ch in reply.cancelled_channels:
+                                if ch and ch != "webapp":
+                                    await scheduler.stop_melody(ch)
+
                         text, ha_results = await ha_path.execute_ha_intents(
                             decision.intents, client,
                             parts=decision.parts,
                             shopping_items=decision.shopping_items,
                             area_targets=decision.area_targets,
+                            timer_actions=decision.timer_actions,
+                            user_id=user_id,
+                            source=source,
+                            on_timer_change=_on_timer_change,
                         )
                         # Only commit to HA_FAST once execution succeeded — a
                         # value-bearing intent with no spoken number raises and
@@ -460,6 +481,15 @@ async def stream_chat_endpoint(
                         # (PROJ-83 ZUSATZ). Emitted only for HA_FAST; the LLM
                         # branch below emits its own "path" event.
                         yield b'data: {"type":"path","path":"HA_FAST"}\n\n'
+                        # PROJ-85 — hand the WebApp the absolute expiry of any
+                        # timer just created so its client can count down.
+                        if created_timers:
+                            yield (
+                                'data: '
+                                + json.dumps({"type": "timer", "created": created_timers},
+                                             ensure_ascii=False)
+                                + "\n\n"
+                            ).encode("utf-8")
                         # Stream HA result as a single token + done
                         yield f'data: {{"type":"token","content":{json.dumps(text, ensure_ascii=False)}}}\n\n'.encode("utf-8")
                         usage = {"prompt_tokens": 0, "completion_tokens": len(text)}
@@ -543,3 +573,131 @@ async def stream_chat_endpoint(
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+# ---------------------------------------------------------------------------
+# /stream/timers — PROJ-85
+# Mounted under /stream/* (nginx allows GET + POST there) so no nginx change is
+# needed. The WebApp reads its role-scoped active timers; the speech gateway
+# polls for a pending expiry announcement; an admin reads/writes the per-role
+# timer config and the default role.
+# ---------------------------------------------------------------------------
+def _iso(dt) -> str | None:
+    return dt.isoformat() if dt is not None else None
+
+
+@app.get("/stream/timers")
+async def list_timers(jwt_payload: dict = Depends(verify_jwt)):
+    """Active timers visible to the caller (their role scope)."""
+    role = await _timers.resolve_role(memory.pool(), jwt_payload.get("user_id"))
+    rows = await _timers.list_active(memory.pool(), role)
+    now = _timers.now_local()
+    return {
+        "role": role,
+        "timers": [
+            {
+                "id": str(r["id"]),
+                "name": r["name"],
+                "status": r["status"],
+                "expires_at": _iso(r["expires_at"]),
+                "remaining_seconds": _timers.secs_left(r, now),
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/stream/timers/pending")
+async def pending_timer(channel: str, jwt_payload: dict = Depends(verify_jwt)):
+    """Speech-gateway poll: the German announcement for any expired-but-unannounced
+    timer of `channel` (a device key like 'esphome:Büro'), marking them acknowledged.
+    Returns {"announcement": null} when there is nothing to say."""
+    text = await _timer_scheduler.pending_announcement(memory.pool(), channel)
+    return {"announcement": text}
+
+
+class TimerRoleConfig(BaseModel):
+    role: str
+    can_use_timers: bool
+    timer_max_active: int = Field(ge=0, le=1000)
+    timer_max_duration_seconds: int = Field(ge=0, le=7 * 24 * 3600)
+
+    @field_validator("role")
+    @classmethod
+    def _role_ok(cls, v: str) -> str:
+        if v not in ("admin", "user", "guest", "child"):
+            raise ValueError("role muss admin, user, guest oder child sein")
+        return v
+
+
+class TimerConfigUpdate(BaseModel):
+    default_role: str | None = None
+    roles: list[TimerRoleConfig] | None = None
+
+    @field_validator("default_role")
+    @classmethod
+    def _default_ok(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("admin", "user", "guest", "child"):
+            raise ValueError("default_role muss admin, user, guest oder child sein")
+        return v
+
+
+@app.get("/stream/timers/config")
+async def get_timer_config(jwt_payload: dict = Depends(_require_admin)):
+    rows = await memory.pool().fetch(
+        "SELECT role, assistant_permissions FROM alice.role_templates ORDER BY role"
+    )
+    roles = []
+    for r in rows:
+        ap = r["assistant_permissions"]
+        if isinstance(ap, str):
+            ap = json.loads(ap)
+        roles.append({
+            "role": r["role"],
+            "can_use_timers": bool(ap.get("can_use_timers", True)),
+            "timer_max_active": int(ap.get("timer_max_active", 0) or 0),
+            "timer_max_duration_seconds": int(ap.get("timer_max_duration_seconds", 0) or 0),
+        })
+    default_role = await _timers.default_role(memory.pool())
+    return {"default_role": default_role, "roles": roles}
+
+
+@app.post("/stream/timers/config")
+async def update_timer_config(
+    body: TimerConfigUpdate, jwt_payload: dict = Depends(_require_admin)
+):
+    """Persist per-role timer limits and/or the default role. Takes effect on
+    newly set timers without a restart; running timers keep their stored role."""
+    pool = memory.pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if body.default_role is not None:
+                await conn.execute(
+                    "INSERT INTO alice.system_settings (key, value, description) "
+                    "VALUES ('timer_default_role', $1::jsonb, "
+                    "'Owner role assigned to a Voice-PE timer when the speaker was not identified.') "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+                    json.dumps(body.default_role),
+                )
+            for rc in body.roles or []:
+                await conn.execute(
+                    "UPDATE alice.role_templates "
+                    "SET assistant_permissions = assistant_permissions || $2::jsonb "
+                    "WHERE role = $1",
+                    rc.role,
+                    json.dumps({
+                        "can_use_timers": rc.can_use_timers,
+                        "timer_max_active": rc.timer_max_active,
+                        "timer_max_duration_seconds": rc.timer_max_duration_seconds,
+                    }),
+                )
+                # Keep the per-user flag in step so the handler's fast check
+                # (and any future per-user override UI) stays consistent.
+                await conn.execute(
+                    "UPDATE alice.permissions_assistant pa "
+                    "SET can_use_timers = $2, updated_at = NOW() "
+                    "FROM alice.users u "
+                    "WHERE pa.user_id = u.id AND u.role = $1",
+                    rc.role, rc.can_use_timers,
+                )
+    return await get_timer_config(jwt_payload)

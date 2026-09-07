@@ -186,6 +186,20 @@ class GatewayWyomingHandler(AsyncEventHandler):
                 extra={"session_id": session_id, "device": device.name},
             )
 
+            # --- PROJ-85 — timer expiry announcement ---
+            # If a timer set on this device has expired since the last
+            # interaction, Alice announces it *before* processing whatever the
+            # user just said (spec: "Der 20 Minuten Timer ist abgelaufen.").
+            device_key = (
+                device.room.replace(" ", "_") if device.room
+                else device.name.replace(" ", "_")
+            )
+            announced = await self._announce_expired_timers(
+                device_key, _token_for(spk_user_id)
+            )
+            if announced:
+                await self._speak_text(announced)
+
             # --- Enrollment trigger check (admin only, before AI call) ---
             is_trigger, enroll_role = enroll_mod.is_enrollment_intent(transcript)
             if is_trigger:
@@ -410,6 +424,29 @@ class GatewayWyomingHandler(AsyncEventHandler):
 
     async def _noop_status(self, _status: str) -> None:
         return
+
+    async def _announce_expired_timers(self, device_key: str, jwt_token: str) -> str | None:
+        """PROJ-85 — ask alice-chat-stream whether a timer set on this device
+        has expired unannounced. Returns the German sentence to speak, or None.
+
+        Best-effort: any error just means "nothing to announce".
+        """
+        import httpx
+
+        url = f"{config.CHAT_STREAM_URL}/stream/timers/pending"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    url,
+                    params={"channel": f"esphome:{device_key}"},
+                    headers={"Authorization": f"Bearer {jwt_token}"},
+                )
+                if resp.status_code != 200:
+                    return None
+                return (resp.json() or {}).get("announcement")
+        except Exception as exc:
+            logger.debug("Timer pending check failed: %s", exc)
+            return None
 
 
 def _service_token_for(user_id: str) -> str:

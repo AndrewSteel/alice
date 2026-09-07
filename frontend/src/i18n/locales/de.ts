@@ -93,6 +93,16 @@ const de = {
     },
   },
 
+  timerAlarm: {
+    title: "Timer abgelaufen",
+    expired: "Der {{name}} ist abgelaufen.",
+    expiredAgo: "Der {{name}} ist vor {{ago}} abgelaufen.",
+    agoSeconds_one: "{{count}} Sekunde",
+    agoSeconds_other: "{{count}} Sekunden",
+    agoMinutes_one: "{{count}} Minute",
+    agoMinutes_other: "{{count}} Minuten",
+  },
+
   sidebar: {
     newChat: "Neuer Chat",
     search: "Suche",
@@ -477,6 +487,24 @@ const de = {
         desc: "Diese Aktion kann nicht rueckgaengig gemacht werden. Der Nutzer {{name}} und alle zugehoerigen Daten werden dauerhaft geloescht.",
         confirmLabel: "Benutzername zur Bestaetigung eingeben:",
         confirmDelete: "Endgueltig loeschen",
+      },
+    },
+
+    timers: {
+      heading: "Timer",
+      allowed: "Timer erlauben",
+      maxActive: "Max. gleichzeitige Timer",
+      maxDurationHours: "Max. Timer-Dauer (Stunden)",
+      defaultRole: "Standard-Rolle fuer nicht erkannte Sprecher",
+      defaultRoleHint:
+        "Wird ein Timer per Sprachgeraet gesetzt und der Sprecher nicht erkannt, gehoert der Timer dieser Rolle.",
+      saved: "Timer-Einstellungen gespeichert",
+      savedDesc: "Aenderungen gelten fuer neu gesetzte Timer.",
+      roleNames: {
+        admin: "Administrator",
+        user: "Nutzer",
+        guest: "Gast",
+        child: "Kind",
       },
     },
 

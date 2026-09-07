@@ -92,6 +92,16 @@ const en = {
     },
   },
 
+  timerAlarm: {
+    title: "Timer finished",
+    expired: "The {{name}} has finished.",
+    expiredAgo: "The {{name}} finished {{ago}} ago.",
+    agoSeconds_one: "{{count}} second",
+    agoSeconds_other: "{{count}} seconds",
+    agoMinutes_one: "{{count}} minute",
+    agoMinutes_other: "{{count}} minutes",
+  },
+
   sidebar: {
     newChat: "New chat",
     search: "Search",
@@ -476,6 +486,24 @@ const en = {
         desc: "This action cannot be undone. The user {{name}} and all associated data will be permanently deleted.",
         confirmLabel: "Enter the username to confirm:",
         confirmDelete: "Delete permanently",
+      },
+    },
+
+    timers: {
+      heading: "Timers",
+      allowed: "Allow timers",
+      maxActive: "Max. concurrent timers",
+      maxDurationHours: "Max. timer duration (hours)",
+      defaultRole: "Default role for unrecognised speakers",
+      defaultRoleHint:
+        "When a timer is set by voice and the speaker is not identified, the timer belongs to this role.",
+      saved: "Timer settings saved",
+      savedDesc: "Changes apply to newly set timers.",
+      roleNames: {
+        admin: "Administrator",
+        user: "User",
+        guest: "Guest",
+        child: "Child",
       },
     },
 

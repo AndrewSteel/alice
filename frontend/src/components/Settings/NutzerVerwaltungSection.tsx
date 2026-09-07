@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import type { AdminUser } from "@/services/adminApi";
 import { UserTable } from "./UserTable";
+import { TimerRolesSection } from "./TimerRolesSection";
 import { CreateUserDialog } from "./CreateUserDialog";
 import { ResetOtpDialog } from "./ResetOtpDialog";
 import { SetCredentialsDialog } from "./SetCredentialsDialog";
@@ -280,6 +281,11 @@ export function NutzerVerwaltungSection() {
           onConfirm={handleDeleteUser}
         />
       )}
+
+      {/* PROJ-85 — per-role timer permission, limits and the default role. */}
+      <div className="pt-6 border-t border-border">
+        <TimerRolesSection />
+      </div>
     </div>
   );
 }

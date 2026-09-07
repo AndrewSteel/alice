@@ -763,6 +763,15 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           onToolStart: handleToolStart,
           onToolEnd: handleToolEnd,
           onVisionResults: options.onVisionResults,
+          onTimerCreated: (created) => {
+            // PROJ-85 — let the WebApp timer alarm pick up the new timer(s)
+            // immediately instead of waiting for its next poll.
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent("alice:timers-changed", { detail: created })
+              );
+            }
+          },
           onDone: finishStream,
           onError: handleError,
         },
