@@ -1,6 +1,6 @@
 # PROJ-84: HA-Agent Area-Context-Weitergabe
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-09-07
 **Last Updated:** 2026-09-07
 
@@ -469,4 +469,34 @@ Backend-Feature (kein UI, kein n8n) — kein Browser-/E2E-Test anwendbar.
 - **Recommendation:** Deploy. BUG-4 bei Gelegenheit nachziehen.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-09-07 — Docker-Container `alice-chat-stream` neu gebaut und
+ausgerollt (nur `app/ha_path.py` + `app/main.py` geändert; keine Schema-Migration,
+kein n8n-Deploy, kein Frontend-Build).
+
+### Live-Verifikation 2026-09-07
+
+| Szenario | Ergebnis |
+| --- | --- |
+| Licht einschalten / ausschalten (raumlos, über HA Voice PE) | ✅ korrekter Raum, alle Lichter |
+| Rolladen auf 50 % (wertbehaftet, Area-Context) | ✅ Wert auf alle Rolladen im Raum |
+| Rolladen öffnen (wertlos, Area-Context) | ✅ |
+| Entität, die nur einmal im Haus vorkommt | ✅ funktional identisch zum bisherigen Einzel-Entity-Fall |
+| Ein Device + Area-Zuordnung | ✅ Geräte-Raum greift |
+| Rückfrage bei fehlendem Raum | ✅ „In welchem Raum …?", nichts ausgeführt |
+
+### Performance (AC-11)
+
+Live gemessen über 5 Area-Context-Anfragen: **0,965 s gesamt ≈ Ø 193 ms/Anfrage**
+— innerhalb des < 200-ms-Ziels (analog PROJ-3 AC-9 / PROJ-83 AC-6), kein
+LLM-Aufruf. Damit ist AC-11 live bestätigt.
+
+### Offen (nicht blockierend)
+
+- **BUG-4** (Low, kosmetisch): generisches Rückfrage-Nomen für Domains außerhalb
+  der 8 in `_DOMAIN_NOUNS` gelisteten Kern-Domains.
+- Vorbestehende Beobachtung aus dem QA-Audit: der HA_FAST-Pfad prüft keine
+  per-User-HA-Berechtigung (`alice.permissions_home_assistant`) — seit
+  PROJ-1/PROJ-83. PROJ-84 vergrößert den Wirkradius leicht (ein Befehl adressiert
+  jetzt alle Geräte einer Domain im Raum). Kandidat für ein eigenes Feature
+  gegen den HA-Pfad insgesamt.
