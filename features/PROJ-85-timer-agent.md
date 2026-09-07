@@ -1,6 +1,6 @@
 # PROJ-85: Timer-Agent
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-09-07
 **Last Updated:** 2026-09-07
 
@@ -633,7 +633,236 @@ Fallback if these fail: fixed short repeating tone over the gateway TTS channel
 (no HA automation).
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-09-07
+**Test method:** Static / code-level verification + unit tests. The Alice stack
+(postgres, weaviate, alice-chat-stream, alice-speech-gateway, Home Assistant) is
+**not running on this machine** — it lives on the production server — so no
+live end-to-end, browser, or n8n-execution testing was possible. Findings are
+from reading the implementation against every AC + edge case, running the Python
+unit suites, and `tsc`/`next build`.
+**Tester:** QA Engineer (AI)
+
+### Automated test status
+
+| Suite | Result |
+|---|---|
+| `alice-chat-stream` pytest (excl. pre-existing redis-less `test_admin_dashboard`) | **152 passed** |
+| — `tests/test_timers.py` | 50 passed |
+| — `tests/test_timer_scheduler.py` | 5 passed |
+| — timer routing cases in `tests/test_ha_path_decide.py` | 3 passed |
+| `alice-speech-gateway` pytest | 13 passed, **6 pre-existing failures** (`test_wyoming_transport` / `test_config` — `Device(user_id=…)` in the test helpers, removed by PROJ-43; **not** caused by PROJ-85, confirmed via `git stash`) |
+| frontend `tsc --noEmit` | clean |
+| frontend `next build` | success |
+
+### Acceptance Criteria Status
+
+#### Setzen — Dauer
+- [x] "auf X Minuten/Stunden" (incl. "1 Stunde 30 Minuten") → timer, `expires_at = now + X` — `parse_time` + `_do_set`, unit-tested
+- [x] unnamed confirmation "Ich habe einen Timer auf {Dauer} gesetzt." — unit-tested
+- [x] unnamed auto-name "{Dauer} Timer" — `derived_name`, unit-tested
+
+#### Setzen — absolute Uhrzeit
+- [x] "auf HH Uhr MM" / "auf HH Uhr" → next occurrence — `_CLOCK_RE`, unit-tested
+- [x] today-if-future / tomorrow-if-past — unit-tested (incl. exactly-now → +24 h)
+- [x] confirmation names computed runtime "…, er läuft {Dauer}." — `_do_set`
+- [x] auto-name "{Uhrzeit} Timer" — unit-tested
+
+#### Setzen — benannt
+- [x] "für {Name}" → "{Name} Timer", singular/title normalised ("Kartoffeln"→"Kartoffel", "Nudeln"→"Nudel") — `parse_name` + `_normalise_name_word`, unit-tested
+- [x] confirmation "Ich habe den {Name} Timer auf {Zeit} gesetzt." (+ "er läuft …" for clock) — `_do_set`
+
+#### Namenskollision
+- [x] active same-name in role scope → immediate fallback "zweiter/dritter … {Name} Timer", no dialog — `resolve_collision_name`, unit-tested
+- [x] confirmation names the fallback "Es gibt schon einen … Ich habe einen zweiten … gesetzt." — unit-tested
+
+#### Rollen-basierte Sichtbarkeit, Berechtigung & Limits
+- [x] timer stored with owner user **and** role; unrecognised voice → `timer_default_role`, owner user NULL — `handle_timer_part`, unit-tested
+- [x] query/change/pause/delete act on the whole role scope — all DB helpers filter `owner_role = $1`, unit-tested
+- [x] "Lösche alle Timer" → only own role scope — `delete_all`, unit-tested
+- [x] role without `can_use_timers` → friendly German refusal, nothing executed, no LLM — `handle_timer_part` guard, unit-tested
+- [x] max-active per role from `role_templates`, exceed → refusal naming the limit — `_do_set`, unit-tested
+- [x] max-duration per role, longer → refusal naming the limit — `_do_set`, unit-tested
+- [x] duration floor 10 s, role-independent — `MIN_DURATION_SECONDS`, unit-tested
+- [x] Settings tab: per-role allowed / max-active / max-duration — `TimerRolesSection`, admin-guarded
+- [x] Settings tab: default-role select, shipping `user` — `TimerRolesSection` + migration 069
+- [x] changes apply without container restart; running timers keep their role — `resolve_role` reads live; `POST /stream/timers/config` writes `role_templates`
+- [x] admin-only visibility — inside the `can_manage_users`-guarded Nutzer-Verwaltung tab
+- [x] seeded via `role_templates`, carried by `init_user_permissions()` — migration 069
+- [ ] **BUG-5:** the Settings tab cannot actually reach the backend — the frontend service calls `/api/timers*`, which nginx does not proxy to alice-chat-stream (only `/api/stream/*` is). Every `getTimerConfig` / `updateTimerConfig` / `getActiveTimers` call 404s against the SPA. **Blocks the whole WebApp side (Settings + alarm).**
+
+#### Mehrere Timer in einem Satz
+- [x] "auf X und einen auf Y Minuten" → two timers via the existing splitter — `decide_path` + `execute_ha_intents`, unit-tested (`test_two_timers_one_sentence`); bare "auf 10" read as minutes
+
+#### Ändern
+- [x] "Verlängere den {Name} Timer um X" → +X, confirm new remaining — `change_expiry`, unit-tested
+- [x] "Verkürze … um X" → −X, confirm — unit-tested
+- [x] shorten past now / ≤ 0 → rejected, states current remaining — `change_expiry` `rejected`, unit-tested
+- [x] no name + exactly one timer → that one; multiple → list + ask, nothing changed — `_pick_target`, unit-tested
+- [ ] **BUG-1:** a timer whose name is *derived* ("20 Minuten Timer", "15 Uhr 40 Timer") cannot be targeted by name — `parse_ref_name`'s regex requires the name to start with a letter, so "Verlängere den 20 Minuten Timer" yields `ref=None`. With one active timer it still works (falls through to "the only one"); with several, the exact AC phrasing "den 20 Minuten Timer" cannot disambiguate. Affects Ändern / Abfragen / Pausieren / Löschen by derived name.
+
+#### Abfragen
+- [x] "Wie lange läuft der {Name} Timer noch?" → remaining, sensible unit — `_do_query`, unit-tested (subject to BUG-1 for derived names)
+- [x] no name, one timer → answered; several → all listed with remaining — `_pick_target`
+- [x] "Welche Timer laufen gerade?" / "Zeig mir meine Timer" → role-scoped list, paused marked — `_do_query` list branch, unit-tested
+- [x] no timers → "Es läuft gerade kein Timer." — unit-tested
+
+#### Pausieren / Fortsetzen
+- [x] pause freezes remaining, timer does not fire — `pause_timer` (status→paused, `paused_remaining_seconds`), unit-tested
+- [x] resume → new `expires_at = now + frozen` — `resume_timer`, unit-tested
+- [x] pause-a-paused / resume-a-running → harmless no-op with message — unit-tested
+- [ ] **BUG-3:** extend/shorten on a *paused* timer replies "… ist schon abgelaufen." (`change_expiry` requires `status='running'`). Spec doesn't explicitly cover it; the message is misleading.
+
+#### Löschen
+- [x] "Lösche den {Name} Timer" / "Brich … ab" → removed, confirm — `delete_timer`, unit-tested (BUG-1 for derived names)
+- [x] "Lösche alle Timer" → all in role scope, confirm count — `delete_all`, unit-tested
+- [x] no name, one timer → that one; several → list, delete nothing — `_pick_target`
+
+#### Ablauf — Voice PE
+- [~] `timer-finished` delivery — **implemented as HA-REST to `script.alice_timer_melody_start`** (not the Wyoming timer protocol — deliberate, per Tech Design). **HARDWARE-VERIFY**: not testable here.
+- [~] device plays a melody on `timer-finished` — HA companion package `alice_timer_melody.yaml`; **HARDWARE-VERIFY**
+- [x] 3 s collect window → one melody / one announcement — `_fire_due` claims `expires_at <= NOW() + 3s`, groups by channel; `pending_announcement` collects all expired of a channel — unit-tested (`test_fire_due_voice_calls_ha`)
+- [x] wake during melody → melody stops, one announcement naming all due timers — `pending_announcement` + speech-gateway `_announce_expired_timers` (announcement text unit-tested; the "melody stops" half is **HARDWARE-VERIFY** via the HA automation)
+- [~] no reaction → melody self-stops after 2 min, timer counts as acknowledged — `_auto_acknowledge` + HA automation `alice_timer_melody_timeout`; **HARDWARE-VERIFY** for the audio, DB side unit-testable
+- [x] after acknowledgement the timer leaves the active set — status → `acknowledged`, `list_active` filters to running/paused
+
+#### Ablauf — WebApp
+- [x] create response carries the absolute `expires_at` — `timer` SSE event in `main.py`; `onTimerCreated` in `api.ts`
+- [x] expiry while tab visible → toast (until dismissed) + tone — `useTimerAlarm` + WebAudio chime; **needs BUG-5 fixed** and depends on `<Toaster/>` now being mounted
+- [x] refocus after expiry → catch-up toast "vor {Dauer} abgelaufen", server authoritative — `useTimerAlarm.handleVisibility`, 15-min window
+- [x] not foreground & not refocused in the window → no message (documented limitation) — by design
+
+#### Nebenläufigkeit
+- [x] every transition = atomic row-locked / conditional op — `SELECT … FOR UPDATE`, `UPDATE … WHERE status='running'` in every mutator, unit-tested
+- [x] scheduler `expired` vs incoming change → expiry wins, change treated as "already expired" — `change_expiry` finds no `running` row → None → "schon abgelaufen", unit-tested
+- [x] delete vs in-progress expiry → delete wins, melody/announcement aborted — `_do_delete` → `cancelled_channels` → `scheduler.stop_melody`; `delete_timer` removes the row so `pending_announcement` won't announce it
+- [x] restart reconcile vs steady loop → single idempotent `expired` transition — conditional-UPDATE claim, unit-tested (`test_fire_due_claims_once`, `test_reconcile_on_start_fires_overdue`)
+
+#### Persistenz & Neustart
+- [x] state in `alice.timers`, survives restarts — table + migration 069
+- [x] on restart: overdue timer fired now, still-running keep counting — `_reconcile_on_start`, unit-tested
+- [~] set device offline at expiry → "expired, undelivered", announced on next contact, then silently done — `pending_announcement` handles the "announce on next contact" via the speech-gateway poll; the explicit "undelivered" marker is folded into `status='expired'` (announced) then `acknowledged`. **HARDWARE-VERIFY** for the offline case.
+
+#### Pfad & Performance
+- [x] all timer ops in HA_FAST — Weaviate match on `domain=timer` objects, then regex text processing, no LLM — `decide_path` / `execute_ha_intents`
+- [ ] **BUG-9:** the Weaviate seed (`seed-timer-intents.sh`) inserts the template patterns **verbatim with `{value}` / `{name}` placeholders** as the vectorised `utterance`. The literal tokens "value"/"name" pollute the embedding and there is no concrete phrasing to match against, so real utterances ("Setze einen Timer auf 20 Minuten") will match poorly or below `INTENT_MIN_CERTAINTY` (0.82) → the feature silently falls back to LLM_ONLY. The migration's timer patterns must be rewritten as concrete natural utterances (the value/name is re-extracted in `timers.py` regardless), or the seed script must expand/strip placeholders.
+- [ ] **< 200 ms end-to-end** — not measurable without the stack. Design is sound (small indexed queries, no LLM); flag for a live Prometheus check at deploy (as done for PROJ-83/84).
+- [x] no regression to existing HA commands / sentence splitter / HA-sync — 77 existing `ha_path` tests green; timer objects are entity-less and skipped by `alice-ha-sync` (filters by concrete `entityId`)
+
+#### Limits & Sprache
+- [x] max-active per role, shipping admin 20 / user 10 / child 3 / guest 0 — migration 069
+- [x] max-duration per role, shipping 24 h (admin/user) / 2 h (child) — migration 069
+- [x] duration < 10 s rejected, states the allowed range — `_do_set` (message says "mindestens 10 Sekunden"; does **not** state an upper bound — minor)
+- [x] all output German / configured language, natural time phrasing — every `TimerReply` string is German; `_fmt_duration` / `_fmt_remaining` natural. **Note:** strings are hard-coded German, not routed through a per-user language setting like LLM output — consistent with PROJ-83/84 HA_FAST replies, acceptable.
+
+### Edge Cases Status
+
+- [x] shorten by more than remaining → rejected, states current remaining — unit-tested
+- [x] extend an already-expired-not-acknowledged timer → "schon abgelaufen" — `change_expiry` (BUG-3 note: same wording wrongly hits *paused* timers)
+- [x] two timers due same moment on one device → bundled — `_fire_due` grouping, unit-tested
+- [~] two timers due on different devices → independent — separate `origin_channel` keys, separate `_deliver_voice`; HARDWARE-VERIFY for the audio
+- [x] third timer due while melody plays → appended to the session — HA script's `input_boolean` guard + `pending_announcement` collects all expired of the channel
+- [x] expiry + change same instant → expiry wins — unit-tested
+- [x] expiry + delete same instant → delete wins — `delete_timer` unconditional + `stop_melody`; **minor race (BUG-8-adjacent):** if delete lands between the scheduler's claim and the melody `play_media` call, `stop_melody` fires before the melody starts and the melody then briefly plays (HA automation self-stops it; row already gone so nothing is announced). Low.
+- [x] acknowledgement-by-wake vs max-time both fire → single transition — `pending_announcement` marks `acknowledged` under `FOR UPDATE`; `_auto_acknowledge` only touches rows still `expired`
+- [~] timer expires mid-conversation with that device → event delivered after the turn — the speech-gateway announces at the **start of the next turn** (after STT), so it naturally waits for the current turn to finish; HARDWARE-VERIFY for the melody timing
+- [x] clock exactly now → tomorrow — unit-tested
+- [x] "auf 15 Uhr" → MM 00 — unit-tested
+- [x] "auf 4 Uhr" at 22:00 → 04:00 next day, no AM/PM heuristic — unit-tested
+- [x] name collides with an expired-not-acknowledged timer → regular name, no fallback — `name_collision` only counts running/paused
+- [x] "2,5 Minuten" → 2 Minuten 30 Sekunden — unit-tested
+- [x] no time value ("Setze einen Timer") → asks for the duration, nothing created, no LLM — unit-tested
+- [x] change/query/delete names a non-existent timer → "Es gibt keinen … Timer", lists the actual ones — `_pick_target`, unit-tested
+- [x] user A (admin) sets, user B (admin) queries → B sees it — role-scoped, unit-tested pattern
+- [x] user C (child) queries while admin timers run → sees only child timers — role-scoped
+- [x] unrecognised voice, default role `user`, Andreas meant it → lands in `user` scope (documented consequence) — by design
+- [~] role loses timer permission while it has active timers — **partially specified, needs a decision**: current behaviour — existing timers keep running & fire; **all** new timer commands (incl. query/delete for cleanup) are refused because `handle_timer_part` checks `cfg.allowed` before dispatching. The Tech Design *recommended* still allowing query/delete for cleanup. **BUG-6 (Low):** cleanup of one's own running timers is blocked after the role loses the permission.
+- [x] child changes a timer via "verkürze" not touching max-duration → allowed (max-duration only checked on set / extend) — `_do_change` only enforces max on `extend`
+- [x] extend beyond role max-duration → rejected naming the limit, remaining unchanged — `_do_change` extend branch, projected-remaining check
+- [x] WebApp timer, browser fully closed then reopened → re-fetches active timers, shows catch-up if within window — `useTimerAlarm` mount + `refresh()`
+- [x] service restart exactly at expiry → reconcile fires it (also if the first `timer-finished` was lost) — `_reconcile_on_start`
+- [x] max-time elapses while user is addressing the device → address wins — `pending_announcement` runs on the turn, `_auto_acknowledge` only touches still-`expired` rows
+- [x] role limit reached, delete one + set new → works (checked at set time) — `count_active` re-checked
+- [x] admin lowers role limits below the running count → running timers stay, only new sets blocked — `_do_set` checks `>=` at set time only
+- [ ] **BUG-2:** "Timer auf 10 Minuten und einen auf 3 Wochen" — the invalid part is **not** rejected. The bare-number fallback in `parse_time` reads "auf 3" (from "3 Wochen") as **3 minutes** and creates a timer. Expected: the "3 Wochen" part is rejected with a reason (partial-success pattern). Same for "3 Tage", "3 Stunden 40" edge inputs.
+
+### Security Audit Results
+
+**Docker / API (`alice-chat-stream` new endpoints):**
+- [x] Authentication: all three endpoints require a valid RS256 JWT (`verify_jwt` / `_require_admin`); missing/invalid → 401
+- [x] `user_id` from the verified JWT only, never from the body/query
+- [x] `POST /stream/timers/config` is `_require_admin` (JWT `role` claim). Note: like the existing `/admin/*` endpoints it trusts the JWT role, not a live DB read — a downgraded admin keeps access until token expiry (pre-existing pattern, accepted).
+- [x] Input validation: `TimerConfigUpdate` / `TimerRoleConfig` are Pydantic models with role enum + `ge/le` bounds on the numeric fields. Timer command text goes through regex extraction only — no SQL string interpolation, all asyncpg parameterised queries.
+- [x] RLS: `alice.timers` and `alice.system_settings` have RLS enabled (permissive policy; the service scopes by `owner_role` in every query — same model as `alice.ha_entities`).
+- [ ] **BUG-7 (Medium, security):** `GET /stream/timers/pending?channel=<any>` requires only `verify_jwt` (any authenticated user, incl. `child`/`guest`), has **no role/ownership scoping**, **leaks timer names** for any device, and **mutates state** (marks the timers `acknowledged`, suppressing the real user's announcement). It is meant for the speech-gateway service token only. Mitigations: VPN-only deployment; single-user household today. Fix: restrict to the `iss == "alice-speech-gateway"` claim (the service token carries it) and/or scope the channel to the caller's role.
+- [x] `GET /stream/timers` is role-scoped (`resolve_role` → `list_active(role)`); a user only sees their own role's timers. `child`/`guest` see only theirs.
+- [x] Rate limiting: inherits the nginx `/api/stream/` limiter.
+- [ ] **BUG-8 (Medium):** the `useTimerAlarm` hook polls `GET /api/stream/timers` every 30 s. That endpoint shares the nginx `stream_limit` zone (10 req/min/IP) with `/stream/chat`. A user actively chatting **and** with the alarm running can hit 429s on chat. Needs either a separate nginx location for `/api/stream/timers*` with its own limit, or a longer poll interval + reliance on the `alice:timers-changed` push.
+- [x] No secrets in responses / logs — timer replies and log lines carry only names + durations; `HA_TOKEN` used server-side only.
+
+**Frontend:**
+- [x] Settings section is inside the `can_manage_users`-guarded tab — non-admins never see it
+- [x] XSS: timer names are rendered as React text (toast `description`, list items) — auto-escaped. Names originate from the user's own speech/text.
+- [x] `localStorage` not used for timer state (server authoritative)
+
+### Bugs Found
+
+#### BUG-1: Timers with a derived name cannot be targeted by name
+- **Severity:** High
+- **Root cause:** `parse_ref_name` regex `\b(?:den|der|des|dem)\s+([A-Za-zÄÖÜäöüß][\wÄÖÜäöüß -]*?)\s+timer\b` requires the name to start with a **letter**. Derived names begin with a digit ("20 Minuten Timer") or "15 Uhr 40 Timer".
+- **Repro:** two timers running ("20 Minuten Timer", "Kartoffel Timer"). Say "Verlängere den 20 Minuten Timer um 5 Minuten". Expected: the 20-minute timer is extended. Actual: `ref=None` → "Es laufen mehrere Timer: … Welchen meinst du?" — cannot proceed.
+- **Priority:** Fix before deployment.
+
+#### BUG-2: Invalid duration in a multi-timer sentence is silently accepted as minutes
+- **Severity:** Medium
+- **Root cause:** `parse_time`'s bare-integer fallback (added for "…auf 10 und einen auf 20") matches "auf 3" inside "3 Wochen" / "3 Tage" and returns 3 minutes.
+- **Repro:** "Timer auf 10 Minuten und einen auf 3 Wochen". Expected: 10-min timer created, "3 Wochen" part rejected with a reason. Actual: two timers, the second at 3 minutes.
+- **Priority:** Fix before deployment (spec edge case explicitly calls for partial-success rejection).
+
+#### BUG-3: Extend/shorten a paused timer says "schon abgelaufen"
+- **Severity:** Low
+- **Root cause:** `change_expiry` guards on `status='running'`; a paused timer yields None, which `_do_change` renders as "ist schon abgelaufen".
+- **Repro:** pause a timer, then "Verlängere den … Timer um 5 Minuten". Expected: either extend the frozen remaining, or "Der Timer ist pausiert — setze ihn erst fort." Actual: "…ist schon abgelaufen."
+- **Priority:** Fix in next sprint.
+
+#### BUG-5: WebApp cannot reach the timer backend (wrong path prefix)
+- **Severity:** High (blocks the entire WebApp half of the feature)
+- **Root cause:** `frontend/src/services/timers.ts` builds URLs as `${STREAM_API_URL}/timers…` = `/api/timers…`. nginx only proxies `/api/stream/*` (and `/api/admin/*`, `/api/auth/*`) to `alice-chat-stream`; `/api/timers` falls through to the SPA catch-all and returns `index.html`.
+- **Repro:** open Settings → Nutzer-Verwaltung as admin. Expected: the Timer section loads the per-role config. Actual: `getTimerConfig()` receives HTML, `res.ok` is true, `res.json()` throws → the section shows its error state. The alarm hook's `getActiveTimers()` fails the same way.
+- **Fix:** prefix the three calls with `/stream` → `${STREAM_API_URL}/stream/timers`, `/stream/timers/config`.
+- **Priority:** Fix before deployment.
+
+#### BUG-6: Cleanup blocked after a role loses the timer permission
+- **Severity:** Low
+- **Root cause:** `handle_timer_part` returns the refusal for **every** action when `cfg.allowed` is false, before dispatching. The Tech Design recommended still allowing query/delete for cleanup.
+- **Repro:** role has 2 running timers, admin turns off "Timer erlauben" for that role, user says "Lösche alle Timer". Expected (per Tech Design G): the delete is allowed so they can clean up. Actual: "Timer sind für deine Rolle nicht freigeschaltet."
+- **Priority:** Fix in next sprint (decision needed — spec left this open).
+
+#### BUG-7: `/stream/timers/pending` unauthenticated-scope + state mutation
+- **Severity:** Medium (security)
+- See Security Audit. Any authenticated user can read + acknowledge any device's expired timers.
+- **Priority:** Fix before deployment (cheap: gate on the `iss` claim).
+
+#### BUG-8: Timer alarm poll shares the chat rate-limit budget
+- **Severity:** Medium
+- `useTimerAlarm` polls `/api/stream/timers` every 30 s against the shared `stream_limit` (10/min). Heavy chatting + alarm → 429 on chat.
+- **Priority:** Fix before deployment (add a dedicated nginx location, or raise the interval to ≥120 s and lean on the `alice:timers-changed` event).
+
+#### BUG-9: Weaviate timer seed keeps `{value}` / `{name}` placeholders in the vectorised text
+- **Severity:** High (feature silently non-functional on the voice/text fast path)
+- See Pfad & Performance. The seed must write concrete natural utterances.
+- **Priority:** Fix before deployment.
+
+### Pre-existing issues surfaced (not PROJ-85 bugs, but relevant)
+- `<Toaster />` was **not mounted anywhere** in the app — every `useToast()` call in Settings was a silent no-op. PROJ-85 mounts it in `(main)/layout.tsx` (required for the alarm). This means existing Settings toasts (user CRUD, DMS, mail, voice) now actually appear — a behaviour change, intended and positive, but worth a regression glance.
+- `alice-speech-gateway` `tests/test_wyoming_transport.py` + `tests/test_config.py` — 6 failures from `Device(user_id=…)` in the test helpers (PROJ-43 removed that field). Pre-dates PROJ-85.
+
+### Summary
+- **Acceptance Criteria:** 58 sub-checks PASS, 5 FAIL (BUG-1, BUG-2, BUG-5, BUG-6, BUG-9), ~9 HARDWARE-VERIFY (Voice-PE audio path — cannot test here, by design), 1 not measurable (< 200 ms — needs live Prometheus).
+- **Bugs Found:** 8 total — 0 Critical, **3 High** (BUG-1, BUG-5, BUG-9), **3 Medium** (BUG-2, BUG-7, BUG-8), **2 Low** (BUG-3, BUG-6).
+- **Security:** One Medium finding (BUG-7 — unscoped state-mutating `pending` endpoint) + one Medium operational (BUG-8 — shared rate limit). Both cheap to fix. Auth, RLS, input validation, parameterised queries all sound.
+- **Production Ready:** **NO** — 3 High bugs (BUG-1 core voice UX, BUG-5 whole WebApp half, BUG-9 the fast-path match itself) plus 2 security/ops Mediums.
+- **Recommendation:** Fix BUG-1, BUG-2, BUG-5, BUG-7, BUG-8, BUG-9 before deployment; BUG-3 and BUG-6 can follow. Then re-run `/qa`, and schedule the HARDWARE-VERIFY session at the Voice PE.
 
 ## Deployment
 _To be added by /deploy_
