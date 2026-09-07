@@ -865,7 +865,7 @@ unit suites, and `tsc`/`next build`.
 
 ## Re-QA — after fixes (2026-09-08)
 
-All 8 bugs from the first pass were fixed in commit `<fix commit>` and
+All 8 bugs from the first pass were fixed in commit `ddcffa9` and
 re-verified by code reading + unit tests. Same constraint: the live stack is
 not runnable here, so the Voice-PE audio path and the < 200 ms budget still
 need a hardware/Prometheus check at deploy.
