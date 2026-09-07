@@ -75,6 +75,15 @@ while read -r row; do
   SERVICE=$(echo "$row" | jq -r '.service')
   while read -r pattern; do
     [ -z "$pattern" ] && continue
+    # These patterns are the vectorised text — a leftover {value}/{name}
+    # placeholder would poison the embedding (see PROJ-85 QA BUG-9).
+    case "$pattern" in
+      *"{"*)
+        echo -e "  ${RED}SKIP${NC} placeholder in pattern: ${pattern}"
+        FAILED=$((FAILED+1))
+        continue
+        ;;
+    esac
     BODY=$(jq -n \
       --arg u "$pattern" \
       --arg s "$SERVICE" \

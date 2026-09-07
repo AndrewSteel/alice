@@ -40,7 +40,9 @@ function base(): string {
   if (!STREAM_API_URL) {
     throw new Error("Streaming-Endpunkt nicht konfiguriert.");
   }
-  return STREAM_API_URL;
+  // nginx only proxies `${STREAM_API_URL}/stream/*` (and /admin, /auth) to
+  // alice-chat-stream — the timer routes live under /stream/ there.
+  return `${STREAM_API_URL}/stream`;
 }
 
 /** Active timers in the caller's role scope (for the WebApp alarm). */

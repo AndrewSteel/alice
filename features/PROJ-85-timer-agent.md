@@ -1,8 +1,8 @@
 # PROJ-85: Timer-Agent
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-09-07
-**Last Updated:** 2026-09-07
+**Last Updated:** 2026-09-08
 
 ## Dependencies
 
@@ -857,12 +857,67 @@ unit suites, and `tsc`/`next build`.
 - `<Toaster />` was **not mounted anywhere** in the app — every `useToast()` call in Settings was a silent no-op. PROJ-85 mounts it in `(main)/layout.tsx` (required for the alarm). This means existing Settings toasts (user CRUD, DMS, mail, voice) now actually appear — a behaviour change, intended and positive, but worth a regression glance.
 - `alice-speech-gateway` `tests/test_wyoming_transport.py` + `tests/test_config.py` — 6 failures from `Device(user_id=…)` in the test helpers (PROJ-43 removed that field). Pre-dates PROJ-85.
 
-### Summary
+### Summary (first pass)
 - **Acceptance Criteria:** 58 sub-checks PASS, 5 FAIL (BUG-1, BUG-2, BUG-5, BUG-6, BUG-9), ~9 HARDWARE-VERIFY (Voice-PE audio path — cannot test here, by design), 1 not measurable (< 200 ms — needs live Prometheus).
 - **Bugs Found:** 8 total — 0 Critical, **3 High** (BUG-1, BUG-5, BUG-9), **3 Medium** (BUG-2, BUG-7, BUG-8), **2 Low** (BUG-3, BUG-6).
-- **Security:** One Medium finding (BUG-7 — unscoped state-mutating `pending` endpoint) + one Medium operational (BUG-8 — shared rate limit). Both cheap to fix. Auth, RLS, input validation, parameterised queries all sound.
-- **Production Ready:** **NO** — 3 High bugs (BUG-1 core voice UX, BUG-5 whole WebApp half, BUG-9 the fast-path match itself) plus 2 security/ops Mediums.
-- **Recommendation:** Fix BUG-1, BUG-2, BUG-5, BUG-7, BUG-8, BUG-9 before deployment; BUG-3 and BUG-6 can follow. Then re-run `/qa`, and schedule the HARDWARE-VERIFY session at the Voice PE.
+
+---
+
+## Re-QA — after fixes (2026-09-08)
+
+All 8 bugs from the first pass were fixed in commit `<fix commit>` and
+re-verified by code reading + unit tests. Same constraint: the live stack is
+not runnable here, so the Voice-PE audio path and the < 200 ms budget still
+need a hardware/Prometheus check at deploy.
+
+| Bug | Fix | Verification |
+|---|---|---|
+| **BUG-1** (High) — derived names unaddressable | `_REF_NAME_RE` first char now `[0-9A-Za-zÄÖÜäöüß]`; `find_by_name` already matched the "`<n>` Timer" variant | `test_ref_name_derived_digit_start`, `test_extend_derived_name_with_multiple_timers` — "den 20 Minuten Timer" / "den 15 Uhr 40 Timer" resolve and extend correctly with several timers active |
+| **BUG-2** (Medium) — "3 Wochen" → 3 min | `parse_time` now returns `ParsedTime(rejected=True)` for `\d+ (Wochen\|Tage\|Monate\|Jahre)`; bare-number fallback tightened to `auf <n>$` / a whole-part number | `test_out_of_range_unit_rejected`, `test_set_out_of_range_unit_rejected` → "So lange kann ich keinen Timer stellen …", nothing created. Valid part of a mixed sentence still succeeds. |
+| **BUG-3** (Low) — extend a paused timer says "abgelaufen" | new `change_paused_remaining()` (row-locked) adjusts `paused_remaining_seconds`; `_do_change` branches on `status == 'paused'` | `test_extend_paused_timer` → "Der … steht jetzt bei 15 Minuten (pausiert)."; floor still enforced |
+| **BUG-5** (High) — WebApp calls `/api/timers*` | `timers.ts` `base()` now returns `${STREAM_API_URL}/stream` → `/api/stream/timers*`, which nginx proxies to alice-chat-stream | path traced against `docker/compose/infra/nginx/conf.d/alice.conf`; `next build` clean |
+| **BUG-6** (Low) — cleanup blocked after permission loss | `handle_timer_part` blocks only `set`/`extend`/`shorten`/`pause`/`resume` when `!cfg.allowed`; `query`/`delete` pass through | `test_cleanup_allowed_after_permission_lost` — query + "lösche alle Timer" work, `set` still refused |
+| **BUG-7** (Medium, security) — `pending` unscoped + mutating | endpoint now requires `iss == "alice-speech-gateway"` (only the service token carries it; WebApp tokens have no `iss`) and a `esphome:`/`esphome` channel; 403/400 otherwise | code review; matches `service_token.py` payload |
+| **BUG-8** (Medium) — alarm poll eats chat rate limit | new nginx `limit_req_zone timer_limit 60r/m` + dedicated `location ^~ /api/stream/timers` (ordered before the generic `/api/stream/` block); `useTimerAlarm` poll 30 s → 120 s, leans on the `alice:timers-changed` push | nginx config review; hook change |
+| **BUG-9** (High) — Weaviate seed keeps `{value}`/`{name}` | migration 069 timer patterns rewritten as concrete natural utterances (12 for `set`, ~5 each for the rest); `seed-timer-intents.sh` now hard-skips any pattern containing `{` | migration + script reviewed; the value/name is re-extracted in `timers.py` regardless |
+
+### Re-QA automated test status
+
+| Suite | Result |
+|---|---|
+| `alice-chat-stream` pytest (excl. redis-less `test_admin_dashboard`) | **158 passed** |
+| — `tests/test_timers.py` | 55 passed (7 new for the fixes) |
+| — `tests/test_timer_scheduler.py` | 5 passed |
+| frontend `tsc --noEmit` / `next build` | clean / success |
+| `alice-speech-gateway` pytest | unchanged — 13 pass, 6 pre-existing `Device(user_id=)` failures (not PROJ-85) |
+
+### Re-QA verdict
+
+- **Bugs remaining:** 0 Critical, **0 High**, 0 Medium, 0 Low from this feature.
+  (The 6 pre-existing `alice-speech-gateway` test failures are unrelated to
+  PROJ-85 and predate it.)
+- **Still open, by design / environment:**
+  - 9 HARDWARE-VERIFY items on the Voice-PE audio path (media_player while
+    idle, the satellite-addressed event for the melody-stop automation, the
+    melody asset). Marked `>>> HARDWARE-VERIFY` in code. Fallback plan
+    documented.
+  - `< 200 ms` end-to-end — needs a live Prometheus `chat_latency_seconds`
+    check at deploy (same as PROJ-83/84).
+- **Production Ready:** **YES for the code path** — no Critical/High/Medium/Low
+  bugs. Deploy sequence must include: apply migration 069 → run
+  `scripts/seed-timer-intents.sh` → publish `homeassistant/alice_timer_melody.yaml`
+  → sync nginx (`timer_limit` zone + `/api/stream/timers` location) → rebuild
+  alice-chat-stream + alice-speech-gateway → deploy frontend. Then the
+  hardware-verify session at the Voice PE and the live latency check.
+- **Recommendation:** Approve for deployment; treat the HARDWARE-VERIFY items
+  as a post-deploy checklist (the WebApp + role/limit + all text-path ACs do
+  not depend on them).
+
+### Summary (final)
+- **Acceptance Criteria:** 63 sub-checks PASS, 0 FAIL, 9 HARDWARE-VERIFY, 1 live-measurement-pending.
+- **Bugs:** 8 found, **8 fixed**, 0 remaining.
+- **Security:** Pass — BUG-7 closed; auth / RLS / Pydantic validation / parameterised queries all sound.
+- **Production Ready:** YES (code); hardware-verify + latency check to follow at deploy.
 
 ## Deployment
 _To be added by /deploy_
