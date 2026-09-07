@@ -268,7 +268,262 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+**Feature-Typ:** Backend-Schwerpunkt (Python in `alice-chat-stream` + `alice-speech-gateway`, neue DB-Tabelle + Schema-Erweiterung, Weaviate-Seed) **plus** ein Frontend-Anteil (Settings-Tab-Erweiterung + WebApp-Timer-Alarm). Kein n8n-Workflow. Kein neuer Docker-Container.
+
+### Das große Bild — was gebaut wird und warum
+
+Alice bekommt einen eigenen, vollständigen Timer-Mechanismus. Der Grund dafür ist im Spec-Interview klar geworden: Home Assistants eingebaute Sprach-Timer sind für Alice nicht erreichbar (sie leben nur in HAs Assist-Pipeline, die Alice über den „Hey Jarvis"-Pfad bewusst umgeht). Alice muss also selbst zählen, selbst benennen, selbst benachrichtigen.
+
+Vier Bausteine, weitgehend unabhängig:
+
+```
+1. Timer-Verstehen      — neue Timer-Satzmuster im schnellen Intent-Pfad erkennen,
+                          Dauer/Uhrzeit/Name/Änderung aus dem Text ziehen
+2. Timer-Speicher       — neue Tabelle alice.timers; ein Timer = eine Zeile mit
+                          Ablauf-Zeitpunkt, Name, Besitzer-Rolle, Status, Setz-Kanal
+3. Timer-Wächter        — ein Hintergrund-Prozess in alice-chat-stream, der auf den
+                          jeweils nächsten Ablauf wartet und dann die Meldung auslöst
+4. Ablauf-Zustellung    — Voice PE: Alice ruft Home Assistant per REST, das Gerät
+                          spielt die Melodie;  WebApp: der Browser zählt selbst
+                          herunter und meldet sich im sichtbaren Tab
+```
+
+Dazu kommt die **Rollen-Schicht**: Wer darf Timer nutzen, wie viele, wie lange — und wessen Timer sieht man. Das hängt an der bestehenden Rollen-Verwaltung (`admin`/`user`/`guest`/`child`).
+
+---
+
+### A) Systemüberblick (Visual)
+
+```
+                        ┌───────────────────────────────────────────────┐
+   "Hey Jarvis,         │  HA Voice PE (ESPHome)                          │
+    setze einen         │   • "Hey Jarvis" → Wyoming → alice-speech-gw    │
+    Timer auf           │   • dauerhaft via ESPHome-API mit HA verbunden  │
+    20 Minuten"         │   • hat eine media_player-Entity in HA          │
+                        └──────────────┬────────────────────────────────┘
+                                       │ Wyoming (kurzlebige Session, nur beim Sprechen)
+                                       ▼
+                        ┌───────────────────────────────┐
+                        │  alice-speech-gateway          │
+                        │   • Speaker-ID → User/Rolle    │
+                        │   • NEU: erkennt Timer-Ablauf- │
+                        │     Ansage-Kontext             │
+                        └──────────────┬────────────────┘
+                                       │ HTTP  (session, transcript, source=esphome:<Raum>)
+                                       ▼
+   Browser / WebApp ───HTTP──►  ┌─────────────────────────────────────────────┐
+   "Timer auf 15 Uhr 40"        │  alice-chat-stream                            │
+                                │  ┌────────────────────────────────────────┐  │
+                                │  │ Schneller Intent-Pfad (bestehend)       │  │
+                                │  │  • Weaviate-Match gegen HAIntent         │  │
+                                │  │  • NEU: Timer-Intents (ohne Gerät)       │  │
+                                │  │  • NEU: Timer-Handler                    │  │
+                                │  │     - Rolle + Berechtigung + Limits      │  │
+                                │  │     - Dauer/Uhrzeit/Name/Delta aus Text  │  │
+                                │  │     - schreibt/ändert alice.timers       │  │
+                                │  └────────────────────────────────────────┘  │
+                                │  ┌────────────────────────────────────────┐  │
+                                │  │ Timer-Wächter (NEU, Hintergrund-Task)    │  │
+                                │  │  • wartet auf nächsten Ablauf           │  │
+                                │  │  • beim Ablauf: Kanal-abhängige Meldung │  │
+                                │  └───────────┬───────────────┬────────────┘  │
+                                └──────────────┼───────────────┼───────────────┘
+                                               │               │
+                    Voice-PE-Timer ◄───────────┘               └────────► WebApp-Timer
+                    HA-REST: Melodie + Ansage                   (Client zählt selbst,
+                    auf media_player des Setz-Geräts             Toast + Ton im Tab)
+                                               │
+                                               ▼
+                                        ┌──────────────┐
+                                        │ PostgreSQL    │  alice.timers  (Zustand)
+                                        │               │  alice.role_templates (+Timer-Felder)
+                                        │               │  alice.permissions_assistant (+can_use_timers)
+                                        └──────────────┘
+```
+
+---
+
+### B) Datenmodell (Klartext)
+
+**Neue Tabelle `alice.timers` — ein Eintrag pro Timer:**
+
+- **ID** — eindeutige Kennung
+- **Name** — der angezeigte/angesprochene Name („Kartoffel Timer", „20 Minuten Timer")
+- **Besitzer-User** — wer den Timer gesetzt hat; leer, wenn die Stimme nicht erkannt wurde
+- **Besitzer-Rolle** — `admin` / `user` / `guest` / `child`; **das** Feld, über das Sichtbarkeit und „lösche alle Timer" laufen
+- **Ablauf-Zeitpunkt** — absoluter Zeitpunkt, zu dem der Timer feuert
+- **Status** — `läuft` / `pausiert` / `abgelaufen` / `quittiert`
+- **Restlaufzeit bei Pause** — nur gesetzt, solange pausiert (eingefrorene Sekunden)
+- **Setz-Kanal** — entweder die Geräte-Kennung des Voice PE (für die Melodie-Zustellung) **oder** ein Marker „WebApp"
+- **Erstellt am** — Zeitstempel
+
+Nur `läuft`- und `pausiert`-Timer zählen als „aktiv" (für Limits, Kollisionsprüfung, Listen).
+
+**Erweiterung der bestehenden Rollen-Verwaltung:**
+
+- `alice.role_templates` bekommt drei zusätzliche Angaben pro Rolle: *Timer erlaubt (ja/nein)*, *maximale Anzahl gleichzeitiger Timer*, *maximale Timer-Dauer*. Diese liegen — wie die bestehenden HA-/DMS-/System-Rechte — als strukturierte Angabe (JSON) im jeweiligen Rollen-Datensatz.
+- `alice.permissions_assistant` (die pro-User-Tabelle) bekommt ein zusätzliches Ja/Nein-Feld *Timer nutzen* — analog zu den vorhandenen `can_use_chat` / `can_use_voice` / `can_use_tools`.
+- Die bestehende Funktion, die bei der User-Anlage die Rollen-Vorlage in die pro-User-Rechte kopiert (`alice.init_user_permissions`), wird um diese Felder ergänzt.
+- **Eine neue System-Einstellung `timer_default_role`** — welche Rolle ein per Voice PE gesetzter Timer bekommt, wenn die Stimme nicht erkannt wurde. Auslieferungswert `user`; im Ein-Nutzer-Haushalt sinnvoll auf `admin`. Ablage: eine schlanke Schlüssel-Wert-Tabelle für System-Settings (oder, falls schon vorhanden, die bestehende) — in der Bau-Phase zu bestätigen.
+
+**Auslieferungs-Defaults je Rolle:**
+
+| Rolle | Timer erlaubt | Max. aktive Timer | Max. Dauer |
+|---|---|---|---|
+| admin | ja | 20 | 24 h |
+| user | ja | 10 | 24 h |
+| child | ja | 3 | 2 h |
+| guest | nein | – | – |
+
+Untergrenze der Dauer: 10 Sekunden, rollenunabhängig, fest.
+
+**Weaviate:** Keine neue Collection. Die Timer-Satzmuster („setze einen Timer auf …", „verlängere den … Timer um …", „wie lange läuft … noch", „lösche alle Timer" …) werden als zusätzliche Einträge in die bestehende `HAIntent`-Sammlung geschrieben — **ohne** Geräte-Zuordnung, mit einem Domänen-Marker `timer`. Der schnelle Intent-Pfad erkennt an diesem Marker, dass der Timer-Handler zuständig ist und **kein** Home-Assistant-Gerätebefehl folgt. Diese Einträge kommen über einen **eigenen kleinen Seed-Schritt** in die Sammlung (ein wiederholbares Skript), nicht über den laufenden HA-Sync — der würde sie mangels Gerät sonst wieder entfernen.
+
+---
+
+### C) Die vier Bausteine im Detail
+
+#### Baustein 1 — Timer verstehen (in `alice-chat-stream`)
+
+Der bestehende schnelle Pfad zerlegt einen Satz in Teilbefehle (Sentence Splitter, unverändert) und matcht jeden gegen die Weaviate-Intent-Sammlung. Neu: Trifft ein Teil einen Timer-Intent, übernimmt ein **Timer-Handler** statt des HA-Geräte-Aufrufs. Er arbeitet in dieser Reihenfolge:
+
+1. **Rolle bestimmen** — aus dem mitgelieferten Nutzer-Token; ist kein Nutzer bekannt, gilt `timer_default_role`.
+2. **Berechtigung prüfen** — hat die Rolle „Timer nutzen"? Wenn nein: freundliche deutsche Ablehnung, fertig.
+3. **Absicht bestimmen** — setzen / ändern / abfragen / pausieren / fortsetzen / löschen. Ergibt sich aus dem gematchten Intent.
+4. **Werte aus dem Text ziehen** — reine Textverarbeitung (gleiches Vorgehen wie bei den Prozent-/Grad-Werten in PROJ-83):
+   - *Dauer:* „20 Minuten", „1 Stunde 30 Minuten", „2,5 Minuten" → Sekunden
+   - *Uhrzeit:* „15 Uhr 40", „15 Uhr" → nächster passender Zeitpunkt (heute, sonst morgen)
+   - *Name:* „für Kartoffeln" → „Kartoffel Timer"; ohne Namen → aus der Zeitangabe abgeleitet
+   - *Änderungs-Delta:* „um 5 Minuten" (verlängern/verkürzen)
+   - *Ziel-Timer bei Änderung/Abfrage/Löschen:* genannter Name; ohne Namen → der einzige aktive Timer der Rolle, sonst Rückfrage mit Aufzählung
+5. **Limits prüfen** (nur beim Setzen und beim Verlängern) — Max-Anzahl, Max-Dauer der Rolle. Bei Verletzung: Ablehnung mit Nennung des Limits.
+6. **Namenskollision** (nur beim Setzen) — existiert im selben Rollen-Scope schon ein aktiver Timer gleichen Namens, wird sofort „zweiter … Timer" / „dritter … Timer" vergeben (keine Rückfrage).
+7. **Schreiben** — Zeile in `alice.timers` anlegen/ändern; danach den Wächter „aufwecken" (er muss seinen nächsten Weckzeitpunkt neu berechnen).
+8. **Antworten** — die bestätigende Sprech-/Textmeldung auf Deutsch, mit berechneter Laufzeit bei Uhrzeit-Timern.
+
+Fehlt eine erwartete Zahl (STT-Aussetzer), wird — wie bei bestehenden Wert-Intents — nichts angelegt und Alice fragt kurz nach.
+
+Alles bleibt ohne Sprachmodell-Aufruf; das <200-ms-Ziel gilt weiter. Die zusätzlichen Datenbank-Abfragen (Rolle, Limits, vorhandene Timer) sind kleine, indizierte Abfragen — gleiches Muster wie der Namens-Lookup in PROJ-83/84.
+
+#### Baustein 2 — Timer-Speicher
+
+Beschrieben unter B). Wichtig für die **Nebenläufigkeit**: Jede Statusänderung an einem Timer passiert als eine einzelne, gesperrte Datenbank-Operation. Damit sind die im Spec geforderten Regeln automatisch erfüllt:
+
+- „Ablauf schlägt Änderung" — wenn der Wächter einen Timer schon auf `abgelaufen` gesetzt hat, findet ein gleichzeitiger „verlängere"-Befehl keinen `läuft`-Timer mehr und antwortet „schon abgelaufen".
+- „Löschen schlägt Ablauf" — der Löschbefehl entfernt die Zeile; eine bereits angestoßene Melodie wird abgebrochen (siehe Baustein 4).
+- „Kein doppelter Ablauf" — der Übergang auf `abgelaufen` greift nur, wenn der Timer noch `läuft`; ein zweiter Versuch (etwa Wächter + Neustart-Nachlauf) läuft ins Leere.
+
+#### Baustein 3 — Timer-Wächter (Hintergrund-Task in `alice-chat-stream`)
+
+Ein einzelner asynchroner Dauerläufer, gestartet beim Hochfahren des Containers (dort wird schon heute die Datenbank-Verbindung initialisiert):
+
+- **Beim Start:** einmal alle Timer durchsehen. Alles, was während einer Ausfallzeit hätte feuern sollen, wird **jetzt** ausgelöst (mit Zusatz „ist vor {Dauer} abgelaufen"). Alles andere: normal weiterlaufen lassen.
+- **Im Betrieb:** bis zum nächsten fälligen Ablauf-Zeitpunkt schlafen, dann auslösen. Wird zwischendurch ein Timer gesetzt/geändert/gelöscht, weckt der Handler den Wächter, damit er seinen Schlaf neu berechnet.
+- **Sammel-Fenster:** Werden mehrere Timer desselben Geräts innerhalb weniger Sekunden (Standard 3) fällig, werden sie zu **einer** Melodie- und Ansage-Sitzung gebündelt.
+- **Nach dem Auslösen:** Voice-PE-Timer, die niemand quittiert, verstummen nach der Maximalzeit (Standard 2 Minuten) von selbst und gelten dann als quittiert.
+
+Warum als Task im bestehenden Container und nicht als eigener Dienst: Die Timer-Schreiblogik sitzt ohnehin dort, es gibt keinen zweiten Schreiber, und ein einzelner Container-Neustart ist durch den Start-Nachlauf abgedeckt. Ein eigener Dienst wäre mehr Betrieb ohne Gewinn.
+
+#### Baustein 4 — Ablauf-Zustellung
+
+**Voice PE** (der Hauptfall):
+
+Die Voice PE ist über die ESPHome-API dauerhaft mit Home Assistant verbunden und hat dort eine Lautsprecher-Entity (`media_player`). Das ist unabhängig davon, ob gerade eine „Hey Jarvis"-Sitzung läuft. Beim Ablauf:
+
+1. Der Wächter ruft **Home Assistant per REST** auf (denselben Weg, den `alice-chat-stream` schon für Geräte-Befehle und Einkaufslisten nutzt) und lässt auf dem Lautsprecher des **Setz-Geräts** eine Melodie/Tonfolge abspielen.
+2. Die Zuordnung „welcher Timer → welches Gerät → welche `media_player`-Entity" kommt aus einer Ergänzung der bestehenden Geräte-Zuordnungsdatei des Speech-Gateways (`device-mapping.yaml`): pro Gerät wird zusätzlich die HA-`media_player`-Entität hinterlegt. Der Setz-Kanal in `alice.timers` speichert die Geräte-Kennung.
+3. **Stoppen der Melodie:** Der saubere Weg ist eine **kleine Home-Assistant-Automation** als Vermittler — sie kennt die Wakeword-/Aktivitäts-Events des Satelliten und den Lautsprecher-Zustand, die Alice selbst nicht sieht. Alice stößt Start (und bei „lösche"/Timeout den Stopp) über ein einfaches Signal an (REST-Aufruf einer Automation bzw. ein Schalt-Hilfsobjekt in HA); die Automation macht das eigentliche Abspielen/Stoppen und stoppt auch, sobald der Nutzer den Satelliten anspricht.
+4. **Ansage beim Ansprechen:** Sagt der Nutzer „Hey Jarvis", während (oder kurz nachdem) die Melodie lief, erkennt das **Speech-Gateway** diesen Kontext (es fragt beim Chat-Backend „gibt es für dieses Gerät einen gerade abgelaufenen, noch nicht angesagten Timer?") und lässt Alice **zuerst** die Ablauf-Meldung sprechen („Der 20 Minuten Timer ist abgelaufen."), bevor eine etwaige weitere Äußerung normal verarbeitet wird. Danach gilt der Timer als quittiert.
+
+> **Was in der Bau-Phase am Gerät verifiziert werden muss:** ob das `nabu_casa.voice_pe`-Paket eine nutzbare `media_player`-Entität bereitstellt, während der „Hey Jarvis"-Wyoming-Pfad aktiv ist, und wie zuverlässig die HA-Automation den „Satellit wird gerade angesprochen"-Zustand sieht. Fällt das negativ aus, ist der Rückfallplan: Melodie als kurze, sich wiederholende Tonfolge über denselben TTS-Audiokanal, den das Gateway ohnehin zum Gerät nutzt — dann ohne „läuft bis Ansprache", sondern feste kurze Wiederholung.
+
+**WebApp:**
+
+Kein Gerät, kein Lautsprecher, keine dauerhafte Verbindung. Deshalb:
+
+1. Legt ein Nutzer im WebApp-Chat einen Timer an, liefert die Antwort den **Ablauf-Zeitpunkt** mit.
+2. Die WebApp zählt **im Browser** herunter. Läuft der Timer ab, während der Tab sichtbar im Vordergrund ist: auffälliger Hinweis (Toast) + Ton (über die schon vorhandene Ton-Freigabe).
+3. Kommt der Tab nach dem Ablauf-Zeitpunkt zurück in den Vordergrund, holt die WebApp den aktuellen Timer-Stand vom Server und zeigt eine **Nachhol-Meldung** („… ist vor 2 Minuten abgelaufen").
+4. War der Tab beim Ablauf im Hintergrund / das Gerät gesperrt und kcommt auch nicht rechtzeitig zurück: **keine** Meldung. Das ist die dokumentierte Grenze — die zuverlässige Hintergrund-Benachrichtigung ist ein eigenes Feature (PROJ-104, Web Push).
+
+Der Server bleibt in allen Fällen die maßgebliche Quelle für den Timer-Status; der Browser-Countdown ist nur die Anzeige.
+
+---
+
+### D) Frontend-Anteil
+
+**1. Settings — Rollen-Verwaltung erweitern**
+
+Der bestehende Bereich „Nutzer-Verwaltung" in den Einstellungen bekommt pro Rolle einen kleinen Timer-Abschnitt:
+
+```
+Einstellungen › Nutzer-Verwaltung › Rollen
+└── Rolle "user"
+     ├── … bestehende Rechte …
+     └── Timer  (NEU)
+          ├── [Schalter] Timer nutzen erlauben
+          ├── [Zahl]     Max. gleichzeitige Timer
+          └── [Zahl]     Max. Timer-Dauer (Stunden)
+
+Einstellungen › Nutzer-Verwaltung  (NEU, einmalig)
+└── [Auswahl] Standard-Rolle für nicht erkannte Sprecher: ( admin | user | guest | child )
+```
+
+- Nur für `admin` sichtbar (die Einstellungsseite hat dieses Muster schon).
+- Bausteine: vorhandene `Switch`-, `Input`- und `Select`-Komponenten aus der UI-Bibliothek; keine neuen UI-Primitive.
+- Datenanbindung: ein schlanker Service analog zum bestehenden DMS-Ordner-Service.
+- Alle Texte über die Übersetzungs-Schicht (keine fest verdrahteten Strings).
+- Änderungen wirken sofort auf **neu** gesetzte Timer; laufende behalten ihre gespeicherte Rolle.
+
+**2. WebApp — Timer-Alarm**
+
+- Ein kleiner Timer-Beobachter im Frontend: hält die aktiven Timer des eigenen Rollen-Scopes, zählt herunter, zeigt bei Ablauf Toast + Ton.
+- Nutzt die vorhandene Hinweis-Infrastruktur (`use-toast`) und Ton-Freigabe (`useAudioPermission`).
+- Gleicht sich beim Zurückkehren in den Vordergrund und beim Neuladen mit dem Server ab (Lese-Zugriff auf die eigenen aktiven Timer).
+- Keine neue Seite, keine Timer-Verwaltungs-Oberfläche — Timer werden per Chat bedient; die WebApp zeigt nur den Alarm.
+
+---
+
+### E) Betroffene Komponenten (Überblick)
+
+| Bereich | Was passiert |
+|---|---|
+| **Datenbank** | Neue Tabelle `alice.timers` (mit Row-Level-Security wie alle Tabellen). `alice.role_templates` + `alice.permissions_assistant` um Timer-Felder erweitert. `alice.init_user_permissions` angepasst. System-Setting `timer_default_role`. Neue Migrationsdatei unter `sql/migrations/`. |
+| **`alice-chat-stream`** | Neuer Timer-Handler im schnellen Pfad (Erkennung, Textauswertung, Rollen-/Limit-Prüfung, Schreiben). Neuer Hintergrund-Wächter (Ablauf-Erkennung, Zustellung, Start-Nachlauf). Kleiner Lese-Zugang „meine aktiven Timer" für die WebApp. Nutzung des bestehenden HA-REST-Wegs für die Melodie. |
+| **`alice-speech-gateway`** | Erkennt beim „Hey Jarvis" den Kontext „für dieses Gerät ist gerade ein Timer abgelaufen" und schiebt die Ansage vor die normale Verarbeitung. Kein Wyoming-Timer-Protokoll. |
+| **`device-mapping.yaml`** (Speech-Gateway-Konfiguration) | Pro Voice PE zusätzlich die HA-`media_player`-Entität hinterlegen. |
+| **Weaviate** | Timer-Satzmuster als geräte-lose `HAIntent`-Einträge über einen eigenen, wiederholbaren Seed-Schritt. |
+| **Home Assistant** | Eine kleine Automation als Melodie-Vermittler (Start/Stop, Stop bei Satelliten-Aktivität / Timeout). Liegt als Datei unter `homeassistant/`. |
+| **Frontend** | Settings: Timer-Abschnitt je Rolle + Standard-Rollen-Auswahl. WebApp: Timer-Alarm-Beobachter (Toast + Ton). Übersetzungstexte. |
+| **n8n** | — keine Änderung |
+
+---
+
+### F) Tech-Entscheidungen (begründet)
+
+| Entscheidung | Warum |
+|---|---|
+| Eigener Timer-Mechanismus statt HA-Assist-Timer | HA-Assist-Timer sind über den „Hey Jarvis"-Pfad strukturell nicht erreichbar (kein Gerät, kein REST-Dienst, nur Assist-Pipeline-intern). Gleiche Sackgasse wie bei den HA-Sprach-Timern selbst. |
+| Timer-Zustand in PostgreSQL | Muss Neustarts überleben, geräteübergreifend abfragbar sein und von mehreren Kanälen (Voice, WebApp) konsistent gesehen werden. Eine Datei oder In-Memory reicht dafür nicht. |
+| Wächter als Task im bestehenden Container | Kein zweiter Schreiber, keine Cron-Granularitäts-Probleme, ein Neustart ist durch den Start-Nachlauf abgedeckt. Ein eigener Dienst wäre mehr Betrieb ohne Nutzen. |
+| Schneller Pfad (kein Sprachmodell) | Konsistent mit PROJ-83/84; Zeit-/Namens-Erkennung ist einfache Textverarbeitung; hält die Antwort unter 200 ms. |
+| Melodie über HA-REST auf den `media_player` | Der einzige Weg, das Gerät proaktiv zu erreichen, wenn keine Sprach-Sitzung läuft. `alice-chat-stream` spricht diesen REST-Weg schon heute. |
+| HA-Automation als Melodie-Vermittler | Die „stoppe bei Ansprache"-Logik braucht Geräte-Events (Wakeword, Satellit aktiv), die in HA vorliegen, aber nicht bei Alice. Die Automation ist der natürliche Ort dafür. |
+| Sichtbarkeit auf Rollen-Ebene | Bewusste Produktentscheidung aus dem Spec-Interview: kompensiert die heute unsichere Sprecher-Erkennung; „der Küchentimer" ist ohnehin eher haushalts- als personengebunden gedacht. |
+| Rollen-Konfiguration in `role_templates` | Deckt sich 1:1 mit dem bestehenden Rechte-Modell (HA-, DMS-, System-Rechte liegen genauso dort). Editierbar über den vorhandenen Settings-Bereich. |
+| WebApp nur im Vordergrund-Tab | Alles andere braucht Web-Push-Infrastruktur (Service Worker, VAPID, Abo-Verwaltung) — eigener Umfang, als PROJ-104 ausgegliedert. Der Hauptanwendungsfall (Voice PE in Küche/Büro) ist ohne Web Push voll abgedeckt. |
+
+---
+
+### G) Offene Punkte / in der Bau-Phase zu bestätigen
+
+- **Am Gerät zu prüfen:** Ist die `media_player`-Entität des Voice PE nutzbar, während der „Hey Jarvis"-Pfad aktiv ist? Wie zuverlässig sieht eine HA-Automation „Satellit wird gerade angesprochen"? — Rückfallplan (feste kurze Tonfolge über den TTS-Kanal) steht.
+- **System-Settings-Ablage:** Gibt es schon eine Tabelle/Mechanik für System-weite Einstellungen (für `timer_default_role`), oder wird eine schlanke Schlüssel-Wert-Tabelle neu angelegt?
+- **Rolle verliert Timer-Recht, hat aber noch laufende Timer:** Empfehlung — bestehende Timer laufen normal ab und lösen aus; Abfragen und Löschen der eigenen laufenden Timer bleibt möglich (Aufräumen), nur neues Setzen ist gesperrt. (Im Spec als offener Punkt markiert; diese Auflösung wird vorgeschlagen.)
+- **Rollen-Aktualität im Sprach-Pfad:** Der Timer-Handler liest die Rolle frisch aus der Datenbank (nicht nur aus dem Token), damit eine Rollen-Änderung sofort greift.
+- **Namensableitung „für Kartoffeln" → „Kartoffel Timer":** regelbasierte Vereinfachung (Genitiv/Plural) mit dokumentierten Grenzen; keine Wortliste.
+- **Melodie-Datei:** kurze, dezente Tonfolge; Ablage und Bereitstellung (HA-lokale Datei vs. vom Gateway ausgeliefert) in der Bau-Phase festlegen.
 
 ## QA Test Results
 _To be added by /qa_
