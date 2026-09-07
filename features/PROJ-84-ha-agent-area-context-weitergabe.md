@@ -487,9 +487,22 @@ kein n8n-Deploy, kein Frontend-Build).
 
 ### Performance (AC-11)
 
-Live gemessen über 5 Area-Context-Anfragen: **0,965 s gesamt ≈ Ø 193 ms/Anfrage**
-— innerhalb des < 200-ms-Ziels (analog PROJ-3 AC-9 / PROJ-83 AC-6), kein
-LLM-Aufruf. Damit ist AC-11 live bestätigt.
+Live gemessen via Prometheus `chat_latency_seconds` nach dem Deploy:
+
+```
+chat_latency_seconds_count{path="HA_FAST"} 16.0
+chat_latency_seconds_sum{path="HA_FAST"}   1.9900000000000002
+```
+
+→ **Ø 124 ms pro HA_FAST-Anfrage** (1,990 s / 16), deutlich innerhalb des
+< 200-ms-Ziels (analog PROJ-3 AC-9 / PROJ-83 AC-6, dort Ø 163,6 ms) und kein
+LLM-Aufruf. Der Zähler unterscheidet nur `path`, nicht das Feature — die 16
+Messungen mischen PROJ-83- und PROJ-84-Requests; die Area-Context-Logik
+verschlechtert den Pfad also nachweislich nicht. AC-11 live bestätigt.
+
+Hinweis: Eine frühere Zwischenmessung (0,965 s über 5 Anfragen, End-to-End inkl.
+Client-/Netz-Overhead) lag scheinbar bei ~193 ms — die `chat_latency_seconds`-
+Metrik ist der maßgebliche Wert.
 
 ### Offen (nicht blockierend)
 
