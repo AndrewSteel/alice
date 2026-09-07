@@ -22,7 +22,6 @@ The background expiry watcher lives in `timer_scheduler.py`.
 from __future__ import annotations
 
 import logging
-import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -60,6 +59,8 @@ class ParsedTime:
     spoken_duration: str | None = None  # "20 Minuten", "1 Stunde 30 Minuten"
     clock: str | None = None            # "15 Uhr 40" if an absolute time was given
     is_clock: bool = False
+    # A time phrase was present but is not a valid timer duration ("3 Wochen").
+    rejected: bool = False
 
 
 def _fmt_duration(total_seconds: int) -> str:
@@ -149,18 +150,25 @@ def parse_time(part: str, *, now: datetime | None = None) -> ParsedTime:
                 clock=clock, is_clock=True,
             )
 
-    # Bare number with no unit and no "Uhr" — the sentence splitter leaves the
-    # first half of "… auf 10 und einen auf 20 Minuten" without its unit. Read
-    # a lone integer as minutes (spec AC: two timers from that sentence).
-    bare = re.search(r"\bauf\s+(\d{1,3})\b", part, re.IGNORECASE) or re.search(
-        r"\b(\d{1,3})\b", part
-    )
+    # An out-of-range unit ("3 Wochen", "2 Tage", "ein Jahr") is a real time
+    # phrase Alice cannot make a timer from — reject it explicitly rather than
+    # let the bare-number fallback below misread "3" as 3 minutes
+    # (PROJ-85 QA BUG-2).
+    if re.search(r"\d+\s*(wochen?|tage?n?|monate?n?|jahre?n?)\b", part, re.IGNORECASE):
+        return ParsedTime(rejected=True)
+
+    # Bare number, no unit, no "Uhr" — the sentence splitter leaves the first
+    # half of "… auf 10 und einen auf 20 Minuten" as "… auf 10". Read a lone
+    # "auf <n>" (or a whole part that is just a number) as minutes.
+    bare = re.search(r"\bauf\s+(\d{1,3})\s*$", part.strip(), re.IGNORECASE) or \
+        re.fullmatch(r"\s*(\d{1,3})\s*", part)
     if bare:
         minutes = int(bare.group(1))
         if 1 <= minutes <= 999:
             seconds = minutes * 60
             return ParsedTime(
-                seconds=seconds, spoken_duration=_fmt_duration(seconds), is_clock=False
+                seconds=seconds, spoken_duration=_fmt_duration(seconds),
+                is_clock=False,
             )
 
     return ParsedTime()
@@ -207,9 +215,11 @@ _NAME_RE = re.compile(
     r"\bf[üu]r\s+(?:den|die|das|meine[rn]?|einen?)?\s*([A-Za-zÄÖÜäöüß][\wÄÖÜäöüß-]*)",
     re.IGNORECASE,
 )
-# Reference in a change/query/delete: "den Kartoffel Timer", "der Nudel Timer"
+# Reference in a change/query/delete: "den Kartoffel Timer", "der Nudel Timer",
+# and derived names "den 20 Minuten Timer", "den 15 Uhr 40 Timer" (first char
+# may be a digit — PROJ-85 QA BUG-1).
 _REF_NAME_RE = re.compile(
-    r"\b(?:den|der|des|dem)\s+([A-Za-zÄÖÜäöüß][\wÄÖÜäöüß -]*?)\s+timer\b",
+    r"\b(?:den|der|des|dem)\s+([0-9A-Za-zÄÖÜäöüß][\wÄÖÜäöüß -]*?)\s+timer\b",
     re.IGNORECASE,
 )
 
@@ -479,6 +489,36 @@ async def change_expiry(pool, timer_id, delta_seconds: int, *, now: datetime | N
             return dict(upd)
 
 
+async def change_paused_remaining(pool, timer_id, delta_seconds: int) -> dict | None:
+    """Extend / shorten a *paused* timer's frozen remaining time.
+
+    Row-locked. Returns the updated {name, remaining}, None if the timer is not
+    paused (caller then treats it as running/expired), or
+    {'rejected': True, 'remaining': …} if the shorten would drop it to ≤ 0.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT id, name, status, paused_remaining_seconds FROM alice.timers "
+                "WHERE id = $1::uuid FOR UPDATE",
+                str(timer_id),
+            )
+            if row is None or row["status"] != "paused":
+                return None
+            new_rem = int(row["paused_remaining_seconds"] or 0) + delta_seconds
+            if new_rem < MIN_DURATION_SECONDS:
+                return {
+                    "rejected": True, "name": row["name"],
+                    "remaining": int(row["paused_remaining_seconds"] or 0),
+                }
+            await conn.execute(
+                "UPDATE alice.timers SET paused_remaining_seconds = $2 "
+                "WHERE id = $1::uuid",
+                str(timer_id), new_rem,
+            )
+            return {"name": row["name"], "remaining": new_rem}
+
+
 async def pause_timer(pool, timer_id, *, now: datetime | None = None) -> dict | None:
     """Freeze a running timer. Returns {'name', 'remaining'} or None (not running)."""
     now = now or datetime.now(LOCAL_TZ)
@@ -585,7 +625,9 @@ async def handle_timer_part(
     role = await resolve_role(pool, user_id)
     cfg = await load_role_config(pool, role)
 
-    if not cfg.allowed:
+    # A role that lost the timer permission can still look at and clear its
+    # own running timers (Tech Design G) — only creating / changing is blocked.
+    if not cfg.allowed and action not in ("query", "delete"):
         return TimerReply(
             "Timer sind für deine Rolle nicht freigeschaltet. "
             "Ein Administrator kann das in den Einstellungen ändern."
@@ -619,6 +661,11 @@ def _origin_channel(source: str | None) -> str:
 
 async def _do_set(pool, part, role, cfg: RoleConfig, owner_user_id, origin_channel, now) -> TimerReply:
     parsed = parse_time(part, now=now)
+    if parsed.rejected:
+        return TimerReply(
+            "So lange kann ich keinen Timer stellen — nenn mir eine Dauer in "
+            "Minuten oder Stunden oder eine Uhrzeit."
+        )
     if parsed.seconds is None:
         return TimerReply("Auf wie viele Minuten soll ich den Timer stellen?")
 
@@ -728,20 +775,34 @@ async def _do_change(pool, part, role, cfg: RoleConfig, action, now) -> TimerRep
     if delta is None:
         return TimerReply("Um wie viele Minuten soll ich den Timer ändern?")
 
-    if action == "shorten":
-        delta = -delta
-    else:
-        # extend — enforce the role max duration on the resulting remaining time
-        if cfg.max_duration_seconds:
-            projected = _secs_left(target, now) + delta
-            if projected > cfg.max_duration_seconds:
-                return TimerReply(
-                    f"Für deine Rolle sind Timer bis höchstens "
-                    f"{_fmt_duration(cfg.max_duration_seconds)} möglich. "
-                    f"Der {target['name']} bleibt unverändert."
-                )
+    signed = -delta if action == "shorten" else delta
 
-    result = await change_expiry(pool, target["id"], delta, now=now)
+    if action == "extend" and cfg.max_duration_seconds:
+        projected = _secs_left(target, now) + delta
+        if projected > cfg.max_duration_seconds:
+            return TimerReply(
+                f"Für deine Rolle sind Timer bis höchstens "
+                f"{_fmt_duration(cfg.max_duration_seconds)} möglich. "
+                f"Der {target['name']} bleibt unverändert."
+            )
+
+    # A paused timer changes its frozen remaining time, not an expiry (BUG-3).
+    if target["status"] == "paused":
+        pres = await change_paused_remaining(pool, target["id"], signed)
+        if pres is None:
+            return TimerReply(f"Der {target['name']} ist nicht mehr aktiv.")
+        if pres.get("rejected"):
+            return TimerReply(
+                f"So viel kann ich nicht abziehen — der {pres['name']} steht bei "
+                f"{_fmt_remaining(pres['remaining'])}."
+            )
+        return TimerReply(
+            f"Der {pres['name']} steht jetzt bei {_fmt_remaining(pres['remaining'])} "
+            f"(pausiert).",
+            wake_scheduler=True,
+        )
+
+    result = await change_expiry(pool, target["id"], signed, now=now)
     if result is None:
         return TimerReply(
             f"Der {target['name']} ist schon abgelaufen. Setz bei Bedarf einen neuen Timer."

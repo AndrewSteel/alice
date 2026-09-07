@@ -277,40 +277,44 @@ $$ LANGUAGE plpgsql;
 
 -- ------------------------------------------------------------
 -- 5. Timer intent templates (entity-less, domain 'timer')
---    Stored for provenance / re-seeding. alice-ha-sync skips them because
---    they have no HA entity; scripts/seed-timer-intents.sh writes the
---    utterances straight into the Weaviate HAIntent collection.
+--    alice-ha-sync skips them (no HA entity); scripts/seed-timer-intents.sh
+--    writes the patterns verbatim into the Weaviate HAIntent collection as the
+--    vectorised utterance. So the patterns MUST be concrete natural sentences
+--    with NO {value}/{name} placeholders — the duration / clock / name / delta
+--    is re-extracted from the live transcript in app/timers.py after the
+--    semantic match. Several phrasings per intent so the vector space covers
+--    the ways a timer command is actually spoken.
 -- ------------------------------------------------------------
 INSERT INTO alice.ha_intent_templates
     (domain, intent, service, patterns, default_parameters,
      requires_confirmation, language, priority, is_active, source, notes)
 VALUES
 ('timer', 'set',    'timer.set',
- '["Setze einen Timer auf {value} Minuten","Stelle einen Timer auf {value} Minuten","Timer auf {value} Minuten","Stelle einen Timer für {name} auf {value} Minuten","Setze einen Timer auf {value} Uhr","Stelle einen Timer auf {value} Uhr","Timer auf {value} Uhr {value}","Wecke mich in {value} Minuten"]'::jsonb,
+ '["Setze einen Timer auf 20 Minuten","Stelle einen Timer auf 15 Minuten","Timer auf 10 Minuten","Stell mir einen Timer auf eine Stunde","Setze einen Timer auf 1 Stunde 30 Minuten","Stelle einen Timer für die Kartoffeln auf 20 Minuten","Setze einen Timer für den Tee auf 5 Minuten","Stelle einen Timer auf 15 Uhr 40","Setze einen Timer auf 7 Uhr","Wecke mich in 25 Minuten","Erinnere mich in 10 Minuten","Neuer Timer 30 Minuten"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
- 'PROJ-85 — entity-less timer intent. Duration/time/name re-parsed in alice-chat-stream timer_path.'),
+ 'PROJ-85 — entity-less timer intent. Duration/time/name re-parsed in alice-chat-stream app/timers.py.'),
 ('timer', 'extend',  'timer.extend',
- '["Verlängere den {name} Timer um {value} Minuten","Verlängere den Timer um {value} Minuten","Stelle den {name} Timer {value} Minuten später"]'::jsonb,
+ '["Verlängere den Kartoffel Timer um 5 Minuten","Verlängere den Timer um 5 Minuten","Gib dem Timer noch 10 Minuten dazu","Stell den Timer 3 Minuten später","Mach den Timer 5 Minuten länger"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'shorten', 'timer.shorten',
- '["Verkürze den {name} Timer um {value} Minuten","Verkürze den Timer um {value} Minuten","Stelle den {name} Timer {value} Minuten früher"]'::jsonb,
+ '["Verkürze den Kartoffel Timer um 2 Minuten","Verkürze den Timer um 5 Minuten","Zieh dem Timer 3 Minuten ab","Stell den Timer 2 Minuten früher","Mach den Timer 5 Minuten kürzer"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'query',   'timer.query',
- '["Wie lange läuft der {name} Timer noch","Wie lange läuft der Timer noch","Welche Timer laufen gerade","Welche Timer laufen","Zeig mir meine Timer","Wie viel Zeit ist noch auf dem {name} Timer"]'::jsonb,
+ '["Wie lange läuft der Kartoffel Timer noch","Wie lange läuft der Timer noch","Wie viel Zeit ist noch auf dem Timer","Welche Timer laufen gerade","Welche Timer laufen","Zeig mir meine Timer","Was für Timer habe ich gerade","Läuft noch ein Timer"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'pause',   'timer.pause',
- '["Pausiere den {name} Timer","Pausiere den Timer","Halte den {name} Timer an","Stoppe den {name} Timer kurz"]'::jsonb,
+ '["Pausiere den Kartoffel Timer","Pausiere den Timer","Halte den Timer an","Stoppe den Timer kurz","Unterbrich den Timer"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'resume',  'timer.resume',
- '["Setze den {name} Timer fort","Setze den Timer fort","Starte den {name} Timer wieder","Lass den {name} Timer weiterlaufen"]'::jsonb,
+ '["Setze den Kartoffel Timer fort","Setze den Timer fort","Starte den Timer wieder","Lass den Timer weiterlaufen","Mach beim Timer weiter"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'delete',  'timer.delete',
- '["Lösche den {name} Timer","Lösche den Timer","Brich den {name} Timer ab","Entferne den {name} Timer","Lösche alle Timer","Brich alle Timer ab"]'::jsonb,
+ '["Lösche den Kartoffel Timer","Lösche den Timer","Brich den Timer ab","Entferne den Timer","Stoppe den Timer ganz","Lösche alle Timer","Brich alle Timer ab"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.')
 ON CONFLICT (domain, intent, language)

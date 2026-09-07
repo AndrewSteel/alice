@@ -27,7 +27,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { getActiveTimers, type ActiveTimer } from "@/services/timers";
 
-const POLL_INTERVAL_MS = 30_000;
+// The chat fires `alice:timers-changed` on every timer create, so the poll is
+// only a safety net for changes made from another device / voice. 2 min keeps
+// it light on the (separate) timer rate-limit budget.
+const POLL_INTERVAL_MS = 120_000;
 // A timer that expired while the tab was hidden is still worth a catch-up
 // toast if the tab returns within this window (spec "Nachhol-Fenster").
 const CATCH_UP_WINDOW_MS = 15 * 60_000;

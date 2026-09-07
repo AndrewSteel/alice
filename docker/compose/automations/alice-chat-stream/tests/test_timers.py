@@ -66,6 +66,13 @@ class TestParseDuration:
         assert p.seconds == 600
         assert not p.is_clock
 
+    def test_out_of_range_unit_rejected(self):
+        # BUG-2: "3 Wochen" must not be misread as 3 minutes
+        for s in ("einen auf 3 Wochen", "Timer auf 2 Tage", "einen auf 1 Monat"):
+            p = parse_time(s, now=NOW)
+            assert p.rejected is True
+            assert p.seconds is None
+
     def test_duration_beats_clock_wording(self):
         # "20 Minuten" must never be read as a clock
         p = parse_time("Stelle einen Timer auf 20 Minuten", now=NOW)
@@ -128,6 +135,11 @@ class TestNames:
 
     def test_ref_name_absent(self):
         assert parse_ref_name("Wie lange läuft der Timer noch") is None
+
+    def test_ref_name_derived_digit_start(self):
+        # BUG-1: derived names begin with a digit
+        assert parse_ref_name("Verlängere den 20 Minuten Timer um 5 Minuten") == "20 Minuten"
+        assert parse_ref_name("Wie lange läuft der 15 Uhr 40 Timer noch") == "15 Uhr 40"
 
     def test_delta(self):
         assert parse_delta("Verlängere den Timer um 5 Minuten") == 300
@@ -312,6 +324,12 @@ class FakePool:
 
     async def execute(self, sql, *args):
         s = self._norm(sql)
+        if "SET paused_remaining_seconds = $2" in s and "status" not in s.split("SET")[1].split("WHERE")[0]:
+            tid, rem = args
+            for r in self.rows:
+                if r["id"] == tid:
+                    r["paused_remaining_seconds"] = rem
+            return "UPDATE 1"
         if "SET status = 'paused'" in s:
             tid, rem = args
             for r in self.rows:
@@ -532,3 +550,60 @@ class TestHandleChange:
         ))
         assert "2 Timer" in r.text
         assert pool.rows == []
+
+    def test_extend_derived_name_with_multiple_timers(self):
+        # BUG-1: "den 20 Minuten Timer" must disambiguate even with several timers
+        pool = FakePool(timers_rows=[
+            _mk_row(id="t1", name="20 Minuten Timer"),
+            _mk_row(id="t2", name="Kartoffel Timer"),
+        ])
+        r = run(timers.handle_timer_part(
+            pool, "Verlängere den 20 Minuten Timer um 5 Minuten", "extend",
+            user_id="u1", source="webapp_cc", now=NOW,
+        ))
+        assert "läuft jetzt noch" in r.text
+        assert pool.rows[0]["expires_at"] == NOW + timedelta(minutes=25)
+
+    def test_set_out_of_range_unit_rejected(self):
+        # BUG-2
+        pool = FakePool()
+        r = run(timers.handle_timer_part(
+            pool, "Timer auf 3 Wochen", "set",
+            user_id="u1", source="webapp_cc", now=NOW,
+        ))
+        assert "So lange kann ich keinen Timer stellen" in r.text
+        assert pool.rows == []
+
+    def test_extend_paused_timer(self):
+        # BUG-3: extending a paused timer adjusts its frozen remaining
+        pool = FakePool(timers_rows=[_mk_row(
+            id="t1", name="Kartoffel Timer", status="paused",
+            paused_remaining_seconds=600,
+        )])
+        r = run(timers.handle_timer_part(
+            pool, "Verlängere den Kartoffel Timer um 5 Minuten", "extend",
+            user_id="u1", source="webapp_cc", now=NOW,
+        ))
+        assert "pausiert" in r.text
+        assert pool.rows[0]["paused_remaining_seconds"] == 900
+
+    def test_cleanup_allowed_after_permission_lost(self):
+        # BUG-6: role lost the permission but can still query + delete
+        pool = FakePool(allowed=False, timers_rows=[_mk_row(id="t1", name="A Timer")])
+        q = run(timers.handle_timer_part(
+            pool, "Welche Timer laufen gerade", "query",
+            user_id="u1", source="webapp_cc", now=NOW,
+        ))
+        assert "A Timer" in q.text
+        d = run(timers.handle_timer_part(
+            pool, "Lösche alle Timer", "delete",
+            user_id="u1", source="webapp_cc", now=NOW,
+        ))
+        assert "gelöscht" in d.text
+        assert pool.rows == []
+        # but setting is still blocked
+        s = run(timers.handle_timer_part(
+            pool, "Timer auf 10 Minuten", "set",
+            user_id="u1", source="webapp_cc", now=NOW,
+        ))
+        assert "nicht freigeschaltet" in s.text
