@@ -17,28 +17,60 @@
 # It first deletes every existing domain=timer HAIntent object so a re-run
 # is idempotent. Safe to run any number of times.
 #
+# Weaviate has no published host port and its hostname ("weaviate") only
+# resolves inside the Docker network, so all Weaviate HTTP calls run through
+# a throw-away curl container attached to the `backend` network (override with
+# WEAVIATE_NET). Run this from the Docker host — no direct network access
+# needed. Postgres is reached with `docker exec` for the same reason.
+#
 # Usage:
-#   ./seed-timer-intents.sh [WEAVIATE_URL] [POSTGRES_CONTAINER]
-#   ./seed-timer-intents.sh http://weaviate:8080 postgres
+#   ./seed-timer-intents.sh
+#   POSTGRES_CONTAINER=postgres WEAVIATE_URL=http://weaviate:8080 ./seed-timer-intents.sh
 # ============================================================
 set -euo pipefail
 
-WEAVIATE_URL="${1:-http://weaviate:8080}"
-PG_CONTAINER="${2:-postgres}"
-PG_USER="${POSTGRES_USER:-user}"
-PG_DB="${POSTGRES_DB:-alice}"
+WEAVIATE_URL="${WEAVIATE_URL:-http://weaviate:8080}"
+WEAVIATE_NET="${WEAVIATE_NET:-backend}"
+PG_CONTAINER="${POSTGRES_CONTAINER:-postgres}"
+# Matches the repo convention (scripts/setup-database.sh, set-initial-passwords.sh).
+PG_USER="${DB_USER:-alice_user}"
+PG_DB="${DB_NAME:-alice}"
 CERTAINTY_THRESHOLD="${CERTAINTY_THRESHOLD:-0.82}"
+CURL_IMAGE="${CURL_IMAGE:-curlimages/curl:8.11.1}"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 
 echo "============================================================"
 echo "PROJ-85: Seed timer intents into Weaviate HAIntent"
 echo "============================================================"
-echo "Weaviate:  ${WEAVIATE_URL}"
+echo "Weaviate:  ${WEAVIATE_URL}  (via docker network '${WEAVIATE_NET}')"
 echo "Postgres:  ${PG_CONTAINER} (${PG_USER}/${PG_DB})"
 echo ""
 
-command -v jq >/dev/null || { echo -e "${RED}jq is required${NC}"; exit 1; }
+command -v jq >/dev/null || { echo -e "${RED}jq is required on the host${NC}"; exit 1; }
+command -v docker >/dev/null || { echo -e "${RED}docker is required${NC}"; exit 1; }
+
+# wv <method> <path> [json-body]  -> prints "<body>\n<http_code>"
+wv() {
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-sS --connect-timeout 5 --max-time 30 -w '\n%{http_code}'
+              -X "$method" -H 'Content-Type: application/json')
+  [ -n "$body" ] && args+=(-d "$body")
+  args+=("${WEAVIATE_URL}${path}")
+  docker run --rm --network "${WEAVIATE_NET}" "${CURL_IMAGE}" "${args[@]}"
+}
+
+# 0. Reachability check — fail fast with a clear message instead of hanging.
+echo -n "Checking Weaviate is reachable... "
+READY=$(wv GET /v1/.well-known/ready || true)
+READY_CODE=$(printf '%s' "$READY" | tail -n1)
+if [ "$READY_CODE" != "200" ] && [ "$READY_CODE" != "204" ]; then
+  echo -e "${RED}no (HTTP ${READY_CODE:-none})${NC}"
+  echo "   Is the '${WEAVIATE_NET}' network correct and Weaviate up?"
+  echo "   Try: WEAVIATE_NET=automation ./scripts/seed-timer-intents.sh"
+  exit 1
+fi
+echo -e "${GREEN}OK${NC}"
 
 # 1. Pull the timer templates as JSON: [{intent, service, patterns:[...]}]
 echo -n "Reading timer templates from PostgreSQL... "
@@ -54,26 +86,28 @@ if [ "$COUNT" -eq 0 ]; then
 fi
 echo -e "${GREEN}${COUNT} template(s)${NC}"
 
-# 2. Delete existing domain=timer objects (idempotent re-run).
+# 2. Delete existing domain=timer objects (idempotent re-run). DELETE
+#    /v1/batch/objects with a where filter — the REST equivalent of the
+#    weaviate client's collection.data.delete_many(where=...).
 echo -n "Deleting existing domain=timer HAIntent objects... "
-DEL_CODE=$(curl -s -o /tmp/timer_del.json -w "%{http_code}" -X DELETE \
-  -H "Content-Type: application/json" \
-  -d '{"match":{"class":"HAIntent","where":{"path":["domain"],"operator":"Equal","valueText":"timer"}}}' \
-  "${WEAVIATE_URL}/v1/batch/objects")
+DEL=$(wv DELETE /v1/batch/objects \
+  '{"match":{"class":"HAIntent","where":{"path":["domain"],"operator":"Equal","valueText":"timer"}}}' || true)
+DEL_CODE=$(printf '%s' "$DEL" | tail -n1)
+DEL_BODY=$(printf '%s' "$DEL" | sed '$d')
 if [[ "$DEL_CODE" == 2* ]]; then
-  echo -e "${GREEN}OK${NC} ($(jq -r '.results.matches // 0' /tmp/timer_del.json 2>/dev/null || echo 0) removed)"
+  echo -e "${GREEN}OK${NC} ($(printf '%s' "$DEL_BODY" | jq -r '.results.matches // 0' 2>/dev/null || echo 0) matched)"
 else
-  echo -e "${YELLOW}HTTP ${DEL_CODE} (continuing)${NC}"
+  echo -e "${YELLOW}HTTP ${DEL_CODE} — continuing (nothing to delete on a first run)${NC}"
 fi
 
 # 3. Build + insert one object per pattern.
 echo "Inserting timer utterances..."
 INSERTED=0
 FAILED=0
-while read -r row; do
-  INTENT=$(echo "$row" | jq -r '.intent')
-  SERVICE=$(echo "$row" | jq -r '.service')
-  while read -r pattern; do
+while read -r rowline; do
+  INTENT=$(echo "$rowline" | jq -r '.intent')
+  SERVICE=$(echo "$rowline" | jq -r '.service')
+  while IFS= read -r pattern; do
     [ -z "$pattern" ] && continue
     # These patterns are the vectorised text — a leftover {value}/{name}
     # placeholder would poison the embedding (see PROJ-85 QA BUG-9).
@@ -93,17 +127,16 @@ while read -r row; do
           utterance:$u, entityId:"", domain:"timer", service:$s,
           parameters:"{}", language:"de", intentTemplate:$it, certaintyThreshold:$ct
       }}')
-    CODE=$(curl -s -o /tmp/timer_ins.json -w "%{http_code}" -X POST \
-      -H "Content-Type: application/json" -d "$BODY" \
-      "${WEAVIATE_URL}/v1/objects")
+    RES=$(wv POST /v1/objects "$BODY" || true)
+    CODE=$(printf '%s' "$RES" | tail -n1)
     if [[ "$CODE" == 2* ]]; then
       INSERTED=$((INSERTED+1))
     else
       FAILED=$((FAILED+1))
       echo -e "  ${RED}FAIL${NC} (${CODE}) ${pattern}"
-      cat /tmp/timer_ins.json 2>/dev/null && echo ""
+      printf '%s\n' "$RES" | sed '$d'
     fi
-  done < <(echo "$row" | jq -r '.patterns[]')
+  done < <(echo "$rowline" | jq -r '.patterns[]')
 done < <(echo "$TEMPLATES_JSON" | jq -c '.[]')
 
 echo ""
