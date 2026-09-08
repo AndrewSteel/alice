@@ -34,8 +34,11 @@ input_text:
   alice_timer_melody_url:
     name: Alice Timer-Melodie URL
     max: 255
-    # Bundled short, gentle tone. Replace with the final asset path.
-    initial: media-source://media_source/local/alice/timer_finished.mp3
+    # Short, gentle tone (2-4 s). Upload it via HA's "Medien" UI into the
+    # local media folder, then set this to its media-source id. The folder
+    # under "Medien" is media-source://media_source/local/<folder>/<file>.
+    # Example for a file placed in the existing "medien" folder:
+    initial: media-source://media_source/local/medien/alice_timer_finished.mp3
 
 input_number:
   alice_timer_melody_max_seconds:
@@ -81,6 +84,13 @@ script:
           - service: media_player.volume_set
             target: { entity_id: "{{ player }}" }
             data: { volume_level: 0.6 }
+          # Resolve the media-source:// id to a playable URL once. Some
+          # media_player integrations accept media-source:// directly; others
+          # (and the ESPHome Voice PE speaker) need the resolved http(s) URL.
+          - service: media_source.resolve_media
+            data:
+              media_content_id: "{{ states('input_text.alice_timer_melody_url') }}"
+            response_variable: resolved
           - repeat:
               # Loop the tone until the "melody active" flag is cleared (by the
               # stop script, the wake trigger, or the timeout automation).
@@ -92,8 +102,10 @@ script:
                 - service: media_player.play_media
                   target: { entity_id: "{{ player }}" }
                   data:
-                    media_content_id: "{{ states('input_text.alice_timer_melody_url') }}"
-                    media_content_type: music
+                    media_content_id: >-
+                      {{ resolved.url if resolved is defined and resolved.url
+                         else states('input_text.alice_timer_melody_url') }}
+                    media_content_type: "{{ resolved.mime_type | default('music', true) }}"
                 - delay: { seconds: 6 }
 
   alice_timer_melody_stop:
