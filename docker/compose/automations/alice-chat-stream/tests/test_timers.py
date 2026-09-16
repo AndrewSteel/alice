@@ -141,6 +141,22 @@ class TestNames:
         assert parse_ref_name("Verlängere den 20 Minuten Timer um 5 Minuten") == "20 Minuten"
         assert parse_ref_name("Wie lange läuft der 15 Uhr 40 Timer noch") == "15 Uhr 40"
 
+    def test_explicit_name_compound_noun(self):
+        # Live QA finding (2026-09-17): "Eiertimer"/"Kartoffeltimer" as one
+        # word is the more natural spoken form than "Timer für Eier".
+        assert parse_name("Setze einen Eiertimer auf 3 Minuten") == "Eier"
+        assert parse_name("Setze einen Kartoffeltimer auf 3 Minuten") == "Kartoffel"
+
+    def test_bare_timer_word_is_not_a_compound_name(self):
+        assert parse_name("Setze einen Timer auf 3 Minuten") is None
+
+    def test_ref_name_compound_noun(self):
+        assert parse_ref_name("Verlängere den Eiertimer um 5 Minuten") == "Eier"
+        assert parse_ref_name("Lösche den Kartoffeltimer") == "Kartoffel"
+
+    def test_ref_bare_timer_word_is_not_a_compound_name(self):
+        assert parse_ref_name("Verlängere den Timer um 5 Minuten") is None
+
     def test_delta(self):
         assert parse_delta("Verlängere den Timer um 5 Minuten") == 300
 
@@ -438,6 +454,32 @@ class TestHandleSet:
         ))
         assert "Kartoffel Timer" in r.text
         assert pool.rows[0]["origin_channel"] == "esphome:Küche"
+
+    def test_set_named_compound_noun(self):
+        r = run(timers.handle_timer_part(
+            FakePool(), "Setze einen Eiertimer auf 3 Minuten", "set",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert "Eier Timer" in r.text
+
+    def test_named_compound_does_not_collide_with_unnamed(self):
+        # Live QA finding (2026-09-17): "Setze einen Timer auf 3 Minuten" then
+        # "Setze einen Eiertimer auf 3 Minuten" must produce two distinctly
+        # named timers, not a name collision fallback ("zweiter 3 Minuten
+        # Timer") swallowing the compound name.
+        pool = FakePool()
+        r1 = run(timers.handle_timer_part(
+            pool, "Setze einen Timer auf 3 Minuten", "set",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert pool.rows[0]["name"] == "3 Minuten Timer"
+        r2 = run(timers.handle_timer_part(
+            pool, "Setze einen Eiertimer auf 3 Minuten", "set",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert "Eier Timer" in r2.text
+        assert pool.rows[1]["name"] == "Eier Timer"
+        assert "zweiter" not in r2.text.lower()
 
     def test_min_duration_rejected(self):
         pool = FakePool()

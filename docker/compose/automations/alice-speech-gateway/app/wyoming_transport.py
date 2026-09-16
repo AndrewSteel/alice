@@ -190,7 +190,16 @@ class GatewayWyomingHandler(AsyncEventHandler):
                     logger.warning("Speaker-ID result discarded: %s", exc)
 
             if not transcript.strip():
-                # Genuine silence — end session quietly (PROJ-42 Bug 4 fix)
+                # Genuine silence — end session quietly (PROJ-42 Bug 4 fix).
+                # PROJ-85: the melody-stop request (kicked off above) must
+                # still be awaited here — otherwise a bare wakeword with no
+                # spoken command breaks out of the loop before the request
+                # finishes and the melody keeps playing until the *next*
+                # "Hey Jarvis" turn actually awaits it (found live 2026-09-17).
+                try:
+                    await asyncio.wait_for(pending_task, timeout=3.0)
+                except Exception as exc:
+                    logger.warning("Timer pending check failed: %s", exc)
                 logger.info(
                     "Wyoming session ended — no speech detected",
                     extra={"session_id": session_id, "device": device_label},
