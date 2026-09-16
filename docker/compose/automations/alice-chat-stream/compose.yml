@@ -10,6 +10,11 @@ services:
       - .env
     volumes:
       - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+      # PROJ-85 — same device-mapping.yaml as alice-speech-gateway, read-only.
+      # The Timer-Agent scheduler reads the media_player field per device to
+      # deliver the expiry melody (alice.ha_entities.area_name is unreliable
+      # for a Voice PE that need not be HA-Assist-exposed).
+      - /srv/compose/automations/alice-speech-gateway/config:/config:ro
     healthcheck:
       test:
         [

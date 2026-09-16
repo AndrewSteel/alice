@@ -34,6 +34,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import httpx
+import yaml
 
 logger = logging.getLogger("alice-chat-stream.timer_scheduler")
 
@@ -54,6 +55,40 @@ MAX_SLEEP_SECONDS = 3600
 # homeassistant/timer_melody.yaml). Alice only signals start/stop.
 HA_MELODY_START_SCRIPT = os.environ.get("TIMER_MELODY_START_SCRIPT", "script.alice_timer_melody_start")
 HA_MELODY_STOP_SCRIPT = os.environ.get("TIMER_MELODY_STOP_SCRIPT", "script.alice_timer_melody_stop")
+
+# alice-speech-gateway's device-mapping.yaml, mounted read-only into this
+# container too (same config volume). alice.ha_entities.area_name is only
+# populated for HA-Assist-exposed entities — a Voice PE talking to Alice over
+# raw Wyoming need not be Assist-exposed at all, so that lookup is unreliable
+# for this purpose (live-found 2026-09-16: media_player rows existed but with
+# no area_name, is_active=false). device-mapping.yaml is the source of truth
+# for a device's room anyway (PROJ-40/42); it now also carries the
+# media_player entity per device.
+DEVICE_MAPPING_PATH = os.environ.get(
+    "DEVICE_MAPPING_PATH", "/config/device-mapping.yaml"
+)
+
+
+def _load_room_to_media_player() -> dict[str, str]:
+    """room (lowercased) -> media_player entity_id, from device-mapping.yaml."""
+    try:
+        with open(DEVICE_MAPPING_PATH) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+    except yaml.YAMLError as exc:
+        logger.error("device-mapping.yaml is invalid: %s", exc)
+        return {}
+
+    mapping: dict[str, str] = {}
+    for entry in (data.get("devices") or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        room = str(entry.get("room") or "").strip().lower()
+        media_player = str(entry.get("media_player") or "").strip()
+        if room and media_player:
+            mapping[room] = media_player
+    return mapping
 
 
 class TimerScheduler:
@@ -258,7 +293,15 @@ class TimerScheduler:
             logger.warning("Auto-acknowledge failed: %s", exc)
 
     async def _media_player_for(self, channel: str) -> str | None:
-        """Resolve the HA media_player entity for a timer's origin device."""
+        """Resolve the HA media_player entity for a timer's origin device.
+
+        Order: explicit env override > device-mapping.yaml (source of truth
+        for a Voice PE's room + speaker, PROJ-40/42) > alice.ha_entities
+        (fallback — only populated for HA-Assist-exposed entities, so it
+        misses a Voice PE that is not Assist-exposed).
+        """
+        room = channel.split(":", 1)[1] if ":" in channel else None
+
         # Explicit override map: "esphome:Büro=media_player.voice_pe_buero,..."
         raw = os.environ.get("TIMER_MEDIA_PLAYER_MAP", "")
         for pair in raw.split(","):
@@ -266,10 +309,14 @@ class TimerScheduler:
                 k, v = pair.split("=", 1)
                 if k.strip() == channel:
                     return v.strip()
-        # Otherwise: the first media_player entity in the device's room.
-        room = channel.split(":", 1)[1] if ":" in channel else None
+
         if not room:
             return None
+
+        from_mapping = _load_room_to_media_player().get(room.replace("_", " ").lower())
+        if from_mapping:
+            return from_mapping
+
         try:
             row = await self._pool().fetchrow(
                 "SELECT entity_id FROM alice.ha_entities "

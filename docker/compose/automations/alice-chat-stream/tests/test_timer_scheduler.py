@@ -1,8 +1,11 @@
 """PROJ-85 — timer scheduler: due-claim idempotency, channel grouping,
 pending announcement wording."""
 import asyncio
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from app import timer_scheduler
 from app.timer_scheduler import TimerScheduler, pending_announcement
@@ -170,3 +173,81 @@ def test_reconcile_on_start_fires_overdue(monkeypatch):
     sched = TimerScheduler(lambda: pool)
     run(sched._reconcile_on_start())
     assert pool.rows[0]["status"] == "expired"
+
+
+# ---------------------------------------------------------------------------
+# _media_player_for — device-mapping.yaml resolution (2026-09-16 QA follow-up:
+# alice.ha_entities.area_name is unreliable for a non-Assist-exposed Voice PE)
+# ---------------------------------------------------------------------------
+DEVICE_MAPPING_YAML = """
+devices:
+  "192.168.1.10":
+    name: "Büro HA Voice PE"
+    room: "Büro"
+    media_player: "media_player.ha_voice_pe_buero_media_player"
+  "192.168.1.11":
+    name: "Küche HA Voice PE"
+    room: "Küche"
+"""
+
+
+@pytest.fixture
+def mapping_file(tmp_path, monkeypatch):
+    p = tmp_path / "device-mapping.yaml"
+    p.write_text(DEVICE_MAPPING_YAML)
+    monkeypatch.setattr(timer_scheduler, "DEVICE_MAPPING_PATH", str(p))
+    return p
+
+
+class FakePoolNoMediaPlayer:
+    """alice.ha_entities has no matching row — the fallback path."""
+
+    async def fetchrow(self, sql, *a):
+        return None
+
+
+def test_media_player_from_device_mapping(mapping_file, monkeypatch):
+    monkeypatch.delenv("TIMER_MEDIA_PLAYER_MAP", raising=False)
+    sched = TimerScheduler(lambda: FakePoolNoMediaPlayer())
+    result = run(sched._media_player_for("esphome:Büro"))
+    assert result == "media_player.ha_voice_pe_buero_media_player"
+
+
+def test_media_player_env_override_wins_over_mapping(mapping_file, monkeypatch):
+    monkeypatch.setenv(
+        "TIMER_MEDIA_PLAYER_MAP",
+        "esphome:Büro=media_player.override_wins",
+    )
+    sched = TimerScheduler(lambda: FakePoolNoMediaPlayer())
+    result = run(sched._media_player_for("esphome:Büro"))
+    assert result == "media_player.override_wins"
+
+
+def test_media_player_falls_back_to_db_when_not_in_mapping(mapping_file, monkeypatch):
+    # "Küche" entry in the fixture has no media_player field.
+    monkeypatch.delenv("TIMER_MEDIA_PLAYER_MAP", raising=False)
+
+    class FakePoolWithRow:
+        async def fetchrow(self, sql, *a):
+            return {"entity_id": "media_player.from_db"}
+
+    sched = TimerScheduler(lambda: FakePoolWithRow())
+    result = run(sched._media_player_for("esphome:Küche"))
+    assert result == "media_player.from_db"
+
+
+def test_media_player_none_when_nothing_matches(mapping_file, monkeypatch):
+    monkeypatch.delenv("TIMER_MEDIA_PLAYER_MAP", raising=False)
+    sched = TimerScheduler(lambda: FakePoolNoMediaPlayer())
+    result = run(sched._media_player_for("esphome:Unbekannt"))
+    assert result is None
+
+
+def test_media_player_missing_file_returns_empty_mapping(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        timer_scheduler, "DEVICE_MAPPING_PATH", str(tmp_path / "does-not-exist.yaml")
+    )
+    monkeypatch.delenv("TIMER_MEDIA_PLAYER_MAP", raising=False)
+    sched = TimerScheduler(lambda: FakePoolNoMediaPlayer())
+    result = run(sched._media_player_for("esphome:Büro"))
+    assert result is None

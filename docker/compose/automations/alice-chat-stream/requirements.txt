@@ -7,3 +7,4 @@ redis>=5.0,<6.0
 PyJWT>=2.8,<3.0
 cryptography>=42,<44
 prometheus-client>=0.20,<0.22
+PyYAML>=6.0,<7.0
