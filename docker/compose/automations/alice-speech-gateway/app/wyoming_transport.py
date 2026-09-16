@@ -215,16 +215,23 @@ class GatewayWyomingHandler(AsyncEventHandler):
             # --- PROJ-85 — timer expiry announcement ---
             # The melody-stop request went out already (kicked off above,
             # before STT). Its result is the German announcement, if any, for
-            # a timer that expired on this device — spoken *before* processing
-            # whatever the user just said (spec: "Der 20 Minuten Timer ist
-            # abgelaufen.").
+            # a timer that expired on this device.
             try:
                 announced = await pending_task
             except Exception as exc:
                 logger.warning("Timer pending check failed: %s", exc)
                 announced = None
             if announced:
+                # Spec: "die Melodie stoppt sofort und Alice sagt eine
+                # Ablauf-Meldung an" — addressing the device while its melody
+                # is playing is the acknowledgement itself, not a new command.
+                # Speak only the announcement and stay in continued-conversation
+                # (no re-wakeword needed for whatever the user actually wants
+                # next) instead of also running this turn's transcript through
+                # enrollment/chat (live QA finding 2026-09-17: saying "Stopp"
+                # during the melody got its own, unwanted LLM reply).
                 await self._speak_text(announced)
+                continue
 
             # --- Enrollment trigger check (admin only, before AI call) ---
             is_trigger, enroll_role = enroll_mod.is_enrollment_intent(transcript)
