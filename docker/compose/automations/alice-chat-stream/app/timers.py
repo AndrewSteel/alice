@@ -218,9 +218,11 @@ _NAME_RE = re.compile(
 # German compound noun: "Eiertimer", "Kartoffeltimer" — one word, at least two
 # letters before "timer" so a bare "Timer" alone never matches (live QA
 # finding 2026-09-17: "Setze einen Eiertimer auf 3 Minuten" is the natural way
-# to say this, more common in speech than "Timer für Eier").
+# to say this, more common in speech than "Timer für Eier"). The optional
+# hyphen accounts for Whisper's actual transcription: it renders this compound
+# as "Eier-Timer", not "Eiertimer" (found live 2026-09-17 in gateway logs).
 _COMPOUND_NAME_RE = re.compile(
-    r"\b([A-Za-zÄÖÜäöüß]{2,}?)timer\b", re.IGNORECASE
+    r"\b([A-Za-zÄÖÜäöüß]{2,}?)-?timer\b", re.IGNORECASE
 )
 # Reference in a change/query/delete: "den Kartoffel Timer", "der Nudel Timer",
 # and derived names "den 20 Minuten Timer", "den 15 Uhr 40 Timer" (first char
@@ -229,9 +231,10 @@ _REF_NAME_RE = re.compile(
     r"\b(?:den|der|des|dem)\s+([0-9A-Za-zÄÖÜäöüß][\wÄÖÜäöüß -]*?)\s+timer\b",
     re.IGNORECASE,
 )
-# Reference as a German compound: "den Eiertimer", "der Kartoffeltimer".
+# Reference as a German compound: "den Eiertimer", "der Kartoffeltimer", and
+# Whisper's actual "der Eier-Timer" rendering (see _COMPOUND_NAME_RE above).
 _REF_COMPOUND_NAME_RE = re.compile(
-    r"\b(?:den|der|des|dem)\s+([A-Za-zÄÖÜäöüß]{2,}?)timer\b", re.IGNORECASE
+    r"\b(?:den|der|des|dem)\s+([A-Za-zÄÖÜäöüß]{2,}?)-?timer\b", re.IGNORECASE
 )
 
 # Very small genitive/plural cleanup for "für Kartoffeln" -> "Kartoffel".

@@ -147,12 +147,22 @@ class TestNames:
         assert parse_name("Setze einen Eiertimer auf 3 Minuten") == "Eier"
         assert parse_name("Setze einen Kartoffeltimer auf 3 Minuten") == "Kartoffel"
 
+    def test_explicit_name_compound_noun_whisper_hyphenates(self):
+        # Whisper actually transcribes this compound as "Eier-Timer", not
+        # "Eiertimer" (found live 2026-09-17 in the gateway STT logs).
+        assert parse_name("Setze einen Eier-Timer auf 2 Minuten") == "Eier"
+        assert parse_name("Setze einen Kartoffel-Timer auf 3 Minuten") == "Kartoffel"
+
     def test_bare_timer_word_is_not_a_compound_name(self):
         assert parse_name("Setze einen Timer auf 3 Minuten") is None
 
     def test_ref_name_compound_noun(self):
         assert parse_ref_name("Verlängere den Eiertimer um 5 Minuten") == "Eier"
         assert parse_ref_name("Lösche den Kartoffeltimer") == "Kartoffel"
+
+    def test_ref_name_compound_noun_whisper_hyphenates(self):
+        assert parse_ref_name("Wie lange läuft noch der Eier-Timer?") == "Eier"
+        assert parse_ref_name("Verkürze den Eier-Timer um 60 Sekunden.") == "Eier"
 
     def test_ref_bare_timer_word_is_not_a_compound_name(self):
         assert parse_ref_name("Verlängere den Timer um 5 Minuten") is None
@@ -475,6 +485,22 @@ class TestHandleSet:
         assert pool.rows[0]["name"] == "3 Minuten Timer"
         r2 = run(timers.handle_timer_part(
             pool, "Setze einen Eiertimer auf 3 Minuten", "set",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert "Eier Timer" in r2.text
+        assert pool.rows[1]["name"] == "Eier Timer"
+        assert "zweiter" not in r2.text.lower()
+
+    def test_named_compound_whisper_hyphen_does_not_collide_with_unnamed(self):
+        # Same scenario, but with Whisper's actual "Eier-Timer" transcription
+        # (found live 2026-09-17 — the un-hyphenated fix alone wasn't enough).
+        pool = FakePool()
+        run(timers.handle_timer_part(
+            pool, "Setze einen Timer auf 3 Minuten", "set",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        r2 = run(timers.handle_timer_part(
+            pool, "Setze einen Eier-Timer auf 3 Minuten", "set",
             user_id="u1", source="esphome:Küche", now=NOW,
         ))
         assert "Eier Timer" in r2.text
