@@ -215,12 +215,23 @@ _NAME_RE = re.compile(
     r"\bf[üu]r\s+(?:den|die|das|meine[rn]?|einen?)?\s*([A-Za-zÄÖÜäöüß][\wÄÖÜäöüß-]*)",
     re.IGNORECASE,
 )
+# German compound noun: "Eiertimer", "Kartoffeltimer" — one word, at least two
+# letters before "timer" so a bare "Timer" alone never matches (live QA
+# finding 2026-09-17: "Setze einen Eiertimer auf 3 Minuten" is the natural way
+# to say this, more common in speech than "Timer für Eier").
+_COMPOUND_NAME_RE = re.compile(
+    r"\b([A-Za-zÄÖÜäöüß]{2,}?)timer\b", re.IGNORECASE
+)
 # Reference in a change/query/delete: "den Kartoffel Timer", "der Nudel Timer",
 # and derived names "den 20 Minuten Timer", "den 15 Uhr 40 Timer" (first char
 # may be a digit — PROJ-85 QA BUG-1).
 _REF_NAME_RE = re.compile(
     r"\b(?:den|der|des|dem)\s+([0-9A-Za-zÄÖÜäöüß][\wÄÖÜäöüß -]*?)\s+timer\b",
     re.IGNORECASE,
+)
+# Reference as a German compound: "den Eiertimer", "der Kartoffeltimer".
+_REF_COMPOUND_NAME_RE = re.compile(
+    r"\b(?:den|der|des|dem)\s+([A-Za-zÄÖÜäöüß]{2,}?)timer\b", re.IGNORECASE
 )
 
 # Very small genitive/plural cleanup for "für Kartoffeln" -> "Kartoffel".
@@ -248,27 +259,38 @@ def _normalise_name_word(word: str) -> str:
 
 
 def parse_name(part: str) -> str | None:
-    """Explicit name from a set command ('für Kartoffeln' -> 'Kartoffel')."""
+    """Explicit name from a set command.
+
+    'für Kartoffeln' -> 'Kartoffel' (explicit form) or the German compound
+    noun 'Eiertimer'/'Kartoffeltimer' -> 'Eier'/'Kartoffel' (the more natural
+    spoken form — live QA finding 2026-09-17).
+    """
     m = _NAME_RE.search(part)
-    if not m:
-        return None
-    return _normalise_name_word(m.group(1))
+    if m:
+        return _normalise_name_word(m.group(1))
+    m = _COMPOUND_NAME_RE.search(part)
+    if m:
+        return _normalise_name_word(m.group(1))
+    return None
 
 
 def parse_ref_name(part: str) -> str | None:
     """Target timer name from a change/query/delete command.
 
     'Verlängere den Kartoffel Timer um 5 Minuten' -> 'Kartoffel'
+    'Verlängere den Kartoffeltimer um 5 Minuten' -> 'Kartoffel' (compound)
     'Wie lange läuft der Timer noch' -> None (no name)
     """
     m = _REF_NAME_RE.search(part)
-    if not m:
-        return None
-    raw = m.group(1).strip()
-    # A single-word reference like "den Timer" leaves raw empty of a real name.
-    if not raw or raw.lower() in ("den", "der"):
-        return None
-    return raw.strip()
+    if m:
+        raw = m.group(1).strip()
+        # A single-word reference like "den Timer" leaves raw empty of a name.
+        if raw and raw.lower() not in ("den", "der"):
+            return raw.strip()
+    m = _REF_COMPOUND_NAME_RE.search(part)
+    if m:
+        return _normalise_name_word(m.group(1))
+    return None
 
 
 def derived_name(parsed: ParsedTime) -> str:
