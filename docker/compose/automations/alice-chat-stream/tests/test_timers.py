@@ -170,6 +170,49 @@ def test_timer_action_from_template():
     assert timer_action(None, "timer:query") == "query"
 
 
+class TestTimerActionExtendShortenArbitration:
+    """Live QA finding (2026-09-16): Weaviate nearText can rank timer.shorten
+    over timer.extend (or vice versa) by a margin as thin as 0.006 once a
+    name/number dilutes the one-word verb signal — the two are near-antonym,
+    structurally near-identical sentences. The verb itself is unambiguous, so
+    it arbitrates a close/wrong semantic match."""
+
+    def test_wrong_shorten_match_corrected_to_extend(self):
+        assert timer_action(
+            "timer.shorten", None, "Verlängere den Kartoffel Timer um 3 Minuten"
+        ) == "extend"
+
+    def test_wrong_extend_match_corrected_to_shorten(self):
+        assert timer_action(
+            "timer.extend", None, "Verkürze den Timer um 5 Minuten"
+        ) == "shorten"
+
+    def test_correct_extend_match_unchanged(self):
+        assert timer_action(
+            "timer.extend", None, "Verlängere den Timer um 5 Minuten"
+        ) == "extend"
+
+    def test_correct_shorten_match_unchanged(self):
+        assert timer_action(
+            "timer.shorten", None, "Verkürze den Kartoffel Timer"
+        ) == "shorten"
+
+    def test_extend_synonyms(self):
+        for text in ("Gib dem Timer noch 10 Minuten dazu", "Mach den Timer länger",
+                     "Stell den Timer später"):
+            assert timer_action("timer.shorten", None, text) == "extend"
+
+    def test_shorten_synonyms(self):
+        for text in ("Zieh dem Timer etwas ab", "Mach den Timer kürzer",
+                     "Stell den Timer früher"):
+            assert timer_action("timer.extend", None, text) == "shorten"
+
+    def test_non_extend_shorten_actions_ignore_part(self):
+        # arbitration only applies to the extend/shorten pair
+        assert timer_action("timer.set", None, "Verlängere den Timer") == "set"
+        assert timer_action("timer.query", None, "Verkürze den Timer") == "query"
+
+
 # ---------------------------------------------------------------------------
 # Fake pool — enough of the asyncpg surface for the handler
 # ---------------------------------------------------------------------------

@@ -392,9 +392,9 @@ async def decide_path(
     # handler, not Home Assistant. Recognised here so area resolution and HA
     # execution skip these parts.
     timer_actions: list[str | None] = [
-        _timers.timer_action(i.service, i.intent_template)
+        _timers.timer_action(i.service, i.intent_template, p)
         if (i.matched and i.domain == "timer") else None
-        for i in intents
+        for i, p in zip(intents, parts)
     ]
 
     any_error = any(i.weaviate_error for i in intents)

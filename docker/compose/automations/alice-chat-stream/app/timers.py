@@ -297,13 +297,48 @@ _INTENT_BY_SERVICE = {
 }
 
 
-def timer_action(service: str | None, intent_template: str | None) -> str | None:
-    """Map the Weaviate match to a timer action, or None if it is not a timer."""
+# extend vs. shorten are near-antonyms of each other and structurally very
+# similar sentences ("Verlängere/Verkürze den X Timer um Y Minuten") — live
+# testing found Weaviate nearText can rank the wrong one by a margin as thin
+# as 0.006 once a name/number dilutes the one-word signal (PROJ-85 QA
+# follow-up, 2026-09-16). The verb itself is unambiguous and trivial to check
+# lexically, so it overrides a close/wrong semantic match rather than trusting
+# the embedding for this specific pair.
+_EXTEND_VERB_RE = re.compile(
+    r"\bverl[äa]nger|\blänger\b|\bdazu\b|\bspäter\b", re.IGNORECASE
+)
+# "ab" alone is too common a German word/preposition to use as a bare
+# standalone signal (false positives); require it paired with "zieh" ("zieh
+# … ab") as in the seeded pattern.
+_SHORTEN_VERB_RE = re.compile(
+    r"\bverk[üu]rz|\bkürzer\b|\bfrüher\b|\bzieh\w*\b.*\bab\b", re.IGNORECASE
+)
+
+
+def timer_action(
+    service: str | None, intent_template: str | None, part: str | None = None
+) -> str | None:
+    """Map the Weaviate match to a timer action, or None if it is not a timer.
+
+    `part` (the actual spoken/typed text), when given, arbitrates an
+    extend/shorten match against the literal verb — see _EXTEND_VERB_RE.
+    """
+    action: str | None = None
     if service and service in _INTENT_BY_SERVICE:
-        return _INTENT_BY_SERVICE[service]
-    if intent_template and intent_template.startswith("timer:"):
-        return intent_template.split(":", 1)[1]
-    return None
+        action = _INTENT_BY_SERVICE[service]
+    elif intent_template and intent_template.startswith("timer:"):
+        action = intent_template.split(":", 1)[1]
+
+    if action in ("extend", "shorten") and part:
+        wants_extend = _EXTEND_VERB_RE.search(part) is not None
+        wants_shorten = _SHORTEN_VERB_RE.search(part) is not None
+        if wants_extend and not wants_shorten:
+            return "extend"
+        if wants_shorten and not wants_extend:
+            return "shorten"
+        # both or neither matched literally — trust the semantic match
+
+    return action
 
 
 # ---------------------------------------------------------------------------
