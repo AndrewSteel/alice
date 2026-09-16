@@ -293,12 +293,19 @@ VALUES
  '["Setze einen Timer auf 20 Minuten","Stelle einen Timer auf 15 Minuten","Timer auf 10 Minuten","Stell mir einen Timer auf eine Stunde","Setze einen Timer auf 1 Stunde 30 Minuten","Stelle einen Timer für die Kartoffeln auf 20 Minuten","Setze einen Timer für den Tee auf 5 Minuten","Stelle einen Timer auf 15 Uhr 40","Setze einen Timer auf 7 Uhr","Wecke mich in 25 Minuten","Erinnere mich in 10 Minuten","Neuer Timer 30 Minuten"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent. Duration/time/name re-parsed in alice-chat-stream app/timers.py.'),
+-- extend/shorten: deliberately NO example durations. nearText ranks a
+-- literal number match so strongly that "Timer auf 2 Minuten" (set) matched
+-- "Stell den Timer 2 Minuten früher" (shorten) at 0.97 — any digit shared
+-- with a set/query utterance can hijack the ranking regardless of sentence
+-- structure. The verb + "Timer" pattern alone carries the intent; the exact
+-- delta is re-extracted from the live transcript in app/timers.py regardless
+-- (PROJ-85 QA follow-up, live-verified 2026-09-16).
 ('timer', 'extend',  'timer.extend',
- '["Verlängere den Kartoffel Timer um 5 Minuten","Verlängere den Timer um 5 Minuten","Gib dem Timer noch 10 Minuten dazu","Stell den Timer 3 Minuten später","Mach den Timer 5 Minuten länger"]'::jsonb,
+ '["Verlängere den Kartoffel Timer","Verlängere den Timer","Gib dem Timer noch etwas dazu","Stell den Timer später","Mach den Timer länger"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'shorten', 'timer.shorten',
- '["Verkürze den Kartoffel Timer um 2 Minuten","Verkürze den Timer um 5 Minuten","Zieh dem Timer 3 Minuten ab","Stell den Timer 2 Minuten früher","Mach den Timer 5 Minuten kürzer"]'::jsonb,
+ '["Verkürze den Kartoffel Timer","Verkürze den Timer","Zieh dem Timer etwas ab","Stell den Timer früher","Mach den Timer kürzer"]'::jsonb,
  '{}'::jsonb, false, 'de', 65, true, 'seed',
  'PROJ-85 — entity-less timer intent.'),
 ('timer', 'query',   'timer.query',
