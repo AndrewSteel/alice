@@ -1,8 +1,8 @@
 # PROJ-85: Timer-Agent
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-09-07
-**Last Updated:** 2026-09-08
+**Last Updated:** 2026-09-17
 
 ## Dependencies
 
@@ -955,17 +955,63 @@ Turn überhaupt erkennt (er terminiert die Wyoming-Session direkt).
   Package enthält nur noch Start/Stop-Scripts + die Timeout-Automation, beide
   live verifiziert.
 
+---
+
+## Live-Test-Nachlauf (2026-09-16/17, vollständige Ablauf-Kette am Voice PE)
+
+Kompletter End-to-End-Test am echten Gerät (Timer setzen → Weaviate-Intent-Match
+→ ablaufen lassen → Melodie → ansprechen → Melodie stoppt + Ansage), inklusive
+mehrerer Iterationen mit dem Nutzer direkt am Gerät. Fünf weitere Bugs
+gefunden und behoben, alle unit-getestet und am Gerät re-verifiziert:
+
+| # | Bug | Fund | Fix |
+|---|---|---|---|
+| 1 | `extend`/`shorten` (Weaviate-Match) | Beispielzahlen in den Seed-Patterns (2/3/5/10 Min.) kollidierten mit denselben Zahlen in echten Anfragen — "Timer auf 2 Minuten" (set) matchte "Stell den Timer 2 Minuten früher" (shorten) mit 0,97 Certainty | Beispielzahlen aus `extend`/`shorten`-Patterns entfernt (Migration 069) |
+| 2 | `extend` vs. `shorten` (Weaviate-Match) | Fast-Antonym-Paar, strukturell fast identische Sätze — sobald Name/Zahl das schwache Verb-Signal verwässert, kippt die Reihenfolge mit nur 0,006 Abstand ("Verlängere den Kartoffel Timer um 3 Minuten" matchte `shorten`) | Lexikalischer Schiedsrichter in `timer_action()`: prüft das tatsächlich gesprochene Verb und korrigiert einen falschen/knappen semantischen Match |
+| 3 | Melodie-Zustellung (kein Ton) | `_media_player_for()` verließ sich auf `alice.ha_entities.area_name` — die ist nur für HA-Assist-exponierte Entities gepflegt; eine reine Wyoming-Voice-PE muss das nicht sein (live: `area_name` leer, `is_active=false`) | `device-mapping.yaml` (ohnehin Quelle für Geräte→Raum) bekommt ein `media_player`-Feld pro Gerät; `alice-chat-stream` mountet dasselbe Config-Volume read-only und liest es vor dem DB-Fallback |
+| 4 | "Ansprache stoppt Melodie" | Ursprünglicher Plan (HA-Automation auf `assist_satellite`-Event) kann grundsätzlich nie feuern — "Hey Jarvis" umgeht HAs Assist-Pipeline komplett (PROJ-42); zusätzlich: erstes "Hey Jarvis" ohne Folgesatz stoppte die Melodie nicht (Stop-Request wurde gestartet, aber nie abgewartet, bevor die Session bei "kein Sprachinhalt" abbrach) | Stop-Logik ins Gateway verlagert (`GET /stream/timers/pending` ruft serverseitig zuerst `stop_melody()`); der Poll wird jetzt auch auf dem "keine Sprache erkannt"-Pfad abgewartet, bevor die Session endet |
+| 5 | Benannte Timer ("Eiertimer") | `parse_name`/`parse_ref_name` erkannten nur "Timer für X", nicht die natürlichere deutsche Wortzusammensetzung; zusätzlich transkribiert Whisper diese als "Eier-Timer" (mit Bindestrich), nicht als ein zusammenhängendes Wort | Neue `_COMPOUND_NAME_RE`/`_REF_COMPOUND_NAME_RE`-Muster (`<Name>-?timer`), in beiden Namens-Auflösungsfunktionen ergänzt |
+
+Zusätzliche Produktentscheidung während des Nachlaufs: Spricht der Nutzer das
+Gerät an, während eine Timer-Melodie läuft, zählt das jetzt als reine
+Quittierung — die Melodie stoppt, die Ablauf-Meldung wird gesagt, aber die
+Äußerung selbst läuft **nicht** zusätzlich durch die normale Chat-Pipeline
+(vorher bekam z. B. "Stopp" eine eigene, ungewollte LLM-Antwort).
+
+**Alle fünf Punkte am Gerät re-verifiziert** (2026-09-17): Melodie stoppt
+zuverlässig beim ersten Ansprechen, `extend`/`shorten` matchen korrekt auch
+mit Namen+Zahl in der Äußerung, zusammengesetzte Timer-Namen ("Eiertimer")
+werden gesetzt/abgefragt/verkürzt ohne Namenskollision mit unbenannten
+Timern, keine zusätzliche Chat-Antwort mehr beim Ansprechen während der
+Melodie.
+
 ### Verbleibend offen
 
 - **Live-Latenz-Check `< 200 ms`** für Timer-Operationen (Prometheus
   `chat_latency_seconds`, analog PROJ-83/84 AC-6/AC-11) — noch nicht gemessen.
-- **End-to-End-Test der kompletten Ablauf-Kette** am Gerät (Timer setzen →
-  ablaufen lassen → Melodie hören → ansprechen → Melodie stoppt + Ansage) mit
-  dem neuen Gateway-seitigen Stop-Pfad — die Einzelteile (Melodie-Scripts,
-  Endpoint-Reihenfolge) sind verifiziert bzw. unit-getestet, der volle Ablauf
-  am Gerät steht noch aus.
-- Sammel-Fenster (mehrere Timer, ein Gerät) und Geräte-Offline-Fall weiterhin
-  nur code-seitig verifiziert.
+- Sammel-Fenster (mehrere Timer gleichzeitig auf einem Gerät) und
+  Geräte-Offline-Fall weiterhin nur code-seitig verifiziert, nicht live
+  nachgestellt.
+- Minuten- und Sekunden-Timer (z. B. 30 s / 50 s) wurden im Live-Test bestätigt
+  funktionsfähig; Stunden-Timer über die volle Voice-PE-Kette nicht gesondert
+  gegengetestet (Code-Pfad identisch, kein Grund zur Annahme eines
+  Unterschieds).
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-09-17 (Migration 069 + `seed-timer-intents.sh` + HA-Package
+`alice_timer_melody.yaml` + `device-mapping.yaml` `media_player`-Feld +
+alice-chat-stream/alice-speech-gateway Container-Updates + Frontend).
+
+Live am Voice PE (Büro) durchgetestet über mehrere Iterationen (siehe
+„Hardware-Verify Nachlauf" und „Live-Test-Nachlauf" oben) — Setzen (Dauer,
+Uhrzeit, benannt inkl. zusammengesetzter Namen), Ändern (verlängern/verkürzen),
+Abfragen, Löschen, Ablauf mit Melodie + Quittierung per Ansprache, alles über
+die volle Voice-PE-Kette bestätigt funktionsfähig. Insgesamt 5 zusätzliche
+Bugs im Live-Betrieb gefunden und behoben (Weaviate-Intent-Verwechslungen bei
+`extend`/`shorten`, Melodie-Geräte-Zuordnung, Melodie-Stopp-Timing,
+zusammengesetzte Timer-Namen — siehe Nachlauf-Abschnitt).
+
+Offen, nicht blockierend: Live-Latenz-Messung (`< 200 ms`) über Prometheus
+noch ausstehend; Sammel-Fenster (mehrere gleichzeitig fällige Timer) und
+Geräte-Offline-Fall nur code-seitig verifiziert.
