@@ -613,15 +613,26 @@ async def pending_timer(channel: str, jwt_payload: dict = Depends(verify_jwt)):
     timer of `channel` (a device key like 'esphome:Büro'), marking them acknowledged.
     Returns {"announcement": null} when there is nothing to say.
 
-    This endpoint mutates state (marks timers acknowledged) and is only meant for
-    the speech gateway, whose service token carries iss="alice-speech-gateway".
-    WebApp tokens (no iss) are rejected so a browser client cannot suppress or
-    enumerate another device's timers (PROJ-85 QA BUG-7).
+    Also stops a currently playing melody on this device (spec: addressing the
+    device stops the melody). alice-chat-stream cannot see HA's assist_satellite
+    state — "Hey Jarvis" bypasses HA's Assist pipeline entirely and streams
+    straight to alice-speech-gateway (PROJ-42), so that entity never changes.
+    The gateway is the only place that knows a new turn just started, hence it
+    calls this endpoint at the top of every turn and the stop happens here,
+    before STT even runs. Idempotent: media_player.media_stop on an already
+    stopped player is a no-op.
+
+    This endpoint mutates state (marks timers acknowledged, stops a melody) and
+    is only meant for the speech gateway, whose service token carries
+    iss="alice-speech-gateway". WebApp tokens (no iss) are rejected so a
+    browser client cannot suppress or enumerate another device's timers
+    (PROJ-85 QA BUG-7).
     """
     if jwt_payload.get("iss") != "alice-speech-gateway":
         raise HTTPException(status_code=403, detail="Nur für das Sprach-Gateway")
     if not channel.startswith("esphome:") and channel != "esphome":
         raise HTTPException(status_code=400, detail="channel muss ein Voice-PE-Gerät sein")
+    await scheduler.stop_melody(channel)
     text = await _timer_scheduler.pending_announcement(memory.pool(), channel)
     return {"announcement": text}
 

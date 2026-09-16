@@ -919,5 +919,53 @@ need a hardware/Prometheus check at deploy.
 - **Security:** Pass — BUG-7 closed; auth / RLS / Pydantic validation / parameterised queries all sound.
 - **Production Ready:** YES (code); hardware-verify + latency check to follow at deploy.
 
+---
+
+## Hardware-Verify Nachlauf (2026-09-16, am echten Voice PE)
+
+Live getestet an der Büro-Voice-PE nach dem Deploy von Migration 069 +
+`seed-timer-intents.sh` + `alice_timer_melody.yaml` (als HA-Package unter
+`/config/packages/`).
+
+| Punkt | Ergebnis |
+|---|---|
+| Voice-PE `media_player`-Entity bei Idle nutzbar | ✅ **Bestätigt** — `media_player.ha_voice_pe_buero_media_player` spielt via `media_player.play_media` mit `media-source://media_source/local/<datei>.mp3`, unabhängig von der "Hey Jarvis"-Wyoming-Session |
+| Melodie-Loop / Timeout-Selbststopp / manueller Stop | ✅ **Bestätigt** — alle drei Scripts (`alice_timer_melody_start`/`_stop`, Timeout-Automation) manuell durchgetestet, funktionieren wie spezifiziert |
+| Melodie-Asset | ✅ Datei liegt unter `/media/alice_timer_finished.mp3`; `input_text.alice_timer_melody_url` zeigt auf `media-source://media_source/local/alice_timer_finished.mp3` |
+| "Ansprache stoppt Melodie" — ursprünglicher HA-Automation-Ansatz | ❌ **Verworfen** — die geplante Automation auf `assist_satellite`-State/-Event kann grundsätzlich nie feuern: "Hey Jarvis" umgeht HAs Assist-Pipeline komplett und geht per raw Wyoming direkt an `alice-speech-gateway` (PROJ-42 `devices/ha-voice-pe/README.md`); die `assist_satellite`-Entity bleibt für diesen Pfad permanent im Leerlauf. Am Gerät verifiziert (Event-Log leer außer dem `media_player`-eigenen State-Wechsel beim Melodie-Start). |
+
+### Architektur-Korrektur: Melodie-Stopp verlagert ins Gateway
+
+Die "Ansprache stoppt Melodie"-Logik sitzt jetzt in **`alice-speech-gateway`**
+statt in einer HA-Automation — der Gateway ist der einzige Ort, der einen neuen
+Turn überhaupt erkennt (er terminiert die Wyoming-Session direkt).
+
+- **`alice-chat-stream`** — `GET /stream/timers/pending` ruft jetzt **zuerst**
+  `scheduler.stop_melody(channel)` auf (idempotent — `media_player.media_stop`
+  auf einem stillen Player ist ein No-Op), **dann** erst
+  `pending_announcement()`. Beides in einem Request.
+- **`alice-speech-gateway`** — `wyoming_transport.py`: der Poll-Aufruf ist von
+  "nach STT" auf "sofort nach `_collect_audio()`" vorgezogen (parallel zu
+  STT/Speaker-ID gestartet, Ergebnis erst nach STT abgewartet) — die Melodie
+  stoppt so schnell wie möglich, nicht erst nach der STT-Latenz. Kein
+  zusätzlicher HTTP-Call nötig; der bestehende `pending`-Poll übernimmt beides.
+- **`homeassistant/alice_timer_melody.yaml`** — die tote
+  `alice_timer_melody_stop_on_wake`-Automation (Trigger
+  `assist_satellite_wake_word_detected`, feuert nie) wurde entfernt. Das
+  Package enthält nur noch Start/Stop-Scripts + die Timeout-Automation, beide
+  live verifiziert.
+
+### Verbleibend offen
+
+- **Live-Latenz-Check `< 200 ms`** für Timer-Operationen (Prometheus
+  `chat_latency_seconds`, analog PROJ-83/84 AC-6/AC-11) — noch nicht gemessen.
+- **End-to-End-Test der kompletten Ablauf-Kette** am Gerät (Timer setzen →
+  ablaufen lassen → Melodie hören → ansprechen → Melodie stoppt + Ansage) mit
+  dem neuen Gateway-seitigen Stop-Pfad — die Einzelteile (Melodie-Scripts,
+  Endpoint-Reihenfolge) sind verifiziert bzw. unit-getestet, der volle Ablauf
+  am Gerät steht noch aus.
+- Sammel-Fenster (mehrere Timer, ein Gerät) und Geräte-Offline-Fall weiterhin
+  nur code-seitig verifiziert.
+
 ## Deployment
 _To be added by /deploy_

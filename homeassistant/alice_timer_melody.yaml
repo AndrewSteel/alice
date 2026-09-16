@@ -1,25 +1,26 @@
 # alice_timer_melody.yaml — PROJ-85 Timer-Agent melody mediator
 #
-# Alice's timer watcher (alice-chat-stream) cannot see the Voice PE's wakeword
-# / "satellite is being addressed" state, so it delegates the melody playback
-# and its stop conditions to Home Assistant. Alice only signals start (and, on
-# "delete" / timeout, stop) over the HA REST API.
+# Alice's timer watcher (alice-chat-stream) plays the expiry melody on the
+# Voice PE by calling this package's scripts over HA's REST API — start on
+# expiry, stop on delete-during-alarm.
 #
-# >>> HARDWARE-VERIFY (spec open point, /architecture G):
-#   1. Confirm the Voice PE exposes a usable media_player entity while the
-#      "Hey Jarvis" Wyoming path is idle. If not, fall back to a fixed short
-#      repeating tone over the TTS channel (handled entirely in
-#      alice-speech-gateway) and drop this file.
-#   2. Confirm which state/trigger reliably signals "the satellite is being
-#      addressed". Candidates below (assist_satellite state, wake_word event).
-#      Adjust the `alice_timer_melody_stop_on_wake` trigger to the one that
-#      actually fires on this hardware.
-#   3. Set input_text.alice_timer_melody_url / the media source to the bundled
-#      melody file once its location is decided (HA local media vs. gateway).
+# "Stop on wake" deliberately does NOT live in HA: "Hey Jarvis" bypasses HA's
+# Assist pipeline entirely and streams straight to alice-speech-gateway over
+# raw Wyoming (PROJ-42) — confirmed at the device 2026-09-16, HA's
+# assist_satellite entity never changes state for it. The gateway is the only
+# place that knows a new turn just began, so it stops the melody itself via
+# GET /stream/timers/pending on alice-chat-stream (see
+# GatewayWyomingHandler._announce_expired_timers in wyoming_transport.py),
+# which calls TimerScheduler.stop_melody() -> script.alice_timer_melody_stop
+# below, same as the delete-during-alarm path.
 #
-# Install: copy into HA's packages/ dir (or append to configuration.yaml under
-# the matching keys) and reload scripts + automations. Requires the three
-# helper entities below.
+# Verified at the device (2026-09-16): start/loop, timeout self-stop, and
+# manual stop all work end-to-end with a real media_player entity and a
+# media-source:// file (see input_text.alice_timer_melody_url below).
+#
+# Install: copy into HA's packages/ dir (requires
+# `homeassistant: packages: !include_dir_named packages` in
+# configuration.yaml) and restart HA. Requires the helper entities below.
 
 # --- Helper entities -------------------------------------------------------
 input_boolean:
@@ -34,11 +35,10 @@ input_text:
   alice_timer_melody_url:
     name: Alice Timer-Melodie URL
     max: 255
-    # Short, gentle tone (2-4 s). Upload it via HA's "Medien" UI into the
-    # local media folder, then set this to its media-source id. The folder
-    # under "Medien" is media-source://media_source/local/<folder>/<file>.
-    # Example for a file placed in the existing "medien" folder:
-    initial: media-source://media_source/local/medien/alice_timer_finished.mp3
+    # Short, gentle tone (2-4 s), placed at the root of HA's media volume
+    # (/media/alice_timer_finished.mp3). media-source://media_source/local/
+    # maps to that root; adjust the filename here if it changes.
+    initial: media-source://media_source/local/alice_timer_finished.mp3
 
 input_number:
   alice_timer_melody_max_seconds:
@@ -84,33 +84,32 @@ script:
           - service: media_player.volume_set
             target: { entity_id: "{{ player }}" }
             data: { volume_level: 0.6 }
-          # Resolve the media-source:// id to a playable URL once. Some
-          # media_player integrations accept media-source:// directly; others
-          # (and the ESPHome Voice PE speaker) need the resolved http(s) URL.
-          - service: media_source.resolve_media
-            data:
-              media_content_id: "{{ states('input_text.alice_timer_melody_url') }}"
-            response_variable: resolved
           - repeat:
               # Loop the tone until the "melody active" flag is cleared (by the
-              # stop script, the wake trigger, or the timeout automation).
+              # stop script — called either from alice-chat-stream on delete,
+              # from alice-speech-gateway at the start of the next turn, or by
+              # the timeout automation below).
               while:
                 - condition: state
                   entity_id: input_boolean.alice_timer_melody_active
                   state: "on"
               sequence:
+                # media_player.play_media accepts a media-source:// id directly
+                # — the integration resolves it itself. (An earlier version of
+                # this script tried to pre-resolve via a
+                # media_source.resolve_media *service*, which does not exist;
+                # resolution is an internal call, not a callable action.)
                 - service: media_player.play_media
                   target: { entity_id: "{{ player }}" }
                   data:
-                    media_content_id: >-
-                      {{ resolved.url if resolved is defined and resolved.url
-                         else states('input_text.alice_timer_melody_url') }}
-                    media_content_type: "{{ resolved.mime_type | default('music', true) }}"
+                    media_content_id: "{{ states('input_text.alice_timer_melody_url') }}"
+                    media_content_type: music
                 - delay: { seconds: 6 }
 
   alice_timer_melody_stop:
     alias: Alice Timer-Melodie stoppen
-    # Called on "delete during melody" / explicit stop.
+    # Called on "delete during melody", and by alice-speech-gateway at the
+    # start of every new turn on this device (see file header).
     sequence:
       - service: input_boolean.turn_off
         target: { entity_id: input_boolean.alice_timer_melody_active }
@@ -128,21 +127,6 @@ automation:
         to: "on"
         for:
           seconds: "{{ states('input_number.alice_timer_melody_max_seconds') | int(120) }}"
-    conditions:
-      - condition: state
-        entity_id: input_boolean.alice_timer_melody_active
-        state: "on"
-    actions:
-      - service: script.alice_timer_melody_stop
-
-  - alias: Alice Timer-Melodie – Stopp bei Ansprache des Satelliten
-    id: alice_timer_melody_stop_on_wake
-    # >>> HARDWARE-VERIFY: replace this trigger with whatever reliably fires
-    #     when the user addresses the Voice PE (wake word detected /
-    #     assist_satellite entering "listening").
-    triggers:
-      - trigger: event
-        event_type: assist_satellite_wake_word_detected
     conditions:
       - condition: state
         entity_id: input_boolean.alice_timer_melody_active
