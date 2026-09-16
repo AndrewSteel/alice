@@ -144,6 +144,23 @@ class GatewayWyomingHandler(AsyncEventHandler):
                     active_enrollment = None
                 continue
 
+            # --- PROJ-85 — stop a playing timer melody on this device ---
+            # The user just started a new turn (AudioStart/Stop collected), so a
+            # timer melody on this device must stop *now* — not after STT, which
+            # costs real time. "Hey Jarvis" bypasses HA's Assist pipeline
+            # entirely (PROJ-42), so HA's assist_satellite entity never reflects
+            # this; the gateway is the only place that knows a turn just began.
+            # Started in parallel with STT/Speaker-ID below; its announcement
+            # result is awaited later, once transcript/speaker are known, so it
+            # never adds latency to the normal command path.
+            device_key = (
+                device.room.replace(" ", "_") if device.room
+                else device.name.replace(" ", "_")
+            )
+            pending_task = asyncio.create_task(
+                self._announce_expired_timers(device_key, _token_for(None))
+            )
+
             # --- Run STT + Speaker-ID in parallel ---
             stt_task = asyncio.create_task(get_engine().transcribe(wav, config.SPEECH_LANGUAGE))
 
@@ -187,16 +204,16 @@ class GatewayWyomingHandler(AsyncEventHandler):
             )
 
             # --- PROJ-85 — timer expiry announcement ---
-            # If a timer set on this device has expired since the last
-            # interaction, Alice announces it *before* processing whatever the
-            # user just said (spec: "Der 20 Minuten Timer ist abgelaufen.").
-            device_key = (
-                device.room.replace(" ", "_") if device.room
-                else device.name.replace(" ", "_")
-            )
-            announced = await self._announce_expired_timers(
-                device_key, _token_for(spk_user_id)
-            )
+            # The melody-stop request went out already (kicked off above,
+            # before STT). Its result is the German announcement, if any, for
+            # a timer that expired on this device — spoken *before* processing
+            # whatever the user just said (spec: "Der 20 Minuten Timer ist
+            # abgelaufen.").
+            try:
+                announced = await pending_task
+            except Exception as exc:
+                logger.warning("Timer pending check failed: %s", exc)
+                announced = None
             if announced:
                 await self._speak_text(announced)
 
@@ -426,10 +443,18 @@ class GatewayWyomingHandler(AsyncEventHandler):
         return
 
     async def _announce_expired_timers(self, device_key: str, jwt_token: str) -> str | None:
-        """PROJ-85 — ask alice-chat-stream whether a timer set on this device
-        has expired unannounced. Returns the German sentence to speak, or None.
+        """PROJ-85 — poll alice-chat-stream's /stream/timers/pending for this
+        device. Two things happen server-side on every call, in this order:
+        (1) any timer melody currently playing on this device is stopped
+        (spec: addressing the device stops the melody — HA's assist_satellite
+        state cannot drive this, "Hey Jarvis" bypasses HA's Assist pipeline
+        entirely per PROJ-42, so the gateway is the only place that knows a new
+        turn just began); (2) any expired-but-unannounced timer for this device
+        is returned as a German sentence and marked acknowledged.
 
-        Best-effort: any error just means "nothing to announce".
+        Returns the sentence to speak, or None. Best-effort: any error just
+        means "nothing to announce" — the melody-stop is still attempted
+        server-side within that same request before the error surfaces.
         """
         import httpx
 
