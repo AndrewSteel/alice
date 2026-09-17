@@ -116,7 +116,12 @@ _SPLITTERS = [
     "und", "dann", "danach", "außerdem", "sowie", "zusätzlich", "auch noch",
 ]
 _FILLER_RE = re.compile(r"^(bitte|mal|noch|auch|doch|kurz)\s+", re.IGNORECASE)
-_PUNCT_RE = re.compile(r"[,\.;]+")
+# Never split on a '.'/',' directly between two digits — a transcribed clock
+# time ("18.30 Uhr") or decimal duration ("2,5 Minuten") would otherwise be
+# torn in two, leaving a bare "... auf 18" that parse_time's fallback then
+# misreads as 18 minutes (PROJ-85 live-usage follow-up). ';' is never used
+# mid-number, so it still always splits.
+_PUNCT_RE = re.compile(r"(?<!\d)[,\.;]+(?!\d)")
 
 
 # ---------------------------------------------------------------------------

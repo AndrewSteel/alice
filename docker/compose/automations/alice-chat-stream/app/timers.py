@@ -112,6 +112,12 @@ _DURATION_TOKEN_RE = re.compile(
 )
 # "15 Uhr 40", "15 Uhr", "4 uhr"
 _CLOCK_RE = re.compile(r"\b(\d{1,2})\s*uhr(?:\s*(\d{1,2}))?\b", re.IGNORECASE)
+# "18.30 Uhr" / "18,30 Uhr" — the hour.minute clock notation, as opposed to
+# "18 Uhr 30". Distinct from _CLOCK_RE because the minutes sit *before* "uhr"
+# here, not after. Whisper transcribes a spoken "18 Uhr 30" as either form
+# (live usage finding, 2026-09-17) — without this, "18.30 Uhr" only matches
+# _CLOCK_RE on the trailing "30 uhr" fragment (hh=30, out of range, dropped).
+_CLOCK_DOTTED_RE = re.compile(r"\b(\d{1,2})[.,](\d{2})\s*uhr\b", re.IGNORECASE)
 
 
 def parse_time(part: str, *, now: datetime | None = None) -> ParsedTime:
@@ -134,7 +140,7 @@ def parse_time(part: str, *, now: datetime | None = None) -> ParsedTime:
             is_clock=False,
         )
 
-    m = _CLOCK_RE.search(part)
+    m = _CLOCK_DOTTED_RE.search(part) or _CLOCK_RE.search(part)
     if m:
         hh = int(m.group(1))
         mm = int(m.group(2)) if m.group(2) is not None else 0
@@ -322,22 +328,49 @@ _INTENT_BY_SERVICE = {
 }
 
 
-# extend vs. shorten are near-antonyms of each other and structurally very
-# similar sentences ("Verlängere/Verkürze den X Timer um Y Minuten") — live
-# testing found Weaviate nearText can rank the wrong one by a margin as thin
-# as 0.006 once a name/number dilutes the one-word signal (PROJ-85 QA
-# follow-up, 2026-09-16). The verb itself is unambiguous and trivial to check
-# lexically, so it overrides a close/wrong semantic match rather than trusting
-# the embedding for this specific pair.
-_EXTEND_VERB_RE = re.compile(
-    r"\bverl[äa]nger|\blänger\b|\bdazu\b|\bspäter\b", re.IGNORECASE
-)
-# "ab" alone is too common a German word/preposition to use as a bare
-# standalone signal (false positives); require it paired with "zieh" ("zieh
-# … ab") as in the seeded pattern.
-_SHORTEN_VERB_RE = re.compile(
-    r"\bverk[üu]rz|\bkürzer\b|\bfrüher\b|\bzieh\w*\b.*\bab\b", re.IGNORECASE
-)
+# Every timer action's seeded Weaviate examples share the same skeleton
+# ("<Verb> den [Name] Timer …"), so a name/number in the live utterance can
+# dilute the one-word verb signal and let nearText rank the wrong action —
+# first found for extend/shorten (0.006 certainty margin, PROJ-85 QA
+# follow-up 2026-09-16: "Verlängere den Kartoffel Timer um 3 Minuten" matched
+# timer:shorten), and independently confirmed for set/delete (a delete of a
+# duration-derived name, e.g. "Den 18 Minuten Timer löschen", can rank
+# closer to timer:set's duration-heavy examples than to timer:delete's
+# name-less ones). Each action's own verb is lexically unambiguous, so it
+# arbitrates a close/wrong semantic match rather than trusting the embedding.
+_ACTION_VERB_RE = {
+    "set": re.compile(
+        r"\btimer\w*\s+(?:auf|f[üu]r)\b|\bauf\s+\d|\bneuer?\s+timer|"
+        r"\bweck\w*\s+mich|\berinnere\s+mich",
+        re.IGNORECASE,
+    ),
+    "delete": re.compile(
+        r"\bl[öo]sch|\bentfern|\bbrich\w*\b.*\bab\b|\bstoppe\w*\b.*\bganz\b",
+        re.IGNORECASE,
+    ),
+    "query": re.compile(
+        r"\bwie\s+lange|\bwie\s+viel\s+zeit|\bwelche\s+timer|\bzeig\w*\s+mir|"
+        r"\bwas\s+f[üu]r\s+timer|\bl[äa]uft\b",
+        re.IGNORECASE,
+    ),
+    "pause": re.compile(
+        r"\bpausier|\bhalte\w*\b.*\ban\b|\bunterbrich|\bstoppe\w*\b.*\bkurz\b",
+        re.IGNORECASE,
+    ),
+    "resume": re.compile(
+        r"\bfort\b|\bweiter|\bwieder\b|\bstarte\w*\b", re.IGNORECASE
+    ),
+    # "ab" alone is too common a German word/preposition to use as a bare
+    # standalone signal (false positives); require it paired with "zieh"
+    # ("zieh … ab") as in the seeded pattern.
+    "extend": re.compile(
+        r"\bverl[äa]nger|\blänger\b|\bdazu\b|\bsp[äa]ter\b", re.IGNORECASE
+    ),
+    "shorten": re.compile(
+        r"\bverk[üu]rz|\bkürzer\b|\bfr[üu]her\b|\bzieh\w*\b.*\bab\b",
+        re.IGNORECASE,
+    ),
+}
 
 
 def timer_action(
@@ -345,8 +378,8 @@ def timer_action(
 ) -> str | None:
     """Map the Weaviate match to a timer action, or None if it is not a timer.
 
-    `part` (the actual spoken/typed text), when given, arbitrates an
-    extend/shorten match against the literal verb — see _EXTEND_VERB_RE.
+    `part` (the actual spoken/typed text), when given, arbitrates the match
+    against the literal verb — see _ACTION_VERB_RE.
     """
     action: str | None = None
     if service and service in _INTENT_BY_SERVICE:
@@ -354,14 +387,16 @@ def timer_action(
     elif intent_template and intent_template.startswith("timer:"):
         action = intent_template.split(":", 1)[1]
 
-    if action in ("extend", "shorten") and part:
-        wants_extend = _EXTEND_VERB_RE.search(part) is not None
-        wants_shorten = _SHORTEN_VERB_RE.search(part) is not None
-        if wants_extend and not wants_shorten:
-            return "extend"
-        if wants_shorten and not wants_extend:
-            return "shorten"
-        # both or neither matched literally — trust the semantic match
+    if action in _ACTION_VERB_RE and part:
+        own_verb_matches = _ACTION_VERB_RE[action].search(part) is not None
+        if not own_verb_matches:
+            literal_actions = [
+                a for a, rx in _ACTION_VERB_RE.items() if rx.search(part)
+            ]
+            if len(literal_actions) == 1:
+                return literal_actions[0]
+        # the semantic match's own verb is literally present, or the literal
+        # text is ambiguous/silent — trust the semantic match
 
     return action
 
