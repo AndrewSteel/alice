@@ -997,6 +997,46 @@ Melodie.
   gegengetestet (Code-Pfad identisch, kein Grund zur Annahme eines
   Unterschieds).
 
+## Nachlauf — Alltagsnutzung (2026-09-17)
+
+Andreas meldete nach ein paar Tagen Alltagsnutzung zwei durchgängige
+Fehlbilder: "Setze einen Timer auf 18 Uhr 30" wurde als 18-Minuten-Dauer
+gesetzt (keine Umrechnung auf die Uhrzeit), und "Den 18 Minuten Timer
+löschen" schlug wiederholt fehl (mal wurde stattdessen ein weiterer
+18-Minuten-Timer angelegt, mal fragte Alice nach, mal behauptete sie, es gebe
+keinen solchen Timer). Andreas' eigene Vermutung: die Weaviate-Ergebnisse
+liegen zu dicht beieinander. Untersuchung durch Lesen des tatsächlich
+deployten Codes (nicht nur der Spec) plus direkte Ausführung der Regex- und
+Split-Logik gegen die gemeldeten Sätze — drei getrennte, alle code-seitig
+reproduzierte Ursachen gefunden:
+
+| # | Ursache | Fund | Fix |
+|---|---|---|---|
+| 1 | Kein lexikalischer Schiedsrichter für set/delete/query/pause/resume | Der bestehende Schiedsrichter in `timer_action()` (siehe Live-Test-Nachlauf oben) deckte nur extend/shorten ab. Alle Timer-Intent-Satzmuster teilen dasselbe Skelett ("Verb + den [Name] Timer …"); ein Löschbefehl mit einer zahlbasierten abgeleiteten Namen ("Den 18 Minuten Timer löschen") kann näher am zahlenlastigen `set`-Cluster liegen als am namenlosen `delete`-Cluster — dieselbe bereits dokumentierte nearText-Schwäche ("ein gemeinsames Digit kann das Ranking unabhängig vom Satzbau kippen"), nur für ein anderes Intent-Paar. Erklärt alle drei gemeldeten Lösch-Symptome: falscher `set`-Treffer legt einen zweiten Timer an; die dadurch entstandene Dopplung löst die "welchen meinst du"-Rückfrage aus; ein fehlgeschlagener Löschversuch plus Statusdrift erklärt "kein solcher Timer". | `timer_action()` generalisiert: ein Verb-Regex pro Aktion (`set`/`delete`/`query`/`pause`/`resume`/`extend`/`shorten`), Schiedsrichter-Logik jetzt tabellengetrieben statt nur für das extend/shorten-Paar hartkodiert. Gegen alle geseedeten Beispielsätze und die gemeldeten Sätze verifiziert (eindeutig, keine Überschneidungen). |
+| 2 | Satzsplitter trennt eine transkribierte Uhrzeit an einem Punkt/Komma | `split_message()`s `_PUNCT_RE` trennte bedingungslos auf `.`/`,`/`;`. Whisper transkribiert eine gesprochene "18 Uhr 30" plausibel auch als "18.30 Uhr" — das zerlegte den Satz in "...auf 18" + "30 uhr"; das erste Fragment hat kein Einheiten-/Uhr-Wort mehr und wird vom Bare-Number-Fallback als 18 Minuten gelesen. Reproduziert exakt das gemeldete Symptom. | `_PUNCT_RE` trennt nicht mehr auf `.`/`,` direkt zwischen zwei Ziffern (`(?<!\d)[,\.;]+(?!\d)`); echte Satzenden/Aufzählungen trennen weiterhin. Schützt auch Dezimal-Dauern ("2,5 Minuten"). |
+| 3 | `_CLOCK_RE` erkennt nur "Uhr" direkt nach der Stunde, nicht die Punkt-Notation | Auch mit Fix #2 unzerteilt bleibt "18.30 Uhr" ein eigenes Muster: die bestehende `_CLOCK_RE` matcht nur auf das Fragment "30 uhr" (hh=30, außerhalb 0–23, wird verworfen) — die Minuten stehen hier *vor* "Uhr", nicht danach wie bei "18 Uhr 30". Gefunden beim Schreiben des Regressionstests für Fix #2. | Neue `_CLOCK_DOTTED_RE` (`\d{1,2}[.,]\d{2}\s*uhr`) für die Stunde.Minute-Schreibweise, vor der bestehenden `_CLOCK_RE` geprüft. |
+
+Alle drei Fixes sind reine Python-Textverarbeitung in `alice-chat-stream`
+(`app/timers.py`, `app/ha_path.py`) — keine Migration, kein Weaviate-Reseed,
+kein Frontend-/n8n-Eingriff nötig. Bewusst kein struktureller Eingriff an der
+gemeinsam genutzten `lookup_intent()` (Domain-Vorfilter, eigene
+Schwellenwerte) — das bereits produktiv verifizierte, chirurgische
+Schiedsrichter-Muster aus dem Live-Test-Nachlauf wurde stattdessen
+verallgemeinert (Entscheidung mit Andreas abgestimmt).
+
+Regressionstests: `TestTimerActionFullArbitration` (8 neue Fälle,
+`tests/test_timers.py`), `TestSplitMessageDigitPunctuation` (5 neue Fälle,
+`tests/test_ha_path_decide.py`), `TestParseClockAfterSplit` +
+Punkt-/Komma-Uhrzeit-Fälle in `TestParseClock` (`tests/test_timers.py`).
+Volle Suite (`alice-chat-stream`, exkl. redis-loser
+`test_admin_dashboard`): **197 grün**, keine Regression an bestehenden
+Geräte-Befehlen, Splitter- oder extend/shorten-Tests.
+
+**Live-Test bestätigt (2026-09-17):** die genauen gemeldeten Sätze ("Setze
+einen Timer auf 18 Uhr 30", "Den 18 Minuten Timer löschen" u. a.) wurden nach
+dem Deploy am Voice PE erneut geprüft — die Anweisungen werden jetzt korrekt
+umgesetzt.
+
 ## Deployment
 
 **Deployed:** 2026-09-17 (Migration 069 + `seed-timer-intents.sh` + HA-Package
@@ -1015,3 +1055,6 @@ zusammengesetzte Timer-Namen — siehe Nachlauf-Abschnitt).
 Offen, nicht blockierend: Live-Latenz-Messung (`< 200 ms`) über Prometheus
 noch ausstehend; Sammel-Fenster (mehrere gleichzeitig fällige Timer) und
 Geräte-Offline-Fall nur code-seitig verifiziert.
+
+**Nachlauf-Fix vom 2026-09-17 (Alltagsnutzung) deployt und live verifiziert**
+— siehe Nachlauf-Abschnitt oben.
