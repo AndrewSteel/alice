@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 import app.ha_path as ha_path
-from app.ha_path import IntentMatch, decide_path
+from app.ha_path import IntentMatch, decide_path, split_message
 
 
 def run(coro):
@@ -95,3 +95,50 @@ def test_timer_plus_ha_command(stub_lookup):
     assert d.path == "HA_FAST"
     assert d.timer_actions[0] == "delete"
     assert d.timer_actions[1] is None
+
+
+# ---------------------------------------------------------------------------
+# PROJ-85 live-usage follow-up — split_message must not tear a transcribed
+# clock time or decimal duration apart on '.'/',' between digits.
+# ---------------------------------------------------------------------------
+class TestSplitMessageDigitPunctuation:
+    def test_clock_time_with_period_stays_one_part(self):
+        # a plausible Whisper transcription of "18 Uhr 30"
+        assert split_message("Setze einen Timer auf 18.30 Uhr") == [
+            "Setze einen Timer auf 18.30 Uhr"
+        ]
+
+    def test_clock_time_with_comma_stays_one_part(self):
+        assert split_message("Setze einen Timer auf 18,30 Uhr") == [
+            "Setze einen Timer auf 18,30 Uhr"
+        ]
+
+    def test_decimal_duration_stays_one_part(self):
+        assert split_message("Setze einen Timer auf 2,5 Minuten") == [
+            "Setze einen Timer auf 2,5 Minuten"
+        ]
+
+    def test_sentence_ending_period_still_splits(self):
+        assert split_message("Setze einen Timer auf 10 Minuten. Wie spät ist es") == [
+            "Setze einen Timer auf 10 Minuten",
+            "Wie spät ist es",
+        ]
+
+    def test_comma_separated_multi_command_still_splits(self):
+        parts = split_message(
+            "Timer auf 10 Minuten, und einen auf 20 Minuten"
+        )
+        assert parts == ["Timer auf 10 Minuten", "einen auf 20 Minuten"]
+
+
+def test_clock_time_with_period_transcription_routes_as_clock(stub_lookup):
+    # End-to-end: a Whisper transcription rendering "18 Uhr 30" as "18.30
+    # Uhr" must still reach the timer handler as ONE unsplit part naming a
+    # clock time, not be torn into "...auf 18" (mis-parsed as 18 minutes)
+    # and a stray "30 uhr" fragment.
+    stub_lookup({"timer": _match(domain="timer", service="timer.set",
+                                 intent_template="timer:set")})
+    d = run(decide_path("Setze einen Timer auf 18.30 Uhr", client=None))
+    assert d.path == "HA_FAST"
+    assert d.parts == ["Setze einen Timer auf 18.30 Uhr"]
+    assert d.timer_actions == ["set"]

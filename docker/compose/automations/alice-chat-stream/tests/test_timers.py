@@ -108,6 +108,49 @@ class TestParseClock:
         p = parse_time("Timer auf 4 Uhr", now=night)
         assert p.seconds == 6 * 3600  # 22:00 -> 04:00 next day
 
+    def test_dotted_hour_minute_notation(self):
+        # "18.30 Uhr" — Whisper's alternative rendering of a spoken "18 Uhr
+        # 30" (live usage finding, 2026-09-17). Without _CLOCK_DOTTED_RE this
+        # only matches the plain _CLOCK_RE on the trailing "30 uhr" fragment
+        # (hh=30, out of range, silently dropped).
+        p = parse_time("Setze einen Timer auf 18.30 Uhr", now=NOW)
+        assert p.is_clock
+        assert p.clock == "18 Uhr 30"
+
+    def test_dotted_hour_minute_notation_comma_variant(self):
+        p = parse_time("Setze einen Timer auf 18,30 Uhr", now=NOW)
+        assert p.is_clock
+        assert p.clock == "18 Uhr 30"
+
+
+class TestParseClockAfterSplit:
+    """Live-usage bug report: "Setze einen Timer auf 18 Uhr 30" was set as an
+    18-minute duration timer. parse_time() itself handles this string
+    correctly in isolation (asserted above) — the failure was upstream, in
+    app.ha_path.split_message() tearing a Whisper transcription like
+    "18.30 Uhr" into "...auf 18" + "30 uhr" on the period. This exercises the
+    real split -> parse pipeline together so a regression there is caught
+    here too, not just in the split_message-only tests in
+    test_ha_path_decide.py."""
+
+    def test_reported_phrase_stays_clock_after_split(self):
+        from app.ha_path import split_message
+
+        parts = split_message("Setze einen Timer auf 18 Uhr 30")
+        assert parts == ["Setze einen Timer auf 18 Uhr 30"]
+        p = parse_time(parts[0], now=NOW)
+        assert p.is_clock
+        assert p.clock == "18 Uhr 30"
+
+    def test_period_transcription_variant_stays_clock_after_split(self):
+        from app.ha_path import split_message
+
+        parts = split_message("Setze einen Timer auf 18.30 Uhr")
+        assert parts == ["Setze einen Timer auf 18.30 Uhr"]
+        p = parse_time(parts[0], now=NOW)
+        assert p.is_clock
+        assert not (p.seconds == 18 * 60)  # must not be misread as 18 min
+
 
 # ---------------------------------------------------------------------------
 # names / delta / all
@@ -233,10 +276,60 @@ class TestTimerActionExtendShortenArbitration:
                      "Stell den Timer früher"):
             assert timer_action("timer.extend", None, text) == "shorten"
 
-    def test_non_extend_shorten_actions_ignore_part(self):
-        # arbitration only applies to the extend/shorten pair
-        assert timer_action("timer.set", None, "Verlängere den Timer") == "set"
-        assert timer_action("timer.query", None, "Verkürze den Timer") == "query"
+    def test_unrelated_literal_verb_corrects_wrong_set_or_query_match(self):
+        # arbitration now generalizes beyond extend/shorten (see
+        # TestTimerActionFullArbitration below) — a clearly-extend/shorten
+        # literal verb overrides a wrong set/query semantic match too.
+        assert timer_action("timer.set", None, "Verlängere den Timer") == "extend"
+        assert timer_action("timer.query", None, "Verkürze den Timer") == "shorten"
+
+
+class TestTimerActionFullArbitration:
+    """Generalizes TestTimerActionExtendShortenArbitration to the remaining
+    action pairs — live usage (2026-09-17) found the same nearText collision
+    for set vs. delete: a delete of a duration-derived name ("Den 18 Minuten
+    Timer löschen") can rank closer to timer:set's duration-heavy seeded
+    examples than to timer:delete's name-less ones, since every timer
+    intent's examples share the same "<Verb> den [Name] Timer" skeleton."""
+
+    def test_delete_of_derived_name_corrected_from_wrong_set_match(self):
+        assert timer_action(
+            "timer.set", None, "Den 18 Minuten Timer löschen"
+        ) == "delete"
+
+    def test_correct_delete_match_unchanged(self):
+        assert timer_action(
+            "timer.delete", None, "Lösche den Kartoffel Timer"
+        ) == "delete"
+
+    def test_query_corrected_from_wrong_delete_match(self):
+        assert timer_action(
+            "timer.delete", None, "Wie lange läuft der 18 Minuten Timer noch"
+        ) == "query"
+
+    def test_set_corrected_from_wrong_delete_match(self):
+        assert timer_action(
+            "timer.delete", None, "Setze einen Timer auf 18 Uhr 30"
+        ) == "set"
+
+    def test_pause_corrected_from_wrong_delete_match(self):
+        assert timer_action(
+            "timer.delete", None, "Stoppe den Timer kurz"
+        ) == "pause"
+
+    def test_delete_ganz_not_confused_with_pause_kurz(self):
+        assert timer_action(
+            "timer.pause", None, "Stoppe den Timer ganz"
+        ) == "delete"
+
+    def test_resume_corrected_from_wrong_delete_match(self):
+        assert timer_action(
+            "timer.delete", None, "Lass den Timer weiterlaufen"
+        ) == "resume"
+
+    def test_ambiguous_literal_text_trusts_semantic_match(self):
+        # no action verb literally present -> semantic match wins unchanged
+        assert timer_action("timer.query", None, "Kartoffel Timer") == "query"
 
 
 # ---------------------------------------------------------------------------
