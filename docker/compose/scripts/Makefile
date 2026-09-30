@@ -25,6 +25,7 @@ STACKS ?= \
   automations/dms-extractor-image \
   automations/alice-mail-reader \
   automations/alice-dms-thumbnailer \
+  automations/alice-google-connect \
   ai/ollama \
   ai/llama-3090 \
   ai/openwebui \

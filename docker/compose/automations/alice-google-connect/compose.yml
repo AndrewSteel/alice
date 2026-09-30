@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------
+# alice-google-connect — Google OAuth connection lifecycle for Alice (PROJ-86).
+#
+# Verifies Alice JWTs only (RS256 public key) — it never issues tokens, so no
+# private key is mounted here. Google access/refresh tokens are stored
+# AES-256-CBC encrypted in alice.google_connections (key: GOOGLE_ENC_KEY).
+#
+# Prerequisite outside this repo: a Google Cloud project with an OAuth client
+# whose redirect URI matches GOOGLE_REDIRECT_URI, consent screen "In Production".
+# ---------------------------------------------------------------------------
+services:
+  alice-google-connect:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-google-connect
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      # Public key only — this service verifies JWTs, it does not sign them.
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8008/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-google-connect]
+      backend:
+        aliases: [alice-google-connect]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

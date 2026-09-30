@@ -33,7 +33,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P1       | Sprecher-Erkennung verbessern (PROJ-103, ausgegliedert aus PROJ-85 — device-abhängige Speaker-ID)                   | 3.3       | Roadmap |
 | P2       | Web Push / PWA-Benachrichtigungen (PROJ-104, ausgegliedert aus PROJ-85 — zuverlässige WebApp-Hintergrund-Meldung)   | 3.3       | Roadmap |
 | P2       | Zeitgesteuerte HA-Befehle (PROJ-105, ausgegliedert aus PROJ-85 — "tu X um Uhrzeit Y", geplante Geräte-Aktion)       | 3.3       | Roadmap |
-| P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Roadmap |
+| P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Deployed |
 | P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
 | P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Roadmap |
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |

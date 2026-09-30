@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Datenschutzerklärung</title>
+    <style>
+      :root {
+        --bg: #f7f5f0;
+        --bg-raised: #ffffff;
+        --text: #1a1d23;
+        --text-dim: #6b7280;
+        --border: #e2ddd2;
+        --accent: #b5762a;
+        --accent-soft: #f0e2cd;
+        --mono: "Space Mono", "IBM Plex Mono", ui-monospace, monospace;
+        --serif: "Source Serif 4", Georgia, serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #12161c;
+          --bg-raised: #191e26;
+          --text: #e8ebef;
+          --text-dim: #8b93a1;
+          --border: #2a3038;
+          --accent: #e8a33d;
+          --accent-soft: #3a2f1a;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #12161c;
+        --bg-raised: #191e26;
+        --text: #e8ebef;
+        --text-dim: #8b93a1;
+        --border: #2a3038;
+        --accent: #e8a33d;
+        --accent-soft: #3a2f1a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding-inline: 24px;
+        padding-block: 48px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--serif);
+        line-height: 1.65;
+      }
+
+      img {
+        max-width: 100%;
+      }
+      [hidden] {
+        display: none !important;
+      }
+
+      .page {
+        max-width: 900px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: 200px minmax(0, 1fr);
+        gap: 48px;
+        align-items: start;
+      }
+
+      @media (max-width: 680px) {
+        .page {
+          grid-template-columns: 1fr;
+        }
+        nav.toc {
+          display: none;
+        }
+      }
+
+      header.top {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+
+      .mark {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: clamp(1.9rem, 5vw, 2.6rem);
+        margin: 0;
+        text-wrap: balance;
+      }
+
+      .meta {
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        color: var(--text-dim);
+      }
+
+      nav.toc {
+        position: sticky;
+        top: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding-top: 4px;
+      }
+
+      nav.toc a {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        text-decoration: none;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border-left: 2px solid transparent;
+      }
+      nav.toc a:hover,
+      nav.toc a:focus-visible {
+        color: var(--text);
+        background: var(--bg-raised);
+        border-left-color: var(--accent);
+      }
+
+      main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 36px;
+      }
+
+      section {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        scroll-margin-top: 24px;
+      }
+
+      h2 {
+        font-family: var(--serif);
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      h2 .num {
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      p,
+      li {
+        color: var(--text-dim);
+        font-size: 1rem;
+      }
+      strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 1.3em;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .card {
+        background: var(--bg-raised);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .card .label {
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-dim);
+        vertical-align: top;
+      }
+      th {
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text);
+      }
+      td:first-child {
+        color: var(--text);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      a {
+        color: var(--accent);
+      }
+      a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      footer {
+        grid-column: 1 / -1;
+        border-top: 1px solid var(--border);
+        padding-top: 24px;
+        margin-top: 12px;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--text-dim);
+      }
+      footer a {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+    </style>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="page">
+      <header class="top">
+        <span class="mark">Happy Mining</span>
+        <h1>Datenschutzerklärung</h1>
+        <span class="meta"
+          >Stand: 19. September 2026 &middot; gilt für die Anwendung
+          „Alice"</span
+        >
+      </header>
+
+      <nav class="toc" aria-label="Abschnitte">
+        <a href="#verantwortlicher">Verantwortlicher</a>
+        <a href="#ueberblick">Überblick</a>
+        <a href="#google">Google-Konto-Verbindung</a>
+        <a href="#daten">Welche Daten</a>
+        <a href="#speicherung">Speicherung</a>
+        <a href="#weitergabe">Weitergabe</a>
+        <a href="#widerruf">Widerruf</a>
+        <a href="#rechte">Ihre Rechte</a>
+        <a href="#kontakt">Kontakt</a>
+      </nav>
+
+      <main>
+        <section id="verantwortlicher">
+          <h2><span class="num">01</span> Verantwortlicher</h2>
+          <div class="card">
+            <span class="label">Verantwortlich im Sinne der DSGVO</span>
+            <p style="margin: 0">
+              <strong>Andrew Steel</strong><br />
+              E-Mail:
+              <a href="mailto:andrew@happy-mining.de">andrew@happy-mining.de</a>
+            </p>
+          </div>
+        </section>
+
+        <section id="ueberblick">
+          <h2><span class="num">02</span> Überblick</h2>
+          <p>
+            „Alice" ist ein privat betriebener, lokal gehosteter Sprachassistent
+            und Smart-Home-Controller. Alice läuft auf eigener Hardware im
+            Haushalt des Verantwortlichen und ist ausschließlich über ein
+            privates VPN erreichbar — es gibt keine öffentliche Anmeldung und
+            keine Registrierung für fremde Personen.
+          </p>
+          <p>
+            Diese Datenschutzerklärung beschreibt speziell, wie Alice mit
+            <strong>Google-Konten</strong> umgeht, wenn ein Nutzer seinen
+            Google-Kalender, seine Google-Aufgaben oder seine Google-Kontakte
+            mit Alice verbindet.
+          </p>
+        </section>
+
+        <section id="google">
+          <h2><span class="num">03</span> Google-Konto-Verbindung</h2>
+          <p>
+            Nutzer können in den Alice-Einstellungen freiwillig ein eigenes
+            Google-Konto per OAuth verbinden. Dabei loggt sich der Nutzer direkt
+            bei Google ein und bestätigt dort, welche Berechtigungen (Scopes) er
+            Alice erteilt — Alice erhält zu keinem Zeitpunkt das
+            Google-Passwort.
+          </p>
+          <p>
+            Nach der Bestätigung erhält Alice von Google einen
+            <strong>Zugriffs-Token</strong> und einen
+            <strong>Refresh-Token</strong>, mit denen im Namen des Nutzers auf
+            die freigegebenen Google-Dienste zugegriffen werden kann.
+          </p>
+        </section>
+
+        <section id="daten">
+          <h2><span class="num">04</span> Welche Daten verarbeitet werden</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kategorie</th>
+                  <th>Beschreibung</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Kontoverbindung</td>
+                  <td>
+                    Google-Kontokennung (E-Mail-Adresse), Zeitpunkt der
+                    Verbindung, Status der Verbindung.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Zugriffsdaten</td>
+                  <td>
+                    Access- und Refresh-Token, verschlüsselt gespeichert —
+                    ausschließlich zur technischen Anbindung, kein
+                    Klartext-Zugriff außerhalb des zuständigen Backend-Dienstes.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Freigegebene Scopes</td>
+                  <td>
+                    Liste der vom Nutzer erteilten Berechtigungen (z.&nbsp;B.
+                    Kalender lesen/schreiben, Aufgaben, Kontakte) — je nachdem,
+                    welche Alice-Funktionen der Nutzer aktiv nutzt.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Nutzdaten</td>
+                  <td>
+                    Kalendereinträge, Aufgaben oder Kontakte werden bei Bedarf
+                    live von Google abgerufen, um sie im Chat anzuzeigen oder
+                    auf Zuruf zu bearbeiten. Es findet
+                    <strong>keine dauerhafte lokale Speicherung</strong> dieser
+                    Nutzdaten statt.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="speicherung">
+          <h2><span class="num">05</span> Speicherung &amp; Verschlüsselung</h2>
+          <p>
+            Zugriffs- und Refresh-Token werden ausschließlich
+            <strong>verschlüsselt</strong> in einer privaten, selbst gehosteten
+            Datenbank gespeichert. Die Entschlüsselung erfolgt nur innerhalb des
+            dafür zuständigen Backend-Dienstes, der nicht öffentlich, sondern
+            nur innerhalb des privaten Netzwerks/VPN erreichbar ist. Es gibt
+            keine Weitergabe der Token im Klartext.
+          </p>
+        </section>
+
+        <section id="weitergabe">
+          <h2><span class="num">06</span> Weitergabe an Dritte</h2>
+          <p>
+            Es findet <strong>keine Weitergabe</strong> von Daten an Dritte
+            statt. Die einzige externe Kommunikation erfolgt direkt zwischen dem
+            Alice-Backend und den offiziellen Google-APIs, ausschließlich im
+            Auftrag und mit Zustimmung des jeweiligen Nutzers. Es gibt keine
+            Werbenutzung, kein Tracking und keine Analyse zu Marketingzwecken.
+          </p>
+        </section>
+
+        <section id="widerruf">
+          <h2><span class="num">07</span> Widerruf</h2>
+          <p>
+            Jeder Nutzer kann die Verbindung seines Google-Kontos jederzeit
+            selbst trennen:
+          </p>
+          <ul>
+            <li>
+              In den Alice-Einstellungen über „Verbindung trennen" — dabei
+              werden die lokal gespeicherten Tokens gelöscht
+              <strong>und</strong> der Zugriff aktiv bei Google widerrufen.
+            </li>
+            <li>
+              Zusätzlich jederzeit direkt bei Google unter
+              <a
+                href="https://myaccount.google.com/permissions"
+                target="_blank"
+                rel="noopener"
+                >myaccount.google.com/permissions</a
+              >.
+            </li>
+          </ul>
+        </section>
+
+        <section id="rechte">
+          <h2><span class="num">08</span> Ihre Rechte</h2>
+          <p>
+            Nutzer haben jederzeit das Recht auf Auskunft, Berichtigung,
+            Löschung und Einschränkung der Verarbeitung ihrer bei Alice
+            gespeicherten Daten sowie das Recht auf Datenübertragbarkeit.
+            Anfragen richten Sie bitte an die unten stehende Kontaktadresse.
+          </p>
+        </section>
+
+        <section id="kontakt">
+          <h2><span class="num">09</span> Kontakt</h2>
+          <div class="card">
+            <span class="label">Fragen zum Datenschutz</span>
+            <p style="margin: 0">
+              Andrew Steel &middot;
+              <a href="mailto:andrew@happy-mining.de">andrew@happy-mining.de</a>
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <a href="/">&larr; Zurück zur Startseite</a>
+      </footer>
+    </div>
+  </body>
+</html>

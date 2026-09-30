@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Happy Mining</title>
+    <style>
+      :root {
+        --bg: #f7f5f0;
+        --bg-raised: #ffffff;
+        --text: #1a1d23;
+        --text-dim: #6b7280;
+        --border: #e2ddd2;
+        --accent: #b5762a;
+        --accent-soft: #f0e2cd;
+        --mono: "Space Mono", "IBM Plex Mono", ui-monospace, monospace;
+        --serif: "Source Serif 4", Georgia, serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #12161c;
+          --bg-raised: #191e26;
+          --text: #e8ebef;
+          --text-dim: #8b93a1;
+          --border: #2a3038;
+          --accent: #e8a33d;
+          --accent-soft: #3a2f1a;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #12161c;
+        --bg-raised: #191e26;
+        --text: #e8ebef;
+        --text-dim: #8b93a1;
+        --border: #2a3038;
+        --accent: #e8a33d;
+        --accent-soft: #3a2f1a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding-inline: 24px;
+        padding-block: 64px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--serif);
+        line-height: 1.6;
+      }
+
+      img {
+        max-width: 100%;
+      }
+      [hidden] {
+        display: none !important;
+      }
+
+      .wrap {
+        max-width: 640px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 48px;
+      }
+
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .mark {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: clamp(2.2rem, 6vw, 3.2rem);
+        line-height: 1.1;
+        margin: 0;
+        text-wrap: balance;
+      }
+
+      .tagline {
+        font-family: var(--mono);
+        font-size: 0.95rem;
+        color: var(--text-dim);
+        margin: 0;
+      }
+
+      .status-card {
+        background: var(--bg-raised);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        color: var(--text-dim);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .status-card p {
+        margin: 0;
+        color: var(--text);
+        font-size: 1rem;
+      }
+
+      section p {
+        color: var(--text-dim);
+        font-size: 1.05rem;
+      }
+
+      section p strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      footer {
+        border-top: 1px solid var(--border);
+        padding-top: 24px;
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        color: var(--text-dim);
+      }
+
+      footer a {
+        color: var(--text-dim);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-decoration-color: var(--border);
+      }
+      footer a:hover,
+      footer a:focus-visible {
+        color: var(--accent);
+        text-decoration-color: var(--accent);
+      }
+      a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+    </style>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+
+  <body>
+    <div class="wrap">
+      <header>
+        <span class="mark">Happy Mining</span>
+        <h1>Alice — ein privater KI-Sprachassistent</h1>
+        <p class="tagline">// lokal gehostet, per Sprache bedienbar, nur für den eigenen Haushalt</p>
+      </header>
+
+      <div class="status-card">
+        <div class="status-row">
+          <span class="dot" aria-hidden="true"></span>
+          <span>Privates Projekt, im Aufbau</span>
+        </div>
+        <p>
+          <strong>Alice</strong> ist ein selbst entwickelter, lokal auf eigener
+          Hardware betriebener KI-Assistent für den Hausgebrauch. Alice
+          versteht gesprochene Anfragen, steuert Smart-Home-Geräte und
+          beantwortet Fragen — alle Berechnungen laufen auf einem eigenen
+          Server, nicht in der Cloud eines Drittanbieters.
+        </p>
+      </div>
+
+      <section>
+        <p>
+          Auf Wunsch kann Alice mit dem eigenen
+          <strong>Google-Konto</strong> verbunden werden, um Kalendereinträge,
+          Aufgaben oder Kontakte im Gespräch abzurufen und zu verwalten. Diese
+          Verbindung ist freiwillig, wird ausschließlich vom jeweiligen Nutzer
+          selbst eingerichtet und kann jederzeit wieder getrennt werden.
+        </p>
+        <p>
+          Details dazu, welche Daten dabei verarbeitet werden, stehen in der
+          <strong>Datenschutzerklärung</strong>, die
+          <a href="/datenschutz.html">hier</a> zu finden ist.
+        </p>
+      </section>
+
+      <footer>
+        <span>&copy; 2026 Andrew Steel</span>
+        <a href="/datenschutz.html">Datenschutzerklärung</a>
+      </footer>
+    </div>
+  </body>
+</html>
