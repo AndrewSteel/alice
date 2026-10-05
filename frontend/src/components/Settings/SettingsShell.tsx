@@ -45,6 +45,8 @@ const TAB_DEFS: TabDef[] = [
   { segment: "stimmprofile", guard: "admin", labelKey: "settings.tabs.voiceProfiles" },
   { segment: "chatarchiv", guard: "can_view_chat_archive", labelKey: "settings.tabs.chatArchive" },
   { segment: "mail", guard: "public", labelKey: "settings.tabs.email" },
+  // PROJ-87 — the flag comes from permissions_assistant via /auth/permissions.
+  { segment: "kalender", guard: "can_use_calendar", labelKey: "settings.tabs.calendar" },
 ];
 
 const triggerBase =

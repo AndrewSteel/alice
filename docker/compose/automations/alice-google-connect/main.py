@@ -70,6 +70,11 @@ STATE_TTL_SECONDS = 600
 # never receive a token that dies mid-request.
 TOKEN_EXPIRY_MARGIN_SECONDS = 60
 
+# Settings tabs the consent flow may return to (PROJ-87; PROJ-88/89 extend
+# this). Fixed allowlist — never an arbitrary URL, so the callback cannot be
+# turned into an open redirect.
+ALLOWED_RETURN_TARGETS = {"kalender"}
+
 # Safety net for the row lock in /token: if contention ever occurs, fail fast
 # with a clear DB error instead of waiting forever.
 LOCK_TIMEOUT = "5s"
@@ -94,6 +99,7 @@ app = FastAPI(title="alice-google-connect", version="1.0.0")
 # ---------------------------------------------------------------------------
 class ConnectStartRequest(BaseModel):
     scopes: list[str]
+    return_to: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -193,12 +199,14 @@ def _sign_state_payload(payload_b64: str) -> str:
     return hmac.new(_get_key(), payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
 
 
-def _build_state(user_id: str) -> str:
+def _build_state(user_id: str, return_to: str | None = None) -> str:
     payload = {
         "user_id": user_id,
         "nonce": secrets.token_urlsafe(16),
         "exp": int(time.time()) + STATE_TTL_SECONDS,
     }
+    if return_to:
+        payload["return_to"] = return_to
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     return f"{payload_b64}.{_sign_state_payload(payload_b64)}"
 
@@ -229,12 +237,21 @@ def _verify_state(state: str) -> dict:
 # ---------------------------------------------------------------------------
 # Helpers — Misc
 # ---------------------------------------------------------------------------
-def _frontend_redirect(**params: str) -> RedirectResponse:
-    """302 back to the Alice settings page with result parameters."""
-    separator = "&" if "?" in FRONTEND_REDIRECT_URL else "?"
+def _frontend_redirect(return_to: str | None = None, **params: str) -> RedirectResponse:
+    """302 back to the Alice settings page with result parameters.
+
+    With an allowlisted return_to the browser lands on /settings/<return_to>
+    on the same origin as FRONTEND_REDIRECT_URL; otherwise on
+    FRONTEND_REDIRECT_URL itself (pre-PROJ-87 behaviour).
+    """
+    base = FRONTEND_REDIRECT_URL
+    if return_to in ALLOWED_RETURN_TARGETS:
+        origin = httpx.URL(FRONTEND_REDIRECT_URL)
+        base = f"{origin.scheme}://{origin.netloc.decode('ascii')}/settings/{return_to}"
+    separator = "&" if "?" in base else "?"
     # httpx handles the percent-encoding of the query parameters.
     encoded = httpx.URL("http://x", params=params).query.decode("ascii")
-    return RedirectResponse(url=f"{FRONTEND_REDIRECT_URL}{separator}{encoded}", status_code=302)
+    return RedirectResponse(url=f"{base}{separator}{encoded}", status_code=302)
 
 
 def _row_to_connection(row: dict) -> dict:
@@ -325,6 +342,8 @@ async def connect_start(
     for scope in scopes:
         if len(scope) > 200 or not scope.startswith(("https://", "openid", "profile", "email")):
             raise HTTPException(status_code=422, detail=f"Ungültiger Scope: {scope}")
+    if body.return_to is not None and body.return_to not in ALLOWED_RETURN_TARGETS:
+        raise HTTPException(status_code=422, detail="Ungültiges Rücksprungziel")
 
     # openid + email are always requested so the callback can identify the
     # Google account behind the grant.
@@ -341,7 +360,7 @@ async def connect_start(
                 "access_type": "offline",
                 "prompt": "consent",
                 "include_granted_scopes": "true",
-                "state": _build_state(user_id),
+                "state": _build_state(user_id, body.return_to),
             },
         )
     )
@@ -366,18 +385,27 @@ async def callback(
     user binding. Any failure redirects back to the frontend without touching
     the database.
     """
+    # The return target is only taken from a verified state; an invalid state
+    # falls back to the default URL.
+    state_payload = None
+    state_error = None
+    if state:
+        try:
+            state_payload = _verify_state(state)
+        except ValueError as exc:
+            state_error = exc
+    rt = state_payload.get("return_to") if state_payload else None
+
     if error:
         logger.info("Callback returned error from Google: %s", error)
-        return _frontend_redirect(google="error", reason=error)
+        return _frontend_redirect(rt, google="error", reason=error)
 
     if not state or not code:
         logger.warning("Callback without state or code")
-        return _frontend_redirect(google="error", reason="invalid_request")
+        return _frontend_redirect(rt, google="error", reason="invalid_request")
 
-    try:
-        state_payload = _verify_state(state)
-    except ValueError as exc:
-        logger.warning("Callback state rejected: %s", exc)
+    if state_payload is None:
+        logger.warning("Callback state rejected: %s", state_error)
         return _frontend_redirect(google="error", reason="invalid_state")
 
     user_id = state_payload["user_id"]
@@ -397,11 +425,11 @@ async def callback(
             )
     except httpx.HTTPError as exc:
         logger.error("Token exchange transport error: %s", exc)
-        return _frontend_redirect(google="error", reason="google_unreachable")
+        return _frontend_redirect(rt, google="error", reason="google_unreachable")
 
     if token_response.status_code != 200:
         logger.error("Token exchange failed (%s): %s", token_response.status_code, token_response.text)
-        return _frontend_redirect(google="error", reason="token_exchange_failed")
+        return _frontend_redirect(rt, google="error", reason="token_exchange_failed")
 
     token_data = token_response.json()
     access_token = token_data.get("access_token")
@@ -411,14 +439,14 @@ async def callback(
 
     if not access_token:
         logger.error("Token exchange response without access_token")
-        return _frontend_redirect(google="error", reason="token_exchange_failed")
+        return _frontend_redirect(rt, google="error", reason="token_exchange_failed")
 
     # --- Identify the Google account ---
     try:
         google_account = await _fetch_google_account(access_token)
     except Exception as exc:
         logger.error("Userinfo lookup failed: %s", exc)
-        return _frontend_redirect(google="error", reason="userinfo_failed")
+        return _frontend_redirect(rt, google="error", reason="userinfo_failed")
 
     # --- Persist (blocking psycopg2 work → worker thread) ---
     ok, reason = await run_in_threadpool(
@@ -426,9 +454,9 @@ async def callback(
         expires_in, granted_scopes,
     )
     if not ok:
-        return _frontend_redirect(google="error", reason=reason)
+        return _frontend_redirect(rt, google="error", reason=reason)
 
-    return _frontend_redirect(google="connected", account=google_account)
+    return _frontend_redirect(rt, google="connected", account=google_account)
 
 
 def _persist_connection(

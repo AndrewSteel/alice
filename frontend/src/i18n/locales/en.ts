@@ -240,6 +240,7 @@ const en = {
       voiceProfiles: "Voice profiles",
       chatArchive: "Chat archive",
       email: "Email",
+      calendar: "Calendar",
     },
 
     profile: {
@@ -505,6 +506,67 @@ const en = {
         guest: "Guest",
         child: "Child",
       },
+    },
+
+    calendar: {
+      title: "Calendar",
+      connect: "Connect account",
+      refresh: "Refresh",
+      reconnect: "Reconnect",
+      grantAccess: "Grant calendar access",
+      disconnect: "Disconnect account",
+      disconnecting: "Disconnecting...",
+      disconnectError: "The account could not be disconnected.",
+      emptyTitle: "No Google account connected yet",
+      emptyDesc: "Connect a Google account so Alice can show, create, change and delete your events.",
+      noScope: "Calendar access has not been granted for this account yet (it was connected for another feature).",
+      noCalendars: "No calendars were found in this account.",
+      readOnly: "read-only",
+      default: "Default",
+      makeDefault: "Make default",
+      activeForAlice: "Active for Alice",
+      activeForAliceAria: "Enable calendar {{name}} for Alice",
+      privacyHint: "Alice only stores your selection. Events are read live from Google on every request.",
+      status: {
+        active: "Active",
+        error: "Error",
+      },
+      notice: {
+        connected: "Google account {{account}} has been connected.",
+        disconnected: "The Google account has been disconnected.",
+        failed: "Connecting to Google failed.",
+        startFailed: "The Google sign-in could not be started.",
+        reasons: {
+          access_denied: "Access was cancelled at Google.",
+          invalid_state: "The sign-in has expired. Please try again.",
+          no_refresh_token:
+            "Google did not grant lasting access. Please remove the access in your Google account and connect again.",
+          google_unreachable: "Google is currently unreachable. Please try again later.",
+        },
+      },
+      errors: {
+        loadFailed: "The calendars could not be loaded.",
+        forbidden: "Your role has no calendar access.",
+        reauth: "The Google connection no longer works. Please reconnect.",
+        unavailable: "Google is currently unreachable. Please try again later.",
+        saveFailed: "The selection could not be saved.",
+      },
+      disconnectDialog: {
+        title: "Disconnect Google account?",
+        desc:
+          "The connection to {{account}} will be removed completely and revoked at Google. Your calendar selection for this account will be deleted.",
+        otherScopesWarning:
+          "This account is also used for other features (e.g. tasks or contacts). They will stop working as well.",
+        confirm: "Disconnect account",
+      },
+    },
+
+    calendarRoles: {
+      heading: "Calendar",
+      hint: "Which roles may use the calendar agent (settings tab and chat/voice).",
+      saved: "Calendar permissions saved",
+      saveFailed: "The calendar permissions could not be saved.",
+      loadFailed: "The calendar permissions could not be loaded.",
     },
 
     voiceProfiles: {

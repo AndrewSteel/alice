@@ -36,3 +36,25 @@ def test_handles_two_parallel_tool_calls():
 
     assert [tc["id"] for tc in pending] == ["a", "b"]
     assert pending[1]["function"]["arguments"] == '{"key":"x","value":"y"}'
+
+
+# PROJ-87 live finding: runaway repetition read aloud on the Voice PE.
+from app.streaming import LLM_MAX_TOKENS, _is_degenerate  # noqa: E402
+
+
+def test_repeated_sentence_is_degenerate():
+    s = "Falls du eine Bestätigung wünschst, sage ich Bescheid, sobald der Termin gelöscht ist."
+    text = "Ich bestätige die Löschung. " + "\n".join([s] * 3) + "\nFalls"
+    assert _is_degenerate(text)
+
+
+def test_normal_answer_is_not_degenerate():
+    assert not _is_degenerate("Morgen hast du zwei Termine. Um 9:20 Fußpflege. Um 10 Uhr Test. ")
+    assert not _is_degenerate("Ja. Ja. Ja. ")          # short sentences are ignored
+    s = "Das ist ein ausreichend langer Satz."
+    assert not _is_degenerate(f"{s} {s} ")              # two repeats are allowed
+    assert not _is_degenerate(f"{s} {s} {s}")           # last one unfinished → not judged yet
+
+
+def test_max_tokens_default():
+    assert LLM_MAX_TOKENS == 4096

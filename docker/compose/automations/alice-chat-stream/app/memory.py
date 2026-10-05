@@ -371,6 +371,14 @@ async def insert_user_message(session_id: str, user_id: str, content: str, msg_t
     return row["id"]
 
 
+async def count_user_messages(session_id: str) -> int:
+    """Turn number of the session (PROJ-87: binds calendar delete tickets to a turn)."""
+    return int(await pool().fetchval(
+        "SELECT COUNT(*) FROM alice.messages WHERE session_id = $1::uuid AND role = 'user'",
+        session_id,
+    ) or 0)
+
+
 async def insert_llm_thinking(session_id: str, user_id: str, content: str) -> None:
     """Save accumulated thinking tokens. role='system' keeps them out of LLM context window."""
     if not content:

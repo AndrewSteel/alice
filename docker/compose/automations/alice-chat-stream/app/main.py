@@ -25,7 +25,7 @@ from fastapi.responses import Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, field_validator
 
-from . import admin_dashboard, ha_path, memory, metrics, streaming
+from . import admin_dashboard, calendar_tools, ha_path, memory, metrics, streaming
 from . import timer_scheduler as _timer_scheduler
 from . import timers as _timers
 from .auth import verify_jwt
@@ -329,6 +329,9 @@ async def admin_dms_drilldown(
 # ---------------------------------------------------------------------------
 # /stream/chat
 # ---------------------------------------------------------------------------
+class _SkipFastPath(Exception):
+    """Control flow: the request is routed straight to the LLM (PROJ-87)."""
+
 async def _persist_and_record_metrics(
     *,
     path_label: str,
@@ -408,6 +411,9 @@ async def stream_chat_endpoint(
     The user_id comes ONLY from the verified JWT — body.user_id is ignored.
     """
     user_id = jwt_payload["user_id"]
+    # Raw bearer token (already verified) — forwarded to alice-calendar, whose
+    # Google token retrieval is scoped to the calling user (PROJ-87).
+    raw_token = (request.headers.get("authorization") or "")[len("Bearer "):]
     session_id = body.session_id
     user_message = body.content
     source = body.source
@@ -446,8 +452,15 @@ async def stream_chat_endpoint(
         usage = {"prompt_tokens": 0, "completion_tokens": 0}
         side: dict = {}
         try:
+            # PROJ-87 — calendar requests and replies to an open calendar
+            # question must not be captured by the HA fast path.
+            open_question = calendar_tools.take_open_question(session_id)
+            skip_fast_path = calendar_tools.bypass_fast_path(user_message, open_question)
+
             # --- HA Fast-Path ---
             try:
+                if skip_fast_path:
+                    raise _SkipFastPath()
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     decision = await ha_path.decide_path(user_message, client, source)
                     if decision.path == "HA_FAST":
@@ -503,6 +516,8 @@ async def stream_chat_endpoint(
                         yield f'data: {{"type":"done","usage":{json.dumps(usage)}}}\n\n'.encode("utf-8")
                         yield b"data: [DONE]\n\n"
                         return
+            except _SkipFastPath:
+                pass
             except Exception as exc:
                 logger.warning("HA fast-path errored, falling back to LLM: %s", exc, extra=log_extra)
 
@@ -510,12 +525,33 @@ async def stream_chat_endpoint(
             # Counterpart to the HA_FAST "path" event above (PROJ-83 ZUSATZ):
             # the gateway keeps the personal greeting on this path.
             yield b'data: {"type":"path","path":"LLM_ONLY"}\n\n'
+
+            # PROJ-87 — calendar availability + open follow-up question for
+            # this turn. Only on the LLM path, so HA_FAST latency is untouched.
+            llm_system_prompt = system_prompt
+            calendar_turn = None
+            if calendar_tools.CALENDAR_URL:
+                try:
+                    turn_no = await memory.count_user_messages(session_id)
+                    async with httpx.AsyncClient() as cal_client:
+                        calendar_turn = await calendar_tools.start_turn(
+                            cal_client, raw_token, session_id, turn_no, source,
+                        )
+                    calendar_turn.lang = (profile.get("preferences") or {}).get("sprache") or "de"
+                    if calendar_turn.enabled:
+                        calendar_turn.force_tool = calendar_tools.force_decision(user_message, open_question)
+                    if calendar_turn.prompt_lines:
+                        llm_system_prompt = system_prompt + "\n" + "\n".join(calendar_turn.prompt_lines)
+                except Exception as exc:
+                    logger.warning("Calendar turn setup failed: %s", exc, extra=log_extra)
+
             async for sse_bytes, side_effect in streaming.stream_chat(
                 user_message=user_message,
                 history=history,
-                system_prompt=system_prompt,
+                system_prompt=llm_system_prompt,
                 user_id=user_id,
                 anrede=anrede,
+                calendar=calendar_turn,
             ):
                 # Detect client disconnect — stop iterating gracefully.
                 if await request.is_disconnected():

@@ -241,6 +241,7 @@ const de = {
       voiceProfiles: "Stimmprofile",
       chatArchive: "Chatarchiv",
       email: "E-Mail",
+      calendar: "Kalender",
     },
 
     profile: {
@@ -506,6 +507,70 @@ const de = {
         guest: "Gast",
         child: "Kind",
       },
+    },
+
+    calendar: {
+      title: "Kalender",
+      connect: "Konto verbinden",
+      refresh: "Aktualisieren",
+      reconnect: "Neu verbinden",
+      grantAccess: "Kalender-Zugriff freigeben",
+      disconnect: "Konto trennen",
+      disconnecting: "Wird getrennt...",
+      disconnectError: "Das Konto konnte nicht getrennt werden.",
+      emptyTitle: "Noch kein Google-Konto verbunden",
+      emptyDesc:
+        "Verbinde ein Google-Konto, damit Alice deine Termine anzeigen, anlegen, aendern und loeschen kann.",
+      noScope:
+        "Fuer dieses Konto ist der Kalender-Zugriff noch nicht freigegeben (es wurde fuer eine andere Funktion verbunden).",
+      noCalendars: "In diesem Konto wurden keine Kalender gefunden.",
+      readOnly: "nur lesbar",
+      default: "Standard",
+      makeDefault: "Als Standard",
+      activeForAlice: "Fuer Alice aktiv",
+      activeForAliceAria: "Kalender {{name}} fuer Alice aktivieren",
+      privacyHint:
+        "Alice speichert nur deine Auswahl. Termine werden bei jeder Anfrage live von Google gelesen.",
+      status: {
+        active: "Aktiv",
+        error: "Fehler",
+      },
+      notice: {
+        connected: "Google-Konto {{account}} wurde verbunden.",
+        disconnected: "Das Google-Konto wurde getrennt.",
+        failed: "Die Verbindung mit Google ist fehlgeschlagen.",
+        startFailed: "Die Anmeldung bei Google konnte nicht gestartet werden.",
+        reasons: {
+          access_denied: "Die Freigabe wurde bei Google abgebrochen.",
+          invalid_state: "Die Anmeldung ist abgelaufen. Bitte erneut versuchen.",
+          no_refresh_token:
+            "Google hat keinen dauerhaften Zugriff gewaehrt. Bitte den Zugriff in deinem Google-Konto entfernen und erneut verbinden.",
+          google_unreachable: "Google ist gerade nicht erreichbar. Bitte spaeter erneut versuchen.",
+        },
+      },
+      errors: {
+        loadFailed: "Die Kalender konnten nicht geladen werden.",
+        forbidden: "Deine Rolle hat keinen Kalenderzugriff.",
+        reauth: "Die Google-Verbindung funktioniert nicht mehr. Bitte neu verbinden.",
+        unavailable: "Google ist gerade nicht erreichbar. Bitte spaeter erneut versuchen.",
+        saveFailed: "Die Auswahl konnte nicht gespeichert werden.",
+      },
+      disconnectDialog: {
+        title: "Google-Konto trennen?",
+        desc:
+          "Die Verbindung zu {{account}} wird vollstaendig entfernt und bei Google widerrufen. Deine Kalenderauswahl fuer dieses Konto wird geloescht.",
+        otherScopesWarning:
+          "Dieses Konto wird auch fuer andere Funktionen (z. B. Aufgaben oder Kontakte) genutzt. Diese funktionieren danach ebenfalls nicht mehr.",
+        confirm: "Konto trennen",
+      },
+    },
+
+    calendarRoles: {
+      heading: "Kalender",
+      hint: "Welche Rollen den Kalender-Agenten (Settings-Tab und Chat/Sprache) nutzen duerfen.",
+      saved: "Kalender-Berechtigungen gespeichert",
+      saveFailed: "Die Kalender-Berechtigungen konnten nicht gespeichert werden.",
+      loadFailed: "Die Kalender-Berechtigungen konnten nicht geladen werden.",
     },
 
     voiceProfiles: {
