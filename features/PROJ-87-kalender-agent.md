@@ -1,6 +1,6 @@
 # PROJ-87: Kalender-Agent
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-10-05
 **Last Updated:** 2026-10-05
 
@@ -126,7 +126,130 @@ Kalender sind **strikt pro User privat** (PROJ-86): kein Teilen, kein Admin-Zugr
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+**Entworfen:** 2026-10-05
+
+### Überblick
+
+PROJ-87 besteht aus vier Bausteinen:
+
+1. **Neuer Service `alice-calendar`** — spricht mit der Google-Calendar-API, löst Zeiträume/Zeitzonen/Wiederholungen auf und bietet sowohl dem Chat als auch dem Settings-Tab eine saubere Schnittstelle. Entscheidung des Users: eigener Container (nicht im Chat-Service, nicht in n8n).
+2. **Chat-Anbindung in `alice-chat-stream`** — neue Kalender-Tools für das LLM (anzeigen/anlegen/ändern/löschen), die den neuen Service aufrufen.
+3. **Settings-Tab „Kalender"** im Frontend, plus ein kleiner Rollen-Schalter im Admin-Bereich.
+4. **Kleine Ergänzungen** an bestehenden Teilen: Rollen-Berechtigung in der Datenbank und eine Rücksprung-Anpassung im PROJ-86-Service (siehe „Offene Punkte").
+
+Kein n8n-Workflow nötig. Kein lokales Cachen von Terminen.
+
+### A) Komponentenstruktur (Settings-Tab)
+
+```
+Settings → Tab „Kalender"  (nur sichtbar mit Kalender-Berechtigung)
++-- Meldungsleiste (Ergebnis nach Google-Rückkehr: verbunden / Fehler)
++-- Kopfzeile mit Button „Konto verbinden"
++-- Leerzustand (kein Konto: kurze Erklärung + „Konto verbinden")
++-- Konten-Liste (je Google-Konto eine Karte)
+|   +-- Konto-Kopf: E-Mail, Status-Badge (aktiv / Fehler)
+|   |   +-- Button „Neu verbinden"   (nur bei Status Fehler)
+|   |   +-- Button „Kalender-Zugriff freigeben"   (nur wenn Kalender-Scope fehlt)
+|   |   +-- Button „Konto trennen"   → Bestätigungsdialog (mit Warnhinweis bei Aufgaben/Kontakte-Scope)
+|   +-- Kalender-Liste (live von Google geladen)
+|       +-- Kalender-Zeile: Name, Farbpunkt, „nur lesbar"-Hinweis
+|           +-- Schalter „Für Alice aktiv"
+|           +-- Auswahl „Standard-Kalender" (nur bei aktiven, beschreibbaren Kalendern)
++-- Ladezustand (Skeleton) / Fehlerzustand je Konto (Google nicht erreichbar)
+
+Settings → Nutzer-Verwaltung (bestehend, admin)
++-- Rollen-Abschnitt (neben dem Timer-Rollen-Abschnitt): Schalter „Kalender nutzen" je Rolle
+```
+
+Wiederverwendet: Tabellen-/Dialog-/Badge-/Skeleton-Bausteine und das Layout-Muster der Postfach-Verwaltung; Settings-Shell mit Tab-Guard; i18n-Schicht; das Rollen-Abschnitt-Muster von `TimerRolesSection`.
+
+### B) Datenmodell (einfach beschrieben)
+
+**Neue Tabelle „Kalenderauswahl"** — eine Zeile pro (Google-Verbindung, Google-Kalender), den der User in Alice aktiviert hat:
+- Eindeutige ID
+- Verbindung (Fremdschlüssel auf die PROJ-86-Tabelle; beim Trennen der Verbindung wird die Auswahl automatisch mit gelöscht)
+- Alice-User (Besitzer, denormalisiert, damit „ein Standard-Kalender pro User" per Datenbank erzwungen werden kann)
+- Google-Kalender-Kennung
+- Aktiv-Flag
+- Standard-Flag — höchstens ein Standard pro User, kontenübergreifend
+- Zeitstempel
+
+Es werden **keine** Kalendernamen, Termine oder Beschreibungen gespeichert — Namen/Farben/Schreibrechte werden bei jedem Öffnen des Tabs live bei Google geholt. Zeilen für Kalender, die es bei Google nicht mehr gibt, werden beim nächsten Laden des Tabs bereinigt.
+
+**Berechtigung:** ein neues Flag „Kalender nutzen" bei den Rollen-Vorlagen und den Assistenten-Berechtigungen (wie das Timer-Flag aus PROJ-85). Default: admin + user an, guest + child aus; die Funktion, die neuen Usern Rechte aus der Vorlage zuweist, übernimmt das Flag.
+
+**Löschbestätigung (flüchtig):** Löschwünsche werden kurzzeitig (wenige Minuten) im vorhandenen Redis abgelegt — kein neuer Dauer-Speicher.
+
+Alle neuen Tabellen: Row Level Security aktiv, Indizes auf User/Verbindung.
+
+### C) Ablauf-Architektur
+
+**Kalenderliste im Tab laden**
+- Tab ruft `alice-calendar` mit dem User-JWT auf → Service holt die Konten (PROJ-86) → holt für jedes Konto mit Kalender-Scope über einen frischen Access-Token die Kalenderliste von Google → mischt die gespeicherte Auswahl (aktiv/Standard) darüber → liefert pro Konto: Status + Kalender. Fällt ein Konto aus, kommen die anderen trotzdem mit Fehlermarkierung zurück.
+
+**Auswahl speichern** (Schalter, Standard setzen): Service schreibt die Auswahl, prüft User-Ownership und die Regeln (erster aktivierter Kalender wird automatisch Standard; Standard nur bei beschreibbaren, aktiven Kalendern; Deaktivieren des Standards entfernt ihn).
+
+**Konto verbinden / Zugriff freigeben / Neu verbinden**: Frontend ruft den bestehenden PROJ-86-Consent-Start mit dem Kalender-Scope auf und leitet zu Google. Nach dem Consent kehrt der Browser zurück zum Tab „Kalender" (siehe Offene Punkte).
+
+**Chat/Sprache — Termine anzeigen**
+1. Chat-Service erkennt Absicht, LLM ruft das Tool „Termine abfragen" mit Zeitraum auf.
+2. Vorprüfung im Chat-Service: Rolle hat Kalender-Berechtigung? User ist eindeutig identifiziert (Nil-UUID = unbekannter Sprecher → Ablehnung mit Erklärung)?
+3. `alice-calendar` holt alle aktiven Kalender des Users, fragt Google pro Kalender parallel ab, löst Serien in einzelne Vorkommen auf, sortiert chronologisch, kürzt nach Regeln (Sprache max. 5, Chat max. 50), liefert strukturiertes Ergebnis inkl. Hinweis, falls ein Konto/Kalender nicht abrufbar war.
+4. LLM formuliert die Antwort in der Nutzersprache.
+
+**Anlegen / Ändern**
+- Tool-Aufruf mit strukturierten Feldern (Titel, Start/Ende oder Dauer, ganztägig, Ort, Beschreibung, Kalender, Erinnerung, Wiederholung). Service wählt den Kalender (genannt → Standard → sonst Rückfrage-Ergebnis „Kalender nötig" mit Auswahl), validiert (vergangene Zeit → Rückfrage-Ergebnis, schreibgeschützter Kalender → klare Ablehnung, zu komplexe Wiederholung → Ablehnung) und ruft Google.
+- Das Ergebnis enthält den von Google bestätigten Termin; nur darauf darf das LLM seine Bestätigung stützen.
+- Termin-Identifikation beim Ändern: Service sucht Kandidaten über Titel + Zeitbezug; bei 0 Treffern „nicht gefunden", bei mehreren eine Kandidatenliste für die Rückfrage.
+- Serien: Ergebnis „Serie – Umfang nötig"; das LLM fragt den User, dann zweiter Aufruf mit Umfang „nur dieser / ganze Serie".
+
+**Löschen — zweistufig, serverseitig abgesichert**
+- Stufe 1 „Löschen vorbereiten": Service identifiziert den Termin eindeutig (sonst Kandidatenliste/Serienumfang-Rückfrage), liefert Titel/Zeit/Kalender zurück plus ein **einmaliges Bestätigungs-Ticket** (kurze Gültigkeit, an User, Termin und Umfang gebunden).
+- Alice nennt dem User den Termin und fragt.
+- Stufe 2 „Löschen bestätigen": nur mit gültigem Ticket **aus einer früheren Chat-Anfrage** (Ticket, das in derselben Anfrage ausgestellt wurde, wird abgelehnt). Dadurch kann das LLM nicht in einem Zug rückfragen und löschen — das Löschen setzt immer ein „Ja" des Users im nächsten Turn voraus, unabhängig vom Modellverhalten. Vor dem Löschen prüft der Service, ob der Termin noch unverändert existiert (Parallel-Änderung in Google).
+
+**Fehlerbehandlung (alle Pfade)**
+- `reauth_required` (409 von PROJ-86): Ergebnis „Verbindung erneuern" → Alice verweist auf Settings → Kalender; Tab zeigt „Neu verbinden".
+- Transientes 503: ein automatischer Wiederholungsversuch, dann „Später nochmal versuchen".
+- Google nicht erreichbar/Timeout/Rate-Limit: klares Fehlerergebnis; das Tool-Ergebnis enthält nie einen Erfolg ohne Google-Bestätigung.
+- Teilausfall (ein Konto von mehreren): Ergebnis der übrigen Konten plus Hinweis.
+
+### D) Tech-Entscheidungen (Begründung)
+
+- **Eigener Service `alice-calendar`** (Entscheidung des Users): saubere Trennung von der Chat-Orchestrierung und von der reinen OAuth-Infrastruktur (PROJ-86). Aufwand: ein Container mehr (Dockerfile, Compose, Makefile-Eintrag, nginx-Route `/api/calendar/`). Die Zeit-/Zeitzonen-/Serienlogik liegt in testbarem Python statt in n8n-Code-Nodes.
+- **Kein n8n:** Datums- und Zeitzonenlogik inkl. Wiederholungen ist fehleranfällig und braucht automatisierte Tests; n8n-Code-Nodes sind dafür ungeeignet und zusätzlich langsamer.
+- **Token-Abruf über PROJ-86 mit durchgereichtem User-JWT:** Der PROJ-86-Token-Endpoint ist bewusst user-scoped (kein bloßes Connection-ID-Credential). `alice-calendar` reicht daher das JWT des anfragenden Users durch und holt Tokens nur, wenn nötig (kurzlebig im Speicher, nie persistiert).
+- **Google Calendar REST direkt (kein SDK):** PROJ-86 nutzt ebenfalls schlanke HTTP-Aufrufe; es werden nur wenige Endpunkte gebraucht (Kalenderliste, Termine lesen/anlegen/ändern/löschen).
+- **Serverseitige Lösch-Absicherung statt Prompt-Anweisung:** Ein Prompt allein garantiert nicht, dass das Modell rückfragt; das einmalige Ticket aus früherer Anfrage erzwingt es. Dies deckt die Anforderung „nur nach Rückfrage" verlässlich ab (Hörfehler bei Spracheingabe).
+- **Auswahl getrennt von den Verbindungen:** Eigene Tabelle statt Erweiterung der PROJ-86-Tabelle — PROJ-86 bleibt dienstneutral; PROJ-88/89 bekommen später analoge Auswahl-Tabellen. Fremdschlüssel mit Cascade-Löschung erfüllt „Auswahl wird mit der Verbindung gelöscht".
+- **Unbekannter Sprecher = kein Zugriff:** Der Chat-Service erkennt den Nil-UUID-Fall bereits für Timer; für Kalender wird er hart abgelehnt (anders als bei Timern kein Rollen-Fallback).
+- **Rollen-Flag im bestehenden Permission-System:** gleiches Muster wie `can_use_timers`; kein neues Berechtigungskonzept.
+- **Chat-Tools werden nur angeboten, wenn berechtigt:** Das Tool-Schema für das LLM enthält Kalender-Tools nur für Rollen/User mit Berechtigung — spart Tokens und verhindert Fehlaufrufe.
+- **Keine Latenz-Optimierung über HA_FAST:** Kalenderanfragen laufen über den normalen LLM-Tool-Pfad (Ziel < 3 s Ende-zu-Ende laut Spec).
+
+### E) Offene Punkte / Änderungen an bestehenden Teilen
+
+1. **Rücksprung nach dem Google-Consent (PROJ-86):** Der Callback leitet heute auf **eine** feste Frontend-URL zurück. Damit der User nach „Konto verbinden" wieder im Tab „Kalender" landet (und später PROJ-88/89 im jeweils eigenen Tab), muss PROJ-86 beim Consent-Start ein Rücksprungziel aus einer festen Liste erlaubter Ziele entgegennehmen und im signierten State mitführen. Kleine, rückwärtskompatible Ergänzung am PROJ-86-Service.
+2. **JWT-Herkunft bei Sprache:** Bei Sprachbefehlen kommt der Aufruf über das Speech-Gateway. Zu klären in der Umsetzung: akzeptiert der PROJ-86-Token-Endpoint das vom Gateway für den identifizierten User durchgereichte/ausgestellte JWT, oder braucht es einen eng begrenzten Service-zu-Service-Pfad (nur für die vom Gateway bestätigte User-ID)? Sicherheitsvorgabe bleibt: Kein Zugriff auf fremde Connections.
+3. **Berechtigungs-Flag im Frontend:** Der Settings-Guard braucht das neue Flag im bestehenden Berechtigungs-Abruf, damit der Tab nur bei Berechtigung erscheint.
+4. **Google-Cloud-Konfiguration (kein Code):** Calendar-API im bestehenden Google-Cloud-Projekt aktivieren; Calendar-Scope (Lesen+Schreiben) im Consent-Screen ergänzen. Da der Scope „sensibel" ist, kann Google eine erneute Verifizierung der Consent-Screen-Einstellungen verlangen.
+5. **System-Prompt/Tool-Beschreibungen:** Anweisung an das LLM, Erfolg nur nach bestätigtem Tool-Ergebnis zu melden und bei Rückfrage-Ergebnissen (Kalender nötig, Kandidatenliste, Serienumfang, Löschticket) den User zu fragen.
+
+### F) Neue/geänderte Infrastruktur
+
+- Neuer Service-Ordner `docker/compose/automations/alice-calendar/` (Dockerfile, compose.yml, `.env.example`, Tests), Eintrag in `docker/compose/scripts/Makefile` (STACKS)
+- Neue nginx-Location `/api/calendar/` → `alice-calendar` (SSE nicht nötig; normale Timeouts; Rate-Limit-Zone analog Timer)
+- Neue Migration (Kalenderauswahl-Tabelle mit RLS + Rollen-Flag in Vorlagen/Berechtigungen + Anpassung der Rechte-Zuweisungsfunktion)
+- `alice-chat-stream`: neue Tool-Definitionen + Dispatch + Berechtigungs-/Sprecher-Vorprüfung + Anpassung System-Prompt
+- Frontend: neuer Settings-Tab-Eintrag + Route `kalender`, Service-Client, Hook, Komponenten, Rollen-Abschnitt, i18n-Keys (de/en)
+- `alice-google-connect`: Rücksprungziel (siehe E.1)
+
+### G) Dependencies (Pakete)
+
+- Backend `alice-calendar`: `fastapi`, `uvicorn` (Service), `httpx` (Google-/PROJ-86-Aufrufe), `asyncpg` oder `psycopg` (je nach Alice-Konvention, PostgreSQL), `redis` (Lösch-Tickets), `pyjwt` + `cryptography` (JWT-Verifikation, RS256), `python-dateutil` bzw. `tzdata` (Zeitzonen/Wiederholungen), `pytest` (Tests)
+- Frontend: keine neuen Pakete erwartet (vorhandene shadcn/ui-Bausteine, Tabelle/Switch/Dialog/Badge, i18n)
+
 
 ## QA Test Results
 _To be added by /qa_
