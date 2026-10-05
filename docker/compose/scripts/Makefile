@@ -26,6 +26,7 @@ STACKS ?= \
   automations/alice-mail-reader \
   automations/alice-dms-thumbnailer \
   automations/alice-google-connect \
+  automations/alice-calendar \
   ai/ollama \
   ai/llama-3090 \
   ai/openwebui \

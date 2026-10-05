@@ -23,11 +23,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, AsyncIterator
 
 import httpx
 
-from . import metrics, tools
+from . import calendar_replies, calendar_tools, metrics, tools
 
 logger = logging.getLogger("alice-chat-stream.streaming")
 
@@ -59,6 +60,26 @@ OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "true").strip().lower() not in (
 )
 
 MAX_TOOL_ROUNDS = 4
+
+# Hard cap per LLM round (reasoning + answer). Without it a degenerate model
+# output ran for 14 799 tokens / 93 s, read aloud sentence by sentence on the
+# Voice PE until the device was unplugged (PROJ-87 live test 2026-10-05).
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+
+# Stop the stream once the same sentence was emitted this many times in a row.
+REPEAT_SENTENCE_LIMIT = 3
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _is_degenerate(text: str) -> bool:
+    """True when the last REPEAT_SENTENCE_LIMIT complete sentences are identical."""
+    parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(text)]
+    # The last element may be an unfinished sentence — only judge complete ones.
+    complete = [p for p in parts[:-1] if len(p) >= 15]
+    if len(complete) < REPEAT_SENTENCE_LIMIT:
+        return False
+    tail = complete[-REPEAT_SENTENCE_LIMIT:]
+    return all(t == tail[0] for t in tail)
 
 # Hard caps for user-visible tool status and summary strings.
 TOOL_STATUS_MAX_LEN = 80
@@ -118,6 +139,9 @@ def _build_tool_status(tool_name: str, args: dict[str, Any]) -> str:
         if query:
             return _truncate(f"Erinnere mich an '{query}'…", TOOL_STATUS_MAX_LEN)
         return "Suche in Erinnerungen…"
+
+    if calendar_tools.is_calendar_tool(tool_name):
+        return _truncate(calendar_tools.tool_status(tool_name, args), TOOL_STATUS_MAX_LEN)
 
     if tool_name == "remember":
         key = str(args.get("key") or "").strip()
@@ -195,6 +219,9 @@ def _build_tool_summary(tool_name: str, ok: bool, result: dict[str, Any]) -> str
     if tool_name == "get_document_details":
         return "Geladen"
 
+    if calendar_tools.is_calendar_tool(tool_name):
+        return _truncate(calendar_tools.tool_summary(tool_name, result), TOOL_SUMMARY_MAX_LEN)
+
     return ""
 
 
@@ -231,13 +258,18 @@ async def stream_chat(
     system_prompt: str,
     user_id: str,
     anrede: str = "du",
+    calendar: calendar_tools.CalendarTurn | None = None,
 ) -> AsyncIterator[tuple[bytes, dict]]:
     """
     Yields (sse_bytes, side_effect_dict). side_effect_dict carries data the
     caller (main.py) needs after the stream ends:
         {"final_text": str, "tool_calls": [...], "usage": {...}}
     Only the LAST yield contains a meaningful side_effect.
+
+    `calendar` (PROJ-87): when enabled, the calendar tools are offered and
+    their calls are routed to alice-calendar instead of tools.execute_tool.
     """
+    base_tools = tools.tool_schema()
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
@@ -248,6 +280,8 @@ async def stream_chat(
     usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
     rounds = 0
     thinking_start_sent = False
+    # PROJ-87: set when a calendar result was answered from a template.
+    calendar_terminal = False
 
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
         while rounds <= MAX_TOOL_ROUNDS:
@@ -258,8 +292,19 @@ async def stream_chat(
                 "stream": True,
                 # OpenAI streaming only returns usage if we ask for it.
                 "stream_options": {"include_usage": True},
-                "tools": tools.tool_schema(),
+                "max_tokens": LLM_MAX_TOKENS,
             }
+            # PROJ-87: calendar tools when permitted; a calendar request forces a
+            # calendar tool call in the first round (no invented results).
+            round_tool_list, tool_choice = calendar_tools.round_tools(base_tools, calendar, rounds)
+            # In a forced tool round the reply comes from the tool result; text
+            # the model writes before its call is dropped, not streamed / read
+            # aloud (live: an invented reminder question before list_events).
+            suppress_text = tool_choice == "required"
+            if round_tool_list:
+                payload["tools"] = round_tool_list
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
             # PROJ-37: llama.cpp streams reasoning as delta.reasoning_content on
             # its own; when thinking is disabled we ask the chat template to skip
             # the phase entirely (qwen3 template honours enable_thinking).
@@ -269,6 +314,7 @@ async def stream_chat(
             pending_tool_calls: list[dict] = []
             assistant_chunk_text = ""
             done_flag = False
+            degenerate = False
             try:
                 async with client.stream(
                     "POST",
@@ -324,12 +370,17 @@ async def stream_chat(
                                 yield (_sse({"type": "thinking_start", "anrede": anrede}), {})
                             yield (_sse({"type": "thinking", "content": thinking}), {})
 
-                        content = delta.get("content") or ""
+                        content = "" if suppress_text else (delta.get("content") or "")
                         if content:
                             assistant_chunk_text += content
                             accumulated_text += content
                             metrics.CHAT_TOKENS_TOTAL.inc()
                             yield (_sse({"type": "token", "content": content}), {})
+                            if ("\n" in content or any(c in content for c in ".!?")) and \
+                                    _is_degenerate(assistant_chunk_text):
+                                logger.warning("LLM output repeats itself — stream stopped")
+                                degenerate = True
+                                break
 
                         # OpenAI streams tool_calls as fragments keyed by `index`.
                         for tc_delta in (delta.get("tool_calls") or []):
@@ -348,8 +399,14 @@ async def stream_chat(
                 yield (_sse({"type": "error", "message": "Verbindungsfehler zum LLM."}), {})
                 return
 
-            # No tool calls → final answer
-            if not pending_tool_calls:
+            # Forced round without a tool call (should not happen with
+            # tool_choice=required): its text was dropped — let an unforced
+            # round answer instead of ending with an empty reply.
+            if suppress_text and not pending_tool_calls and not degenerate:
+                continue
+
+            # No tool calls → final answer (a degenerate stream never runs tools)
+            if degenerate or not pending_tool_calls:
                 # Append the assistant's full message to history (not strictly needed since
                 # we exit the loop, but keeps semantics clean if extended later).
                 if assistant_chunk_text:
@@ -365,6 +422,7 @@ async def stream_chat(
             messages.append(assistant_msg)
 
             # Execute each tool, emit start/end events, append results
+            calendar_reply: str | None = None
             for tc in pending_tool_calls:
                 fn = (tc.get("function") or {})
                 tool_name = fn.get("name") or "unknown"
@@ -389,7 +447,16 @@ async def stream_chat(
                     "query": query_hint,
                 }), {})
 
-                result = await tools.execute_tool(tool_name, args, user_id, client)
+                if calendar_tools.is_calendar_tool(tool_name) and calendar is not None:
+                    result = await calendar_tools.execute(tool_name, args, client, calendar)
+                    # PROJ-87: phrase calendar outcomes from a template instead
+                    # of another LLM round (short, never an invented success).
+                    reply = calendar_replies.compose(result, calendar.lang, calendar.channel)
+                    if reply is not None:
+                        calendar_reply = reply
+                        calendar_terminal = calendar_replies.is_terminal(result)
+                else:
+                    result = await tools.execute_tool(tool_name, args, user_id, client)
                 ok = "error" not in result
                 outcome = (
                     "timeout" if result.get("error") == "timeout"
@@ -438,6 +505,13 @@ async def stream_chat(
                 if vision_items:
                     yield (_sse({"type": "vision_results", "results": vision_items}), {})
 
+            if calendar_reply is not None:
+                sep = "\n\n" if accumulated_text.strip() else ""
+                accumulated_text += sep + calendar_reply
+                messages.append({"role": "assistant", "content": calendar_reply})
+                yield (_sse({"type": "token", "content": sep + calendar_reply}), {})
+                break
+
             if not done_flag:
                 # Some Ollama versions don't set done=true on the chunk that contains
                 # tool_calls; loop again to let the model finish its turn.
@@ -457,7 +531,7 @@ async def stream_chat(
         # Signal conversation end for HA commands. The Wyoming voice path uses
         # this to close the session immediately after the TTS confirmation plays,
         # rather than waiting 6 s for the silence-detection turn.
-        if any(tc.get("tool") == "home_assistant" for tc in tool_call_log):
+        if calendar_terminal or any(tc.get("tool") == "home_assistant" for tc in tool_call_log):
             yield (_sse({"type": "conversation_end"}), {})
         yield (_sse({"type": "done", "usage": usage}), side)
         yield (b"data: [DONE]\n\n", {})

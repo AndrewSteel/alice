@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# alice-calendar — Google Calendar agent for Alice (PROJ-87).
+#
+# Verifies Alice JWTs only (RS256 public key). Google access tokens come from
+# alice-google-connect (PROJ-86) on behalf of the calling user; no event data
+# is stored. nginx exposes /api/calendar/* only — /internal/* (chat tools) is
+# reachable from alice-chat-stream over the Docker network alone.
+# ---------------------------------------------------------------------------
+services:
+  alice-calendar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-calendar
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8009/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-calendar]
+      backend:
+        aliases: [alice-calendar]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation
