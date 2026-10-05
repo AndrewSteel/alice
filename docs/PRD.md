@@ -37,7 +37,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
 | P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Roadmap |
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
-| P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Roadmap |
+| P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Planned |
 | P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Roadmap |
 | P2       | Kontakte-Agent — inkl. Settings-Tab „Kontakte", mehrere Google-Kontaktbücher pro User (PROJ-89)                    | 3.4       | Roadmap |
 | P2       | Websearch-Agent — Plan → begrenzter Such-Loop → Antwort (PROJ-90)                                                  | 3.4       | Roadmap |
