@@ -160,7 +160,7 @@ def test_device_room_applies_to_all_domain_entities(house, stub_lookup):
 
     client = FakeClient()
     text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert len(client.posts) == 2
     assert text == "Licht im Büro eingeschaltet."
@@ -193,7 +193,7 @@ def test_named_device_wins(house, stub_lookup):
 
     client = FakeClient()
     text, _ = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert len(client.posts) == 1
     assert client.posts[0]["json"]["entity_id"] == "light.wohnzimmer_lese"
@@ -210,7 +210,7 @@ def test_no_room_asks_back(house, stub_lookup):
 
     client = FakeClient()
     text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert client.posts == []
     assert results == []
@@ -249,7 +249,7 @@ def test_partial_failure_named_separately(house, stub_lookup):
     d = run(decide_path("Licht einschalten", client=None, source="esphome:Büro"))
     client = FakeClient(fail={"light.buero_stehlampe"})
     text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert "Licht im Büro eingeschaltet, außer Büro Stehlampe" in text
     assert sum(1 for r in results if r["success"]) == 1
@@ -263,7 +263,7 @@ def test_all_offline(house, stub_lookup):
     d = run(decide_path("Licht einschalten", client=None, source="esphome:Büro"))
     client = FakeClient(fail={"light.buero_decke", "light.buero_stehlampe"})
     text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert "nichts hat geklappt" in text
     assert all(not r["success"] for r in results)
@@ -280,7 +280,7 @@ def test_value_applied_to_all_area_entities(house, stub_lookup):
                         source="esphome:Büro"))
     client = FakeClient()
     text, _ = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert all(p["json"]["brightness_pct"] == 30 for p in client.posts)
     assert len(client.posts) == 2
@@ -304,29 +304,15 @@ def test_multi_command_independent_area_context(house, stub_lookup):
 
 
 # ---------------------------------------------------------------------------
-# Multi-command — area part + shopping-list part
+# Multi-command — area part + shopping-list part: since PROJ-106 the shopping
+# part never matches HA_FAST, so the request goes to the LLM (cross-domain
+# multi-intent is PROJ-102).
 # ---------------------------------------------------------------------------
-def test_area_plus_shopping(house, stub_lookup, monkeypatch):
+def test_area_plus_shopping_goes_llm(house, stub_lookup):
     stub_lookup({"licht": _light_on()})
-
-    class _P(FakePool):
-        async def fetchrow(self, *a, **kw):
-            return {"entity_id": "todo.einkaufsliste"}
-
-    import app.memory as memory
-    p = _P(HOUSE)
-    monkeypatch.setattr(memory, "pool", lambda: p)
-
     d = run(decide_path("Licht einschalten und Butter auf die Einkaufsliste",
                         client=None, source="esphome:Büro"))
-    assert d.path == "HA_FAST"
-    assert d.shopping_items[-1] == "Butter"
-    client = FakeClient()
-    text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
-        area_targets=d.area_targets))
-    assert "Licht im Büro eingeschaltet" in text
-    assert "Butter" in text
+    assert d.path == "LLM_ONLY"
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +341,7 @@ def test_area_temperature_uses_per_entity_bounds(house, stub_lookup):
         "climate.buero_ht": {"min_temp": 5, "max_temp": 35},
     })
     text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert client.posts[0]["json"] == {"entity_id": "climate.buero_ht", "temperature": 27}
     assert text == "Heizung im Büro auf 27 Grad gestellt."
@@ -371,7 +357,7 @@ def test_area_temperature_out_of_range_per_entity(house, stub_lookup):
                         source="esphome:Büro"))
     client = FakeClient(states={"climate.buero_ht": {"min_temp": 5, "max_temp": 30}})
     text, results = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert client.posts == []
     assert "Büro Heizung" in text and "5–30 Grad" in text
@@ -390,7 +376,7 @@ def test_area_percent_out_of_range_message_is_room_scoped(house, stub_lookup):
                         source="esphome:Büro"))
     client = FakeClient()
     text, _ = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert client.posts == []
     assert "weaviate" not in text.lower()
@@ -405,7 +391,7 @@ def test_area_message_grammar_feminine_room(house, stub_lookup):
     d = run(decide_path("Licht einschalten", client=None, source="esphome:Küche"))
     client = FakeClient()
     text, _ = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert text == "Licht in der Küche eingeschaltet."
 
@@ -417,6 +403,6 @@ def test_area_message_grammar_masculine_room(house, stub_lookup):
     d = run(decide_path("Rolladen schließen", client=None, source="esphome:Büro"))
     client = FakeClient()
     text, _ = run(execute_ha_intents(
-        d.intents, client, parts=d.parts, shopping_items=d.shopping_items,
+        d.intents, client, parts=d.parts,
         area_targets=d.area_targets))
     assert text == "Rolladen im Büro geschlossen."

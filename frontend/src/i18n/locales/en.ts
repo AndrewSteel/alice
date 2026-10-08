@@ -569,6 +569,14 @@ const en = {
       loadFailed: "The calendar permissions could not be loaded.",
     },
 
+    listsRoles: {
+      heading: "Lists",
+      hint: "Which roles may use tasks and lists (chat/voice). Children may read, add and tick off entries on shared lists; guests have no access.",
+      saved: "Lists permissions saved",
+      saveFailed: "The lists permissions could not be saved.",
+      loadFailed: "The lists permissions could not be loaded.",
+    },
+
     voiceProfiles: {
       heading: "Voice profiles",
       refresh: "Refresh list",

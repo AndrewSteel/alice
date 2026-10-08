@@ -573,6 +573,14 @@ const de = {
       loadFailed: "Die Kalender-Berechtigungen konnten nicht geladen werden.",
     },
 
+    listsRoles: {
+      heading: "Listen",
+      hint: "Welche Rollen Aufgaben und Listen (Chat/Sprache) nutzen duerfen. Kinder duerfen auf gemeinsamen Listen lesen, eintragen und abhaken; Gaeste haben keinen Zugriff.",
+      saved: "Listen-Berechtigungen gespeichert",
+      saveFailed: "Die Listen-Berechtigungen konnten nicht gespeichert werden.",
+      loadFailed: "Die Listen-Berechtigungen konnten nicht geladen werden.",
+    },
+
     voiceProfiles: {
       heading: "Stimmprofile",
       refresh: "Liste aktualisieren",
