@@ -214,3 +214,13 @@ def test_agenda_lists_forbidden_or_unknown_speaker():
     assert c(r) == "Morgen hast du 1 Termin: um 10:00 Uhr Zahnarzt."
     r = _agenda(None, {"error": "unknown_speaker"})
     assert c(r).startswith("Ich weiß nicht, wer spricht")
+
+
+def test_agenda_hint_when_lists_unavailable():
+    """QA BUG-4: a missing entries part is mentioned."""
+    r = _agenda({"status": "ok", "range": RANGE, "events": [EVENT], "total": 1}, {"error": "lists_unavailable"})
+    assert c(r) == "Morgen hast du 1 Termin: um 10:00 Uhr Zahnarzt. Die Aufgaben waren nicht abrufbar."
+
+
+def test_reserved_name_error():
+    assert c({"error": "reserved_name"}).startswith("Dieser Name ist der Einkaufsliste vorbehalten")

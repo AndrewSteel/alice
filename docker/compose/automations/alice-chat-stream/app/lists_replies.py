@@ -28,6 +28,7 @@ _ERRORS = {
         "not_list_owner": "Gemeinsame Listen dürfen nur ein Admin und die Person, die sie angelegt hat, umbenennen oder löschen.",
         "no_shopping_list": "Es ist gerade keine Einkaufsliste festgelegt – das kann ein Admin erledigen.",
         "duplicate_list_name": "Eine Liste mit diesem Namen gibt es schon.",
+        "reserved_name": "Dieser Name ist der Einkaufsliste vorbehalten – bitte nimm einen anderen.",
         "private_not_shopping": "Eine private Liste kann nicht die Einkaufsliste sein.",
         "item_gone": "Den Eintrag gibt es nicht mehr, ich habe nichts gelöscht.",
         "item_changed": "Der Eintrag wurde inzwischen geändert, deshalb habe ich ihn nicht gelöscht.",
@@ -50,6 +51,7 @@ _ERRORS = {
         "not_list_owner": "Shared lists can only be renamed or deleted by an admin or the person who created them.",
         "no_shopping_list": "There is no shopping list set right now – an admin can set one.",
         "duplicate_list_name": "A list with that name already exists.",
+        "reserved_name": "That name is reserved for the shopping list – please pick another one.",
         "private_not_shopping": "A private list can't be the shopping list.",
         "item_gone": "That entry no longer exists, nothing was deleted.",
         "item_changed": "The entry has changed in the meantime, so I did not delete it.",
@@ -467,6 +469,7 @@ def _manage(r: dict, lang: str) -> str:
 # Combined day query (calendar + lists)
 # ---------------------------------------------------------------------------
 _CAL_SILENT = {"no_active_calendar", "forbidden", "unknown_speaker", "calendar_disabled"}
+_LISTS_SILENT = {"forbidden", "unknown_speaker", "lists_disabled"}
 
 
 def _agenda(r: dict, lang: str, voice: bool, today: date) -> str:
@@ -488,6 +491,9 @@ def _agenda(r: dict, lang: str, voice: bool, today: date) -> str:
         hint = (" Der Kalender war nicht erreichbar." if lang == "de" else " The calendar could not be read.")
     elif cal and cal.get("warnings"):
         hint = cr._warnings(cal, lang)
+    if lists.get("error") and lists["error"] not in _LISTS_SILENT:
+        # QA BUG-4: never present a day as complete when the entries are missing.
+        hint += (" Die Aufgaben waren nicht abrufbar." if lang == "de" else " The entries could not be read.")
 
     if not events and not items:
         return (f"{_cap(span)} steht nichts an." if lang == "de" else f"Nothing is planned {span}.") + hint

@@ -128,3 +128,40 @@ def test_invalid_input_goes_back_to_llm(monkeypatch):
         lt, message="Steuererklärung bis 31. Juli, wichtig")
     assert len(calls) == 2
     assert _tokens(events).startswith("Ich habe „Steuererklärung“ auf die Liste „Meine Aufgaben“ gesetzt, Frist bis")
+
+
+def test_parallel_tool_calls_all_confirmed(monkeypatch):
+    """QA BUG-1: the model split the items itself — every stored entry is confirmed."""
+    msg = "Setze Milch und Butter auf die Einkaufsliste"
+    lt = _turn(msg, "lists", channel="voice")
+    shop = {"name": "Einkaufsliste", "shared": True, "shopping": True}
+    rounds = [[{"choices": [{"delta": {"tool_calls": [
+        {"index": 0, "id": "c1", "type": "function",
+         "function": {"name": "lists_add_items", "arguments": json.dumps({"items": "Milch", "list": "Einkaufsliste"})}},
+        {"index": 1, "id": "c2", "type": "function",
+         "function": {"name": "lists_add_items", "arguments": json.dumps({"items": "Butter", "list": "Einkaufsliste"})}},
+    ]}, "finish_reason": "tool_calls"}]}]]
+    events, calls = _run(monkeypatch, rounds, [
+        {"status": "added", "list": shop, "items": [{"title": "Milch"}], "reopened": []},
+        {"status": "added", "list": shop, "items": [{"title": "Butter"}], "reopened": []},
+    ], lt, message=msg)
+    assert len(calls) == 2
+    assert _tokens(events) == ("Ich habe Milch auf die Einkaufsliste gesetzt. "
+                               "Ich habe Butter auf die Einkaufsliste gesetzt.")
+    assert any('"conversation_end"' in e for e in events)
+
+
+def test_parallel_calls_with_question_keep_conversation_open(monkeypatch):
+    lt = _turn("x", "lists", channel="voice")
+    rounds = [[{"choices": [{"delta": {"tool_calls": [
+        {"index": 0, "id": "c1", "type": "function",
+         "function": {"name": "lists_add_items", "arguments": json.dumps({"items": "A"})}},
+        {"index": 1, "id": "c2", "type": "function",
+         "function": {"name": "lists_add_items", "arguments": json.dumps({"items": "B", "list": "Werkstatt"})}},
+    ]}, "finish_reason": "tool_calls"}]}]]
+    events, _ = _run(monkeypatch, rounds, [
+        {"status": "added", "list": {"name": "Meine Aufgaben"}, "items": [{"title": "A"}], "reopened": []},
+        {"status": "unknown_list", "name": "Werkstatt"},
+    ], lt)
+    assert _tokens(events).endswith("Soll ich sie anlegen?")
+    assert not any('"conversation_end"' in e for e in events)

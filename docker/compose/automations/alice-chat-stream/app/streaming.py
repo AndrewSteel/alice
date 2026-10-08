@@ -431,7 +431,10 @@ async def stream_chat(
             messages.append(assistant_msg)
 
             # Execute each tool, emit start/end events, append results
-            template_reply: str | None = None
+            # Several calendar/lists calls in one round (e.g. the model split
+            # "Milch und Butter" itself) each get their sentence (QA BUG-1).
+            template_replies: list[str] = []
+            round_terminal = True
             for tc in pending_tool_calls:
                 fn = (tc.get("function") or {})
                 tool_name = fn.get("name") or "unknown"
@@ -462,15 +465,15 @@ async def stream_chat(
                     # of another LLM round (short, never an invented success).
                     reply = calendar_replies.compose(result, calendar.lang, calendar.channel)
                     if reply is not None:
-                        template_reply = reply
-                        template_terminal = calendar_replies.is_terminal(result)
+                        template_replies.append(reply)
+                        round_terminal = round_terminal and calendar_replies.is_terminal(result)
                 elif lists_tools.is_lists_tool(tool_name) and lists is not None:
                     result = await lists_tools.execute(tool_name, args, client, lists, calendar)
                     # PROJ-106: same template approach as the calendar.
                     reply = lists_replies.compose(result, lists.lang, lists.channel)
                     if reply is not None:
-                        template_reply = reply
-                        template_terminal = lists_replies.is_terminal(result)
+                        template_replies.append(reply)
+                        round_terminal = round_terminal and lists_replies.is_terminal(result)
                 else:
                     result = await tools.execute_tool(tool_name, args, user_id, client)
                 ok = "error" not in result
@@ -521,7 +524,9 @@ async def stream_chat(
                 if vision_items:
                     yield (_sse({"type": "vision_results", "results": vision_items}), {})
 
-            if template_reply is not None:
+            if template_replies:
+                template_reply = " ".join(dict.fromkeys(template_replies))
+                template_terminal = round_terminal
                 sep = "\n\n" if accumulated_text.strip() else ""
                 accumulated_text += sep + template_reply
                 messages.append({"role": "assistant", "content": template_reply})
