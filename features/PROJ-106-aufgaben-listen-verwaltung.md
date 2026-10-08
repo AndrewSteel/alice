@@ -1,6 +1,6 @@
 # PROJ-106: Aufgaben- & Listen-Verwaltung (lokal) — Kern
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-10-08
 **Last Updated:** 2026-10-08
 
@@ -179,7 +179,142 @@ Bedienung im Kern ausschließlich **per Chat und Sprache** (auch die Listenverwa
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+**Entworfen:** 2026-10-08
+
+### Überblick
+
+PROJ-106 besteht aus fünf Bausteinen:
+
+1. **Neuer Service `alice-lists`** — hält Listen und Einträge in PostgreSQL, erzwingt alle Regeln (Sichtbarkeit, Rollen, Einkaufsliste, Duplikate, Löschbestätigung) und löst Zeiträume/Zeitzonen auf. Gleiches Muster wie `alice-calendar` (PROJ-87): eigener Container, interne Tool-Endpoints für den Chat. Weil PROJ-107 (WebApp-Ansicht) später dieselbe Logik braucht, bekommt der Service schon jetzt eine saubere Schnittstelle, statt die Regeln im Chat-Service zu vergraben.
+2. **Chat-Anbindung in `alice-chat-stream`** — neue Listen-Tools für das LLM, deterministische Mehrfach-Trennung, Antworten per Vorlage, erzwungene Tool-Nutzung je Absicht (PROJ-87-Mechanismen wiederverwendet).
+3. **Kombinierte Tagesabfrage** — der Chat-Service ruft Kalender **und** Listen ab und setzt eine gemeinsame Antwort zusammen.
+4. **Rückbau** des Einkaufslisten-Pfads aus PROJ-83 (HA_FAST).
+5. **Admin-Bereich:** Rollen-Schalter „Listen nutzen“ in der Nutzerverwaltung (neben Timer- und Kalender-Rollen).
+
+Kein n8n-Workflow, keine neue UI-Seite (die kommt mit PROJ-107), keine Cloud.
+
+### A) Komponentenstruktur
+
+Einzige sichtbare UI-Änderung:
+
+```
+Settings → Nutzer-Verwaltung (bestehend, admin)
++-- Rollen-Abschnitt Timer      (bestehend)
++-- Rollen-Abschnitt Kalender   (bestehend)
++-- Rollen-Abschnitt Listen     (NEU)
+    +-- je Rolle: Schalter „Listen nutzen“ (admin/user/child an, guest aus)
+```
+
+Wiederverwendet: das Rollen-Abschnitt-Muster von `TimerRolesSection` / `CalendarRolesSection`, i18n-Schicht (de/en). Alles andere läuft über Chat und Sprache.
+
+### B) Datenmodell (einfach beschrieben)
+
+**Tabelle „Listen“** — eine Zeile pro Liste:
+- Eindeutige ID, Name
+- Besitzer/Ersteller (User); bei privaten Listen der einzige Zugriffsberechtigte
+- Art: privat oder gemeinsam
+- Einkaufslisten-Kennzeichen (höchstens eine Liste im ganzen Haushalt; nur gemeinsame Listen können es tragen — per Datenbank erzwungen)
+- Zeitstempel
+
+Regeln, die die Datenbank selbst absichert: Listennamen sind je Sichtbarkeitsbereich ohne Beachtung der Groß-/Kleinschreibung eindeutig (gemeinsam: haushaltsweit; privat: je Besitzer). Dass ein *anderer* User einen Namen nutzt, den eine für ihn unsichtbare private Liste trägt, bleibt dadurch erlaubt. Wird ein User gelöscht, verschwinden seine privaten Listen mit; seine gemeinsamen Listen bleiben (Ersteller wird leer, danach nur noch Admin zuständig).
+
+**Tabelle „Einträge“** — eine Zeile pro Eintrag:
+- Eindeutige ID, Liste (Löschen der Liste löscht die Einträge mit)
+- Titel (Pflicht, beliebig lang), Notiz
+- Fälligkeit und Frist — jeweils Zeitpunkt plus Kennzeichen „nur Datum / mit Uhrzeit“ (damit „morgen“ ohne Uhrzeit von „morgen 14 Uhr“ unterscheidbar ist und die Sommerzeit stimmt)
+- Priorität (hoch / normal / niedrig)
+- Status offen/erledigt, Zeitpunkt des Abhakens, wer abgehakt hat
+- Angelegt von, Zeitstempel
+
+Erledigte Einträge werden 30 Tage nach dem Abhaken endgültig entfernt (täglicher Aufräum-Lauf im Service).
+
+**Standardliste je User:** wird am User gespeichert (Verweis auf eine Liste). Fällt die Liste weg, greift automatisch „Meine Aufgaben“, die bei Bedarf neu angelegt wird.
+
+**Berechtigung:** neues Flag „Listen nutzen“ bei Rollen-Vorlagen und Assistenten-Berechtigungen (wie `can_use_timers` / `can_use_calendar`); die Funktion, die neuen Usern Rechte zuweist, übernimmt es. Die feinere Abstufung aus der Spec (child darf lesen/anlegen/abhaken, aber nicht entfernen; Einkaufsliste kennzeichnen/löschen nur admin) ist **fest im Service verdrahtet** und nicht pro Rolle konfigurierbar — die Spec sieht im Admin-Bereich nur eine Rollenebene vor; mehr Schalter wären Spekulation. *(Zur Bestätigung, siehe Offene Punkte 1.)*
+
+**Löschbestätigung & offene Rückfragen (flüchtig):** wie bei PROJ-87 kurzzeitig im vorhandenen Redis, kein neuer Dauer-Speicher.
+
+Alle neuen Tabellen: Row Level Security aktiv, Indizes auf Besitzer, Liste, Status und Datumsfelder.
+
+### C) Ablauf-Architektur
+
+**Sprecher und Zugriff (für jede Aktion, serverseitig)**
+1. Chat-Service ermittelt den Sprecher (Nil-UUID = unbekannt) und die Rolle **frisch aus der Datenbank** (das Gateway-JWT behauptet immer „user“).
+2. `alice-lists` prüft Rolle × Aktion × Listenart. Private Listen sind nur für den Besitzer sichtbar — auch Admins sehen sie nicht (die Abfragen filtern hart nach Besitzer, zusätzlich RLS).
+3. Unbekannter Sprecher: ausschließlich „zur gekennzeichneten Einkaufsliste hinzufügen“. Alles andere → Ablehnung mit Hinweis, dass Alice nicht weiß, wer spricht. Kein Fallback auf Admin/Gerät. Ohne Berechtigung werden dem LLM nur dann Tools angeboten, wenn sie nutzbar sind; ansonsten erklärt ein Prompt-Hinweis die Ablehnung.
+
+**Mehrere Einträge in einem Satz — deterministisch**
+Das LLM extrahiert nur die Rohangabe pro Aufruf (z. B. „Milch, Butter und Eier“ als *ein* Textfeld plus Liste/Datum/Priorität). Die Trennung an jedem Komma und jedem „und“ passiert **im Service per festem Regelwerk**, nicht im Modell; Mengenangaben („2 Packungen Milch“) bleiben am Eintrag. So bleibt „Salz und Pfeffer“ garantiert zwei Einträge. Gleiches gilt für Abhaken und Entfernen mehrerer Einträge.
+
+**Einträge anlegen**
+1. Liste bestimmen: genannt → Auflösung (exakt → eindeutig ähnlich → bei mehreren Rückfrage); „Einkaufsliste/Einkaufszettel“ → gekennzeichnete Liste; sonst Standardliste. Unbekannt → Rückfrage „anlegen?“. Gleichnamig privat/gemeinsam → Rückfrage „deine private oder die gemeinsame?“.
+2. Datumslogik: Fälligkeit/Frist auflösen (Zeitzone des Users, Uhrzeit ohne Datum = heute bzw. morgen, wenn verstrichen). Vergangenes Datum oder Frist vor Fälligkeit → Rückfrage-Ergebnis statt stillschweigendem Speichern.
+3. Duplikate: Einkaufsliste → ohne Hinweis anlegen; steht der Artikel als erledigt drauf → wieder öffnen. Andere Listen → Rückfrage, wenn offener Eintrag gleichen Titels existiert.
+4. Speichern und **das tatsächlich Gespeicherte** zurückgeben; die Vorlagen-Antwort zählt es auf (Eintrag, Liste, Fälligkeit/Frist/Priorität).
+
+**Abfragen**
+Filter: Liste, Zeitraum, nur Fristen, überfällig, „steht X drauf?“, Anzahl, erledigt (max. 30 Tage). Ohne Listenname werden alle sichtbaren Listen durchsucht. Sortierung wie in der Spec (überfällig → früheres Datum → Priorität → ohne Datum); Kürzung Sprache max. 5 + Rest, Chat max. 50 mit Hinweis.
+
+**Ändern / Abhaken / Wieder öffnen**
+Eintrag wird über den (ungefähren) Titel gefunden; 0 Treffer → klare Meldung, mehrere → Kandidatenliste für die Rückfrage (bei gleichnamigen Einträgen in mehreren Listen mit Listennamen). Abhaken/Öffnen/Ändern ohne Rückfrage. Gleichzeitige Aktionen (zwei User haken dasselbe ab) werden als „bereits erledigt/nicht mehr vorhanden“ gemeldet, nie als Fehler.
+
+**Entfernen — zweistufig, serverseitig abgesichert (nur außerhalb der Einkaufsliste)**
+Identisch zum PROJ-87-Muster: Stufe 1 identifiziert genau einen Eintrag und gibt ein einmaliges Ticket aus (an User, Eintrag, Session und Turn gebunden); Stufe 2 löscht nur mit einem Ticket **aus dem unmittelbar vorherigen Turn** und nach erneuter Prüfung, dass der Eintrag unverändert existiert. Ein „Ja“ führt so verlässlich zum Löschen (Chat und Voice), „Nein“ oder ein anderer Turn lässt das Ticket verfallen. Auf der Einkaufsliste entfällt die Rückfrage; Child wird dort höflich abgewiesen mit Hinweis auf „Abhaken“. **Listen löschen** nutzt denselben Ticket-Mechanismus (Rückfrage nennt die Anzahl der Einträge, bei der Einkaufsliste den Hinweis darauf; nur Admin).
+
+**Listenverwaltung**
+Anlegen (privat/gemeinsam), Umbenennen, Löschen, Standardliste setzen, Übersicht, Einkaufsliste kennzeichnen (nur Admin; Kennzeichen wandert, Bestätigung nennt die bisherige Liste). Namens-Eindeutigkeit und Rechte (Admin + Ersteller bei gemeinsamen Listen) werden im Service geprüft. Ohne Einkaufsliste werden Einkaufslisten-Anfragen mit Hinweis auf den Admin abgelehnt — auch für unbekannte Sprecher.
+
+**Kombinierte Tagesabfrage (PROJ-87-Änderung)**
+Der Chat-Service entscheidet die Absicht **vor** dem LLM-Aufruf per festen Stichwortregeln (Termin/Kalender → nur Kalender; Aufgabe/fällig/Frist/überfällig/Listenname → nur Listen; allgemeine „Was steht an?“ → beides). Bei „beides“ werden Kalender und Listen parallel abgefragt (je nach Berechtigung/Verbindung auch nur eines davon), und **eine** Vorlagen-Antwort setzt Termine zuerst, dann Fälligkeiten und Fristen zusammen; Sprache insgesamt max. 5 Elemente + Rest. Keine Rückfrage. Eine Lücke in einem der beiden Teile (z. B. Google nicht erreichbar) führt zu der Antwort des anderen Teils plus kurzem Hinweis.
+
+**Antwortverhalten (aus PROJ-87 übernommen)**
+- Antworten entstehen **aus Vorlagen** anhand strukturierter Service-Ergebnisse, nicht aus freier LLM-Formulierung → kurz, ohne interne Begriffe, ohne erfundene Erfolge. Sprache der Vorlagen folgt der Nutzersprache.
+- **Erzwungene Tool-Nutzung** je erkannter Absicht in der ersten Runde (`tool_choice=required`), Text dieser Runde wird verworfen; nach einer Rückfrage keine Tools im Antwort-Turn außer der Bestätigung.
+- **Offene Rückfrage über Turns hinweg:** der Service merkt sich die letzte offene Rückfrage je User+Session (Redis) und liefert sie für genau den Folgeturn.
+- **Voice:** Vorlagen sprechen Datum/Uhrzeit aus; `conversation_end` nach abgeschlossener Aktion, offen bei Rückfrage; Token-Limit und Wiederholungsbremse wie bei Kalender.
+- **HA_FAST-Umgehung:** Listen-Anfragen und Antworten auf offene Listen-Rückfragen werden nicht vom Smart-Home-Schnellpfad abgefangen (analog zur Kalender-Umgehung).
+
+**Fehlerbehandlung**
+Datenbank/Service nicht erreichbar → klare Fehlermeldung ohne Erfolgsbehauptung; keine Tool-Ergebnisse ohne bestätigte Speicherung. Zeitüberschreitung → „später nochmal versuchen“. Keine Teilausführung ohne Hinweis: bei Mehrfach-Aktionen werden erledigte und nicht gefundene Einträge getrennt benannt.
+
+### D) Tech-Entscheidungen (Begründung)
+
+- **Eigener Service `alice-lists`** statt Modul im Chat-Service: PROJ-107 (WebApp), PROJ-108 (Erinnerungen), PROJ-109/110 bauen darauf auf und brauchen dieselben Regeln über eine Schnittstelle. Die Regeln (Rechte, Duplikate, Einkaufsliste) gehören nicht in den Orchestrierungs-Service. Aufwand: ein Container mehr — bewährtes Muster aus PROJ-87.
+- **Kein n8n:** Datums-/Zeitzonenlogik, Trennregel und Rechteprüfung brauchen automatisierte Tests; n8n-Code-Nodes sind dafür ungeeignet und langsamer (Ziel < 2 s).
+- **Eigene Datenbanktabellen statt Weaviate:** strukturierte, relationale Daten mit Filtern, Sortierung und Rechten — Weaviate bringt hier nichts. Ungefähre Namensauflösung („Baumarktliste“ → „Baumarkt“) geschieht per einfacher Ähnlichkeitssuche in PostgreSQL; kein Embedding nötig.
+- **Eine Listen-Art, zwei Sichtbarkeiten:** ein Modell für Einkaufen und Aufgaben (wie in der Spec); die Einkaufsliste ist nur ein Kennzeichen an einer gemeinsamen Liste, keine eigene Struktur.
+- **Fälligkeit/Frist als Zeitpunkt + „mit/ohne Uhrzeit“:** nur so lässt sich „morgen“ von „morgen 14 Uhr“ trennen, ohne Zeitzonen- und Sommerzeitfehler.
+- **Trennregel im Code, nicht im Prompt:** Spec fordert Determinismus; ein Prompt garantiert „Salz und Pfeffer = zwei Einträge“ nicht.
+- **Rechte serverseitig + RLS statt nur Prompt:** Rolle wird frisch aus der DB gelesen, private Listen sind doppelt abgesichert (Abfragefilter + RLS) — auch gegen Admin.
+- **Lösch-Ticket wiederverwendet:** gleicher Mechanismus wie PROJ-87, damit Hörfehler per Voice nie etwas ohne „Ja“ löschen. Wenn möglich wird der Ticket-Code gemeinsam genutzt statt kopiert (Entscheidung in der Umsetzung, siehe Offene Punkte 3).
+- **Vorlagen-Antworten:** hat bei PROJ-87 erfundene Erfolge und Geschwätz beseitigt; wird übernommen.
+- **Kein HA_FAST:** Listen-Anfragen sind kein < 200-ms-Fall; sie laufen über den LLM-Tool-Pfad mit erzwungener Tool-Wahl.
+
+### E) Offene Punkte / Änderungen an bestehenden Teilen
+
+1. **Feinabstufung der Rechte:** Vorschlag wie oben — ein Rollen-Schalter „Listen nutzen“ im Admin-Bereich; die Unterschiede admin/user/child (Entfernen, Listen verwalten, Einkaufsliste) sind fest im Service. Alternative wäre ein eigener Schalter je Aktion — würde über die Spec hinausgehen.
+2. **Rückbau PROJ-83:** der Einkaufslisten-Pfad in `ha_path.py` (Schreiben nach `todo.einkaufsliste`, zugehörige Intents/Vorlagen, Tests) entfällt vollständig; HA-Sync-Daten zur Einkaufsliste werden darauf geprüft, ob sie Reste hinterlassen.
+3. **Gemeinsamer Ticket-Code:** `tickets.py` aus `alice-calendar` ist fachlich identisch nutzbar. Sauberste Lösung (gemeinsames Modul vs. angepasste Kopie in `alice-lists`) wird in der Umsetzung entschieden; Kalender-Verhalten darf sich nicht ändern.
+4. **PROJ-87-Anpassung Tagesabfrage:** Stichwort-Weiche und kombinierte Antwortvorlage liegen im Chat-Service; die bestehende reine Kalender-Antwort bleibt für „Termin/Kalender“-Anfragen unverändert.
+5. **Erste Nutzung / Startdaten:** Migration legt die gemeinsame „Einkaufsliste“ (gekennzeichnet) an; „Meine Aufgaben“ entsteht pro User beim ersten Gebrauch. Keine Datenmigration aus HA/Google (Out of Scope).
+6. **Speaker-ID:** unbekannter Sprecher funktioniert technisch bereits über die Nil-UUID; die Qualität der Erkennung gehört zu PROJ-103.
+7. **System-Prompt/Tool-Beschreibungen:** Erfolg nur nach bestätigtem Tool-Ergebnis melden; bei Rückfrage-Ergebnissen (mehrdeutig, unbekannte Liste, Duplikat, Vergangenheit, Löschticket) den User fragen; optionale Felder nie erfragen.
+
+### F) Neue/geänderte Infrastruktur
+
+- Neuer Service-Ordner `docker/compose/automations/alice-lists/` (Dockerfile, compose.yml, `.env.example`, Tests), Eintrag in `docker/compose/scripts/Makefile` (STACKS), `.gitignore` für `.env`
+- Neue nginx-Location `/api/lists/` → `alice-lists` (normale Timeouts, eigene Rate-Limit-Zone; für PROJ-107 vorbereitet; Chat-Tools laufen intern ohne nginx)
+- Neue Migration: Tabellen Listen + Einträge (RLS, Indizes), Standardliste am User, Flag „Listen nutzen“ in Vorlagen/Berechtigungen, angepasste Rechte-Zuweisungsfunktion, Backfill für bestehende User, Startliste „Einkaufsliste“
+- `alice-chat-stream`: neue Tool-Definitionen + Dispatch, Absichtserkennung/Weiche (Listen / Kalender / kombiniert), Vorlagen-Antworten, Berechtigungs-/Sprecher-Vorprüfung, HA_FAST-Umgehung, Prompt-Anpassung, neue Env `LISTS_URL`; Rückbau Einkaufslisten-Pfad
+- `alice-auth`: `/auth/permissions` liefert zusätzlich `can_use_lists`
+- Frontend: Rollen-Abschnitt „Listen“ in der Nutzerverwaltung, Service-Client, i18n-Keys (de/en) — keine neue Route
+- Täglicher Aufräum-Lauf (erledigte Einträge > 30 Tage) im Service
+
+### G) Dependencies (Pakete)
+
+- Backend `alice-lists`: `fastapi`, `uvicorn`, `asyncpg`, `httpx`, `redis` (Tickets/Rückfragen), `pyjwt` + `cryptography` (RS256), `tzdata` (Zeitzonen), `pytest` (Tests) — dieselben wie `alice-calendar`
+- Frontend: keine neuen Pakete (vorhandene shadcn/ui-Bausteine)
 
 ## QA Test Results
 _To be added by /qa_
