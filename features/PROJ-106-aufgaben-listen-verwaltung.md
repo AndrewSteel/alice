@@ -1,6 +1,6 @@
 # PROJ-106: Aufgaben- & Listen-Verwaltung (lokal) — Kern
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-10-08
 **Last Updated:** 2026-10-08
 
@@ -350,7 +350,145 @@ Datenbank/Service nicht erreichbar → klare Fehlermeldung ohne Erfolgsbehauptun
 Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-Passwort setzen); `LISTS_URL=http://alice-lists:8010` in `alice-chat-stream/.env`; Container `alice-lists` starten **vor** nginx-Reload (statischer `proxy_pass`); `alice-chat-stream`, `alice-auth` und Frontend neu bauen/deployen.
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-10-08
+**Umgebung:** lokal — Postgres-16-Testcontainer (init-schema + Migrationen 063–072), Redis-7-Container, `alice-lists`-Image gebaut und gestartet; `alice-chat-stream` per Unit-/Stream-Tests mit Fake-LLM. Kein echtes LLM und kein Voice PE lokal → Live-Testsätze sind Teil des Deploy-Live-Tests.
+**Tester:** QA Engineer (AI)
+
+### Automatisierte Tests
+- `alice-lists`: 101/101 grün (`LISTS_TEST_DSN` gegen Testcontainer)
+- `alice-chat-stream`: 355/355 grün (inkl. Kalender-Regression PROJ-87, HA-Pfad PROJ-83/84/85)
+- `alice-calendar`: 98/98 grün (unverändert)
+- Frontend: `tsc --noEmit` und `next build` sauber
+
+### Acceptance Criteria Status
+
+#### Listen
+- [x] Private Listen nur für Ersteller (auch nicht für Admin), gemeinsame für alle Berechtigten
+- [x] Start: gemeinsame „Einkaufsliste“ gekennzeichnet; „Meine Aufgaben“ beim ersten Gebrauch als Standardliste
+- [x] Anlegen (privat/gemeinsam), Umbenennen, Löschen, Standardliste, Übersicht mit Markierungen
+- [x] Namen case-insensitiv eindeutig unter sichtbaren Listen, Duplikat abgelehnt
+- [x] Gemeinsame Liste mit Namen einer fremden privaten erlaubt; Besitzer wird „privat oder gemeinsam?“ gefragt
+- [x] Ungefähre Namen („Baumarktliste“ → „Baumarkt“), Mehrdeutigkeit → Rückfrage; „Einkaufsliste/-zettel“ → gekennzeichnete Liste
+- [x] Unbekannte Liste → „Soll ich sie anlegen?“, kein Auto-Anlegen
+- [x] Löschen nur nach Rückfrage mit Anzahl; Einträge mitgelöscht; Standard fällt auf „Meine Aufgaben“; „Meine Aufgaben“ wird neu angelegt
+- [ ] BUG-3 (Low): Umbenennen in „Einkaufszettel“/„Einkaufsliste“ wird nicht abgelehnt (Liste danach per Name unerreichbar)
+
+#### Einkaufsliste
+- [x] Genau eine gemeinsame Liste gekennzeichnet (DB-Index), Name frei
+- [x] Nur Admin kennzeichnet; Bestätigung nennt die bisherige; private Listen nicht kennzeichenbar
+- [x] Nur Admin löscht sie (Rückfrage nennt „Einkaufsliste“); danach klare Ablehnung mit Admin-Hinweis
+- [x] HA_FAST-Einkaufslistenpfad vollständig entfernt, kein Schreiben nach `todo.einkaufsliste`
+
+#### Einträge — Felder
+- [x] Nur Titel Pflicht; Notiz, Fälligkeit/Frist (je mit optionaler Uhrzeit), Priorität
+- [x] Sprachregeln am/um → Fälligkeit, bis/spätestens → Frist, wichtig/unwichtig → Priorität (Prompt + Schema; LLM-Abbildung im Live-Test zu bestätigen); keine Nachfrage nach optionalen Feldern
+- [x] Vergangenes Datum → Rückfrage
+
+#### Einträge — Anlegen
+- [x] Ohne Liste → Standardliste; mit Liste → Auflösung
+- [x] Trennung an jedem „und“/Komma deterministisch, Mengen bleiben am Eintrag
+- [x] Einkaufsliste: offene Duplikate ohne Hinweis; erledigter Artikel wird wieder geöffnet
+- [x] Andere Listen: offenes Duplikat → Rückfrage
+- [ ] BUG-1 (High): Bestätigung zählt nicht alle angelegten Einträge auf, wenn das Modell mehrere Tool-Aufrufe in einer Runde macht
+
+#### Einträge — Anzeigen
+- [x] Alle genannten Abfragearten (Liste, Aufgaben, heute/morgen/Woche fällig, nur Fristen, überfällig, „steht X drauf?“, Anzahl)
+- [x] Ohne Listenname alle sichtbaren Listen; Listenname nur bei mehreren Listen
+- [x] Sortierung überfällig → früheres Datum → Priorität → ohne Datum; Fälligkeit/Frist unterscheidbar
+- [x] Notizen nur auf Nachfrage
+- [x] Voice max. 5 + Rest; Chat max. 50 + Kürzungshinweis
+- [x] Klare Leer-Meldungen
+- [x] Zeitzone des Users (Default Europe/Berlin)
+
+#### Kombinierte Tagesabfrage
+- [x] Termin/Kalender/„vor“ → nur Kalender
+- [x] Aufgabe/Frist/fällig/überfällig/Liste → nur Listen
+- [x] Allgemeine Tagesabfrage → eine kombinierte Antwort, Termine zuerst, Voice max. 5 gesamt
+- [x] Ohne Kalender-Berechtigung/-Verbindung nur Einträge; ohne Listen-Berechtigung nur Termine
+- [ ] BUG-4 (Low): fällt der Listen-Dienst aus, fehlt im kombinierten Ergebnis der Hinweis auf die Unvollständigkeit
+
+#### Ändern, Abhaken, Entfernen
+- [x] Alle Felder änderbar inkl. Verschieben; Bestätigung der neuen Fassung
+- [x] Identifikation über ungefähren Titel; mehrere → Rückfrage; keiner → Meldung
+- [x] Abhaken ohne Rückfrage, mit Zeitpunkt + Person; Wieder öffnen
+- [x] Mehrfach-Abhaken/-Entfernen, Nicht-Gefundene benannt, Rest ausgeführt
+- [x] Einkaufsliste: Entfernen ohne Rückfrage
+- [x] Andere Listen: Löschen nur nach „Ja“ im Folgeturn (serverseitiges Ticket + Ja-Wächter), ein Eintrag pro Rückfrage
+- [x] Erledigte abfragbar (30 Tage); „Räume … auf“; automatische Löschung nach 30 Tagen
+
+#### Berechtigungen und Sprecher
+- [x] Rollen-Flag im Admin-Bereich, Defaults admin/user/child an, guest aus (auch nicht lesend)
+- [x] Gemeinsame Listen umbenennen/löschen: Admin + Ersteller
+- [x] Ablehnung mit Grund
+- [ ] BUG-2 (Medium): Unbekannter Sprecher + andere Liste als Einkaufsliste → „Liste gibt es nicht, anlegen?“ bzw. „gibt es nicht“ statt Ablehnung mit Sprecher-Hinweis
+- [x] Private Listen strikt privat (auch gegen Admin)
+
+#### Antwortverhalten
+- [x] Vorlagen-Antworten kurz, ohne Technikbegriffe
+- [x] Rückfragen nur in den vorgesehenen Fällen
+- [x] Kein Erfolg ohne gespeichertes Ergebnis (erzwungene Tool-Runde, Text der Runde verworfen)
+- [x] „Ja“ löscht zuverlässig, „Nein“ nie; Rückfrage verfällt nach anderem Turn
+- [x] Voice: gesprochene Zeiten, keine Listen/Markdown; `conversation_end` nur ohne offene Rückfrage
+- [x] Listen-Anfragen/Rückfrage-Antworten umgehen HA_FAST („Öffne … wieder“ erst nach HA_FAST-Fehlschlag)
+- [x] Nutzersprache (de/en)
+- [ ] Live-Testsätze WebApp + Voice PE: offen — nur mit echtem LLM/Gerät prüfbar (Deploy-Live-Test)
+
+### Edge Cases Status
+- [x] Gleichzeitiges Abhaken/Entfernen → „bereits erledigt“/„nicht gefunden“, kein Fehler
+- [x] Eintrag zwischen Rückfrage und Bestätigung geändert/entfernt → nicht gelöscht, Meldung
+- [x] Abhaken eines erledigten Eintrags → „schon erledigt“
+- [x] Gleichnamige Einträge in mehreren Listen → Rückfrage mit Listennamen
+- [x] Uhrzeit ohne Datum → heute bzw. morgen, Bestätigung nennt Tag
+- [x] Frist vor Fälligkeit → Rückfrage
+- [x] Keine Einkaufsliste → Ablehnung auch für unbekannte Sprecher, Admin genannt
+- [x] Kind entfernt von Einkaufsliste → Hinweis auf Abhaken
+- [x] Rolle verliert Berechtigung → sofortige Sperre, private Listen bleiben
+- [x] User gelöscht → private Listen weg, gemeinsame bleiben (nur Admin verwaltet)
+- [x] Hörfehler → Bestätigung nennt Verstandenes
+- [x] Sehr lange Einträge ungekürzt (bis 2000 Zeichen)
+- [x] Zeitumstellung: Uhrzeit bleibt korrekte Ortszeit
+
+### Security Audit Results
+- [x] Authentifizierung: fehlender/ungültiger/abgelaufener JWT → 401
+- [x] Rolle aus DB statt JWT-Claim (gefälschter `role: admin` → 403 auf Admin-Endpoint)
+- [x] Fremde private Listen/Einträge weder sichtbar noch per `item_ref` adressierbar (auch Admin)
+- [x] Tickets an User + Session + Folgeturn gebunden; fremdes/abgelaufenes Ticket löscht nichts
+- [x] `confirmed=true` ohne offene Rückfrage wird ignoriert; Lösch-Bestätigung nur bei explizitem „Ja“
+- [x] SQL-Injection in Listen-/Eintragsnamen wirkungslos (parametrisierte Queries)
+- [x] HTML im Titel wird im Frontend nicht roh gerendert
+- [x] Ungültige Eingaben (Typen, UUIDs, > 30 Einträge, Überlängen) → `invalid_input`, kein 500
+- [x] `/internal/*` nicht über nginx erreichbar; eigene Rate-Limit-Zone `lists_limit`
+- [x] Keine Secrets/Stacktraces in Antworten
+
+### Bugs Found
+
+#### BUG-1: Parallele Tool-Aufrufe — nur die letzte Bestätigung wird ausgegeben
+- **Severity:** High
+- **Steps to Reproduce:** Modell zerlegt „Setze Milch und Butter auf die Einkaufsliste“ entgegen dem Prompt selbst und ruft `lists_add_items` zweimal in einer Runde auf → beide gespeichert, Antwort: „Ich habe Butter auf die Einkaufsliste gesetzt.“
+- **Ursache:** `streaming.py` überschreibt `template_reply` je Tool-Aufruf (gilt auch für Kalender).
+- **Expected:** Bestätigung nennt alle gespeicherten Einträge.
+
+#### BUG-2: Unbekannter Sprecher + andere Liste
+- **Severity:** Medium
+- **Steps to Reproduce:** Unbekannter Sprecher: „Setze Dübel auf die Liste Baumarkt“ → „Die Liste „Baumarkt“ gibt es nicht. Soll ich sie anlegen?“; „Was steht auf der Liste Baumarkt?“ → „gibt es nicht“.
+- **Expected:** Ablehnung mit Hinweis, dass Alice nicht weiß, wer spricht (Spec: alles außer Einkaufsliste-Hinzufügen).
+
+#### BUG-3: Umbenennen auf Einkaufslisten-Begriff
+- **Severity:** Low
+- **Steps to Reproduce:** „Benenne die Liste Probe in Einkaufszettel um“ → umbenannt; „Setze Y auf Einkaufszettel“ landet auf der Einkaufsliste.
+- **Expected:** Ablehnung wie beim Anlegen.
+
+#### BUG-4: Kombinierte Tagesabfrage ohne Hinweis bei Ausfall des Listen-Dienstes
+- **Severity:** Low
+- **Steps to Reproduce:** Listen-Dienst liefert `lists_unavailable`, Kalender ok → nur Termine, kein Hinweis.
+- **Expected:** Hinweis „Die Aufgaben waren nicht abrufbar“ analog zum Kalender.
+
+### Summary
+- **Acceptance Criteria:** 63 Prüfpunkte, 59 bestanden, 4 mit Bug; Live-Testsätze offen (Deploy)
+- **Bugs:** 0 Critical, 1 High, 1 Medium, 2 Low
+- **Security:** sauber
+- **Production Ready:** NOT READY (BUG-1 High)
 
 ## Deployment
 _To be added by /deploy_
