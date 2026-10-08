@@ -1,6 +1,6 @@
 # PROJ-106: Aufgaben- & Listen-Verwaltung (lokal) — Kern
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-10-08
 **Last Updated:** 2026-10-08
 
@@ -372,7 +372,7 @@ Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-P
 - [x] Ungefähre Namen („Baumarktliste“ → „Baumarkt“), Mehrdeutigkeit → Rückfrage; „Einkaufsliste/-zettel“ → gekennzeichnete Liste
 - [x] Unbekannte Liste → „Soll ich sie anlegen?“, kein Auto-Anlegen
 - [x] Löschen nur nach Rückfrage mit Anzahl; Einträge mitgelöscht; Standard fällt auf „Meine Aufgaben“; „Meine Aufgaben“ wird neu angelegt
-- [ ] BUG-3 (Low): Umbenennen in „Einkaufszettel“/„Einkaufsliste“ wird nicht abgelehnt (Liste danach per Name unerreichbar)
+- [x] ~~BUG-3 (Low)~~ behoben: Einkaufslisten-Begriffe sind für andere Listen reserviert (Anlegen + Umbenennen)
 
 #### Einkaufsliste
 - [x] Genau eine gemeinsame Liste gekennzeichnet (DB-Index), Name frei
@@ -390,7 +390,7 @@ Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-P
 - [x] Trennung an jedem „und“/Komma deterministisch, Mengen bleiben am Eintrag
 - [x] Einkaufsliste: offene Duplikate ohne Hinweis; erledigter Artikel wird wieder geöffnet
 - [x] Andere Listen: offenes Duplikat → Rückfrage
-- [ ] BUG-1 (High): Bestätigung zählt nicht alle angelegten Einträge auf, wenn das Modell mehrere Tool-Aufrufe in einer Runde macht
+- [x] ~~BUG-1 (High)~~ behoben: Bestätigung nennt alle gespeicherten Einträge, auch bei mehreren Tool-Aufrufen in einer Runde
 
 #### Einträge — Anzeigen
 - [x] Alle genannten Abfragearten (Liste, Aufgaben, heute/morgen/Woche fällig, nur Fristen, überfällig, „steht X drauf?“, Anzahl)
@@ -406,7 +406,7 @@ Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-P
 - [x] Aufgabe/Frist/fällig/überfällig/Liste → nur Listen
 - [x] Allgemeine Tagesabfrage → eine kombinierte Antwort, Termine zuerst, Voice max. 5 gesamt
 - [x] Ohne Kalender-Berechtigung/-Verbindung nur Einträge; ohne Listen-Berechtigung nur Termine
-- [ ] BUG-4 (Low): fällt der Listen-Dienst aus, fehlt im kombinierten Ergebnis der Hinweis auf die Unvollständigkeit
+- [x] ~~BUG-4 (Low)~~ behoben: Hinweis „Die Aufgaben waren nicht abrufbar.“
 
 #### Ändern, Abhaken, Entfernen
 - [x] Alle Felder änderbar inkl. Verschieben; Bestätigung der neuen Fassung
@@ -421,7 +421,7 @@ Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-P
 - [x] Rollen-Flag im Admin-Bereich, Defaults admin/user/child an, guest aus (auch nicht lesend)
 - [x] Gemeinsame Listen umbenennen/löschen: Admin + Ersteller
 - [x] Ablehnung mit Grund
-- [ ] BUG-2 (Medium): Unbekannter Sprecher + andere Liste als Einkaufsliste → „Liste gibt es nicht, anlegen?“ bzw. „gibt es nicht“ statt Ablehnung mit Sprecher-Hinweis
+- [x] ~~BUG-2 (Medium)~~ behoben: unbekannter Sprecher wird bei jeder anderen Liste mit Sprecher-Hinweis abgelehnt
 - [x] Private Listen strikt privat (auch gegen Admin)
 
 #### Antwortverhalten
@@ -489,6 +489,14 @@ Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-P
 - **Bugs:** 0 Critical, 1 High, 1 Medium, 2 Low
 - **Security:** sauber
 - **Production Ready:** NOT READY (BUG-1 High)
+
+### Re-QA 2026-10-08 (nach Bugfix)
+- **BUG-1** behoben: `streaming.py` sammelt die Vorlagen-Antworten aller Kalender-/Listen-Aufrufe einer Runde (gleiche Sätze nur einmal); `conversation_end` nur, wenn keine davon eine Rückfrage ist. Regressionstests: zwei parallele `lists_add_items` → beide bestätigt; Mischung mit Rückfrage → Sitzung bleibt offen.
+- **BUG-2** behoben: `resolve_list()` lehnt beim unbekannten Sprecher jeden Namen außer der Einkaufsliste (Alias oder echter Name) mit `unknown_speaker` ab — auch bei `confirmed=true`. Gegen den neu gebauten Container per HTTP verifiziert.
+- **BUG-3** behoben: neue Prüfung `reserved_name` beim Anlegen und Umbenennen; erlaubt nur für die Einkaufsliste selbst und für eine gemeinsame Liste eines Admins (um sie nach dem Löschen neu zu kennzeichnen). Per HTTP verifiziert.
+- **BUG-4** behoben: kombinierte Tagesabfrage nennt einen Ausfall des Listen-Dienstes.
+- Regression: `alice-lists` 102/102, `alice-chat-stream` 359/359, `alice-calendar` 98/98 grün; Container-Smoke (Health, Lösch-Ablauf mit Redis, unbekannter Sprecher → Einkaufsliste) ohne Fehler im Log.
+- **Ergebnis:** 63/63 Prüfpunkte im Code bestanden, 0 offene Bugs, Security sauber → **READY**. Offen nur der Live-Test der Testsätze mit echtem LLM über WebApp und Voice PE (Teil von `/deploy`).
 
 ## Deployment
 _To be added by /deploy_

@@ -219,8 +219,16 @@ async def test_unknown_speaker_may_only_add_to_shopping():
                  agent.query_items(unknown, {"range": "tomorrow"})):
         assert (await call)["error"] == "unknown_speaker"
     await agent.manage_list(make_ctx(USER), {"action": "create", "name": "Urlaub", "shared": True})
-    r = await agent.add_items(unknown, {"items": "x", "list": "Urlaub"})
-    assert r["status"] == "unknown_list"   # only the shopping list is visible to him
+    # QA BUG-2: any other list is refused with the speaker hint, never
+    # answered with "unknown list" / "shall I create it?"
+    for call in (agent.add_items(unknown, {"items": "x", "list": "Urlaub"}),
+                 agent.add_items(unknown, {"items": "x", "list": "Werkstatt"}),
+                 agent.add_items(make_ctx(None, turn=2, confirmed=True), {"items": "x", "list": "Werkstatt"}),
+                 agent.query_items(unknown, {"list": "Werkstatt"})):
+        assert (await call)["error"] == "unknown_speaker"
+    # the shopping list by its real name still works
+    r = await agent.add_items(unknown, {"items": "Brot", "list": "einkaufsliste"})
+    assert r["status"] == "added"
 
 
 # ---------------------------------------------------------------------------
@@ -481,3 +489,23 @@ async def test_latency_reasonable():
     t0 = time.monotonic()
     await agent.query_items(make_ctx(USER), {})
     assert time.monotonic() - t0 < 1.0
+
+
+async def test_shopping_alias_names_are_reserved():
+    """QA BUG-3: a list named like the shopping alias would be unreachable."""
+    r = await agent.manage_list(make_ctx(USER), {"action": "create", "name": "Einkaufszettel"})
+    assert r["error"] == "reserved_name"
+    await agent.manage_list(make_ctx(USER), {"action": "create", "name": "Probe"})
+    r = await agent.manage_list(make_ctx(USER), {"action": "rename", "name": "Probe", "new_name": "Einkaufszettel"})
+    assert r["error"] == "reserved_name"
+    # the shopping list itself may carry it
+    r = await agent.manage_list(make_ctx(ADMIN), {"action": "rename", "name": "Einkaufsliste",
+                                                  "new_name": "Einkaufszettel"})
+    assert r["status"] == "list_renamed"
+    # after deleting the shopping list an admin may create a shared one to flag
+    q = await agent.manage_list(make_ctx(ADMIN, turn=1), {"action": "delete", "name": "Einkaufszettel"})
+    await agent.confirm_delete(make_ctx(ADMIN, turn=2), {"ticket": q["ticket"]})
+    r = await agent.manage_list(make_ctx(ADMIN), {"action": "create", "name": "Einkaufsliste", "shared": True})
+    assert r["status"] == "list_created"
+    r = await agent.manage_list(make_ctx(USER), {"action": "create", "name": "Einkaufsliste", "shared": True})
+    assert r["error"] in ("reserved_name", "duplicate_list_name")

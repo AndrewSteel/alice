@@ -174,6 +174,13 @@ def resolve_list(ctx: Ctx, vis: Visible, name: str | None, scope: str | None = N
     if tx.is_shopping_alias(name):
         lst = vis.shopping
         return {"list": lst} if lst else _err(*ERR_NO_SHOPPING)
+    if ctx.unknown:
+        # Only the shopping list exists for him — any other name is refused
+        # with the speaker hint, never answered with "unknown list" (QA BUG-2).
+        shop = vis.shopping
+        if shop is not None and tx.match_names(name, [shop["name"]]):
+            return {"list": shop}
+        return _err(*ERR_UNKNOWN_SPEAKER)
     candidates = vis.lists
     if scope in ("private", "shared"):
         candidates = [l for l in candidates if l["is_shared"] == (scope == "shared")]
@@ -800,6 +807,18 @@ async def cleanup_list(ctx: Ctx, args: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Tool: list management
 # ---------------------------------------------------------------------------
+def _reserved_name(ctx: Ctx, name: str, shared: bool, lst: dict | None) -> dict | None:
+    """"Einkaufsliste"/"Einkaufszettel" always address the flagged list, so a
+    list with such a name would be unreachable (QA BUG-3). Allowed only for
+    the shopping list itself and for an admin's shared list (to be flagged
+    as the new shopping list)."""
+    if not tx.is_shopping_alias(name):
+        return None
+    if (lst is not None and lst.get("is_shopping")) or (shared and ctx.role == "admin"):
+        return None
+    return _err("reserved_name", "Dieser Name ist der Einkaufsliste vorbehalten.")
+
+
 _MANAGE_ACTIONS = ("create", "rename", "delete", "set_default", "set_shopping", "overview")
 
 
@@ -823,9 +842,10 @@ async def manage_list(ctx: Ctx, args: dict) -> dict:
         name = _str_arg(args, "name", MAX_LIST_NAME)
         if not name:
             raise tu.InputError("name ist erforderlich")
-        if tx.is_shopping_alias(name) and vis.shopping is not None:
-            return _err("duplicate_list_name", "Die Einkaufsliste gibt es schon.", name=vis.shopping["name"])
         shared = _flag(args, "shared")
+        reserved = _reserved_name(ctx, name, shared, None)
+        if reserved:
+            return reserved
         if shared:
             denied = permission_error(ctx, "create_shared", None)
             if denied:
@@ -850,6 +870,9 @@ async def manage_list(ctx: Ctx, args: dict) -> dict:
         denied = permission_error(ctx, "rename", lst)
         if denied:
             return denied
+        reserved = _reserved_name(ctx, new_name, lst["is_shared"], lst)
+        if reserved:
+            return reserved
         try:
             row = await db.rename_list(ctx.user_id, lst["id"], new_name)
         except db.DuplicateName:
