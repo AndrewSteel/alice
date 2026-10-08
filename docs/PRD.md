@@ -6,7 +6,7 @@
 
 ## Vision
 
-Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, durchgängig deutsche Zusammenfassungen, volle Sichtbarkeit über den Verarbeitungsstand) und erweitert Alice um eigenständige Agenten (Timer, Google Kalender/Aufgaben/Kontakte, Websuche) sowie eine leistungsfähigere Smart-Home-Steuerung mit variablen Intents und Raumkontext.
+Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, durchgängig deutsche Zusammenfassungen, volle Sichtbarkeit über den Verarbeitungsstand) und erweitert Alice um eigenständige Agenten (Timer, Google Kalender/Kontakte, eigene lokale Aufgaben-/Listenverwaltung, Websuche) sowie eine leistungsfähigere Smart-Home-Steuerung mit variablen Intents und Raumkontext.
 
 ## Target Users
 
@@ -35,10 +35,11 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P2       | Zeitgesteuerte HA-Befehle (PROJ-105, ausgegliedert aus PROJ-85 — "tu X um Uhrzeit Y", geplante Geräte-Aktion)       | 3.3       | Roadmap |
 | P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Deployed |
 | P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
-| P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Roadmap |
+| P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Verworfen (→ PROJ-106) |
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
 | P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Architected |
-| P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Roadmap |
+| P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Verworfen (→ PROJ-106) |
+| P2       | Aufgaben- & Listen-Verwaltung (lokal) — ersetzt PROJ-88/PROJ-100 (PROJ-106)                                       | 3.4       | Roadmap |
 | P2       | Kontakte-Agent — inkl. Settings-Tab „Kontakte", mehrere Google-Kontaktbücher pro User (PROJ-89)                    | 3.4       | Roadmap |
 | P2       | Websearch-Agent — Plan → begrenzter Such-Loop → Antwort (PROJ-90)                                                  | 3.4       | Roadmap |
 
@@ -52,12 +53,13 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | Variable HA-Intents (%-Werte, Mengen) funktionsfähig                       | Rolladen, Licht, Einkaufsliste                |
 | Timer/Wecker per Sprache setz-, änder-, abfrag-, löschbar                  | ja                                            |
 | Google-Agenten ohne lokale Datenspeicherung                                | nur Live-Abfragen                             |
-| Mehrere Google-Kalender/-Aufgabenlisten/-Kontaktbücher pro User verwaltbar | im Settings-Tab, analog Postfach-Verwaltung   |
+| Mehrere Google-Kalender/-Kontaktbücher pro User verwaltbar                 | im Settings-Tab, analog Postfach-Verwaltung   |
+| Aufgaben mit Uhrzeit, Frist und Erinnerung per Sprache verwaltbar          | ja                                            |
 | Websearch-Agent Such-Loop begrenzt                                         | hartes Maximum, keine Endlosschleife          |
 
 ## Constraints
 
-- **Lokal-First** bleibt Grundprinzip. **Ausnahme**: Google- und Websearch-Agenten benötigen zwingend Cloud-Zugriff (keine lokale Alternative) — nur Live-Abfragen, kein lokales Caching der Google-Daten
+- **Lokal-First** bleibt Grundprinzip. **Ausnahme**: Google- und Websearch-Agenten benötigen zwingend Cloud-Zugriff (keine lokale Alternative) — nur Live-Abfragen, kein lokales Caching der Google-Daten. Aufgaben/Listen werden lokal verwaltet (PROJ-106)
 - **Hardware**: Ryzen 9 + RTX 3090 (LLM + Whisper) + TITAN X (Embeddings + Speaker-ID)
 - **Zugang**: Nur über VPN erreichbar (kein öffentliches Internet)
 - **Sprache**: Primär Deutsch; Docs auf Deutsch, Code/Commits auf Englisch
