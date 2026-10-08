@@ -39,7 +39,11 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
 | P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Architected |
 | P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Verworfen (→ PROJ-106) |
-| P2       | Aufgaben- & Listen-Verwaltung (lokal) — ersetzt PROJ-88/PROJ-100 (PROJ-106)                                       | 3.4       | Roadmap |
+| P2       | Aufgaben- & Listen-Verwaltung (lokal) — ersetzt PROJ-88/PROJ-100 (PROJ-106)                                       | 3.4       | Planned |
+| P2       | Aufgaben-WebApp-Ansicht (PROJ-107, ausgegliedert aus PROJ-106)                                                     | 3.4       | Roadmap |
+| P2       | Aufgaben-Erinnerungen (PROJ-108, ausgegliedert aus PROJ-106)                                                       | 3.4       | Roadmap |
+| P2       | Wiederkehrende Aufgaben (PROJ-109, ausgegliedert aus PROJ-106)                                                     | 3.4       | Roadmap |
+| P2       | Unteraufgaben (PROJ-110, ausgegliedert aus PROJ-106)                                                               | 3.4       | Roadmap |
 | P2       | Kontakte-Agent — inkl. Settings-Tab „Kontakte", mehrere Google-Kontaktbücher pro User (PROJ-89)                    | 3.4       | Roadmap |
 | P2       | Websearch-Agent — Plan → begrenzter Such-Loop → Antwort (PROJ-90)                                                  | 3.4       | Roadmap |
 
