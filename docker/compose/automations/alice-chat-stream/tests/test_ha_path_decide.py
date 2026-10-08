@@ -1,4 +1,4 @@
-"""PROJ-83 — decide_path() routing for shopping-list and value commands."""
+"""PROJ-83 — decide_path() routing for value commands (shopping list: removed by PROJ-106)."""
 import asyncio
 
 import pytest
@@ -28,11 +28,11 @@ def _match(**kw):
     return IntentMatch(matched=True, certainty=0.9, **kw)
 
 
-def test_shopping_list_routes_ha_fast(stub_lookup):
+def test_shopping_list_no_longer_ha_fast(stub_lookup):
+    # PROJ-106: the shopping list is handled by alice-lists via the LLM path.
     stub_lookup({})  # nothing matches in Weaviate
     d = run(decide_path("Milch zur Einkaufsliste hinzufügen", client=None))
-    assert d.path == "HA_FAST"
-    assert d.shopping_items == ["Milch"]
+    assert d.path == "LLM_ONLY"
 
 
 def test_plain_free_text_still_llm_only(stub_lookup):
@@ -47,19 +47,16 @@ def test_value_command_routes_ha_fast(stub_lookup):
                                     parameters={"position": 50})})
     d = run(decide_path("Rolladen im Büro auf 37 Prozent stellen", client=None))
     assert d.path == "HA_FAST"
-    assert d.shopping_items == [None]
 
 
-def test_multi_command_value_plus_shopping(stub_lookup):
+def test_multi_command_value_plus_shopping_goes_llm(stub_lookup):
     stub_lookup({"licht": _match(entity_id="light.wohnzimmer", domain="light",
                                  service="light.turn_on",
                                  parameters={"brightness_pct": 50})})
     d = run(decide_path(
         "Licht im Wohnzimmer auf 30 Prozent und Butter auf die Einkaufsliste",
         client=None))
-    assert d.path == "HA_FAST"
-    assert d.shopping_items[-1] == "Butter"
-    assert d.shopping_items[0] is None
+    assert d.path == "LLM_ONLY"
 
 
 # ---------------------------------------------------------------------------

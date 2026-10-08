@@ -25,7 +25,7 @@ from fastapi.responses import Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, field_validator
 
-from . import admin_dashboard, calendar_tools, ha_path, memory, metrics, streaming
+from . import admin_dashboard, calendar_tools, ha_path, lists_replies, lists_tools, memory, metrics, streaming
 from . import timer_scheduler as _timer_scheduler
 from . import timers as _timers
 from .auth import verify_jwt
@@ -456,6 +456,12 @@ async def stream_chat_endpoint(
             # question must not be captured by the HA fast path.
             open_question = calendar_tools.take_open_question(session_id)
             skip_fast_path = calendar_tools.bypass_fast_path(user_message, open_question)
+            # PROJ-106 — lists requests, general day queries and replies to an
+            # open lists question are routed past HA_FAST as well.
+            lists_open = lists_tools.take_open_question(session_id)
+            lists_kind = None if (open_question and not lists_open) else \
+                lists_tools.classify(user_message, lists_open)
+            skip_fast_path = skip_fast_path or lists_tools.bypass_fast_path(lists_kind)
 
             # --- HA Fast-Path ---
             try:
@@ -477,7 +483,6 @@ async def stream_chat_endpoint(
                         text, ha_results = await ha_path.execute_ha_intents(
                             decision.intents, client,
                             parts=decision.parts,
-                            shopping_items=decision.shopping_items,
                             area_targets=decision.area_targets,
                             timer_actions=decision.timer_actions,
                             user_id=user_id,
@@ -545,6 +550,46 @@ async def stream_chat_endpoint(
                 except Exception as exc:
                     logger.warning("Calendar turn setup failed: %s", exc, extra=log_extra)
 
+            # PROJ-106 — lists availability + open follow-up question, and the
+            # calendar / lists / combined routing decided above.
+            lists_turn = None
+            if lists_tools.LISTS_URL:
+                try:
+                    turn_no = await memory.count_user_messages(session_id)
+                    async with httpx.AsyncClient() as lists_client:
+                        lists_turn = await lists_tools.start_turn(
+                            lists_client, raw_token, session_id, turn_no, source,
+                        )
+                    lists_turn.lang = (profile.get("preferences") or {}).get("sprache") or "de"
+                    lists_tools.prepare(lists_turn, user_message, lists_kind, lists_open)
+                    if lists_turn.prompt_lines:
+                        llm_system_prompt += "\n" + "\n".join(lists_turn.prompt_lines)
+                except Exception as exc:
+                    logger.warning("Lists turn setup failed: %s", exc, extra=log_extra)
+                    lists_turn = None
+            if lists_kind in ("lists", "lists_soft", "agenda") and calendar_turn is not None:
+                calendar_turn.force_tool = None
+            lists_usable = lists_turn is not None and lists_turn.enabled
+            if lists_kind == "agenda" and not lists_usable and calendar_turn is not None \
+                    and calendar_turn.enabled:
+                # Without lists access a day query is answered from the calendar alone.
+                calendar_turn.force_tool = ["calendar_list_events"]
+            elif lists_kind in ("lists", "agenda") and not lists_usable:
+                # No lists access (role / service down) and nothing else to answer
+                # with: decline from the template, never via a free LLM answer.
+                reason = (lists_turn.reason if lists_turn is not None else None) or "lists_unavailable"
+                lang = (profile.get("preferences") or {}).get("sprache") or "de"
+                text = lists_replies.compose(
+                    {"error": "forbidden" if reason == "forbidden" else "lists_unavailable"},
+                    lang, calendar_tools.channel_for(source),
+                )
+                final_text = text
+                yield f'data: {{"type":"token","content":{json.dumps(text, ensure_ascii=False)}}}\n\n'.encode("utf-8")
+                yield b'data: {"type":"conversation_end"}\n\n'
+                yield f'data: {{"type":"done","usage":{json.dumps(usage)}}}\n\n'.encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+
             async for sse_bytes, side_effect in streaming.stream_chat(
                 user_message=user_message,
                 history=history,
@@ -552,6 +597,7 @@ async def stream_chat_endpoint(
                 user_id=user_id,
                 anrede=anrede,
                 calendar=calendar_turn,
+                lists=lists_turn,
             ):
                 # Detect client disconnect — stop iterating gracefully.
                 if await request.is_disconnected():

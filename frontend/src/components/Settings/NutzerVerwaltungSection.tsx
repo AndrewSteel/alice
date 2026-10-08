@@ -12,6 +12,7 @@ import type { AdminUser } from "@/services/adminApi";
 import { UserTable } from "./UserTable";
 import { TimerRolesSection } from "./TimerRolesSection";
 import { CalendarRolesSection } from "./CalendarRolesSection";
+import { ListsRolesSection } from "./ListsRolesSection";
 import { CreateUserDialog } from "./CreateUserDialog";
 import { ResetOtpDialog } from "./ResetOtpDialog";
 import { SetCredentialsDialog } from "./SetCredentialsDialog";
@@ -291,6 +292,11 @@ export function NutzerVerwaltungSection() {
       {/* PROJ-87 — per-role calendar permission. */}
       <div className="pt-6 border-t border-border">
         <CalendarRolesSection />
+      </div>
+
+      {/* PROJ-106 — per-role lists permission. */}
+      <div className="pt-6 border-t border-border">
+        <ListsRolesSection />
       </div>
     </div>
   );

@@ -36,24 +36,6 @@ CONFIRMATION_DOMAINS = {"lock", "alarm_control_panel"}
 _PERCENT_PARAM_KEYS = {"brightness_pct", "position", "value"}
 _TEMPERATURE_PARAM_KEYS = {"temperature"}
 
-# Shopping-list trigger phrases (PROJ-83 baustein 3). Everything before the
-# trigger is taken verbatim as the item text.
-_SHOPPING_LIST_RE = re.compile(
-    r"^\s*(?:schreib(?:e)?\s+|setz(?:e)?\s+|pack(?:e)?\s+|füg(?:e)?\s+)?"
-    r"(?P<item>.+?)"
-    r"\s+(?:auf|zu|zur|zum|in|an)\s+"
-    r"(?:(?:die|der|den|das|meine[rn]?|unsere[rn]?|unser)\s+)?"
-    r"einkaufs(?:liste|zettel)"
-    r"(?:\s+(?:hinzu(?:fügen)?|schreiben|setzen|packen|aufnehmen))?"
-    r"\b.*$",
-    re.IGNORECASE,
-)
-# Trailing verb that may remain after the trigger phrase (e.g. "... hinzufügen").
-_SHOPPING_TRAILING_VERB_RE = re.compile(
-    r"\s+(?:hinzu(?:fügen)?|schreiben|setzen|packen|aufnehmen)\s*$", re.IGNORECASE
-)
-
-
 def extract_numeric_value(text: str) -> int | None:
     """Extract the first numeric value from a spoken command part.
 
@@ -93,23 +75,6 @@ def classify_value_type(service: str | None, parameters: dict[str, Any] | None) 
         return ("percent", "position")
     return None
 
-
-def detect_shopping_list_item(part: str) -> str | None:
-    """Detect a 'add X to the shopping list' command and return the item text.
-
-    Returns the free-text item (verbatim, incl. quantity like '2 Packungen
-    Milch'), or None if the part is not a shopping-list command.
-    """
-    m = _SHOPPING_LIST_RE.match(part.strip())
-    if not m:
-        return None
-    item = m.group("item").strip()
-    item = _SHOPPING_TRAILING_VERB_RE.sub("", item).strip()
-    # Strip a leading imperative verb the outer group didn't catch.
-    item = re.sub(
-        r"^(?:schreib(?:e)?|setz(?:e)?|pack(?:e)?|füg(?:e)?|nimm)\s+", "", item, flags=re.IGNORECASE
-    ).strip()
-    return item or None
 
 _SPLITTERS = [
     "und dann", "und danach", "und außerdem",
@@ -355,9 +320,7 @@ class HARouteDecision:
     path: str            # "HA_FAST" or "LLM_ONLY"
     parts: list[str]
     intents: list[IntentMatch]
-    # PROJ-83 — shopping-list item text per part (None = not a shopping-list part).
-    shopping_items: list[str | None] | None = None
-    # PROJ-84 — per-part area resolution (None = not applicable, e.g. shopping list).
+    # PROJ-84 — per-part area resolution (None = not applicable, e.g. timer).
     area_targets: list[AreaResolution | None] | None = None
     # PROJ-85 — timer action per part ("set"/"extend"/… or None). A non-None
     # entry means the timer handler owns this part, not Home Assistant.
@@ -369,9 +332,9 @@ async def decide_path(
 ) -> HARouteDecision:
     """
     Project decision: only HA_FAST vs LLM_ONLY (no HYBRID).
-    A request is HA_FAST iff every part either matched a Weaviate intent with
-    certainty >= threshold OR is a recognised shopping-list command,
-    AND no Weaviate error occurred.
+    A request is HA_FAST iff every part matched a Weaviate intent with
+    certainty >= threshold AND no Weaviate error occurred. (The PROJ-83
+    shopping-list branch was removed by PROJ-106 — lists run via alice-lists.)
 
     PROJ-84: for a matched part that names no device, the target entities are
     re-resolved from the named room, else the speaking device's room (`source`),
@@ -381,17 +344,9 @@ async def decide_path(
 
     parts = split_message(message)
 
-    # PROJ-83 — shopping-list commands are free text and never match Weaviate;
-    # detect them up front so a part is not misrouted to LLM_ONLY.
-    shopping_items: list[str | None] = [detect_shopping_list_item(p) for p in parts]
-
     intents: list[IntentMatch] = []
-    for p, shop in zip(parts, shopping_items):
-        if shop is not None:
-            # Placeholder — this part is handled by the shopping-list branch.
-            intents.append(IntentMatch(matched=True, certainty=1.0, domain="todo"))
-        else:
-            intents.append(await lookup_intent(p, client))
+    for p in parts:
+        intents.append(await lookup_intent(p, client))
 
     # PROJ-85 — a matched intent with domain "timer" is handled by the timer
     # handler, not Home Assistant. Recognised here so area resolution and HA
@@ -410,14 +365,11 @@ async def decide_path(
     area_targets: list[AreaResolution | None] = [None] * len(parts)
     area_lookup_failed = False
     if all_matched and not any_error:
-        needs_area = any(
-            shop is None and i.domain and i.domain not in ("todo", "timer")
-            for i, shop in zip(intents, shopping_items)
-        )
+        needs_area = any(i.domain and i.domain != "timer" for i in intents)
         area_names = await _load_area_names() if needs_area else []
         entity_index = await _load_entity_name_index() if needs_area else []
-        for idx, (p, shop, intent) in enumerate(zip(parts, shopping_items, intents)):
-            if shop is not None or not intent.domain or intent.domain in ("todo", "timer"):
+        for idx, (p, intent) in enumerate(zip(parts, intents)):
+            if not intent.domain or intent.domain == "timer":
                 continue
             if _text_names_entity(p, entity_index):
                 area_targets[idx] = AreaResolution(mode="entity")
@@ -443,7 +395,7 @@ async def decide_path(
         else "LLM_ONLY"
     )
     return HARouteDecision(
-        path=path, parts=parts, intents=intents, shopping_items=shopping_items,
+        path=path, parts=parts, intents=intents,
         area_targets=area_targets, timer_actions=timer_actions,
     )
 
@@ -503,7 +455,7 @@ async def _load_friendly_names(entity_ids: list[str]) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# PROJ-83 — value re-extraction, range checks, shopping list
+# PROJ-83 — value re-extraction, range checks
 # ---------------------------------------------------------------------------
 async def _fetch_temp_range(entity_id: str, headers: dict, client: httpx.AsyncClient) -> tuple[float, float] | None:
     """Read min_temp/max_temp for a climate entity from HA. None on any failure."""
@@ -573,46 +525,6 @@ async def _resolve_value(
             ),
         }
     return {"ok": True, "params": {**(intent.parameters or {}), param_key: value}}
-
-
-async def _add_shopping_list_item(
-    item: str, headers: dict, client: httpx.AsyncClient
-) -> dict[str, Any]:
-    """Add a free-text item to the first active todo entity."""
-    from . import memory
-
-    try:
-        row = await memory.pool().fetchrow(
-            "SELECT entity_id FROM alice.ha_entities "
-            "WHERE domain = 'todo' AND is_active = TRUE "
-            "ORDER BY entity_id LIMIT 1"
-        )
-    except Exception as exc:
-        logger.warning("Shopping-list entity lookup failed: %s", exc)
-        return {"success": False, "msg": "Ich konnte die Einkaufsliste gerade nicht erreichen."}
-
-    if not row or not row["entity_id"]:
-        return {"success": False, "msg": "Es ist keine Einkaufsliste für Alice freigegeben."}
-
-    entity_id = row["entity_id"]
-    try:
-        resp = await client.post(
-            f"{HA_URL}/api/services/todo/add_item",
-            json={"entity_id": entity_id, "item": item},
-            headers=headers,
-            timeout=10.0,
-        )
-        if 200 <= resp.status_code < 300:
-            return {"success": True, "entity": entity_id, "item": item,
-                    "msg": f"„{item}“ auf die Einkaufsliste gesetzt."}
-        return {"success": False, "entity": entity_id,
-                "msg": f"Ich konnte „{item}“ nicht auf die Einkaufsliste setzen (HTTP {resp.status_code})."}
-    except httpx.TimeoutException:
-        return {"success": False, "entity": entity_id,
-                "msg": "Zeitüberschreitung beim Eintrag auf die Einkaufsliste."}
-    except Exception as exc:
-        return {"success": False, "entity": entity_id,
-                "msg": f"Netzwerkfehler beim Eintrag auf die Einkaufsliste: {exc}"}
 
 
 async def _do_service_call(
@@ -720,7 +632,6 @@ async def execute_ha_intents(
     intents: list[IntentMatch],
     client: httpx.AsyncClient,
     parts: list[str] | None = None,
-    shopping_items: list[str | None] | None = None,
     area_targets: list[AreaResolution | None] | None = None,
     timer_actions: list[str | None] | None = None,
     user_id: str | None = None,
@@ -730,9 +641,8 @@ async def execute_ha_intents(
     """
     Execute every HA_FAST intent. Returns (response_text, results).
 
-    `parts` and `shopping_items` are parallel to `intents` (PROJ-83): `parts`
-    supplies the original text for per-intent value re-extraction, and a
-    non-None `shopping_items[i]` marks part i as a shopping-list command.
+    `parts` is parallel to `intents` (PROJ-83) and supplies the original text
+    for per-intent value re-extraction.
 
     `area_targets` is parallel to `intents` (PROJ-84): a non-None entry with
     mode "area" expands the call to every entity in a room; mode "ask" means the
@@ -746,7 +656,6 @@ async def execute_ha_intents(
     """
     n = len(intents)
     parts = (parts or [""] * n)[:n] + [""] * max(0, n - len(parts or []))
-    shopping_items = (shopping_items or [None] * n)[:n] + [None] * max(0, n - len(shopping_items or []))
     area_targets = (area_targets or [None] * n)[:n] + [None] * max(0, n - len(area_targets or []))
     timer_actions = (timer_actions or [None] * n)[:n] + [None] * max(0, n - len(timer_actions or []))
 
@@ -795,13 +704,11 @@ async def execute_ha_intents(
 
     needs_confirmation = [i for i in intents if i.requires_confirmation]
 
-    # Pair every intent with its text part / shopping flag / area target.
+    # Pair every intent with its text part / area target.
     # PROJ-85 — timer parts were already handled above; drop them here.
     work = [
-        (intent, part, shop, area)
-        for intent, part, shop, area, tmr in zip(
-            intents, parts, shopping_items, area_targets, timer_actions
-        )
+        (intent, part, area)
+        for intent, part, area, tmr in zip(intents, parts, area_targets, timer_actions)
         if not intent.requires_confirmation and tmr is None
     ]
 
@@ -817,7 +724,7 @@ async def execute_ha_intents(
         return [intent.entity_id]
 
     all_entity_ids = [
-        e for i, _, _, a in work for e in _targets(i, a) if e
+        e for i, _, a in work for e in _targets(i, a) if e
     ]
     # Friendly names for all involved entities (PROJ-83 BUG-3 — nicer German
     # in success/range messages).
@@ -829,8 +736,8 @@ async def execute_ha_intents(
     # they only get the "number present?" check (range checks need the real
     # room entities, not the arbitrary Weaviate match). ---
     resolved_by_idx: dict[int, dict[str, Any]] = {}
-    for idx, (intent, part, shop, area) in enumerate(work):
-        if shop is not None or not intent.service or "." not in intent.service:
+    for idx, (intent, part, area) in enumerate(work):
+        if not intent.service or "." not in intent.service:
             continue
         is_area = area is not None and area.mode == "area"
         vt = classify_value_type(intent.service, intent.parameters)
@@ -851,14 +758,7 @@ async def execute_ha_intents(
     results: list[dict[str, Any]] = []
     out_parts: list[str] = []
 
-    for idx, (intent, part, shop, area) in enumerate(work):
-        # --- Shopping-list branch (PROJ-83 baustein 3) ---
-        if shop is not None:
-            r = await _add_shopping_list_item(shop, headers, client)
-            results.append(r)
-            out_parts.append(r.get("msg") or ("Erledigt." if r.get("success") else "Fehler."))
-            continue
-
+    for idx, (intent, part, area) in enumerate(work):
         if not intent.service or "." not in intent.service:
             r = {"entity": intent.entity_id, "success": False,
                  "msg": f"Ungültiger Service: {intent.service}"}

@@ -243,67 +243,6 @@ def test_entity_offline_error_is_friendly():
 
 
 # ---------------------------------------------------------------------------
-# Shopping list
-# ---------------------------------------------------------------------------
-class _FakePool:
-    def __init__(self, row):
-        self._row = row
-
-    async def fetchrow(self, *args, **kwargs):
-        return self._row
-
-
-def _patch_pool(monkeypatch, row):
-    import app.memory as memory
-    monkeypatch.setattr(memory, "pool", lambda: _FakePool(row))
-
-
-def test_shopping_list_add_item(monkeypatch):
-    _patch_pool(monkeypatch, {"entity_id": "todo.einkaufsliste"})
-    shop_intent = IntentMatch(matched=True, certainty=1.0, domain="todo")
-    client = FakeClient()
-    text, results = run(execute_ha_intents(
-        [shop_intent], client,
-        parts=["2 Packungen Milch zur Einkaufsliste hinzufügen"],
-        shopping_items=["2 Packungen Milch"]))
-    assert client.posts[0]["url"].endswith("/api/services/todo/add_item")
-    assert client.posts[0]["json"] == {"entity_id": "todo.einkaufsliste", "item": "2 Packungen Milch"}
-    assert results[0]["success"] is True
-
-
-def test_shopping_list_very_long_item_not_truncated(monkeypatch):
-    _patch_pool(monkeypatch, {"entity_id": "todo.einkaufsliste"})
-    shop_intent = IntentMatch(matched=True, certainty=1.0, domain="todo")
-    client = FakeClient()
-    long_item = "einen großen Sack Bio-Kartoffeln festkochend für das Wochenende"
-    run(execute_ha_intents(
-        [shop_intent], client, parts=[long_item + " zur Einkaufsliste hinzufügen"],
-        shopping_items=[long_item]))
-    assert client.posts[0]["json"]["item"] == long_item
-
-
-def test_shopping_list_duplicate_still_added(monkeypatch):
-    # No dedup — follows HA default behaviour.
-    _patch_pool(monkeypatch, {"entity_id": "todo.einkaufsliste"})
-    shop_intent = IntentMatch(matched=True, certainty=1.0, domain="todo")
-    client = FakeClient()
-    _, results = run(execute_ha_intents(
-        [shop_intent], client, parts=["Milch zur Einkaufsliste"], shopping_items=["Milch"]))
-    assert results[0]["success"] is True
-
-
-def test_shopping_list_no_list_configured(monkeypatch):
-    _patch_pool(monkeypatch, None)
-    shop_intent = IntentMatch(matched=True, certainty=1.0, domain="todo")
-    client = FakeClient()
-    text, results = run(execute_ha_intents(
-        [shop_intent], client, parts=["Milch zur Einkaufsliste"],
-        shopping_items=["Milch"]))
-    assert client.posts == []
-    assert "keine Einkaufsliste" in text
-
-
-# ---------------------------------------------------------------------------
 # Non-value intent — no regression
 # ---------------------------------------------------------------------------
 def test_valueless_intent_unchanged():

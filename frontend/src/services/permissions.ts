@@ -16,6 +16,8 @@ export interface SystemPermissions {
   can_manage_mailboxes: boolean;
   /** PROJ-87 — from permissions_assistant, gates the "Kalender" tab. */
   can_use_calendar: boolean;
+  /** PROJ-106 — from permissions_assistant (lists via chat/voice). */
+  can_use_lists: boolean;
   [flag: string]: boolean;
 }
 

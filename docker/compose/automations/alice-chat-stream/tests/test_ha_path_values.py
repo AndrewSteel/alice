@@ -1,12 +1,11 @@
-"""PROJ-83 — unit tests for value re-extraction, classification and
-shopping-list detection in ha_path.py.
+"""PROJ-83 — unit tests for value re-extraction and classification in
+ha_path.py (shopping-list detection was removed by PROJ-106).
 
 Only the pure (non-async, no-httpx) helpers are exercised here; conftest.py
 stubs httpx, so the HTTP-touching paths are covered by /qa integration.
 """
 from app.ha_path import (  # noqa: E402
     classify_value_type,
-    detect_shopping_list_item,
     extract_numeric_value,
 )
 
@@ -81,37 +80,3 @@ class TestClassifyValueType:
 
     def test_temperature_wins_over_percent(self):
         assert classify_value_type("x.y", {"temperature": 5, "brightness_pct": 5}) == ("temperature", "temperature")
-
-
-# ---------------------------------------------------------------------------
-# detect_shopping_list_item
-# ---------------------------------------------------------------------------
-class TestDetectShoppingListItem:
-    def test_zur_einkaufsliste_hinzufuegen(self):
-        assert detect_shopping_list_item("Milch zur Einkaufsliste hinzufügen") == "Milch"
-
-    def test_auf_die_einkaufsliste(self):
-        assert detect_shopping_list_item("Butter auf die Einkaufsliste") == "Butter"
-
-    def test_schreib_prefix(self):
-        assert detect_shopping_list_item("schreib Käse auf die Einkaufsliste") == "Käse"
-
-    def test_quantity_in_item(self):
-        assert detect_shopping_list_item("2 Packungen Milch zur Einkaufsliste hinzufügen") == "2 Packungen Milch"
-
-    def test_long_free_text_item(self):
-        txt = "einen großen Sack Kartoffeln für das Wochenende zur Einkaufsliste hinzufügen"
-        assert detect_shopping_list_item(txt) == "einen großen Sack Kartoffeln für das Wochenende"
-
-    def test_einkaufszettel_synonym(self):
-        assert detect_shopping_list_item("Eier auf den Einkaufszettel") == "Eier"
-
-    def test_not_a_shopping_command(self):
-        assert detect_shopping_list_item("Licht im Wohnzimmer einschalten") is None
-        assert detect_shopping_list_item("Rolladen im Büro auf 50 Prozent stellen") is None
-
-    def test_setze_auf_die_liste(self):
-        assert detect_shopping_list_item("setze Tomaten auf die Einkaufsliste") == "Tomaten"
-
-    def test_meine_einkaufsliste(self):
-        assert detect_shopping_list_item("Zwiebeln zu meiner Einkaufsliste hinzufügen") == "Zwiebeln"

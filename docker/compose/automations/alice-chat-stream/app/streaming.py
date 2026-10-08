@@ -28,7 +28,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from . import calendar_replies, calendar_tools, metrics, tools
+from . import calendar_replies, calendar_tools, lists_replies, lists_tools, metrics, tools
 
 logger = logging.getLogger("alice-chat-stream.streaming")
 
@@ -143,6 +143,9 @@ def _build_tool_status(tool_name: str, args: dict[str, Any]) -> str:
     if calendar_tools.is_calendar_tool(tool_name):
         return _truncate(calendar_tools.tool_status(tool_name, args), TOOL_STATUS_MAX_LEN)
 
+    if lists_tools.is_lists_tool(tool_name):
+        return _truncate(lists_tools.tool_status(tool_name, args), TOOL_STATUS_MAX_LEN)
+
     if tool_name == "remember":
         key = str(args.get("key") or "").strip()
         value_raw = args.get("value")
@@ -222,6 +225,9 @@ def _build_tool_summary(tool_name: str, ok: bool, result: dict[str, Any]) -> str
     if calendar_tools.is_calendar_tool(tool_name):
         return _truncate(calendar_tools.tool_summary(tool_name, result), TOOL_SUMMARY_MAX_LEN)
 
+    if lists_tools.is_lists_tool(tool_name):
+        return _truncate(lists_tools.tool_summary(tool_name, result), TOOL_SUMMARY_MAX_LEN)
+
     return ""
 
 
@@ -259,6 +265,7 @@ async def stream_chat(
     user_id: str,
     anrede: str = "du",
     calendar: calendar_tools.CalendarTurn | None = None,
+    lists: lists_tools.ListsTurn | None = None,
 ) -> AsyncIterator[tuple[bytes, dict]]:
     """
     Yields (sse_bytes, side_effect_dict). side_effect_dict carries data the
@@ -268,6 +275,7 @@ async def stream_chat(
 
     `calendar` (PROJ-87): when enabled, the calendar tools are offered and
     their calls are routed to alice-calendar instead of tools.execute_tool.
+    `lists` (PROJ-106): the same for the lists tools / alice-lists.
     """
     base_tools = tools.tool_schema()
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -280,8 +288,9 @@ async def stream_chat(
     usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
     rounds = 0
     thinking_start_sent = False
-    # PROJ-87: set when a calendar result was answered from a template.
-    calendar_terminal = False
+    # PROJ-87/106: set when a calendar/lists result was answered from a
+    # template and no question is pending (the voice session may end).
+    template_terminal = False
 
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
         while rounds <= MAX_TOOL_ROUNDS:
@@ -294,9 +303,9 @@ async def stream_chat(
                 "stream_options": {"include_usage": True},
                 "max_tokens": LLM_MAX_TOKENS,
             }
-            # PROJ-87: calendar tools when permitted; a calendar request forces a
-            # calendar tool call in the first round (no invented results).
-            round_tool_list, tool_choice = calendar_tools.round_tools(base_tools, calendar, rounds)
+            # PROJ-87/106: calendar / lists tools when permitted; such a request
+            # forces a matching tool call in the first round (no invented results).
+            round_tool_list, tool_choice = lists_tools.round_tools(base_tools, calendar, lists, rounds)
             # In a forced tool round the reply comes from the tool result; text
             # the model writes before its call is dropped, not streamed / read
             # aloud (live: an invented reminder question before list_events).
@@ -422,7 +431,7 @@ async def stream_chat(
             messages.append(assistant_msg)
 
             # Execute each tool, emit start/end events, append results
-            calendar_reply: str | None = None
+            template_reply: str | None = None
             for tc in pending_tool_calls:
                 fn = (tc.get("function") or {})
                 tool_name = fn.get("name") or "unknown"
@@ -453,8 +462,15 @@ async def stream_chat(
                     # of another LLM round (short, never an invented success).
                     reply = calendar_replies.compose(result, calendar.lang, calendar.channel)
                     if reply is not None:
-                        calendar_reply = reply
-                        calendar_terminal = calendar_replies.is_terminal(result)
+                        template_reply = reply
+                        template_terminal = calendar_replies.is_terminal(result)
+                elif lists_tools.is_lists_tool(tool_name) and lists is not None:
+                    result = await lists_tools.execute(tool_name, args, client, lists, calendar)
+                    # PROJ-106: same template approach as the calendar.
+                    reply = lists_replies.compose(result, lists.lang, lists.channel)
+                    if reply is not None:
+                        template_reply = reply
+                        template_terminal = lists_replies.is_terminal(result)
                 else:
                     result = await tools.execute_tool(tool_name, args, user_id, client)
                 ok = "error" not in result
@@ -505,11 +521,11 @@ async def stream_chat(
                 if vision_items:
                     yield (_sse({"type": "vision_results", "results": vision_items}), {})
 
-            if calendar_reply is not None:
+            if template_reply is not None:
                 sep = "\n\n" if accumulated_text.strip() else ""
-                accumulated_text += sep + calendar_reply
-                messages.append({"role": "assistant", "content": calendar_reply})
-                yield (_sse({"type": "token", "content": sep + calendar_reply}), {})
+                accumulated_text += sep + template_reply
+                messages.append({"role": "assistant", "content": template_reply})
+                yield (_sse({"type": "token", "content": sep + template_reply}), {})
                 break
 
             if not done_flag:
@@ -531,7 +547,7 @@ async def stream_chat(
         # Signal conversation end for HA commands. The Wyoming voice path uses
         # this to close the session immediately after the TTS confirmation plays,
         # rather than waiting 6 s for the silence-detection turn.
-        if calendar_terminal or any(tc.get("tool") == "home_assistant" for tc in tool_call_log):
+        if template_terminal or any(tc.get("tool") == "home_assistant" for tc in tool_call_log):
             yield (_sse({"type": "conversation_end"}), {})
         yield (_sse({"type": "done", "usage": usage}), side)
         yield (b"data: [DONE]\n\n", {})

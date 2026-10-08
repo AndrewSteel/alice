@@ -1,6 +1,6 @@
 # PROJ-106: Aufgaben- & Listen-Verwaltung (lokal) — Kern
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-10-08
 **Last Updated:** 2026-10-08
 
@@ -315,6 +315,39 @@ Datenbank/Service nicht erreichbar → klare Fehlermeldung ohne Erfolgsbehauptun
 
 - Backend `alice-lists`: `fastapi`, `uvicorn`, `asyncpg`, `httpx`, `redis` (Tickets/Rückfragen), `pyjwt` + `cryptography` (RS256), `tzdata` (Zeitzonen), `pytest` (Tests) — dieselben wie `alice-calendar`
 - Frontend: keine neuen Pakete (vorhandene shadcn/ui-Bausteine)
+
+## Implementation Notes (Backend + Frontend)
+
+**Umgesetzt:** 2026-10-08
+
+### Gebaut
+- **Migration `sql/migrations/072-proj106-lists.sql`:** `alice.lists` (privat/gemeinsam, Einkaufslisten-Kennzeichen; Namens-Eindeutigkeit je Sichtbarkeitsbereich und „höchstens eine Einkaufsliste“ per Unique-Index, „nur gemeinsame Listen können Einkaufsliste sein“ per CHECK), `alice.list_items` (Fälligkeit/Frist je Zeitpunkt + „mit Uhrzeit“, Priorität, Notiz, erledigt wann/von wem), `alice.list_preferences` (Standardliste), Flag `can_use_lists` (admin/user/child an, guest aus) inkl. Backfill und angepasster `init_user_permissions()`, Startliste „Einkaufsliste“. Idempotent, gegen frischen Postgres-16-Container verifiziert.
+- **Neuer Service `alice-lists`** (Port 8010, `docker/compose/automations/alice-lists/`): Tools `add_items`, `query_items`, `complete_items`, `reopen_items`, `update_item`, `remove_items`, `confirm_delete`, `cleanup_list`, `manage_list`; Admin-Endpoints `/lists/admin/roles`; täglicher Aufräum-Lauf (erledigte Einträge > 30 Tage, alle 6 h geprüft). Rolle wird je Anfrage frisch aus `alice.users` gelesen (Rollen-Claim im JWT wird ignoriert). Trennregel („und“/Komma, ohne Ausnahme) deterministisch in `textutil.split_items()`.
+- **`alice-chat-stream`:** `lists_tools.py` (Weiche Kalender / Listen / kombinierte Tagesabfrage vor HA_FAST, erzwungene Tool-Wahl, offene Rückfrage, Tool-Schema, `lists_agenda` fragt Kalender + Listen parallel ab), `lists_replies.py` (Vorlagen-Antworten de/en, Sprachausgabe ohne Listen/Markdown, `conversation_end` nur ohne offene Rückfrage); `streaming.py` und `main.py` angebunden; neue Env `LISTS_URL`. Ohne Listen-Berechtigung wird eine Listen-Anfrage direkt per Vorlage abgelehnt (kein freier LLM-Text).
+- **Rückbau PROJ-83:** Einkaufslisten-Zweig in `ha_path.py` (Erkennung, `todo/add_item`, `shopping_items`) inkl. Tests entfernt. Der HA-Sync hat keine Todo-Intent-Vorlagen — es bleiben keine Utterances zurück (nur die Entity-Zeile in `alice.ha_entities`, wirkungslos).
+- **PROJ-87-Anpassung:** `calendar_tools` unterscheidet explizite Kalender-Wörter von der allgemeinen Tagesfrage; ohne `LISTS_URL` bleibt das Kalender-Verhalten unverändert.
+- **`alice-auth`:** `/auth/permissions` liefert zusätzlich `can_use_lists`.
+- **Frontend:** `ListsRolesSection` (Rollen-Schalter „Listen“) in der Nutzer-Verwaltung, `services/lists.ts`, i18n de/en.
+- **Infra:** Makefile-STACKS, nginx `location ^~ /api/lists/` (Zone `lists_limit` 60r/m, nur GET/PUT; `/internal/*` nicht erreichbar), `.gitignore` (`alice-lists/.env`).
+
+### Entscheidungen / Abweichungen vom Tech Design
+- **Offene Punkte 1 + 3 wie vorgeschlagen:** ein Rollen-Schalter „Listen nutzen“, Feinabstufung admin/user/child fest im Service; Ticket-Code als angepasste Kopie (`alice:lists:`-Präfix) — `alice-calendar` unverändert.
+- **Standardliste** in eigener Tabelle `alice.list_preferences` statt Spalte an `alice.users` (keine Änderung an der Auth-Tabelle).
+- **RLS:** auf allen neuen Tabellen aktiv, Policies wie im Projektmuster (`calendar_selections`) permissiv — der Service verbindet als Schema-Owner. Privatheit wird durch harte Besitzer-Filter in **jeder** Abfrage erzwungen (auch gegen Admin). `FORCE ROW LEVEL SECURITY` mit Session-Variablen wurde verworfen, weil es Backups/`pg_dump` des Owners brechen würde.
+- **Ungefähre Namensauflösung** in Python (`difflib`, Kern ohne „Liste“/Artikel) statt PostgreSQL-Ähnlichkeitssuche — Listenzahl pro Haushalt ist klein, keine Extension nötig.
+- **Bestätigungen serverseitig abgesichert:** `confirmed=true` zählt nur, wenn für User+Session eine offene Rückfrage aus dem Vorturn existiert; `lists_confirm_delete` wird im Chat-Service nur bei ausdrücklichem „Ja“ ausgeführt (sonst „Okay, ich habe nichts gelöscht.“).
+- **„Weiche“ Listen-Absicht** für „Öffne … wieder“ / „… ist doch nicht da“: HA_FAST bekommt zuerst die Chance (sonst würde „Öffne den Rolladen wieder“ falsch geroutet); trifft HA_FAST nicht, wird auf die Listen-Tools gezwungen.
+- **Mehrere Einträge löschen außerhalb der Einkaufsliste:** Rückfrage für den ersten Eintrag, die übrigen werden genannt und müssen einzeln gelöscht werden (Spec: genau ein Eintrag pro Rückfrage).
+- **Identische Einträge** (z. B. zweimal „Milch“ auf der Einkaufsliste) gelten bei Abhaken/Entfernen nicht als mehrdeutig; pro Nennung wird ein Eintrag bearbeitet.
+- **Gemischte Sätze** („Licht an und Butter auf die Einkaufsliste“) laufen nicht mehr über HA_FAST, sondern komplett über das LLM (Multi-Intent über Domänen → PROJ-102).
+
+### Tests
+- `alice-lists`: 101 Tests (Regeln, Rechte-Matrix, DB-Integration entlang der AC, HTTP-Schicht) — DB-Tests mit `LISTS_TEST_DSN` gegen Postgres-Testcontainer; Container-Smoke-Test (Image-Build, `/health`, kompletter Lösch-Ablauf über HTTP mit echtem Redis).
+- `alice-chat-stream`: 355 Tests grün (283 bestehende nach Rückbau + 72 neue für Routing, Vorlagen, Stream-Ablauf).
+- Frontend: `tsc` und `next build` sauber.
+
+### Für Deploy
+Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-Passwort setzen); `LISTS_URL=http://alice-lists:8010` in `alice-chat-stream/.env`; Container `alice-lists` starten **vor** nginx-Reload (statischer `proxy_pass`); `alice-chat-stream`, `alice-auth` und Frontend neu bauen/deployen.
 
 ## QA Test Results
 _To be added by /qa_

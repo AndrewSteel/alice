@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# alice-lists — local task & list management for Alice (PROJ-106).
+#
+# Verifies Alice JWTs only (RS256 public key). Lists and entries live in
+# PostgreSQL (alice schema); Redis holds the short-lived delete tickets and
+# open follow-up questions. nginx exposes /api/lists/* only — /internal/*
+# (chat tools) is reachable from alice-chat-stream over the Docker network.
+# ---------------------------------------------------------------------------
+services:
+  alice-lists:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-lists
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8010/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-lists]
+      backend:
+        aliases: [alice-lists]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

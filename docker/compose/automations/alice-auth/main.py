@@ -747,9 +747,9 @@ _SYSTEM_PERMISSION_FLAGS: tuple[str, ...] = (
 async def get_permissions(authorization: str | None = Header(default=None)):
     """
     Return the effective alice.permissions_system flags for the authenticated
-    user as JSON (all 10 boolean flags) plus can_use_calendar from
-    alice.permissions_assistant (PROJ-87). Requires a valid Bearer JWT.
-    If no permission row exists (should not happen — init_user_permissions runs
+    user as JSON (all 10 boolean flags) plus can_use_calendar (PROJ-87) and
+    can_use_lists (PROJ-106) from alice.permissions_assistant. Requires a
+    valid Bearer JWT. If no permission row exists (should not happen — init_user_permissions runs
     on login/creation — but handled as a fallback), all flags default to false.
     """
     payload = _require_auth(authorization)
@@ -772,10 +772,10 @@ async def get_permissions(authorization: str | None = Header(default=None)):
                 (user_id,),
             )
             row = cur.fetchone()
-            # PROJ-87: the calendar flag lives on permissions_assistant but
-            # gates a Settings tab, so it is exposed here as well.
+            # PROJ-87/106: the calendar and lists flags live on
+            # permissions_assistant but gate UI, so they are exposed here as well.
             cur.execute(
-                "SELECT can_use_calendar FROM alice.permissions_assistant WHERE user_id = %s",
+                "SELECT can_use_calendar, can_use_lists FROM alice.permissions_assistant WHERE user_id = %s",
                 (user_id,),
             )
             assistant_row = cur.fetchone()
@@ -783,6 +783,7 @@ async def get_permissions(authorization: str | None = Header(default=None)):
         # Fallback: no row → all flags false rather than erroring.
         flags = {flag: bool(row[flag]) if row else False for flag in _SYSTEM_PERMISSION_FLAGS}
         flags["can_use_calendar"] = bool(assistant_row["can_use_calendar"]) if assistant_row else False
+        flags["can_use_lists"] = bool(assistant_row["can_use_lists"]) if assistant_row else False
         return flags
 
     except HTTPException:

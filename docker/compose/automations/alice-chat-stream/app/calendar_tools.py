@@ -79,11 +79,13 @@ def channel_for(source: str | None) -> str:
 #    "Termin angelegt". For calendar requests the first LLM round therefore
 #    offers only the calendar tools with tool_choice="required", so every
 #    answer is grounded in a real alice-calendar result.
-_CALENDAR_INTENT_RE = re.compile(
-    r"(termin|kalender|calendar|appointment|verabredung"
-    r"|\bwas\s+steht\b.*\ban\b|\bwas\s+habe?\s+ich\b.*\bvor\b)",
+_CALENDAR_WORD_RE = re.compile(
+    r"(termin|kalender|calendar|appointment|verabredung|\bwas\s+habe?\s+ich\b.*\bvor\b)",
     re.IGNORECASE,
 )
+# General day query — calendar only while PROJ-106 lists are off; with lists it
+# is answered with events AND due entries (lists_tools.classify, "agenda").
+_DAY_QUERY_RE = re.compile(r"\bwas\s+steht\b.*\ban\b", re.IGNORECASE)
 _NEGATIVE_RE = re.compile(
     r"^\s*(nein|nee|ne|nö|no|abbrechen|abbruch|stopp?|doch nicht|lieber nicht|vergiss|lass)\b",
     re.IGNORECASE,
@@ -123,7 +125,12 @@ _open_questions: dict[str, tuple[str, str, float]] = {}
 
 
 def is_calendar_intent(message: str) -> bool:
-    return bool(_CALENDAR_INTENT_RE.search(message or ""))
+    return is_explicit_calendar_intent(message) or bool(_DAY_QUERY_RE.search(message or ""))
+
+
+def is_explicit_calendar_intent(message: str) -> bool:
+    """"Termin"/"Kalender"/"was habe ich … vor" — calendar only (PROJ-106 spec)."""
+    return bool(_CALENDAR_WORD_RE.search(message or ""))
 
 
 def detect_action(message: str) -> list[str]:
