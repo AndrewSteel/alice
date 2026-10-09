@@ -51,7 +51,7 @@
 | PROJ-108 | 3.4  | Aufgaben-Erinnerungen — proaktive Hinweise zu fälligen Aufgaben/Fristen per Sprache (Voice PE) und WebApp; Abhängigkeit von PROJ-106, PROJ-85 (Timer), PROJ-104 (Web Push); ausgegliedert beim PROJ-106-Spec-Interview 2026-10-08 | Roadmap | —    | 2026-10-08 |
 | PROJ-109 | 3.4  | Wiederkehrende Aufgaben — Wiederholungsregeln (täglich/wöchentlich/monatlich/jährlich, Ende), nächstes Vorkommen beim Erledigen; Abhängigkeit von PROJ-106; ausgegliedert beim PROJ-106-Spec-Interview 2026-10-08 | Roadmap | —    | 2026-10-08 |
 | PROJ-110 | 3.4  | Unteraufgaben — Aufgaben hierarchisch untergliedern (anlegen, anzeigen, erledigen) per Chat/Sprache; Abhängigkeit von PROJ-106; Bedarf vor Spec prüfen; ausgegliedert beim PROJ-106-Spec-Interview 2026-10-08 | Roadmap | —    | 2026-10-08 |
-| PROJ-111 | 3.3  | LLM-Gateway mit Priorisierung — vorgeschaltete Schicht vor `llama-3090`, die Chat-/Sprach-Anfragen vor DMS-/Mail-Analyse-Anfragen bedient (GPU-Slot-Vergabe nach Priorität); Abhängigkeit von PROJ-99; Anlass: PROJ-106-Live-Test durch DMS-Last blockiert, Architektur-Prüfung 2026-10-08 (MQTT als Queue verworfen) | Planned | [Spec](PROJ-111-llm-gateway-priorisierung.md) | 2026-10-09 |
+| PROJ-111 | 3.3  | LLM-Gateway mit Priorisierung — vorgeschaltete Schicht vor `llama-3090`, die Chat-/Sprach-Anfragen vor DMS-/Mail-Analyse-Anfragen bedient (GPU-Slot-Vergabe nach Priorität); Abhängigkeit von PROJ-99; Anlass: PROJ-106-Live-Test durch DMS-Last blockiert, Architektur-Prüfung 2026-10-08 (MQTT als Queue verworfen) | Architected | [Spec](PROJ-111-llm-gateway-priorisierung.md) | 2026-10-09 |
 
 <!-- Add features above this line -->
 

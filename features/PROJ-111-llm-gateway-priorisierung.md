@@ -1,6 +1,6 @@
 # PROJ-111: LLM-Gateway mit Priorisierung
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-10-09
 **Last Updated:** 2026-10-09
 
@@ -81,7 +81,86 @@ Regel: **Mensch vor Maschine** — wird der Slot frei, kommt immer zuerst die ä
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Ausgangslage (Ist-Zustand)
+`llama-3090` hängt heute in drei Docker-Netzen (frontend, backend, automation) und wird von allen Aufrufern direkt angesprochen – Chat-Dienst, n8n, Bild-Extraktor, OpenWebUI und (über nginx) der externe Zugang `llama3090.happy-mining.de`. Alle benutzen denselben Zugangsschlüssel. llama.cpp arbeitet streng in Eingangsreihenfolge ab.
+
+### Art des Features
+Reines Backend/Infrastruktur: **ein neuer Container, keine UI, keine Datenbank, keine n8n-Workflows.** Die Aufrufer ändern nur ihre Endpunkt-Adresse (und bekommen einen eigenen Schlüssel).
+
+### A) Aufbau (Komponenten)
+
+```
+Aufrufer                                   Gateway (neu)                         GPU
++-- alice-chat-stream  (Schlüssel A) -+
++-- OpenWebUI          (Schlüssel B) -+--> alice-llm-gateway ------------------> llama-3090
++-- externer Zugang via nginx (Schl. C)+    +-- Schlüssel prüfen + Stufe ermitteln   (nur noch vom
++-- n8n (alle Workflows) (Schlüssel D) -+   +-- Warteschlange „Interaktiv"            Gateway erreichbar,
++-- dms-extractor-image  (Schlüssel E) -+   +-- Warteschlange „Hintergrund"          genau 1 Anfrage
+                                            +-- Slot-Wächter (max. 1 aktive Anfrage)  gleichzeitig)
+                                            +-- Durchreichen der Antwort (Streaming)
+                                            +-- Logs + Prometheus-Kennzahlen
+```
+
+### B) Funktionsweise in Alltagssprache
+1. Eine Anfrage trifft ein. Das Gateway prüft den Schlüssel; falsch/fehlend → sofort abgelehnt.
+2. Aus dem Schlüssel ergibt sich die Stufe (Interaktiv oder Hintergrund). Der Aufrufer kann sie nicht beeinflussen – es gibt kein „Priorität"-Feld in der Anfrage, das ausgewertet würde.
+3. Die Anfrage stellt sich in die Warteschlange ihrer Stufe (Eingangsreihenfolge).
+4. Der Slot-Wächter gibt den GPU-Slot immer an die **älteste interaktive** Anfrage, nur wenn keine wartet an die **älteste Hintergrund**-Anfrage.
+5. Die Anfrage wird an `llama-3090` weitergeleitet; die Antwort (inkl. Token-Stream, Thinking, Tool-Calls) wird 1:1 an den Aufrufer durchgereicht.
+6. Ist die Antwort komplett (oder fehlgeschlagen/abgebrochen), wird der Slot freigegeben und die nächste Anfrage kommt dran.
+
+Jede Tool-Loop-Runde des Chat-Agenten ist eine eigene Anfrage und reiht sich neu ein (wie in der Spec festgelegt).
+
+### C) Datenmodell (nur im Arbeitsspeicher, nichts persistent)
+- **Schlüsselzuordnung** (Konfiguration): je Aufrufer ein eigener Schlüssel mit Name und Stufe. Alle Schlüssel, die nicht ausdrücklich als „Interaktiv" eingetragen sind, laufen als Hintergrund.
+- **Wartende Anfrage** (flüchtig): Aufrufername, Stufe, Eingangszeitpunkt. Geht bei Neustart verloren (bewusst, siehe Edge Cases).
+- **Kennzahlen/Logs**: Zähler und Wartezeiten in Prometheus; pro Anfrage eine strukturierte Log-Zeile (Aufrufer, Stufe, Wartezeit, Laufzeit, Ergebnis).
+
+### D) Tech-Entscheidungen (mit Begründung)
+| Entscheidung | Warum |
+| --- | --- |
+| **Eigener kleiner Python-Dienst** (wie `alice-lists`, `alice-speech-gateway`) | Gleicher Stack, gleiche Betriebsweise (Compose, Healthcheck, Tests). Eine Prioritäts-Warteschlange mit „höchstens 1 aktiv" ist mit nginx/Standard-Proxys nicht abbildbar – nginx kann nur Eingangsreihenfolge. |
+| **Eigener Schlüssel je Aufrufer** statt Kopf-Feld „Priorität" | Erfüllt „Aufrufer kann Stufe nicht selbst wählen": Identität = Schlüssel, vom Gateway geprüft. Keine Code-Änderung bei den Aufrufern nötig; ein neuer Dienst ohne Eintrag läuft automatisch als Hintergrund. |
+| **Nur wenige Pfade durchgelassen** (Chat-, Modell-, Health-Endpunkte der OpenAI-API) | Verkleinert die Angriffsfläche; das Gateway ist kein offener Proxy auf alles, was llama.cpp anbietet. Genauen Pfad-Umfang legt `/backend` anhand der tatsächlichen Aufrufer fest. |
+| **Durchreichen als Stream ohne Zwischenpuffer** | Token-Streaming, Thinking-Tokens und Tool-Calls bleiben unverändert und ohne spürbare Zusatzlatenz (Ziel < 50 ms). |
+| **Slot bleibt belegt bis Antwort-Ende; Abbruch des Aufrufers gibt ihn sofort frei** | Garantiert „höchstens 1 aktive Anfrage"; wartende Anfragen abgebrochener Aufrufer werden verworfen und nie mehr weitergeleitet. Der Abbruch wird auch an `llama-3090` weitergegeben, damit die GPU nicht umsonst weiterrechnet. |
+| **`llama-3090` wird in ein eigenes, abgeschottetes Docker-Netz verlegt**, in dem nur das Gateway hängt | Technische Durchsetzung von „niemand umgeht das Gateway" – nicht nur Absprache. Heute hängt es in drei Netzen. |
+| **Den echten `llama-3090`-Schlüssel kennt nur das Gateway** | Die Aufrufer bekommen eigene Gateway-Schlüssel; der Schlüssel zur GPU liegt nicht mehr verteilt in fünf `.env`-Dateien. |
+| **Prometheus-Anbindung wie beim `chatstream`-Job** | Vorhandenes Muster, ein zusätzlicher Scrape-Job; keine neue Infrastruktur. |
+| **Keine Persistenz / kein Redis** | Warteschlange ist bewusst flüchtig (Nicht-Scope: „abschicken und vergessen"). Hält das Gateway einfach und ohne Abhängigkeiten. |
+| **Genau eine Gateway-Instanz** | Mehrere Instanzen würden den „1 Slot"-Wächter aushebeln. |
+
+### E) Workflow Architecture
+- **Trigger:** HTTP-Anfrage eines Aufrufers (OpenAI-kompatible API, identisch zu `llama-3090`).
+- **Verarbeitung:** Schlüssel prüfen → Stufe bestimmen → einreihen → auf Slot warten → weiterleiten → Antwort durchreichen → Slot freigeben → loggen/zählen.
+- **Ein-/Ausgang:** unverändert durchgereichter Anfrage-/Antwort-Inhalt; zusätzlich nur Log und Metriken.
+- **Integrationen:** `llama-3090` (Ziel), Prometheus (Scrape), nginx (externer Zugang + VPN).
+- **Fehlerbehandlung:**
+  - Falscher/fehlender Schlüssel → Ablehnung (kein Weiterleiten).
+  - `llama-3090` nicht erreichbar / Fehler → Fehler an Aufrufer, Slot frei, nächste Anfrage kommt dran.
+  - Aufrufer bricht ab (wartend oder laufend) → Anfrage entfällt bzw. wird abgebrochen, Slot frei.
+  - Gateway-Neustart → Aufrufer sehen Fehler und nutzen ihre bestehenden Fehlerpfade; kein Direktumweg zur GPU.
+
+### F) Betroffene bestehende Teile
+| Teil | Änderung |
+| --- | --- |
+| `docker/compose/ai/llama-3090` | Netze: nur noch das neue abgeschottete Netz |
+| `alice-chat-stream`, `dms-extractor-image`, `n8n`, `openwebui` | Nur `.env`/Compose: Endpunkt-Adresse + eigener Schlüssel |
+| nginx-Vhost `llama-3090.conf` | Ziel von `llama-3090` auf Gateway umstellen |
+| `infra/prometheus/prometheus.yml` | Neuer Scrape-Job `llm-gateway` |
+| `docker/compose/scripts/Makefile` | Neuen Stack ergänzen |
+| README / Betriebsdoku | Rollback-Anleitung (Aufrufer wieder direkt auf `llama-3090`, Netz zurück) |
+
+### G) Dependencies (Pakete)
+- Python-Web-Framework + ASGI-Server und HTTP-Client mit Streaming (wie in den vorhandenen Python-Diensten)
+- Prometheus-Client-Bibliothek (Kennzahlen)
+
+### H) Hinweise für die Umsetzung / Risiken
+- **Reihenfolge beim Ausrollen:** zuerst Gateway starten und testen, dann Aufrufer nacheinander umstellen, zuletzt `llama-3090` aus den alten Netzen nehmen (erst dann ist die Umgehung technisch ausgeschlossen).
+- **Zeitüberschreitungen:** Das Gateway darf Wartezeit in der Schlange nicht eigenmächtig begrenzen; die Timeouts der Aufrufer (z.B. Extractor 300 s, Chat 120 s) bleiben maßgeblich. Chat-Timeout 120 s ist ggf. bei langer laufender Hintergrund-Anfrage knapp – über die Kennzahlen beobachten.
+- **Modellwechsel-Anfragen** (z.B. `alice-llm-model-warmup`) laufen als normale Hintergrund-Anfrage durch; keine Sonderbehandlung.
+- **Offener Punkt für `/backend`:** Genaue Liste der Pfade, die tatsächlich genutzt werden (n8n-Shim, Extractor, OpenWebUI), vor Implementierung per Code-Check bestätigen.
 
 ## QA Test Results
 _To be added by /qa_
