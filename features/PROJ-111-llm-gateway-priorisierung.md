@@ -212,7 +212,7 @@ Jede Tool-Loop-Runde des Chat-Agenten ist eine eigene Anfrage und reiht sich neu
 - [x] Abbruch beim Warten → nie weitergeleitet, Schlange wieder leer, Kennzahl `client_abort` (`test_abort_while_waiting_is_never_forwarded`); zusätzlich Abbruch während der Ausführung (Streaming + Nicht-Streaming) gibt den Slot sofort frei und schließt die Upstream-Verbindung
 
 #### Sicherheit
-- [x] Nur gültige Bearer-Token; fehlend/falsch/abgeschnitten/verlängert/ohne Schema/`Basic`/`X-Api-Key`/der echte llama-Schlüssel → 401, nichts weitergeleitet; Prüfung vor dem Lesen des Bodys
+- [x] Nur gültige Bearer-Token; fehlend/falsch/abgeschnitten/verlängert/ohne Schema/`Basic`/`X-Api-Key`/der echte llama-Schlüssel → 401, nichts weitergeleitet; Prüfung vor dem Lesen des Bodys (Ausnahme seit Bugfix 2026-10-10: `GET /v1/models` ohne Schlüssel wie bei llama.cpp)
 - [x] Erreichbarkeit nur intern (Docker-Netze, kein veröffentlichter Port) + VPN-Vhost wie bisher; `/metrics` extern 404
 
 #### Betrieb & Sichtbarkeit
@@ -263,5 +263,10 @@ Keine Critical/High/Medium-Bugs.
 - WebApp-Chat, Voice PE, OpenWebUI und n8n (`alice-dms-image-description-backfill`) laufen über das Gateway.
 - Beim Rollout aufgefallen und gelöst: OpenWebUI übernimmt `OPENAI_API_BASE_URL`/`OPENAI_API_KEY` nur beim ersten Start (PersistentConfig) → Verbindung im Admin-Panel umgestellt. In Gateway-README und Deploy-Hinweisen dokumentiert.
 - Unabhängiger Befund: Backfill scheitert bei Riesenbildern (Panorama 22704×1760 px) am n8n-Speicherlimit, nicht am Gateway → ausgegliedert als PROJ-112.
+
+**Bugfix nach Deploy (2026-10-10): `GET /v1/models` ohne Schlüssel**
+- Befund: `alice-dms-classification-backfill` und `alice-dms-language-backfill` brachen mit `ollama_unavailable` ab. Ihre Node „Code: Ollama Health Check“ ruft `/v1/models` **ohne** Authorization-Header auf. llama.cpp nimmt `/v1/models` (wie `/health`) von der Schlüsselprüfung aus, das Gateway verlangte dagegen einen Schlüssel → 401.
+- Fix: `GET /v1/models` ist im Gateway wie bei llama.cpp ohne Schlüssel erlaubt (nur Modellnamen, kein GPU-Slot); Aufrufe ohne gültigen Schlüssel werden als `anonymous` geloggt. `POST /v1/chat/completions` verlangt weiterhin einen gültigen Schlüssel. Keine Workflow-Änderung nötig (AC „Aufrufer unverändert“).
+- Test `test_models_is_public_like_llama_cpp`; 33/33 grün. Wirksam nach Neubau des Gateways.
 
 **Offen/Beobachten:** Chat-Wartezeit hinter langen Hintergrund-Anfragen über `llm_gateway_queue_wait_seconds{tier="interactive"}` (Chat-Timeout 120 s).
