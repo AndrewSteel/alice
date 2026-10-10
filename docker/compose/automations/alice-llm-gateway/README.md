@@ -30,12 +30,12 @@ out by priority: **human before machine**.
 | Path                        | Auth       | Notes                                                                                                     |
 | --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
 | `POST /v1/chat/completions` | caller key | queued for the slot; body and response (incl. SSE stream, reasoning, tool calls) passed through unchanged |
-| `GET /v1/models`            | caller key | forwarded directly, does not use the GPU slot (router metadata)                                           |
+| `GET /v1/models`            | –          | forwarded directly, does not use the GPU slot (router metadata); no key needed, like llama.cpp (n8n health checks send none) — logged as `anonymous` |
 | `GET /health`               | –          | gateway liveness + `upstream` reachability + queue lengths                                                |
 | `GET /metrics`              | –          | Prometheus (internal only; nginx returns 404 externally)                                                  |
 
 Everything else returns 404 — the gateway is not an open proxy onto llama.cpp.
-Missing/wrong key → `401`, nothing forwarded. `llama-3090` unreachable → `502`
+Missing/wrong key on a chat completion → `401`, nothing forwarded. `llama-3090` unreachable → `502`
 (`504` on connect/read timeout); upstream error statuses are passed through.
 
 ## Observability

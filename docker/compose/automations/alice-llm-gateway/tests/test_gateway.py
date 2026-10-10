@@ -1,5 +1,6 @@
 """End-to-end tests over real HTTP: client -> gateway -> fake llama-3090."""
 import asyncio
+import logging
 
 import httpx
 
@@ -25,10 +26,23 @@ async def test_rejects_missing_or_wrong_key(gateway, llama):
         r1 = await c.post(CHAT, content=body("x"))
         r2 = await c.post(CHAT, content=body("x"), headers={"Authorization": "Bearer nope"})
         r3 = await c.post(CHAT, content=body("x"), headers={"Authorization": f"Bearer {UPSTREAM_KEY}"})
-        r4 = await c.get("/v1/models", headers={"Authorization": "Basic abc"})
-    assert [r.status_code for r in (r1, r2, r3, r4)] == [401, 401, 401, 401]
+    assert [r.status_code for r in (r1, r2, r3)] == [401, 401, 401]
     assert r1.json()["error"]["type"] == "authentication_error"
     assert llama.auth == []  # nothing forwarded
+
+
+async def test_models_is_public_like_llama_cpp(gateway, llama, caplog):
+    """n8n health checks call GET /v1/models without a key (llama.cpp exempts it)."""
+    caplog.set_level(logging.INFO, logger="alice-llm-gateway")
+    async with httpx.AsyncClient(base_url=gateway) as c:
+        r1 = await c.get("/v1/models")
+        r2 = await c.get("/v1/models", headers={"Authorization": "Basic abc"})
+        chat = await c.post(CHAT, content=body("x"))
+    assert r1.status_code == 200 and r1.json()["data"][0]["id"] == "qwen3-vl-30b"
+    assert r2.status_code == 200
+    assert chat.status_code == 401  # inference still needs a key
+    await _wait_until(lambda: '"caller": "anonymous"' in caplog.text)
+    assert llama.order == []
 
 
 async def test_only_allowlisted_paths(gateway, llama):

@@ -2,7 +2,8 @@
 
 Endpoints:
   POST /v1/chat/completions  queued for the single llama-3090 slot (interactive first)
-  GET  /v1/models            forwarded directly (router metadata, no GPU slot)
+  GET  /v1/models            forwarded directly (router metadata, no GPU slot); like
+                             llama.cpp it needs no key (n8n health checks call it without one)
   GET  /health               gateway liveness + upstream reachability
   GET  /metrics              Prometheus
 
@@ -26,12 +27,16 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from . import config, metrics
-from .scheduler import TIERS, SlotScheduler
+from .scheduler import BACKGROUND, TIERS, SlotScheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("alice-llm-gateway")
 
-# (method, path) -> needs the GPU slot
+# Caller recorded for keyless requests to a public route.
+_ANONYMOUS = config.Client(name="anonymous", tier=BACKGROUND, key="")
+
+# (method, path) -> needs the GPU slot. Routes that skip the slot are also
+# public, matching llama.cpp's key-exempt endpoints (/v1/models).
 PROXY_ROUTES = {
     ("POST", "/v1/chat/completions"): True,
     ("GET", "/v1/models"): False,
@@ -164,6 +169,8 @@ async def proxy(scope, receive, send, uses_slot: bool) -> None:
     path = scope["path"]
     token = _bearer(scope)
     client = config.find_client(state.clients, token) if token else None
+    if client is None and not uses_slot:
+        client = _ANONYMOUS
     if client is None:
         metrics.REJECTED_TOTAL.labels("unauthorized").inc()
         logger.warning(json.dumps({"event": "llm_request_rejected", "reason": "unauthorized", "path": path}))
