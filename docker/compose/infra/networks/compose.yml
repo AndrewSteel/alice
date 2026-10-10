@@ -11,3 +11,8 @@ networks:
     name: automation
     driver: bridge
     attachable: true
+  # PROJ-111: only llama-3090 + alice-llm-gateway — nothing bypasses the gateway.
+  llm:
+    name: llm
+    driver: bridge
+    attachable: true

@@ -111,6 +111,7 @@ slot) and the allocator cap on `weaviate-transformers` are what make it fit;
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
 | `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
 | `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads Qwen3-VL-30B-A3B (id `qwen3-vl-30b`) / Mistral-Small-3.2-24B (id `mistral-small-3.2-24b`), one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
+| `alice-llm-gateway`     | Priority gateway in front of `llama-3090` (PROJ-111): the only route to the GPU; hands the single slot to interactive callers (chat, OpenWebUI, external vhost) before background ones (n8n, extractor). Per-caller keys, Prometheus job `llm-gateway` |
 | `ollama-titan`          | Ollama on the TITAN X — Jupyter / GPU experiments only, not in the Alice request path       |
 | `weaviate`              | Vector search                                                                               |
 | `weaviate-transformers` | text2vec-transformers inference (RTX 3090)                                                  |

@@ -6,10 +6,10 @@ services:
     # updates are applied manually. Router mode moves fast — it is useful to be
     # told when a new :server-cuda is out. Test presets.ini after each update.
     restart: unless-stopped
-    # Same reachability as the retired ollama-3090 plus the two nets its other
-    # consumers live on: frontend (n8n, openwebui), backend (dms-extractor-image),
-    # automation (alice-chat-stream).
-    networks: [frontend, backend, automation]
+    # PROJ-111: reachable ONLY via alice-llm-gateway (priority queue for the
+    # single slot). The `llm` network holds nothing but these two containers.
+    # Rollback: networks: [frontend, backend, automation] (see gateway README).
+    networks: [llm]
     # Router mode: no fixed model. --models-preset points at an INI whose
     # section names become the model IDs clients request in the `model` field.
     # --models-max 1 keeps only ONE model resident in the 24 GB of the 3090.
@@ -36,7 +36,7 @@ services:
     volumes:
       # GGUF files + presets.ini + HF download cache, on fast storage.
       - /srv/hot/models/llama-cpp:/models
-      # Single-line API key (also referenced by consumers' OLLAMA_API_KEY).
+      # Single-line API key — known only to alice-llm-gateway (PROJ-111).
       - /srv/warm/llama-3090/llama_api_key:/run/secrets/llama_api_key:ro
     healthcheck:
       # Router answers /health once it is up; individual models load on demand.
@@ -47,12 +47,6 @@ services:
       retries: 10
 
 networks:
-  frontend:
+  llm:
     external: true
-    name: frontend
-  backend:
-    external: true
-    name: backend
-  automation:
-    external: true
-    name: automation
+    name: llm

@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# alice-llm-gateway — priority gateway in front of llama-3090 (PROJ-111).
+#
+# The only service on the `llm` network besides llama-3090, i.e. the only way
+# to reach the GPU. Hands the single llama slot to interactive callers (chat,
+# OpenWebUI, external vhost) before background callers (n8n, extractors).
+# Callers authenticate with their own key (clients file); only the gateway
+# knows the real llama-3090 key. Exactly ONE instance — the queue is in memory.
+# ---------------------------------------------------------------------------
+services:
+  alice-llm-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-llm-gateway
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      # `<name> <tier> <key>` per caller — see clients.example
+      - /srv/warm/llm-gateway/clients:/run/secrets/llm_gateway_clients:ro
+      # The real llama-3090 bearer token (same file llama-3090 mounts).
+      - /srv/warm/llama-3090/llama_api_key:/run/secrets/llama_api_key:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8011/health'', timeout=2)" || exit 1',
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      llm:
+        aliases: [alice-llm-gateway]
+      # callers: n8n, openwebui, prometheus, nginx
+      frontend:
+        aliases: [alice-llm-gateway]
+      # callers: dms-extractor-image, nginx
+      backend:
+        aliases: [alice-llm-gateway]
+      # caller: alice-chat-stream
+      automation:
+        aliases: [alice-llm-gateway]
+
+networks:
+  llm:
+    external: true
+    name: llm
+  frontend:
+    external: true
+    name: frontend
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

@@ -10,7 +10,7 @@ services:
       # PROJ-99: llama.cpp router speaks the OpenAI API, not Ollama's.
       - ENABLE_OLLAMA_API=false
       - ENABLE_OPENAI_API=true
-      - OPENAI_API_BASE_URL=http://llama-3090:11434/v1
+      - OPENAI_API_BASE_URL=http://alice-llm-gateway:8011/v1
       # Bearer token for the llama.cpp router (--api-key-file). Set in .env.
       - OPENAI_API_KEY=${OLLAMA_API_KEY:-}
       # Zeitzone & Basis-Setup
