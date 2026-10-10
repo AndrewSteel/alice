@@ -1,8 +1,8 @@
 # PROJ-111: LLM-Gateway mit Priorisierung
 
-## Status: Architected
+## Status: Deployed
 **Created:** 2026-10-09
-**Last Updated:** 2026-10-09
+**Last Updated:** 2026-10-10
 
 ## Dependencies
 - Requires: PROJ-99 (Umstellung Ollama → llama.cpp) — `llama-3090` ist der einzige Inference-Endpunkt, vor den das Gateway geschaltet wird
@@ -162,8 +162,106 @@ Jede Tool-Loop-Runde des Chat-Agenten ist eine eigene Anfrage und reiht sich neu
 - **Modellwechsel-Anfragen** (z.B. `alice-llm-model-warmup`) laufen als normale Hintergrund-Anfrage durch; keine Sonderbehandlung.
 - **Offener Punkt für `/backend`:** Genaue Liste der Pfade, die tatsächlich genutzt werden (n8n-Shim, Extractor, OpenWebUI), vor Implementierung per Code-Check bestätigen.
 
+## Implementation Notes (Backend, 2026-10-09)
+
+**Neuer Dienst `alice-llm-gateway`** (`docker/compose/automations/alice-llm-gateway/`, Port 8011, Starlette + uvicorn mit genau 1 Worker, httpx, prometheus-client):
+
+- `app/scheduler.py` — `SlotScheduler`: zwei FIFO-Schlangen (`interactive`, `background`), höchstens ein Slot-Inhaber; bei Freigabe zuerst älteste interaktive, sonst älteste Hintergrund-Anfrage. Abbruch eines Wartenden entfernt ihn aus der Schlange; Abbruch im selben Tick wie die Zuteilung reicht den Slot weiter (kein Leck).
+- `app/config.py` — Aufrufer-Datei `/run/secrets/llm_gateway_clients` (`<name> <tier> <key>` je Zeile, Server: `/srv/warm/llm-gateway/clients`); unbekannte Stufe → Hintergrund; leere Datei, doppelte Schlüssel/Namen → Startabbruch. Schlüsselvergleich zeitkonstant (`hmac.compare_digest`). Der echte llama-Schlüssel wird aus `/srv/warm/llama-3090/llama_api_key` gelesen und nur Richtung `llama-3090` gesendet; der Aufrufer-Schlüssel wird nie weitergereicht.
+- `app/main.py` — reiner ASGI-Proxy: Schlüssel prüfen **vor** dem Lesen des Bodys → 401; Body max. 50 MB (wie nginx) → 413; einreihen; Warten und Weiterleiten laufen jeweils parallel zu einem Verbindungsabbruch-Wächter (Abbruch beim Warten = nie weitergeleitet; Abbruch beim Laufen = Upstream-Verbindung geschlossen, Slot frei). Antwort wird chunkweise ohne Puffer durchgereicht (`aiter_raw`), Status und Header 1:1 (ohne Hop-by-Hop). `llama-3090` nicht erreichbar → 502, Timeout → 504, Upstream-Fehlerstatus wird durchgereicht. Wartezeit in der Schlange wird **nicht** begrenzt; `UPSTREAM_READ_TIMEOUT_SECONDS` (Default 900) schützt nur vor hängendem Upstream.
+- **Pfad-Umfang** (offener Punkt aus dem Design, per Code-Check bestätigt): genutzt werden nur `POST /v1/chat/completions` (Chat-Stream, Extractor, alle n8n-Shims/HTTP-Nodes, OpenWebUI) und `GET /v1/models` (n8n-Health-Checks, OpenWebUI). Alles andere → 404.
+- **Abweichung:** `GET /v1/models` wird ohne Slot weitergeleitet — das ist Router-Metadaten, belegt keinen GPU-Slot, und n8n-Health-Checks sollen nicht hinter 20 Analysen warten. „Höchstens eine Anfrage“ gilt für alle Inferenz-Anfragen.
+- Strukturierte JSON-Logzeile je Anfrage (`caller`, `tier`, `wait_ms`, `upstream_ms`, `outcome` ok/error/timeout/client_abort, `status`); abgelehnte Schlüssel als `llm_request_rejected`.
+- Prometheus: `llm_gateway_queue_length{tier}`, `llm_gateway_slot_busy`, `llm_gateway_queue_wait_seconds{tier}`, `llm_gateway_upstream_seconds{tier}`, `llm_gateway_requests_total{tier,outcome}`, `llm_gateway_rejected_total{reason}`; Scrape-Job `llm-gateway` in `infra/prometheus/prometheus.yml`.
+- `/health` (ohne Auth): Gateway lebt + `upstream`-Erreichbarkeit + Schlangenlängen; Docker-Healthcheck + `restart: unless-stopped`.
+
+**Geänderte bestehende Teile:**
+
+- Neues Docker-Netz `llm` (`infra/networks/compose.yml`, Makefile-Target `networks`); `llama-3090` hängt nur noch in `llm`, das Gateway in `llm` + frontend/backend/automation.
+- `.env.example` von `alice-chat-stream`, `dms-extractor-image`, `n8n`, `openwebui`: `OLLAMA_URL=http://alice-llm-gateway:8011`, `OLLAMA_API_KEY` = eigener Gateway-Schlüssel; `openwebui/compose.yml`: `OPENAI_API_BASE_URL` auf das Gateway. Keine Code- oder Workflow-Änderung (alle n8n-Aufrufe lesen `$env.OLLAMA_URL`/`$env.OLLAMA_API_KEY`; die `llama-3090`-Fallbacks greifen nur ohne Env und scheitern nach der Netz-Isolierung, statt das Gateway zu umgehen).
+- nginx `llama-3090.conf`: Ziel `alice-llm-gateway:8011`, `/metrics` extern 404. Externe Nutzer brauchen den neuen `external`-Schlüssel.
+- Makefile-Stack, README (Diensttabelle), `ai/llama-3090/README.md`.
+- **Ausroll-Reihenfolge und Rollback:** `docker/compose/automations/alice-llm-gateway/README.md`.
+
+**Tests:** 24 (Scheduler-Unit, Konfiguration, End-to-End über echtes HTTP gegen Fake-`llama-3090` inkl. 20+1-Testfall, Streaming-Byte-Gleichheit, Abbrüche, Upstream-Ausfall); Image gebaut, Container-Smoke-Test (Healthcheck, 401, 502, Logs) ok.
+
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-10-09
+**Umgebung:** lokal (Dev-Rechner, kein GPU/`llama-3090`) — Gateway unter uvicorn gegen einen Fake-`llama-3090` (echtes HTTP, SSE-Streaming, Verbindungsabbrüche); Docker-Image gebaut und gestartet; nginx-Vhost (`nginx:1.31-alpine`) + Gateway in einem Docker-Testnetz; `nginx -t` und `promtool check config` gegen die geänderten Dateien. Live-Test mit echtem `llama-3090`, echten Aufrufern und echter DMS-Last ist Teil von `/deploy`.
+**Tester:** QA Engineer (AI)
+
+### Automatisierte Tests
+- `alice-llm-gateway`: **32/32 grün**, 3× hintereinander stabil (`test_scheduler` 5, `test_config` 3, `test_gateway` 16, `test_qa_redteam` 8)
+- Keine Code-Änderungen an anderen Diensten oder n8n-Workflows (nur `.env.example`/Compose/nginx/Prometheus) → keine Regressionstests anderer Suiten nötig
+
+### Acceptance Criteria Status
+
+#### Priorisierung
+- [x] Alle Aufrufer nur über das Gateway: `.env.example` (chat-stream, extractor, n8n, openwebui), OpenWebUI-Compose und nginx-Vhost zeigen auf `alice-llm-gateway:8011`; `llama-3090` hängt nur noch im Netz `llm` (technisch erzwungen; per Code-Check: alle n8n-Aufrufe lesen `$env.OLLAMA_URL`)
+- [x] Interaktiv vor Hintergrund beim Freiwerden des Slots (`test_interactive_overtakes_20_queued_background`, Last-Test 200 Anfragen)
+- [x] Eingangsreihenfolge innerhalb der Stufe, auch zwischen zwei interaktiven Aufrufern (`test_fifo_between_interactive_callers`)
+- [x] Höchstens eine Anfrage gleichzeitig an `llama-3090` (Fake misst `max_active == 1`, auch bei 200 parallelen Anfragen)
+- [x] Laufende Hintergrund-Anfrage wird nicht abgebrochen; Chat wartet nur auf diese eine
+- [x] Testfall 20 Hintergrund + 1 Chat → Chat ist die nächste an `llama-3090` (Unit- und End-to-End-Test)
+- [x] Stufe nur über Schlüssel; Spoofing per Header (`X-Priority`, `X-Tier`, `X-Caller`) und Body-Feldern wirkungslos (`test_background_cannot_claim_interactive_tier`); unbekannte Stufe in der Aufrufer-Datei → Hintergrund. *Hinweis:* Aufrufer **ohne** Eintrag werden abgelehnt (401) statt als Hintergrund bedient — erfüllt die Sicherheits-AC (gültiger Schlüssel nötig); „unbekannte Aufrufer“ im Sinne der Spec sind eingetragene Schlüssel ohne Stufe `interactive`
+
+#### Transparenz gegenüber den Aufrufern
+- [x] Antworten unverändert: SSE-Stream byte-identisch zum Direktaufruf und nicht gepuffert (mehrere Chunks); Status + Header 1:1; Upstream-Fehlerstatus wird durchgereicht
+- [x] Aufrufer brauchen nur URL + Schlüssel (keine Code-/Workflow-Änderung)
+- [x] Abbruch beim Warten → nie weitergeleitet, Schlange wieder leer, Kennzahl `client_abort` (`test_abort_while_waiting_is_never_forwarded`); zusätzlich Abbruch während der Ausführung (Streaming + Nicht-Streaming) gibt den Slot sofort frei und schließt die Upstream-Verbindung
+
+#### Sicherheit
+- [x] Nur gültige Bearer-Token; fehlend/falsch/abgeschnitten/verlängert/ohne Schema/`Basic`/`X-Api-Key`/der echte llama-Schlüssel → 401, nichts weitergeleitet; Prüfung vor dem Lesen des Bodys
+- [x] Erreichbarkeit nur intern (Docker-Netze, kein veröffentlichter Port) + VPN-Vhost wie bisher; `/metrics` extern 404
+
+#### Betrieb & Sichtbarkeit
+- [x] JSON-Logzeile je Anfrage mit Aufrufer, Stufe, Wartezeit, Laufzeit, Ergebnis (ok/error/timeout/client_abort) + Status
+- [x] Prometheus: Schlangenlänge je Stufe, Wartezeit je Stufe, Anfragen je Stufe+Ergebnis (+ Slot-belegt, Laufzeit, Ablehnungen); Scrape-Job `llm-gateway`, `promtool` ok
+- [x] `restart: unless-stopped` + Docker-Healthcheck (im Container verifiziert)
+- [x] Rollback dokumentiert (Gateway-README, Kommentare in llama-Compose und nginx-Vhost)
+
+### Edge Cases Status
+- [x] Gateway aus/Neustart: kein Umweg zu `llama-3090` (Netz-Isolierung); wartende Anfragen gehen verloren (In-Memory)
+- [x] `llama-3090` nicht erreichbar → 502 an Aufrufer, Slot frei, nächste Anfrage läuft (`test_upstream_down_gives_502_and_frees_slot`); Upstream-500 durchgereicht, Slot frei
+- [x] Lange laufende Hintergrund-Anfrage: Chat wartet (bewusst akzeptiert); über `llm_gateway_queue_wait_seconds{tier="interactive"}` sichtbar
+- [x] Mehrere Personen gleichzeitig: FIFO
+- [x] Hintergrund-Anfrage wartet länger als eigenes Timeout → Aufrufer bricht ab, wird nicht mehr weitergeleitet
+- [x] Zusätzlich: Body > 50 MB → 413 ohne Weiterleitung; Pfad-Varianten (`/v1/chat/completions/`, `//`, Großschreibung, `..`, `/props`, `/slots`, `/v1/embeddings`, `/models/load`) → 404; `Expect: 100-continue` (curl mit 2-MB-Body) funktioniert
+
+### Security Audit Results (Docker-Feature)
+- [x] Authentifizierung: eigener Schlüssel je Aufrufer, zeitkonstanter Vergleich, 401 vor Body-Lesen
+- [x] Autorisierung/Priorität: Stufe nur aus dem Schlüssel, nicht manipulierbar
+- [x] Keine offene Proxy-Fläche: nur 2 Pfade freigegeben (llama.cpp-Admin-Pfade wie `/slots`, `/models/load` gesperrt)
+- [x] Keine Secrets in Logs, `/health`, `/metrics` (Aufrufer-, llama- und falsch geratene Schlüssel geprüft); Aufrufer-Schlüssel wird nie an `llama-3090` weitergereicht
+- [x] Last/Robustheit: 200 parallele Anfragen korrekt priorisiert, 500 Fehlerfälle → Schlange leer, Speicher ~27 MiB konstant
+- [x] Overhead bei leerer Schlange: Median **0,9 ms** (Ziel < 50 ms)
+
+### Bugs Found
+Keine Critical/High/Medium-Bugs.
+
+#### BUG-1: `/health` extern über den Vhost erreichbar (Info)
+- **Severity:** Low (Info, akzeptiert — kein Fix)
+- **Beobachtung:** `https://llama3090.happy-mining.de/health` liefert ohne Schlüssel Schlangenlängen und `upstream`-Status.
+- **Bewertung:** Nur über VPN erreichbar; vorher war `llama-3090`s `/health` dort ebenso öffentlich. Keine Secrets. Externe Health-Prüfungen bleiben so funktionsfähig.
+
+### Hinweise für `/deploy`
+- Ausroll-Reihenfolge laut Gateway-README einhalten (erst `docker network connect llm llama-3090`, Gateway starten, Aufrufer einzeln umstellen, zuletzt `llama-3090` isolieren); externe Nutzer brauchen den neuen `external`-Schlüssel.
+- OpenWebUI übernimmt `OPENAI_API_BASE_URL`/`OPENAI_API_KEY` nur beim allerersten Start (PersistentConfig in `webui.db`) — Verbindung im Admin-Panel auf das Gateway umstellen (beim ersten Rollout 2026-10-09 aufgefallen: OpenWebUI blieb auf `llama-3090` und hatte nach der Netz-Isolierung keine Verbindung).
+- Live-Test: Chat-Anfrage während laufender DMS-Analyse (Wartezeit in Logs/Prometheus), Voice PE, OpenWebUI, n8n-Warmup, Extractor; danach `docker exec n8n wget -qO- http://llama-3090:11434/health` muss fehlschlagen.
+- Chat-Timeout (`OLLAMA_TIMEOUT_SECONDS=120`) zählt die Wartezeit mit — bei langen Extractor-Anfragen über `llm_gateway_queue_wait_seconds{tier="interactive"}` beobachten.
+
+### Production-Ready Decision
+**READY** — alle Acceptance Criteria und Edge Cases bestanden, keine Critical/High-Bugs.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-10-10 (vom User auf dem Server ausgerollt, Reihenfolge laut Gateway-README)
+**Production:** `alice-llm-gateway` (Docker, Port 8011, nur intern; extern über `llama3090.happy-mining.de` via VPN-nginx)
+
+**Live-Test (User, 2026-10-10): positiv**
+- WebApp-Chat, Voice PE, OpenWebUI und n8n (`alice-dms-image-description-backfill`) laufen über das Gateway.
+- Beim Rollout aufgefallen und gelöst: OpenWebUI übernimmt `OPENAI_API_BASE_URL`/`OPENAI_API_KEY` nur beim ersten Start (PersistentConfig) → Verbindung im Admin-Panel umgestellt. In Gateway-README und Deploy-Hinweisen dokumentiert.
+- Unabhängiger Befund: Backfill scheitert bei Riesenbildern (Panorama 22704×1760 px) am n8n-Speicherlimit, nicht am Gateway → ausgegliedert als PROJ-112.
+
+**Offen/Beobachten:** Chat-Wartezeit hinter langen Hintergrund-Anfragen über `llm_gateway_queue_wait_seconds{tier="interactive"}` (Chat-Timeout 120 s).

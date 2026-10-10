@@ -35,7 +35,8 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P2       | Zeitgesteuerte HA-Befehle (PROJ-105, ausgegliedert aus PROJ-85 — "tu X um Uhrzeit Y", geplante Geräte-Aktion)       | 3.3       | Roadmap |
 | P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Deployed |
 | P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
-| P1       | LLM-Gateway mit Priorisierung — Chat/Sprache vor DMS-/Mail-Analyse (PROJ-111)                                      | 3.3       | Planned |
+| P1       | LLM-Gateway mit Priorisierung — Chat/Sprache vor DMS-/Mail-Analyse (PROJ-111)                                      | 3.3       | Deployed |
+| P2       | Panorama-/Großbild-Beschreibung im DMS — Flächen-Begrenzung statt 1024-px-Kante, Backfill ohne n8n-Speicherlimit (PROJ-112) | 3.3       | Roadmap |
 | P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Verworfen (→ PROJ-106) |
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
 | P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Architected |
