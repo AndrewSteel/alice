@@ -28,6 +28,7 @@ STACKS ?= \
   automations/alice-google-connect \
   automations/alice-calendar \
   automations/alice-lists \
+  automations/alice-llm-gateway \
   ai/ollama \
   ai/llama-3090 \
   ai/openwebui \
@@ -53,6 +54,7 @@ networks:
 	@docker network inspect frontend >/dev/null 2>&1 || docker network create frontend
 	@docker network inspect backend >/dev/null 2>&1 || docker network create backend
 	@docker network inspect automation >/dev/null 2>&1 || docker network create automation
+	@docker network inspect llm >/dev/null 2>&1 || docker network create llm
 	
 up: networks
 	@for s in $(STACKS); do \

@@ -6,6 +6,11 @@ Alice consumers. `ollama-titan` (TITAN X, Jupyter) is unaffected.
 
 ## Endpoint
 
+> **PROJ-111:** `llama-3090` sits on the isolated `llm` network and is reachable
+> **only** through `alice-llm-gateway` (priority queue for the single slot).
+> All consumers — and the external vhost — use `http://alice-llm-gateway:8011`
+> with their own gateway key. See `automations/alice-llm-gateway/README.md`.
+
 - Internal: `http://llama-3090:11434` — OpenAI-compatible, paths under `/v1`
   (`/v1/chat/completions`, `/v1/models`). `/health` for liveness.
 - External (VPN only): `https://llama3090.happy-mining.de`
@@ -209,8 +214,9 @@ printf '%s' "$(openssl rand -hex 32)" | sudo tee /srv/warm/llama-3090/llama_api_
 sudo chmod 600 /srv/warm/llama-3090/llama_api_key
 ```
 
-Then put the **same** value as `OLLAMA_API_KEY=` into every consumer `.env`
-(alice-chat-stream, dms-extractor-image, n8n, openwebui).
+Since PROJ-111 only `alice-llm-gateway` uses this key (it mounts the same
+file). Consumers get their **own gateway keys** in `OLLAMA_API_KEY=` — see
+`automations/alice-llm-gateway/README.md`.
 
 ## Rollback
 

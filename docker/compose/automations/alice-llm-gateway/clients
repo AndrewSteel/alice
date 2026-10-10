@@ -1,0 +1,10 @@
+# alice-llm-gateway callers (PROJ-111) — copy to /srv/warm/llm-gateway/clients
+# (root:root, 600). One caller per line:  <name> <tier> <key>
+# tier: interactive (a human is waiting) | background (everything else).
+# Callers NOT listed here are rejected (401). Generate keys with:
+#   openssl rand -hex 32
+chat-stream  interactive  3e184e955dc8ab2a7c4e118e4f3aa9b06136f0dfa5be931892d18a250cc2e787
+openwebui    interactive  2b5a8212fa6fba0565aad3d78dd2315e5c83e7846e61e8e328ac4c871fd603d2
+external     interactive  1130799f56694f8abfb45824e170d9f0a28a0e0851d71c504ba1b84886b02282
+n8n          background   db604f32efc29a0836a16bbd0503679d81c1245359258d12f17d65ec19b9bcc2
+dms-extractor-image background  b2692c87baf018bb8f57c463558c8c7cb891d3c34ac07a6048009399f22599d9
