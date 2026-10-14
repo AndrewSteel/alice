@@ -592,8 +592,8 @@ def health():
 def describe(req: DescribeRequest):
     """Description only (no EXIF/GPS, no Redis). Blocks while another image is processed."""
     file_path = req.file_path
-    # realpath: reject ../ escapes out of the NAS mounts
-    if not os.path.realpath(file_path).startswith("/mnt/nas/"):
+    # realpath: reject ../ escapes out of the NAS mounts; NUL would make realpath raise
+    if "\x00" in file_path or not os.path.realpath(file_path).startswith("/mnt/nas/"):
         log("error", "Rejected invalid file_path (must be under /mnt/nas/)", file_path=file_path)
         return JSONResponse({"error": "invalid_path", "detail": "file_path must be under /mnt/nas/"}, status_code=400)
 
