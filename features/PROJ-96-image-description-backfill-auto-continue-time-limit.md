@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-28
-**Last Updated:** 2026-08-28 (deployed — produktiv gesetzt durch Nutzer)
+**Last Updated:** 2026-10-14 (BUG-4 n8n-Heap-OOM behoben; BUG-5 Panorama-Bilder/HTTP 413 zurückgestellt bis PROJ-112)
 
 ## Dependencies
 - Betrifft: `alice-dms-image-description-backfill` (PROJ-?, Deployed, aber bisher noch nie ausgeführt — 0 Executions) — kein neuer Baustein, Erweiterung eines bestehenden, ungenutzten Workflows.
@@ -274,3 +274,28 @@ _Bereit für Review._
 Workflow `alice-dms-image-description-backfill` ist produktiv gesetzt. Die beiden Schedule-Trigger (23:30 Uhr, 06:00 Uhr) laufen ab sofort unbeaufsichtigt; der bestehende Webhook bleibt für Ad-hoc-Testläufe zusätzlich aktiv.
 
 **Offene Beobachtung:** Der Selbstaufruf-Pfad (Auto-Fortsetzung über mehrere Batches) wurde in den bisherigen Testläufen noch nicht ausgelöst, da `remaining` in beiden Fällen die Zeit überdauerte. Empfehlung: n8n-Executions nach dem ersten oder zweiten nächtlichen Lauf prüfen, um zu bestätigen, dass die Selbstaufruf-Kette (`Execute Workflow: Self (Continue)`) bei Bedarf tatsächlich greift und die Lock-Erneuerung über mehrere Kettenglieder hinweg funktioniert.
+
+## Post-Deployment Bugfixes
+
+#### BUG-4: n8n stürzt mit „JavaScript heap out of memory“ ab — Bild-Base64 in Execution-Daten + blockierende Selbstaufruf-Kette
+- **Severity:** Critical (reißt den kompletten n8n-Prozess mit, inkl. aller parallel laufenden Workflows wie `alice-dms-path-worker`)
+- **Gefunden:** 2026-10-11 durch Nutzer — n8n-Log zeigt wiederholt `FATAL ERROR: Reached heap limit` und `There was a problem running hook "workflowExecuteAfter" RangeError: Invalid string length` (flatted-Stringify beim Persistieren der Execution). Executions des Backfills enden in Ketten von `crashed` im ~6-Minuten-Takt (10.10. ab 21:30 und 04:21 Uhr UTC); Execution 230074 blieb als Zombie mit Status `running` und ohne Daten stehen.
+- **Root Cause (zwei sich verstärkende Ursachen):**
+  1. `Code: Resolve & Read Image` legte das komplette Bild als `image_b64` ins Item-JSON. n8n hält die Run-Daten aller 50 Bilder eines Batches im Speicher und serialisiert sie am Ende der Execution → bei Fotos mit mehreren MB hunderte MB pro Execution (V8-String-Limit / 4-GB-Heap).
+  2. `Execute Workflow: Self (Continue)` lief mit `waitForSubWorkflow: true` → jede Eltern-Execution blieb samt ihrer Bilddaten im Speicher, solange das Kind lief. Der Speicherbedarf wuchs linear mit der Kettenlänge bis zum OOM. (Dieser Pfad war laut Deployment-Abschnitt vor dem Deploy noch nie live ausgelöst worden.)
+- **Fix:**
+  - `Code: Resolve & Read Image` → umbenannt in `Code: Resolve Image Path`, gibt nur noch `resolved_path` zurück.
+  - `HTTP: Ollama Vision` + `Code: Extract Description` → ersetzt durch einen Code-Node `Code: Ollama Vision` (axios, gleicher Endpoint/Prompt/Timeout 300 s, `maxBodyLength: Infinity`): liest die Datei, ruft das Vision-Modell auf und gibt nur `{ weaviate_uuid, statusCode, ai_description }` zurück. Die Base64-Daten existieren nur noch als lokale Variable und landen nie in den Execution-Daten.
+  - `Execute Workflow: Self (Continue)` → `waitForSubWorkflow: false`; die Eltern-Execution endet sofort und gibt ihren Speicher frei. Der Fortsetzungs-Pfad führt jetzt direkt zu `IF: From Webhook` statt über `Code: Release Lock`, da die Kind-Execution denselben Lock-Owner-Token übernimmt und den Lock weiterhin hält; freigegeben wird er vom letzten Kettenglied.
+- **Status:** Fixed und deployed (durch Nutzer). Panorama-Bilder scheitern weiterhin, jetzt mit HTTP 413 → BUG-5.
+
+#### BUG-5: Panorama-/Großbilder scheitern mit HTTP 413 — Task-Runner bricht danach ab
+- **Severity:** High (Backfill bleibt bei jedem Lauf an denselben Bildern hängen)
+- **Gefunden:** 2026-10-14 durch Nutzer, nach dem BUG-4-Fix
+- **Symptom:** Für Panoramen (z.B. 22704×1760 px, 52,8 MB) liefert `Code: Ollama Vision` `statusCode: 413`. `IF: Ollama OK` führt in den False-Zweig; der anschließende `Code: Log Still Failed (Ollama Error)` scheitert mit „Node execution failed“ (`InternalTaskRunnerDisconnectAnalyzer` — der Task-Runner-Prozess hat die Verbindung verloren).
+- **Ursache:**
+  - Der Backfill schickt das **Originalbild** als Base64 (≈ +33 % Größe). Ab ca. 37 MB Dateigröße liegt der Request über `MAX_BODY_BYTES` = 50 MB des `alice-llm-gateway` (PROJ-111, = nginx `client_max_body_size 50m`) → 413.
+  - Vermutung (nicht verifiziert): Puffer + Base64-String + JSON-Body + axios-Kopie eines solchen Bildes belegen mehrere hundert MB im Task-Runner; der Runner bricht dadurch weg, sichtbar wird der Fehler erst im nächsten Code-Node.
+  - Grundsätzlicher Unterschied: `dms-extractor-image` (`get_ai_description`) verkleinert auf längste Seite 1024 px, der Backfill nicht. Für Panoramen ist aber auch die Verkleinerung des Extractors unbrauchbar (22704×1760 → 1024×79 px) — vermutlich ist genau das der Grund, warum diese Bilder überhaupt mit `extraction_failed = true` im Backfill landen.
+- **Entscheidung (Nutzer, 2026-10-14):** Keine isolierte Fehlerbehandlung im Backfill. Die Bildaufbereitung für Panoramen/Großbilder wird in **PROJ-112** einheitlich für Extractor und Backfill gelöst; PROJ-96 wird erst danach abgeschlossen.
+- **Status:** Zurückgestellt — blockiert durch PROJ-112.

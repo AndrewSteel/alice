@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## alice-dms-image-description-backfill\n\nRetries the AI vision description for Weaviate \"Image\" objects where\nextraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Triggers**:\n- `Schedule Trigger: 23:30` — daily, window limit 2h15min (8100s)\n- `Schedule Trigger: 06:00` — daily, window limit 1h45min (6300s)\n- `Webhook: POST /image-description-backfill` — ad-hoc test runs, optional\n  `max_runtime_seconds` override in body/query (same override pattern as PROJ-92)\n\n**Auto-continue (PROJ-96)**: fetches up to 50 images per batch (LIMIT unchanged).\nIf time remains in the window (>= 5min buffer) and images with extraction_failed=true\nremain, the workflow re-invokes itself (Execute Workflow, waitForSubWorkflow=true),\npassing the original window_start + limit forward so the time check stays consistent\nacross the whole self-invocation chain.\n\n**Time limit check**: between loop iterations (not mid Ollama-call/PATCH), analog\nPROJ-94 — the in-flight image always finishes before the loop is left.\n\n**Overlap lock**: `alice:dms:image-description-backfill:lock:run` (Redis) — first\ninvocation of a window chain acquires fail-closed (skip run if already locked by\nanother chain); every self-invocation renews the same lock fail-open (Redis hiccup\nmust not abort an already-running chain — TTL is the fallback safety net).\n\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
+        "content": "## alice-dms-image-description-backfill\n\nRetries the AI vision description for Weaviate \"Image\" objects where\nextraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Triggers**:\n- `Schedule Trigger: 23:30` — daily, window limit 2h15min (8100s)\n- `Schedule Trigger: 06:00` — daily, window limit 1h45min (6300s)\n- `Webhook: POST /image-description-backfill` — ad-hoc test runs, optional\n  `max_runtime_seconds` override in body/query (same override pattern as PROJ-92)\n\n**Auto-continue (PROJ-96)**: fetches up to 50 images per batch (LIMIT unchanged).\nIf time remains in the window (>= 5min buffer) and images with extraction_failed=true\nremain, the workflow re-invokes itself (Execute Workflow, waitForSubWorkflow=false - the parent ends\nimmediately and frees its memory; it does NOT release the lock, the child owns it now),\npassing the original window_start + limit forward so the time check stays consistent\nacross the whole self-invocation chain.\n\n**Time limit check**: between loop iterations (not mid Ollama-call/PATCH), analog\nPROJ-94 — the in-flight image always finishes before the loop is left.\n\n**Overlap lock**: `alice:dms:image-description-backfill:lock:run` (Redis) — first\ninvocation of a window chain acquires fail-closed (skip run if already locked by\nanother chain); every self-invocation renews the same lock fail-open (Redis hiccup\nmust not abort an already-running chain — TTL is the fallback safety net).\n\n**Memory**: image base64 lives only inside `Code: Ollama Vision` and is never\nreturned as item data (otherwise 50 images per batch blow up the n8n heap).\n\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
         "height": 460,
         "width": 500,
         "color": 5
@@ -199,13 +199,13 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Resolve & Read Image\" } });\nconst fs = require('fs');\nconst item = $input.first().json;\nconst candidates = [item.file_path, ...(item.additionalPaths || [])].filter(Boolean);\n\nlet resolvedPath = null;\nfor (const p of candidates) {\n  try {\n    if (fs.existsSync(p)) { resolvedPath = p; break; }\n  } catch (e) {}\n}\n\nif (!resolvedPath) {\n  logger.warn(`[image-description-backfill] No readable path for ${item.weaviate_uuid}`);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}\n\ntry {\n  const buf = fs.readFileSync(resolvedPath);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, resolved_path: resolvedPath, image_b64: buf.toString('base64'), _read_ok: true } }];\n} catch (e) {\n  logger.warn(`[image-description-backfill] Read failed for ${resolvedPath}: ${e.message}`);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Resolve Image Path\" } });\nconst fs = require('fs');\nconst item = $input.first().json;\nconst candidates = [item.file_path, ...(item.additionalPaths || [])].filter(Boolean);\n\nlet resolvedPath = null;\nfor (const p of candidates) {\n  try {\n    if (fs.existsSync(p)) { resolvedPath = p; break; }\n  } catch (e) {}\n}\n\nif (!resolvedPath) {\n  logger.warn(`[image-description-backfill] No readable path for ${item.weaviate_uuid}`);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}\n\n// Only the path is passed on - the image itself is read inside \"Code: Ollama Vision\"\n// so its base64 never ends up in the execution data (caused n8n heap OOM).\nreturn [{ json: { weaviate_uuid: item.weaviate_uuid, resolved_path: resolvedPath, _read_ok: true } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [2100, 60],
-      "id": "code-resolve-read",
-      "name": "Code: Resolve & Read Image"
+      "id": "code-resolve-path",
+      "name": "Code: Resolve Image Path"
     },
     {
       "parameters": {
@@ -249,40 +249,13 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ (($env.OLLAMA_URL || 'http://llama-3090:11434').replace(/\\/$/, '')) + '/v1/chat/completions' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "value": "={{ $env.OLLAMA_API_KEY ? ('Bearer ' + $env.OLLAMA_API_KEY) : undefined }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_VISION_MODEL, messages: [{ role: 'user', content: [ { type: 'text', text: 'Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung.' }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + $json.image_b64 } } ] }], stream: false, temperature: 0.3 }) }}",
-        "options": {
-          "timeout": 300000,
-          "response": {
-            "response": {
-              "responseFormat": "json",
-              "fullResponse": true
-            }
-          }
-        }
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Ollama Vision\" } });\nconst fs = require('fs');\nconst axios = require('axios');\nconst item = $input.first().json;\n\n// Read + base64 + vision call in one node: the image stays a local variable and\n// only the description is returned, keeping execution data small (n8n heap OOM fix).\nlet statusCode = 0;\nlet ai_description = '';\ntry {\n  const image_b64 = fs.readFileSync(item.resolved_path).toString('base64');\n  const baseUrl = ($env.OLLAMA_URL || 'http://llama-3090:11434').replace(/\\/$/, '');\n  const headers = { 'Content-Type': 'application/json' };\n  if ($env.OLLAMA_API_KEY) headers.Authorization = 'Bearer ' + $env.OLLAMA_API_KEY;\n  const r = await axios.post(`${baseUrl}/v1/chat/completions`, {\n    model: $env.OLLAMA_VISION_MODEL,\n    messages: [{ role: 'user', content: [\n      { type: 'text', text: 'Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung.' },\n      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + image_b64 } }\n    ] }],\n    stream: false,\n    temperature: 0.3\n  }, {\n    headers,\n    timeout: 300000,\n    maxBodyLength: Infinity,\n    maxContentLength: Infinity,\n    validateStatus: () => true\n  });\n  statusCode = r.status;\n  const body = r.data || {};\n  // PROJ-99: OpenAI shape from llama.cpp; keep the old Ollama field as a fallback.\n  const content = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || body.response || '';\n  ai_description = String(content).slice(0, 50000);\n  if (statusCode >= 300) logger.warn(`[image-description-backfill] Vision call HTTP ${statusCode} for ${item.weaviate_uuid}`);\n} catch (e) {\n  logger.warn(`[image-description-backfill] Vision call failed for ${item.weaviate_uuid}: ${e.message}`);\n}\n\nreturn [{ json: { weaviate_uuid: item.weaviate_uuid, statusCode, ai_description } }];"
       },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [2700, -40],
-      "id": "http-ollama-vision",
-      "name": "HTTP: Ollama Vision",
-      "onError": "continueRegularOutput"
+      "id": "code-ollama-vision",
+      "name": "Code: Ollama Vision"
     },
     {
       "parameters": {
@@ -316,23 +289,13 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (Ollama Error)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\nlogger.warn(`[image-description-backfill] Ollama call failed for ${weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'ollama_error' } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (Ollama Error)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $input.first().json.weaviate_uuid;\nlogger.warn(`[image-description-backfill] Ollama call failed for ${weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'ollama_error' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [3300, 110],
       "id": "code-log-still-failed-ollama",
       "name": "Code: Log Still Failed (Ollama Error)"
-    },
-    {
-      "parameters": {
-        "jsCode": "const resp = $input.first().json;\nconst body = resp.body || resp;\nconst weaviate_uuid = $('Code: Resolve & Read Image').first().json.weaviate_uuid;\n// PROJ-99: OpenAI shape from llama.cpp; keep the old Ollama field as a fallback.\nconst content = (body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || (body && body.response) || '';\nconst ai_description = String(content).slice(0, 50000);\nreturn [{ json: { weaviate_uuid, ai_description } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [3300, -190],
-      "id": "code-extract-description",
-      "name": "Code: Extract Description"
     },
     {
       "parameters": {
@@ -478,7 +441,7 @@
         },
         "mode": "once",
         "options": {
-          "waitForSubWorkflow": true
+          "waitForSubWorkflow": false
         }
       },
       "type": "n8n-nodes-base.executeWorkflow",
@@ -695,18 +658,7 @@
         ],
         [
           {
-            "node": "Code: Resolve & Read Image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code: Resolve & Read Image": {
-      "main": [
-        [
-          {
-            "node": "IF: File Readable",
+            "node": "Code: Resolve Image Path",
             "type": "main",
             "index": 0
           }
@@ -717,7 +669,7 @@
       "main": [
         [
           {
-            "node": "HTTP: Ollama Vision",
+            "node": "Code: Ollama Vision",
             "type": "main",
             "index": 0
           }
@@ -742,22 +694,11 @@
         ]
       ]
     },
-    "HTTP: Ollama Vision": {
-      "main": [
-        [
-          {
-            "node": "IF: Ollama OK",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "IF: Ollama OK": {
       "main": [
         [
           {
-            "node": "Code: Extract Description",
+            "node": "HTTP: PATCH Weaviate",
             "type": "main",
             "index": 0
           }
@@ -776,17 +717,6 @@
         [
           {
             "node": "Code: Time Check",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code: Extract Description": {
-      "main": [
-        [
-          {
-            "node": "HTTP: PATCH Weaviate",
             "type": "main",
             "index": 0
           }
@@ -888,7 +818,7 @@
       "main": [
         [
           {
-            "node": "Code: Release Lock",
+            "node": "IF: From Webhook",
             "type": "main",
             "index": 0
           }
@@ -918,6 +848,28 @@
         [
           {
             "node": "End: No Webhook Response Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Resolve Image Path": {
+      "main": [
+        [
+          {
+            "node": "IF: File Readable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Ollama Vision": {
+      "main": [
+        [
+          {
+            "node": "IF: Ollama OK",
             "type": "main",
             "index": 0
           }
