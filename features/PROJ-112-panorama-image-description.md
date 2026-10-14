@@ -1,8 +1,8 @@
 # PROJ-112: Panorama-/Großbild-Beschreibung im DMS (zentrale Bildbeschreibung mit Teilbild-Zerlegung)
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-10-14
-**Last Updated:** 2026-10-14 (Backend implementiert)
+**Last Updated:** 2026-10-14 (QA bestanden)
 
 ## Dependencies
 - Betrifft: `dms-extractor-image` (`get_ai_description`, MQTT-Topic `alice/dms/image`) und n8n-Workflow `alice-dms-image-description-backfill`
@@ -232,7 +232,99 @@ Es kommen **keine neuen gespeicherten Daten** hinzu. Weder PostgreSQL noch Weavi
 2. Danach: **Deploy n8n-workflow `alice-dms-image-description-backfill`**.
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-10-14
+**Umgebung:** lokal per Docker — gebautes `dms-extractor-image`-Image (`mem_limit`/`--memory` 3 GB, ohne Swap), Mosquitto 2, Redis 7, Mock-LLM (OpenAI-kompatibel, protokolliert Bildgröße/Prompt je Aufruf, steuerbare Fehler/Leerantworten/Verzögerung). Backfill-Node „Code: Request Description" in Node 20 mit `$input`/`$getWorkflowStaticData`-Stubs gegen den Test-Extractor ausgeführt; alle Code-Nodes per `node --check`, Verbindungen strukturell geprüft.
+**Tester:** QA Engineer (AI)
+
+### Acceptance Criteria Status
+
+#### AC-1: Zentrale Beschreibungs-Funktion
+- [x] Genau eine Implementierung (`get_ai_description`), Eingabe Pfad, Ausgabe Text; MQTT-Pfad und `POST /describe` nutzen sie
+- [x] MQTT-Pfad: EXIF (Datum, Kamera), GPS und Geocode-Queue-Eintrag unverändert (JPEG mit GPS getestet)
+- [x] Deutscher Prompt, 3–5 Sätze; Kürzung auf 50.000 Zeichen bei Einzelbild und Panorama (60.000-Zeichen-Antwort → 50.000)
+- [x] Fehler statt Leer-/Platzhaltertext (leere LLM-Antwort → `502 vision_failed`)
+
+#### AC-2: Standard-Format (≤ 2:1 / 1:2)
+- [x] 6000×4000, 4000×6000, 4000×2000 (exakt 2:1), 16320×12240 → je **1** LLM-Aufruf
+- [x] Verkleinerung auf längste Seite 1024 px (1024×683, 683×1024, 1024×512, 1024×768); `OLLAMA_MAX_IMAGE_PX` konfigurierbar
+
+#### AC-3: Teilbild-Zerlegung (> 2:1 / 1:2)
+- [x] 4100×2000 → 2 Teilbilder (3:2) + Zusammenfassung
+- [x] 22704×1760 → 8 Teilbilder + 1 Zusammenfassung (9 Aufrufe), Teilbilder 1024×579
+- [x] 1760×22704 → 8 Teilbilder (579×1024), Reihenfolge oben → unten, Zusammenfassungs-Prompt „von oben nach unten"
+- [x] Max. 8 Teilbilder, ≥ 10 % Überlappung, ~3:2, ≤ 2:1 solange möglich, lückenlose Abdeckung, Reihenfolge links → rechts — Eigenschaftstest über 10.142 zufällige Nicht-Standard-Formate
+- [x] Zusammenfassung als eigener Text-Aufruf mit Anweisung „eine Szene, keine Aufzählung"
+- [ ] **Offen (nur live prüfbar):** inhaltliche Qualität der Gesamtbeschreibung mit dem echten Vision-Modell → beim `/deploy` prüfen
+
+#### AC-4: Fehlerverhalten (alles oder nichts)
+- [x] Fehler bei Teilbild 5 von 8 → Abbruch nach genau 5 Aufrufen, `502`, kein Teilergebnis
+- [x] Fehler bei der Zusammenfassung (Aufruf 9) → `502`, kein Teilergebnis
+- [x] LLM nicht erreichbar → `502 vision_failed`; keine Wiederholungen innerhalb eines Aufrufs
+- [x] MQTT-Pfad: Fehler → `extraction_failed=true` im Redis-Ergebnis
+
+#### AC-5: Pixel-Obergrenze
+- [x] 200 MP JPEG (16320×12240) → beschrieben, Peak 78 MB
+- [x] 200 MP HEIC → beschrieben, Peak 1,4 GB (vorher an libheif-Grenze gescheitert, siehe Implementation Notes)
+- [x] 250 MP PNG (RGB/RGBA) → beschrieben, Peak 1,07 GB / 2,0 GB (< 3 GB Limit, kein OOM-Kill)
+- [x] 312 MP → `too_large`, Log „image too large: 312 MP"; MQTT-Pfad `extraction_failed=true`
+
+#### AC-6: Backfill
+- [x] Übergibt nur den aufgelösten Pfad an `http://dms-extractor-image:8012/describe`, liest keine Bilddateien, ruft kein LLM mehr auf (keine `OLLAMA_*`-Referenzen mehr im Workflow)
+- [x] Erfolg → `_ok=true` + Text → bestehender PATCH-Zweig (`ai_description`, `extraction_failed=false`, Zählung `updated`)
+- [x] Fehler (422/502/Timeout) → `_ok=false` → `still_failed`, Fehlergrund im Log
+- [x] Extractor nicht erreichbar → `extractor_unreachable` gesetzt → Schleife endet, keine Selbst-Fortsetzung
+- [x] Zeitfenster, Lock, Auto-Fortsetzung, Summary: Nodes unverändert (nur Ergänzung des Abbruch-Flags)
+- [x] 55,8-MB-Panorama (22704×1760, Rauschen, realistischer Dateigröße) → Extractor-Peak 137 MB; n8n erhält nur Text
+- [ ] **Offen (nur live prüfbar):** das echte 52,8-MB-Panorama über den produktiven Backfill → beim `/deploy` prüfen
+- [x] n8n Task-Runner-Timeout (`N8N_RUNNERS_TASK_TIMEOUT=3600`) liegt über dem 15-min-Request-Timeout
+
+### Edge Cases Status
+- [x] EC exakt 2:1 → Einzelbild; 2,05:1 → 2 Teilbilder
+- [x] EC 40000×1000 → 8 Teilbilder (breiter als 2:1), Beschreibung entsteht, kein Fehler
+- [x] EC 800×100 → 6 Teilbilder à 150×100, nicht hochskaliert
+- [x] EC > 250 MP → abgelehnt + Log
+- [x] EC Teilbild-Timeout/-Fehler → nichts gespeichert
+- [x] EC Datei fehlt / Verzeichnis / keine Bilddatei / defektes Bild → `422 unreadable`
+- [x] EC gleichzeitige Aufrufe MQTT + Backfill → strikt nacheinander (Aufruf-Reihenfolge L×8,S,V×8,S — nie verschachtelt)
+- [x] Zusätzlich: Bild-Modi L, P, P+Transparenz, LA, 1-Bit, CMYK, I;16, RGBA → korrekt beschrieben
+- [x] Zusätzlich: MQTT-Keepalive 1800 s beim Broker angekommen (`k1800`); Container stoppt sauber (0,5 s, Exit 0); Heartbeat läuft während Verarbeitung weiter
+
+### Security Audit Results
+- [x] Kein Port veröffentlicht, keine nginx-Route; nur im Docker-Netz `backend` erreichbar
+- [x] Pfad-Validierung per `realpath`: `/etc/passwd`, `/mnt/nas/../etc/passwd`, `/mnt/nasty/…`, `/mnt/nas` und Symlink unter `/mnt/nas/` → `/etc/passwd` werden mit `400` abgelehnt
+- [x] Fehlerhafte Payloads (leer, kein JSON, falscher Typ) → `422` (Pydantic), Container stabil
+- [x] `/docs`, `/openapi.json` deaktiviert (404)
+- [x] LLM-API-Key wird gesendet (`Bearer`), erscheint aber nicht in den Logs
+- [x] Speicher: eigene 250-MP-Grenze greift vor dem Dekodieren (ersetzt Pillow-/libheif-Schutz), Sperre verhindert parallele Großbilder
+- [ ] BUG-1 (Low): Null-Byte im Pfad → `500`
+- Info (akzeptiert, Tech-Design-Entscheidung): Endpunkt ohne Authentifizierung — jeder Container im Netz `backend` kann Beschreibungen von NAS-Bildern anfordern bzw. die Warteschlange belegen
+
+### Bugs Found
+
+#### BUG-1: Null-Byte im `file_path` führt zu HTTP 500
+- **Severity:** Low
+- **Steps to Reproduce:**
+  1. `POST /describe` mit `{"file_path": "/mnt/nas/test/a\u0000b.jpg"}`
+  2. Expected: `400 invalid_path`
+  3. Actual: `500 Internal Server Error` (unbehandelter `ValueError` aus `os.path.realpath`); Container läuft weiter, Backfill würde `still_failed` zählen
+- **Priority:** Nice to have (nur intern erreichbar, keine Auswirkung außer Statuscode)
+
+#### INFO-1: 16-Bit-PNGs mit vollem Wertebereich werden weiß
+- **Severity:** Info (keine Regression — identisches Verhalten mit dem bisherigen `convert("RGB")`)
+- Pillow schneidet `I;16`-Werte > 255 beim Wandeln nach RGB ab. Außerhalb des Scopes; bei Bedarf eigenes Ticket.
+
+### Regression
+- PROJ-56/99 (MQTT-Extraktion): EXIF/GPS/Geocode-Queue/Redis-Ergebnis unverändert; Ablehnung ungültiger Pfade und ungültigen JSONs unverändert
+- PROJ-111: Aufrufe gehen weiterhin mit eigenem Gateway-Key an `OLLAMA_URL`
+- PROJ-96: Workflow-Struktur (Lock, Zeitfenster, Selbstaufruf, Summary) unverändert; alle Verbindungen konsistent
+
+### Summary
+- **Acceptance Criteria:** 29/31 bestanden lokal; 2 nur live prüfbar (Beschreibungsqualität mit echtem Modell, echtes 52,8-MB-Panorama über produktiven Backfill) → Teil des `/deploy`-Live-Tests
+- **Bugs Found:** 1 total (0 critical, 0 high, 0 medium, 1 low) + 1 Info
+- **Security:** Pass (1 Low)
+- **Production Ready:** YES
+- **Recommendation:** Deploy; BUG-1 optional mitbeheben
 
 ## Deployment
 _To be added by /deploy_
