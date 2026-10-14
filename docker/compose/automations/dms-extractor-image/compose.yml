@@ -11,6 +11,9 @@ services:
       service: nas-base
     env_file:
       - .env
+    # PROJ-112: one image at a time. Measured peaks: 200 MP JPEG ~80 MB (draft decode),
+    # 250 MP RGB PNG ~1.1 GB, 250 MP RGBA PNG ~2.0 GB (worst case) -> 3 GB with headroom
+    mem_limit: 3g
     healthcheck:
       test:
         [
