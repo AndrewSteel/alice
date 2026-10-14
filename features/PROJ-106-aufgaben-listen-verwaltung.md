@@ -1,8 +1,8 @@
 # PROJ-106: Aufgaben- & Listen-Verwaltung (lokal) — Kern
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-10-08
-**Last Updated:** 2026-10-08
+**Last Updated:** 2026-10-14 (Deployed)
 
 ## Dependencies
 - Ersetzt: PROJ-88 (Google-Aufgaben-Agent, verworfen) und PROJ-100 (HA-Todo-Listen-Agent, verworfen) — Begründung im verworfenen Entwurf `PROJ-88-aufgaben-agent.md`
@@ -499,4 +499,11 @@ Migration 072 einspielen; `alice-lists/.env` aus `.env.example` anlegen (Redis-P
 - **Ergebnis:** 63/63 Prüfpunkte im Code bestanden, 0 offene Bugs, Security sauber → **READY**. Offen nur der Live-Test der Testsätze mit echtem LLM über WebApp und Voice PE (Teil von `/deploy`).
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-10-14 (vom User auf dem Server ausgerollt)
+**Tag:** `v2.6.0-PROJ-106`
+**Production:** `alice-lists` (Docker, Port 8010, nginx `/api/lists/`), `alice-chat-stream` (`lists_tools`/`lists_replies`, `LISTS_URL`), WebApp (Rollen-Schalter „Listen“), Migration 072
+
+**Live-Test (User, 2026-10-14): positiv**
+- WebApp-Chat und beide Voice-PE-Geräte funktionieren einwandfrei mit echtem LLM (der bisher offene Punkt „Live-Test mit echtem LLM über WebApp + Voice PE" ist damit erledigt).
+- Der frühere Live-Test (2026-10-09) war durch DMS-Last blockiert; das wurde mit PROJ-111 (LLM-Gateway mit Priorisierung) gelöst.
