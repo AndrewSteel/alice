@@ -1,8 +1,8 @@
 # PROJ-112: Panorama-/Großbild-Beschreibung im DMS (zentrale Bildbeschreibung mit Teilbild-Zerlegung)
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-10-14
-**Last Updated:** 2026-10-14
+**Last Updated:** 2026-10-14 (Tech Design ergänzt)
 
 ## Dependencies
 - Betrifft: `dms-extractor-image` (`get_ai_description`, MQTT-Topic `alice/dms/image`) und n8n-Workflow `alice-dms-image-description-backfill`
@@ -96,13 +96,117 @@ Ziel: **eine zentrale Bildbeschreibungs-Funktion** (Eingabe: Dateipfad, Ausgabe:
 
 - Speicher: Dekodieren eines 250-MP-Bildes benötigt grob 750 MB RAM (RGB); das Container-Speicherlimit muss dafür ausgelegt sein (`/architecture`)
 - Konfigurierbar: Verkleinerungskante (Default 1024 px), Pixel-Obergrenze (Default 250 MP); Schwelle 2:1, Teilbild-Verhältnis 3:2, Überlappung 10 % und max. 8 Teilbilder dürfen als Konstanten fest sein
-- Offene Architekturfrage: zentrale Funktion im `dms-extractor-image` belassen (mit synchroner Schnittstelle für den Backfill) oder eigener Container
+- Architekturfrage entschieden (siehe Tech Design): zentrale Funktion bleibt im `dms-extractor-image`, zusätzlich mit synchroner interner Schnittstelle für den Backfill
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Überblick
+
+Die Beschreibungs-Funktion bleibt im Container `dms-extractor-image` und bekommt eine zweite „Tür": Neben dem bestehenden MQTT-Eingang (`alice/dms/image`) nimmt der Container jetzt auch direkte Anfragen vom Backfill entgegen (Pfad rein, Beschreibungstext raus). Beide Türen führen in dieselbe Funktion. Es entsteht kein neuer Container.
+
+```
+Neues Bild im DMS                          Backfill (n8n, nachts)
+      |                                            |
+  MQTT alice/dms/image                    direkte Anfrage "Beschreibe /mnt/nas/..."
+      |                                            |
+      +------------------+------------------------+
+                         v
+             dms-extractor-image
+             +-- Eingang A: MQTT (EXIF + GPS + Beschreibung, wie bisher)
+             +-- Eingang B: interne Anfrage (nur Beschreibung)   <-- NEU
+             +-- Sperre: immer nur ein Bild gleichzeitig         <-- NEU
+             +-- Bildbeschreibung (zentral)
+                   +-- Größe prüfen (> 250 MP -> Fehler)         <-- NEU
+                   +-- Seitenverhältnis prüfen (<= 2:1 ?)        <-- NEU
+                   |     +-- ja: 1 Bild (1024 px)  -> LLM
+                   |     +-- nein: bis zu 8 Teilbilder -> LLM je Teilbild
+                   |                + 1 Zusammenfassung -> LLM  <-- NEU
+                   +-- alles oder nichts: Fehler statt Teilergebnis
+                         v
+                 LLM-Gateway (PROJ-111) -> llama-3090
+```
+
+### A) Komponenten-Struktur
+
+```
+dms-extractor-image (bestehender Container, erweitert)
++-- MQTT-Eingang (besteht)           -> EXIF, GPS, Geocode-Queue, Redis-Ergebnis
++-- Interner Anfrage-Eingang (NEU)   -> nur Beschreibung, Antwort direkt zurück
++-- Bild-Vorbereitung (NEU)
+|   +-- Größenprüfung (Obergrenze 250 MP)
+|   +-- Entscheidung Einzelbild / Teilbilder (Schwelle 2:1 bzw. 1:2)
+|   +-- Zerlegung in max. 8 Teilbilder (3:2, 10 % Überlappung)
++-- Bildbeschreibung (besteht, erweitert)
+|   +-- Beschreibung je Bild/Teilbild
+|   +-- Zusammenfassung der Teil-Beschreibungen (NEU)
++-- Ein-Bild-gleichzeitig-Sperre (NEU)
+
+alice-dms-image-description-backfill (n8n, vereinfacht)
++-- Holen der Bilder mit extraction_failed=true   (unverändert)
++-- Dateipfad auflösen                            (unverändert)
++-- Beschreibung anfordern                        (ersetzt "Code: Ollama Vision")
++-- Ergebnis nach Weaviate schreiben              (unverändert)
++-- Zeitfenster / Lock / Auto-Fortsetzung / Summary (unverändert, PROJ-96)
+```
+
+### B) Daten
+
+Es kommen **keine neuen gespeicherten Daten** hinzu. Weder PostgreSQL noch Weaviate bekommen neue Felder (Bildbreite/-höhe werden bewusst nicht gespeichert).
+
+- **Anfrage des Backfills:** der Dateipfad des Bildes.
+- **Antwort bei Erfolg:** der deutsche Beschreibungstext.
+- **Antwort bei Fehler:** ein Fehlergrund, damit der Backfill ihn ins Log schreiben kann. Mögliche Gründe: Bild zu groß (> 250 MP), Datei nicht lesbar bzw. kein gültiges Bild, Pfad ungültig, Vision-Modell fehlgeschlagen oder leer.
+- **Ergebnis im DMS:** unverändert `ai_description` und `extraction_failed` am Weaviate-Objekt bzw. im Redis-Ergebnis des MQTT-Pfads.
+
+### C) Tech-Entscheidungen (begründet)
+
+1. **Funktion bleibt im `dms-extractor-image`, kein neuer Container.** Der Container hat bereits NAS-Zugriff, Bildbibliotheken inkl. HEIC und die LLM-Konfiguration. Ein neuer Container bräuchte alles noch einmal samt Deployment, für eine einzige Funktion. Nachteil: Wenn der Backfill ein Panorama beschreiben lässt, warten neu eintreffende MQTT-Bilder ein paar Minuten. Das ist unkritisch, weil DMS-Bildbeschreibung ohnehin keine Echtzeit-Anforderung hat.
+
+2. **Direkte Anfrage statt MQTT für den Backfill.** Der Backfill braucht das Ergebnis sofort zurück, um zwischen `updated` und `still_failed` zu unterscheiden und das Ergebnis selbst zu speichern. MQTT liefert keine Antwort. So bleibt auch EXIF/GPS unberührt (Spec: keine Neu-Extraktion).
+
+3. **Nur ein Bild gleichzeitig.** Eine Sperre im Container serialisiert MQTT- und Backfill-Aufträge. Das schützt den Arbeitsspeicher (ein 250-MP-Bild braucht beim Dekodieren ca. 750 MB) und passt zum LLM-Server, der ohnehin nur einen Slot hat (`n_slots = 1`). Die Reihenfolge zwischen Chat und DMS regelt weiterhin das LLM-Gateway (PROJ-111).
+
+4. **Größe wird vor dem Dekodieren geprüft.** Aus dem Datei-Kopf liest man die Pixelmaße, ohne das Bild zu laden. Bilder über 250 MP werden sofort abgelehnt, bevor Speicher belegt wird. Pillows eigene Schutzgrenze (ca. 179 MP) wird auf die gleiche Obergrenze angehoben, sonst würden 200-MP-Bilder schon beim Öffnen scheitern.
+
+5. **Zusammenfassung in einem eigenen LLM-Aufruf.** Die Teil-Beschreibungen werden dem Modell als reiner Text zurückgegeben mit der Anweisung, daraus eine zusammenhängende Szenenbeschreibung zu machen. Das braucht kein Bild und ist schnell. Die Sprache bleibt wie bei allen DMS-Beschreibungen Deutsch (PROJ-79: durchgängig deutsche DMS-Daten).
+
+6. **Schutz der internen Anfrage.** Die Schnittstelle ist nur im internen Backend-Netz erreichbar und wird nicht über nginx veröffentlicht. Wie im MQTT-Pfad werden nur Pfade unter `/mnt/nas/` akzeptiert, damit darüber keine beliebigen Dateien gelesen werden können.
+
+7. **MQTT-Verbindung gegen lange Verarbeitung absichern.** Die MQTT-Verarbeitung blockiert den Netzwerk-Thread des Clients; während eines mehrminütigen Panoramas kann er keine Keepalive-Signale senden (heute 300 s, der Broker trennt nach ca. 450 s). Lösung: Keepalive deutlich erhöhen (Richtwert 1800 s), sodass die längste realistische Verarbeitung (inkl. Wartezeit im Gateway) abgedeckt ist. Das ist die kleinere Änderung gegenüber einem Umbau auf einen Arbeits-Thread und erhält das bisherige Quittierungsverhalten (Nachricht gilt erst nach Verarbeitung als zugestellt).
+
+8. **Gesundheitsprüfung bleibt wirksam.** Der Heartbeat des Containers läuft in einem eigenen Thread und wird durch lange Aufträge nicht ausgebremst. Ein Panorama führt daher nicht zu einem fälschlich „unhealthy" markierten Container.
+
+9. **Container-Speicherlimit setzen.** Bisher gibt es keins. Richtwert 2 GB (ein Bild gleichzeitig, Dekodieren + Zuschnitt + Verkleinern). Der genaue Wert wird im `/backend` am echten 200-MP-Testbild verifiziert.
+
+### D) Workflow-Architektur Backfill (n8n)
+
+- **Trigger:** unverändert (Schedule 23:30 / 06:00, Webhook für Ad-hoc, Selbstaufruf).
+- **Geänderter Schritt:** Der bisherige Knoten „Code: Ollama Vision" (liest Datei, Base64, LLM-Aufruf) wird ersetzt durch eine Anfrage an den Extractor mit dem bereits aufgelösten Dateipfad. n8n lädt nie mehr Bildinhalte → die Ursache für Heap-OOM und HTTP 413 entfällt.
+- **Datenfluss:** Pfad → Extractor → Beschreibungstext oder Fehlergrund → bei Erfolg PATCH nach Weaviate (`ai_description`, `extraction_failed=false`) → Zähler `updated`; bei Fehler Zähler `still_failed` + Log mit Fehlergrund.
+- **Timeout:** Die Anfrage muss länger warten dürfen als die längste Panorama-Verarbeitung (Richtwert 15 Minuten, deutlich mehr als die ca. 5 Minuten für 9 LLM-Aufrufe).
+- **Integrationen:** Extractor (neu), Weaviate (unverändert). Der Backfill ruft das LLM nicht mehr selbst auf; die Variablen `OLLAMA_URL` / `OLLAMA_VISION_MODEL` werden im Workflow nicht mehr benötigt.
+- **Fehlerbehandlung:** Jeder Fehler (inkl. Zeitüberschreitung der Anfrage, Extractor nicht erreichbar) zählt als `still_failed`; das Bild bleibt `extraction_failed=true` und wird beim nächsten Lauf erneut versucht. Ist der Extractor insgesamt nicht erreichbar, soll der Lauf nicht alle 50 Bilder einzeln durchprobieren (Fehler-Abbruch-Kriterium wird im `/backend` festgelegt).
+- **Hinweis:** Die Änderung betrifft eine Workflow-Datei; Deployment erfolgt wie üblich durch den Nutzer („Deploy n8n-workflow alice-dms-image-description-backfill").
+
+### E) Reihenfolge der Umsetzung (Empfehlung)
+
+1. Extractor: Größenprüfung, Zerlegung, Zusammenfassung und interner Eingang; MQTT-Keepalive, Speicherlimit (testbar mit Panorama 22704×1760 und 200-MP-Bild).
+2. Extractor deployen und die neue Schnittstelle manuell mit den Testbildern prüfen.
+3. Backfill-Workflow umstellen und von Hand mit einem Panorama ausführen (Webhook, kurzes Zeitlimit).
+
+### F) Abhängigkeiten (Pakete)
+
+- Kleiner Webserver für den internen Eingang, passend zu den übrigen Alice-Diensten (FastAPI samt Server-Paket) — wird im `/backend` festgelegt.
+- Keine neuen Bildbibliotheken (Pillow, pillow-heif bleiben).
+
+### G) Betroffene Dateien
+
+- `docker/compose/automations/dms-extractor-image/` (Funktion, Compose: internes Netz, Speicherlimit, Konfiguration der Obergrenzen)
+- `workflows/alice-dms-image-description-backfill.json`
+- Keine Änderung an `sql/`, Frontend oder nginx.
 
 ## QA Test Results
 _To be added by /qa_
