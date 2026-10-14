@@ -1,8 +1,8 @@
 # PROJ-112: Panorama-/Großbild-Beschreibung im DMS (zentrale Bildbeschreibung mit Teilbild-Zerlegung)
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-10-14
-**Last Updated:** 2026-10-14 (QA bestanden, BUG-1 behoben)
+**Last Updated:** 2026-10-14 (Deployed)
 
 ## Dependencies
 - Betrifft: `dms-extractor-image` (`get_ai_description`, MQTT-Topic `alice/dms/image`) und n8n-Workflow `alice-dms-image-description-backfill`
@@ -328,4 +328,12 @@ Es kommen **keine neuen gespeicherten Daten** hinzu. Weder PostgreSQL noch Weavi
 - **Recommendation:** Deploy
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-10-14
+**Tag:** `v2.5.0-PROJ-112`
+
+- `dms-extractor-image` neu gebaut und gestartet (interner Eingang `:8012`, `mem_limit: 3g`, MQTT-Keepalive 1800 s)
+- n8n-Workflow `alice-dms-image-description-backfill` vom Nutzer deployed
+- Live-Test durch den Nutzer: Container und Workflow arbeiten nach den Vorgaben
+
+**Noch nicht live geprüft:** neu eingespulte Panorama-Bilder über den MQTT-Pfad. Ein gezielter Aufruf ist dafür nicht möglich; die Prüfung erfolgt, sobald ein Panorama im regulären Betrieb eintrifft (Beschreibungsqualität und Verhalten des Teilbild-Pfads mit dem echten Vision-Modell).
