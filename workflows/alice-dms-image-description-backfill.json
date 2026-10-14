@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## alice-dms-image-description-backfill\n\nRetries the AI vision description for Weaviate \"Image\" objects where\nextraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Triggers**:\n- `Schedule Trigger: 23:30` — daily, window limit 2h15min (8100s)\n- `Schedule Trigger: 06:00` — daily, window limit 1h45min (6300s)\n- `Webhook: POST /image-description-backfill` — ad-hoc test runs, optional\n  `max_runtime_seconds` override in body/query (same override pattern as PROJ-92)\n\n**Auto-continue (PROJ-96)**: fetches up to 50 images per batch (LIMIT unchanged).\nIf time remains in the window (>= 5min buffer) and images with extraction_failed=true\nremain, the workflow re-invokes itself (Execute Workflow, waitForSubWorkflow=false - the parent ends\nimmediately and frees its memory; it does NOT release the lock, the child owns it now),\npassing the original window_start + limit forward so the time check stays consistent\nacross the whole self-invocation chain.\n\n**Time limit check**: between loop iterations (not mid Ollama-call/PATCH), analog\nPROJ-94 — the in-flight image always finishes before the loop is left.\n\n**Overlap lock**: `alice:dms:image-description-backfill:lock:run` (Redis) — first\ninvocation of a window chain acquires fail-closed (skip run if already locked by\nanother chain); every self-invocation renews the same lock fail-open (Redis hiccup\nmust not abort an already-running chain — TTL is the fallback safety net).\n\n**Memory**: image base64 lives only inside `Code: Ollama Vision` and is never\nreturned as item data (otherwise 50 images per batch blow up the n8n heap).\n\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
+        "content": "## alice-dms-image-description-backfill\n\nRetries the AI vision description for Weaviate \"Image\" objects where\nextraction_failed = true (e.g. after an OLLAMA_URL outage).\n\n**Triggers**:\n- `Schedule Trigger: 23:30` — daily, window limit 2h15min (8100s)\n- `Schedule Trigger: 06:00` — daily, window limit 1h45min (6300s)\n- `Webhook: POST /image-description-backfill` — ad-hoc test runs, optional\n  `max_runtime_seconds` override in body/query (same override pattern as PROJ-92)\n\n**Auto-continue (PROJ-96)**: fetches up to 50 images per batch (LIMIT unchanged).\nIf time remains in the window (>= 5min buffer) and images with extraction_failed=true\nremain, the workflow re-invokes itself (Execute Workflow, waitForSubWorkflow=false - the parent ends\nimmediately and frees its memory; it does NOT release the lock, the child owns it now),\npassing the original window_start + limit forward so the time check stays consistent\nacross the whole self-invocation chain.\n\n**Time limit check**: between loop iterations (not mid description request/PATCH), analog\nPROJ-94 — the in-flight image always finishes before the loop is left.\n\n**Overlap lock**: `alice:dms:image-description-backfill:lock:run` (Redis) — first\ninvocation of a window chain acquires fail-closed (skip run if already locked by\nanother chain); every self-invocation renews the same lock fail-open (Redis hiccup\nmust not abort an already-running chain — TTL is the fallback safety net).\n\n**Description (PROJ-112)**: `Code: Request Description` sends only the resolved path to\n`POST http://dms-extractor-image:8012/describe` (central implementation, tiles panoramas,\nrejects > 250 MP) and gets the text or an error back — n8n never loads image data.\nIf the extractor is unreachable, the loop stops after the current image and the\nchain does not continue.\n\n**Processes**: Weaviate collection \"Image\" only, filter extraction_failed = true\n**Leaves untouched**: weaviate_uuid, thumbnail_path, additionalPaths, EXIF and geocoding fields\n**Progress**: logged as { processed, updated, still_failed, remaining }\n**Safe to re-run**: extraction_failed = true filter automatically excludes already-fixed images",
         "height": 460,
         "width": 500,
         "color": 5
@@ -136,7 +136,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Fetch Failed Batch\" } });\nconst axios = require('axios');\n\n// Reset per-run counters (workflow static data persists across executions, so it must be zeroed at the start of every run)\nconst staticData = $getWorkflowStaticData('global');\nstaticData.updated = 0;\nstaticData.still_failed = 0;\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 50;\nconst gql = `{ Get { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }, limit: ${LIMIT}) { _additional { id } file_path additionalPaths } } }`;\n\nlet results = [];\ntry {\n  const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  if (r.data?.errors) {\n    logger.warn(`[image-description-backfill] GraphQL error: ${JSON.stringify(r.data.errors)}`);\n  } else {\n    results = r.data?.data?.Get?.Image || [];\n  }\n} catch (e) {\n  logger.warn(`[image-description-backfill] Fetch failed: ${e.message}`);\n}\n\nlogger.info(`[image-description-backfill] Found ${results.length} image(s) with extraction_failed=true`);\n\nconst run = $('Code: Acquire/Renew Lock').first().json;\n\nif (results.length === 0) {\n  return [{ json: { _empty: true, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner, _from_webhook: run._from_webhook } }];\n}\n\nreturn results.map(doc => ({\n  json: {\n    weaviate_uuid: doc._additional?.id,\n    file_path: doc.file_path || null,\n    additionalPaths: doc.additionalPaths || [],\n    _empty: false,\n    window_start: run.window_start,\n    max_runtime_seconds: run.max_runtime_seconds,\n    lock_owner: run.lock_owner,\n    _from_webhook: run._from_webhook\n  }\n}));"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Fetch Failed Batch\" } });\nconst axios = require('axios');\n\n// Reset per-run counters (workflow static data persists across executions, so it must be zeroed at the start of every run)\nconst staticData = $getWorkflowStaticData('global');\nstaticData.updated = 0;\nstaticData.still_failed = 0;\nstaticData.extractor_unreachable = false;\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst LIMIT = 50;\nconst gql = `{ Get { Image(where: { path: [\"extraction_failed\"], operator: Equal, valueBoolean: true }, limit: ${LIMIT}) { _additional { id } file_path additionalPaths } } }`;\n\nlet results = [];\ntry {\n  const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: gql }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 30000\n  });\n  if (r.data?.errors) {\n    logger.warn(`[image-description-backfill] GraphQL error: ${JSON.stringify(r.data.errors)}`);\n  } else {\n    results = r.data?.data?.Get?.Image || [];\n  }\n} catch (e) {\n  logger.warn(`[image-description-backfill] Fetch failed: ${e.message}`);\n}\n\nlogger.info(`[image-description-backfill] Found ${results.length} image(s) with extraction_failed=true`);\n\nconst run = $('Code: Acquire/Renew Lock').first().json;\n\nif (results.length === 0) {\n  return [{ json: { _empty: true, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner, _from_webhook: run._from_webhook } }];\n}\n\nreturn results.map(doc => ({\n  json: {\n    weaviate_uuid: doc._additional?.id,\n    file_path: doc.file_path || null,\n    additionalPaths: doc.additionalPaths || [],\n    _empty: false,\n    window_start: run.window_start,\n    max_runtime_seconds: run.max_runtime_seconds,\n    lock_owner: run.lock_owner,\n    _from_webhook: run._from_webhook\n  }\n}));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -199,7 +199,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Resolve Image Path\" } });\nconst fs = require('fs');\nconst item = $input.first().json;\nconst candidates = [item.file_path, ...(item.additionalPaths || [])].filter(Boolean);\n\nlet resolvedPath = null;\nfor (const p of candidates) {\n  try {\n    if (fs.existsSync(p)) { resolvedPath = p; break; }\n  } catch (e) {}\n}\n\nif (!resolvedPath) {\n  logger.warn(`[image-description-backfill] No readable path for ${item.weaviate_uuid}`);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}\n\n// Only the path is passed on - the image itself is read inside \"Code: Ollama Vision\"\n// so its base64 never ends up in the execution data (caused n8n heap OOM).\nreturn [{ json: { weaviate_uuid: item.weaviate_uuid, resolved_path: resolvedPath, _read_ok: true } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Resolve Image Path\" } });\nconst fs = require('fs');\nconst item = $input.first().json;\nconst candidates = [item.file_path, ...(item.additionalPaths || [])].filter(Boolean);\n\nlet resolvedPath = null;\nfor (const p of candidates) {\n  try {\n    if (fs.existsSync(p)) { resolvedPath = p; break; }\n  } catch (e) {}\n}\n\nif (!resolvedPath) {\n  logger.warn(`[image-description-backfill] No readable path for ${item.weaviate_uuid}`);\n  return [{ json: { weaviate_uuid: item.weaviate_uuid, _read_ok: false } }];\n}\n\n// Only the path is passed on - dms-extractor-image reads the image itself (PROJ-112).\nreturn [{ json: { weaviate_uuid: item.weaviate_uuid, resolved_path: resolvedPath, _read_ok: true } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -249,13 +249,13 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Ollama Vision\" } });\nconst fs = require('fs');\nconst axios = require('axios');\nconst item = $input.first().json;\n\n// Read + base64 + vision call in one node: the image stays a local variable and\n// only the description is returned, keeping execution data small (n8n heap OOM fix).\nlet statusCode = 0;\nlet ai_description = '';\ntry {\n  const image_b64 = fs.readFileSync(item.resolved_path).toString('base64');\n  const baseUrl = ($env.OLLAMA_URL || 'http://llama-3090:11434').replace(/\\/$/, '');\n  const headers = { 'Content-Type': 'application/json' };\n  if ($env.OLLAMA_API_KEY) headers.Authorization = 'Bearer ' + $env.OLLAMA_API_KEY;\n  const r = await axios.post(`${baseUrl}/v1/chat/completions`, {\n    model: $env.OLLAMA_VISION_MODEL,\n    messages: [{ role: 'user', content: [\n      { type: 'text', text: 'Beschreibe dieses Bild ausführlich auf Deutsch in 3-5 Sätzen. Beschreibe was du siehst: Personen, Objekte, Szene, Ort, Farben, Stimmung.' },\n      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + image_b64 } }\n    ] }],\n    stream: false,\n    temperature: 0.3\n  }, {\n    headers,\n    timeout: 300000,\n    maxBodyLength: Infinity,\n    maxContentLength: Infinity,\n    validateStatus: () => true\n  });\n  statusCode = r.status;\n  const body = r.data || {};\n  // PROJ-99: OpenAI shape from llama.cpp; keep the old Ollama field as a fallback.\n  const content = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || body.response || '';\n  ai_description = String(content).slice(0, 50000);\n  if (statusCode >= 300) logger.warn(`[image-description-backfill] Vision call HTTP ${statusCode} for ${item.weaviate_uuid}`);\n} catch (e) {\n  logger.warn(`[image-description-backfill] Vision call failed for ${item.weaviate_uuid}: ${e.message}`);\n}\n\nreturn [{ json: { weaviate_uuid: item.weaviate_uuid, statusCode, ai_description } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Request Description\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\n\n// PROJ-112: the description is generated centrally by dms-extractor-image\n// (tiling for panoramas, size limit). n8n only passes the path and never loads\n// image data itself (cause of the former heap OOM / HTTP 413).\nconst EXTRACTOR_URL = 'http://dms-extractor-image:8012/describe';\nconst UNREACHABLE_CODES = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH'];\n\nlet ai_description = '';\nlet ok = false;\ntry {\n  const r = await axios.post(EXTRACTOR_URL, { file_path: item.resolved_path }, {\n    headers: { 'Content-Type': 'application/json' },\n    timeout: 900000, // 15 min: a panorama takes up to 9 LLM calls, plus waiting behind the MQTT path / in the gateway\n    validateStatus: () => true\n  });\n  if (r.status >= 200 && r.status < 300) {\n    ai_description = String((r.data && r.data.ai_description) || '');\n    ok = ai_description.trim() !== '';\n  } else {\n    const err = r.data || {};\n    logger.warn(`[image-description-backfill] Extractor HTTP ${r.status} for ${item.weaviate_uuid}: ${err.error || ''} ${err.detail || ''}`);\n  }\n} catch (e) {\n  if (UNREACHABLE_CODES.includes(e.code)) {\n    // Extractor down: leave the loop after this image instead of failing every remaining image one by one.\n    $getWorkflowStaticData('global').extractor_unreachable = true;\n  }\n  logger.warn(`[image-description-backfill] Extractor request failed for ${item.weaviate_uuid}: ${e.code || ''} ${e.message}`);\n}\n\nreturn [{ json: { weaviate_uuid: item.weaviate_uuid, _ok: ok, ai_description } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [2700, -40],
-      "id": "code-ollama-vision",
-      "name": "Code: Ollama Vision"
+      "id": "code-request-description",
+      "name": "Code: Request Description"
     },
     {
       "parameters": {
@@ -268,12 +268,12 @@
           },
           "conditions": [
             {
-              "id": "check-ollama-ok",
-              "leftValue": "={{ $json.statusCode }}",
-              "rightValue": 300,
+              "id": "check-description-ok",
+              "leftValue": "={{ $json._ok }}",
+              "rightValue": true,
               "operator": {
-                "type": "number",
-                "operation": "lt"
+                "type": "boolean",
+                "operation": "equals"
               }
             }
           ],
@@ -284,18 +284,18 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [3000, -40],
-      "id": "if-ollama-ok",
-      "name": "IF: Ollama OK"
+      "id": "if-description-ok",
+      "name": "IF: Description OK"
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (Ollama Error)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $input.first().json.weaviate_uuid;\nlogger.warn(`[image-description-backfill] Ollama call failed for ${weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'ollama_error' } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Log Still Failed (Description Error)\" } });\nconst staticData = $getWorkflowStaticData('global');\nstaticData.still_failed = (staticData.still_failed || 0) + 1;\nconst weaviate_uuid = $input.first().json.weaviate_uuid;\nlogger.warn(`[image-description-backfill] Description failed for ${weaviate_uuid}`);\nreturn [{ json: { result: 'still_failed', reason: 'description_error' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [3300, 110],
-      "id": "code-log-still-failed-ollama",
-      "name": "Code: Log Still Failed (Ollama Error)"
+      "id": "code-log-still-failed-description",
+      "name": "Code: Log Still Failed (Description Error)"
     },
     {
       "parameters": {
@@ -342,7 +342,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Time Check\" } });\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst elapsedSeconds = (Date.now() - run.window_start) / 1000;\nconst timeLimitReached = elapsedSeconds >= run.max_runtime_seconds;\nif (timeLimitReached) {\n  logger.info(`[image-description-backfill] Window time limit reached (elapsed=${Math.round(elapsedSeconds)}s, limit=${run.max_runtime_seconds}s) - leaving loop, in-flight image already completed`);\n}\nreturn [{ json: { ...$input.first().json, _time_limit_reached: timeLimitReached } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Time Check\" } });\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst elapsedSeconds = (Date.now() - run.window_start) / 1000;\nconst timeLimitReached = elapsedSeconds >= run.max_runtime_seconds;\n// PROJ-112: an unreachable extractor ends the loop the same way as the time limit.\nconst extractorUnreachable = $getWorkflowStaticData('global').extractor_unreachable === true;\nif (extractorUnreachable) {\n  logger.warn('[image-description-backfill] dms-extractor-image unreachable - leaving loop, remaining images stay extraction_failed=true');\n}\nif (timeLimitReached) {\n  logger.info(`[image-description-backfill] Window time limit reached (elapsed=${Math.round(elapsedSeconds)}s, limit=${run.max_runtime_seconds}s) - leaving loop, in-flight image already completed`);\n}\nreturn [{ json: { ...$input.first().json, _time_limit_reached: timeLimitReached || extractorUnreachable } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -392,7 +392,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Check Continue\" } });\nconst summary = $input.first().json;\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst BUFFER_SECONDS = 300; // 5 min safety buffer before the window limit\n\nconst elapsedSeconds = (Date.now() - run.window_start) / 1000;\nconst timeRemaining = run.max_runtime_seconds - elapsedSeconds;\nconst hasMoreImages = (summary.remaining || 0) > 0;\nconst enoughTimeForAnotherBatch = timeRemaining >= BUFFER_SECONDS;\n\nconst shouldContinue = hasMoreImages && enoughTimeForAnotherBatch;\nlogger.info(`[image-description-backfill] Check Continue: remaining=${summary.remaining}, time_remaining=${Math.round(timeRemaining)}s, shouldContinue=${shouldContinue}`);\n\nreturn [{ json: { ...summary, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner, _from_webhook: run._from_webhook, _should_continue: shouldContinue } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-image-description-backfill\", node: \"Code: Check Continue\" } });\nconst summary = $input.first().json;\nconst run = $('Code: Fetch Failed Batch').first().json;\nconst BUFFER_SECONDS = 300; // 5 min safety buffer before the window limit\n\nconst elapsedSeconds = (Date.now() - run.window_start) / 1000;\nconst timeRemaining = run.max_runtime_seconds - elapsedSeconds;\nconst hasMoreImages = (summary.remaining || 0) > 0;\nconst enoughTimeForAnotherBatch = timeRemaining >= BUFFER_SECONDS;\n\nconst extractorUnreachable = $getWorkflowStaticData('global').extractor_unreachable === true;\n\nconst shouldContinue = hasMoreImages && enoughTimeForAnotherBatch && !extractorUnreachable;\nlogger.info(`[image-description-backfill] Check Continue: remaining=${summary.remaining}, time_remaining=${Math.round(timeRemaining)}s, extractor_unreachable=${extractorUnreachable}, shouldContinue=${shouldContinue}`);\n\nreturn [{ json: { ...summary, window_start: run.window_start, max_runtime_seconds: run.max_runtime_seconds, lock_owner: run.lock_owner, _from_webhook: run._from_webhook, _should_continue: shouldContinue } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -669,7 +669,7 @@
       "main": [
         [
           {
-            "node": "Code: Ollama Vision",
+            "node": "Code: Request Description",
             "type": "main",
             "index": 0
           }
@@ -694,7 +694,7 @@
         ]
       ]
     },
-    "IF: Ollama OK": {
+    "IF: Description OK": {
       "main": [
         [
           {
@@ -705,14 +705,14 @@
         ],
         [
           {
-            "node": "Code: Log Still Failed (Ollama Error)",
+            "node": "Code: Log Still Failed (Description Error)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Code: Log Still Failed (Ollama Error)": {
+    "Code: Log Still Failed (Description Error)": {
       "main": [
         [
           {
@@ -865,11 +865,11 @@
         ]
       ]
     },
-    "Code: Ollama Vision": {
+    "Code: Request Description": {
       "main": [
         [
           {
-            "node": "IF: Ollama OK",
+            "node": "IF: Description OK",
             "type": "main",
             "index": 0
           }

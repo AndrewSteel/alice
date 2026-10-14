@@ -1,8 +1,8 @@
 # PROJ-112: Panorama-/Großbild-Beschreibung im DMS (zentrale Bildbeschreibung mit Teilbild-Zerlegung)
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-10-14
-**Last Updated:** 2026-10-14 (Tech Design ergänzt)
+**Last Updated:** 2026-10-14 (Backend implementiert)
 
 ## Dependencies
 - Betrifft: `dms-extractor-image` (`get_ai_description`, MQTT-Topic `alice/dms/image`) und n8n-Workflow `alice-dms-image-description-backfill`
@@ -207,6 +207,29 @@ Es kommen **keine neuen gespeicherten Daten** hinzu. Weder PostgreSQL noch Weavi
 - `docker/compose/automations/dms-extractor-image/` (Funktion, Compose: internes Netz, Speicherlimit, Konfiguration der Obergrenzen)
 - `workflows/alice-dms-image-description-backfill.json`
 - Keine Änderung an `sql/`, Frontend oder nginx.
+
+## Implementation Notes (Backend, 2026-10-14)
+
+### `dms-extractor-image`
+- **Zentrale Funktion** `get_ai_description(file_path)` (Name/Schnittstelle unverändert) wirft bei Fehler `DescriptionError` mit Grund `unreadable` | `too_large` | `vision_failed`; MQTT-Pfad und HTTP-Eingang nutzen dieselbe Funktion.
+- **Interner Eingang** `POST /describe` `{"file_path": "..."}` auf Port **8012** (FastAPI/uvicorn, nur Netz `backend`, nicht über nginx). Antworten: `200 {"ai_description"}`, `400 invalid_path`, `422 unreadable|too_large`, `502 vision_failed` (jeweils `{"error", "detail"}`). Pfadprüfung per `realpath` (kein `../`-Ausbruch aus `/mnt/nas/`). Zusätzlich `GET /health`.
+- **Sperre:** `threading.Lock` um die gesamte Beschreibung — MQTT- und HTTP-Aufträge laufen strikt nacheinander (lokal verifiziert).
+- **Größenprüfung** aus dem Datei-Kopf vor dem Dekodieren; Pillow-Grenze deaktiviert (`MAX_IMAGE_PIXELS = None`), eigene Grenze `IMAGE_MAX_MEGAPIXELS` (Default 250). Log: `image too large: 312 MP`.
+- **Teilbild-Zerlegung** `tile_boxes()`: > 2:1 → Teilbilder ~3:2 mit ≥ 10 % Überlappung, max. 8; bei mehr Bedarf werden die Teilbilder so verbreitert, dass 8 Stück mit 10 % Überlappung das Bild abdecken (überschreitet 2:1 ab ca. 14,6:1 — Spec „ca. 16:1"). Pro Teilbild ein Vision-Aufruf (Prompt nennt „Ausschnitt i von n"), danach ein reiner Text-Aufruf zur Zusammenfassung als eine Szene.
+- **Speicher:** Das Gesamtbild wird vor dem Zuschnitt auf die Zielgröße verkleinert (JPEG: `draft()` dekodiert direkt verkleinert); RGBA→RGB nutzt nur den Alpha-Kanal. Gemessene Spitzen (lokal, ohne Swap): 200-MP-JPEG 78 MB, 55-MB-Panorama-JPEG 137 MB, 200-MP-HEIC 1,4 GB, 250-MP-RGB-PNG 1,07 GB, 250-MP-RGBA-PNG 2,0 GB → **`mem_limit: 3g`** (statt Richtwert 2 GB).
+- **Abweichung/Fund:** libheif lehnte 200-MP-HEIC ab (Sicherheitsgrenze 512 MB Allokation — betraf auch den bisherigen Code). `pillow_heif.options.DISABLE_SECURITY_LIMITS = True`; die eigene 250-MP-Grenze ersetzt diesen Schutz.
+- **MQTT:** `keepalive=1800`; Netzwerk-Schleife jetzt per `loop_start()` im Hintergrund-Thread, uvicorn im Haupt-Thread. Heartbeat-Thread unverändert.
+- Neue Konfiguration (`.env.example`): `OLLAMA_MAX_IMAGE_PX` (1024), `IMAGE_MAX_MEGAPIXELS` (250). Neue Pakete: `fastapi`, `uvicorn`.
+
+### `alice-dms-image-description-backfill`
+- „Code: Ollama Vision" → **„Code: Request Description"**: `POST http://dms-extractor-image:8012/describe` mit aufgelöstem Pfad, Timeout 15 min; Fehlergrund wird geloggt. „IF: Ollama OK" → „IF: Description OK" (prüft `_ok`), „Code: Log Still Failed (Ollama Error)" → „… (Description Error)" (`reason: description_error`).
+- **Abbruch-Kriterium Extractor nicht erreichbar:** Verbindungsfehler (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`) setzen `extractor_unreachable` in den Static Data → Schleife endet nach dem aktuellen Bild (wie Zeitlimit), keine Selbst-Fortsetzung. Zurückgesetzt bei jedem Batch-Start. Zeitüberschreitung einer einzelnen Anfrage zählt nur als `still_failed`.
+- `OLLAMA_URL`/`OLLAMA_VISION_MODEL`/`OLLAMA_API_KEY` werden vom Workflow nicht mehr genutzt.
+- Hinweis (unverändert, PROJ-96): Lock-TTL 15 min wird nur pro Batch erneuert; ein Batch mit mehreren Panoramen kann länger dauern. Da sich die Zeitfenster (23:30 / 06:00) nicht überschneiden, ist das nur bei manuellen Webhook-Läufen relevant.
+
+### Deployment-Reihenfolge
+1. `dms-extractor-image` neu bauen und starten (`./scripts/sync-compose.sh`, dann Build/Up).
+2. Danach: **Deploy n8n-workflow `alice-dms-image-description-backfill`**.
 
 ## QA Test Results
 _To be added by /qa_
