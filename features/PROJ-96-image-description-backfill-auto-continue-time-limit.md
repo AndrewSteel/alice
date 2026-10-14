@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-08-28
-**Last Updated:** 2026-10-14 (BUG-4 n8n-Heap-OOM behoben; BUG-5 Panorama-Bilder/HTTP 413 zurückgestellt bis PROJ-112)
+**Last Updated:** 2026-10-14 (BUG-4 n8n-Heap-OOM behoben; BUG-5 Panorama-Bilder/HTTP 413 durch PROJ-112 behoben)
 
 ## Dependencies
 - Betrifft: `alice-dms-image-description-backfill` (PROJ-?, Deployed, aber bisher noch nie ausgeführt — 0 Executions) — kein neuer Baustein, Erweiterung eines bestehenden, ungenutzten Workflows.
@@ -298,4 +298,5 @@ Workflow `alice-dms-image-description-backfill` ist produktiv gesetzt. Die beide
   - Vermutung (nicht verifiziert): Puffer + Base64-String + JSON-Body + axios-Kopie eines solchen Bildes belegen mehrere hundert MB im Task-Runner; der Runner bricht dadurch weg, sichtbar wird der Fehler erst im nächsten Code-Node.
   - Grundsätzlicher Unterschied: `dms-extractor-image` (`get_ai_description`) verkleinert auf längste Seite 1024 px, der Backfill nicht. Für Panoramen ist aber auch die Verkleinerung des Extractors unbrauchbar (22704×1760 → 1024×79 px) — vermutlich ist genau das der Grund, warum diese Bilder überhaupt mit `extraction_failed = true` im Backfill landen.
 - **Entscheidung (Nutzer, 2026-10-14):** Keine isolierte Fehlerbehandlung im Backfill. Die Bildaufbereitung für Panoramen/Großbilder wird in **PROJ-112** einheitlich für Extractor und Backfill gelöst; PROJ-96 wird erst danach abgeschlossen.
-- **Status:** Zurückgestellt — blockiert durch PROJ-112.
+- **Status:** Fixed durch PROJ-112 (deployed 2026-10-14, Tag `v2.5.0-PROJ-112`).
+- **Fix (PROJ-112):** `Code: Ollama Vision` wurde durch `Code: Request Description` ersetzt. Der Backfill schickt nur noch den aufgelösten Dateipfad an `POST http://dms-extractor-image:8012/describe` und lädt keine Bilddaten mehr; Verkleinerung bzw. Teilbild-Zerlegung übernimmt der Extractor. Damit entfallen sowohl die 50-MB-Grenze des Gateways (413) als auch die Speicherlast im Task-Runner. Die Knoten heißen jetzt `IF: Description OK` und `Code: Log Still Failed (Description Error)`. Lokal mit einem 55,8-MB-Panorama (22704×1760) verifiziert; Details in [PROJ-112](PROJ-112-panorama-image-description.md).
