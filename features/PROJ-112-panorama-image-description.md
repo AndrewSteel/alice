@@ -2,7 +2,7 @@
 
 ## Status: Approved
 **Created:** 2026-10-14
-**Last Updated:** 2026-10-14 (QA bestanden)
+**Last Updated:** 2026-10-14 (QA bestanden, BUG-1 behoben)
 
 ## Dependencies
 - Betrifft: `dms-extractor-image` (`get_ai_description`, MQTT-Topic `alice/dms/image`) und n8n-Workflow `alice-dms-image-description-backfill`
@@ -297,13 +297,14 @@ Es kommen **keine neuen gespeicherten Daten** hinzu. Weder PostgreSQL noch Weavi
 - [x] `/docs`, `/openapi.json` deaktiviert (404)
 - [x] LLM-API-Key wird gesendet (`Bearer`), erscheint aber nicht in den Logs
 - [x] Speicher: eigene 250-MP-Grenze greift vor dem Dekodieren (ersetzt Pillow-/libheif-Schutz), Sperre verhindert parallele Großbilder
-- [ ] BUG-1 (Low): Null-Byte im Pfad → `500`
+- [x] BUG-1 (Low): Null-Byte im Pfad → `500` — **behoben 2026-10-14**, jetzt `400 invalid_path`
 - Info (akzeptiert, Tech-Design-Entscheidung): Endpunkt ohne Authentifizierung — jeder Container im Netz `backend` kann Beschreibungen von NAS-Bildern anfordern bzw. die Warteschlange belegen
 
 ### Bugs Found
 
-#### BUG-1: Null-Byte im `file_path` führt zu HTTP 500
+#### BUG-1: Null-Byte im `file_path` führt zu HTTP 500 — FIXED (2026-10-14)
 - **Severity:** Low
+- **Fix:** `describe()` lehnt Pfade mit `\x00` vor `realpath` mit `400 invalid_path` ab. Nachtest: Null-Byte-Pfade → 400; `../`-Ausbruch → 400; Panorama/Standardbild → 200 (keine Regression)
 - **Steps to Reproduce:**
   1. `POST /describe` mit `{"file_path": "/mnt/nas/test/a\u0000b.jpg"}`
   2. Expected: `400 invalid_path`
@@ -321,10 +322,10 @@ Es kommen **keine neuen gespeicherten Daten** hinzu. Weder PostgreSQL noch Weavi
 
 ### Summary
 - **Acceptance Criteria:** 29/31 bestanden lokal; 2 nur live prüfbar (Beschreibungsqualität mit echtem Modell, echtes 52,8-MB-Panorama über produktiven Backfill) → Teil des `/deploy`-Live-Tests
-- **Bugs Found:** 1 total (0 critical, 0 high, 0 medium, 1 low) + 1 Info
-- **Security:** Pass (1 Low)
+- **Bugs Found:** 1 total (0 critical, 0 high, 0 medium, 1 low — behoben) + 1 Info
+- **Security:** Pass
 - **Production Ready:** YES
-- **Recommendation:** Deploy; BUG-1 optional mitbeheben
+- **Recommendation:** Deploy
 
 ## Deployment
 _To be added by /deploy_
