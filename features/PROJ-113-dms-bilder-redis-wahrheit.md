@@ -1,8 +1,8 @@
 # PROJ-113: DMS-Bilder in die Redis-Wahrheit aufnehmen (Lifecycle + Reconcile für Image)
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-10-15
-**Last Updated:** 2026-10-15 (QA bestanden, BUG-2 behoben)
+**Last Updated:** 2026-10-15 (Deployed, Live-Test steht aus)
 
 ## Dependencies
 - Baut auf: PROJ-19 (Redis-Karten `alice:dms:path_to_hash` / `alice:dms:hash_to_paths:<hash>`), PROJ-21/PROJ-44 (Scanner → `alice/dms/lifecycle`, `delete_file`), PROJ-56 (Bild-Extraktion), PROJ-97 (Reconcile + Orphan-Cleanup)
@@ -365,4 +365,17 @@ Geänderte Dateien: die fünf Workflows (`alice-dms-processor`, `-path-worker`, 
 **READY** — keine Critical- oder High-Bugs. BUG-2 (Medium) ist behoben, 2 Low (BUG-1, BUG-3) bleiben dokumentiert. Drei Kriterien sind erst nach dem Deployment messbar und als Live-Checks oben festgehalten.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-10-15
+**Tag:** `v2.7.0-PROJ-113`
+
+- Die fünf n8n-Workflows (`alice-dms-lifecycle`, `-processor`, `-path-worker`, `-scanner`, `-reconcile`) vom Nutzer deployed, einschließlich des BUG-2-Fixes im Scanner
+- `DMS_DELETE_MAX_RATIO` ist optional; ohne gesetzte Variable gilt im Code der Default 0,2
+
+**Live-Test steht aus.** Der Nutzer berichtet nach einiger Laufzeit. Offen sind die drei Kriterien, die nur live messbar sind, und die Erstinbetriebnahme:
+1. Bilder-Ordner: `registered_files` > 0, bekannte Bilder werden nicht mehr neu eingereiht, Zeitlimit-Fortsetzung (`resume_from`) und `full_pass_completed: true` nach spätestens ein bis zwei Läufen (**C4**)
+2. `folders_without_full_pass` im Scanner-Statistik-Item (MQTT `alice/dms/scanner/stats`) ist nach dem ersten vollständigen Durchlauf aller Ordner leer
+3. Erst danach der echte Reconcile (`POST /webhook/alice-dms-reconcile` mit `{"confirm": true, "ignore_delete_limit": true}`): `checked` umfasst die ~24.300 Bilder, jedes `Image` hat eine Datei unter `file_path` (**G2**), der Image-Description-Backfill meldet `no_file` gegen 0 (**G3**)
+4. Redis: `HLEN alice:dms:path_to_hash` steigt auf ~25.000, `SCARD alice:dms:queued_files` sinkt deutlich
+
+Ergebnisse des Live-Tests werden hier nachgetragen. Bis dahin offen: BUG-1 (Low) und BUG-3 (Low) aus der QA.
