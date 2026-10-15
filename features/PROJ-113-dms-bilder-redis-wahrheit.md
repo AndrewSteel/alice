@@ -1,8 +1,8 @@
 # PROJ-113: DMS-Bilder in die Redis-Wahrheit aufnehmen (Lifecycle + Reconcile für Image)
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-10-15
-**Last Updated:** 2026-10-15 (Backend implementiert)
+**Last Updated:** 2026-10-15 (QA bestanden)
 
 ## Dependencies
 - Baut auf: PROJ-19 (Redis-Karten `alice:dms:path_to_hash` / `alice:dms:hash_to_paths:<hash>`), PROJ-21/PROJ-44 (Scanner → `alice/dms/lifecycle`, `delete_file`), PROJ-56 (Bild-Extraktion), PROJ-97 (Reconcile + Orphan-Cleanup)
@@ -261,7 +261,106 @@ Geänderte Dateien: die fünf Workflows (`alice-dms-processor`, `-path-worker`, 
 4. Echter Reconcile: `POST /webhook/alice-dms-reconcile` mit `{"confirm": true, "ignore_delete_limit": true}`
 
 ## QA Test Results
-_To be added by /qa_
+
+**Datum:** 2026-10-15 · **Tester:** QA (Claude) · **Umfang:** 5 n8n-Workflows (nicht deployt — Deployment durch den Nutzer)
+
+**Methode:** Die Code-Knoten werden direkt aus den Workflow-JSONs in einem Node-Harness ausgeführt (In-Memory-Redis, Fake-Weaviate mit GraphQL/REST, Fake-Thumbnailer, `/mnt/nas` → Temp-Verzeichnis). Tests: `node --test workflows/tests/proj113/` → **46/46 grün** (36 Backend + 10 QA-Edge-Cases). Gegenprobe mit den Workflows aus dem Stand vor PROJ-113: 32/36 rot. Dazu kamen eine Strukturprüfung (Verbindungen, eindeutige Namen/IDs, Syntax), eine Regressionssuche nach weiteren Lesern der Redis-Keys und eine Durchsicht der Live-Daten (nur lesend, `ki.lan`).
+
+### Acceptance Criteria
+
+| AC | Kriterium | Ergebnis |
+|----|-----------|----------|
+| A1 | Neues Bild → `path_to_hash` + `hash_to_paths` gesetzt | PASS |
+| A2 | Duplikat (anderer Pfad) → beide Karteneinträge für den neuen Pfad | PASS |
+| A3 | Hash nach Verarbeitung nicht mehr in `queued_files` | PASS |
+| A4 | Unverändertes Bild beim nächsten Scan „bereits verarbeitet“, kein Extractor | PASS |
+| A5 | Eigener Hauptpfad nie in `additionalPaths` (Processor, Lifecycle, Reconcile-Bereinigung) | PASS |
+| B1 | Fehlende Einträge für bestehende Bilder werden nachgetragen (per Selbstheilung im Scan, Design E) | PASS |
+| B2 | Pfade nicht existierender Dateien werden nicht eingetragen (nur gescannte Dateien) | PASS |
+| B3 | Hash = tatsächlicher Dateiinhalt; abweichender Hash → normaler Weg (kein Weaviate-Treffer → `new`/`replace`) | PASS |
+| B4 | Nachtrag löst keine LLM-Beschreibung aus (`registered`, `_skip`) | PASS |
+| B5 | `additionalPaths` mit eigenem Hauptpfad werden bereinigt (Reconcile + Processor-Duplikat) | PASS |
+| B6 | Wiederholbar ohne Doppel-Einträge; Zähler `registered_files` (Design E) | PASS |
+| C1 | Gelöschtes Bild → `delete_file`, wenn kein weiterer Pfad lebt (nach Karenz, siehe Abweichung 1) | PASS |
+| C2 | Redis-Eintrag erst nach erfolgreicher Verarbeitung entfernt; bei Fehler bleibt er und wird erneut gemeldet | PASS |
+| C3 | Datei lebt woanders weiter → `remove_path`, Hauptpfad wird umgesetzt, toter Pfad raus | PASS |
+| C4 | Vollständiger Durchlauf über mehrere Läufe mit Fortsetzung (Logik) | PASS (Logik) · **Messung nur live** |
+| D1 | Lifecycle findet `Image` über `file_hash` | PASS |
+| D2 | `delete_file` löscht `Image`-Objekt + Thumbnail | PASS |
+| D3 | `add_path` / `update_path` für `Image` (`additionalPaths` / `file_path`) | PASS |
+| D4 | Übrige Collections unverändert (inkl. BankStatement-Kaskade) | PASS |
+| E1 | Reconcile prüft alle `Image`-Objekte, `checked` enthält Bilder | PASS |
+| E2 | Gleiche Regeln wie für Dokumente (gesund / Pfad korrigieren / löschen + Thumbnail + Redis) | PASS |
+| E3 | Fehlendes Feld wird protokolliert, Collection trotzdem geprüft | PASS |
+| E4 | Zeitplan `0 0 * * 1` (montags 00:00 UTC, sonst nie) | PASS |
+| F1 | Freigabe nicht erreichbar → keine Löschungen, protokolliert (Scanner + Reconcile) | PASS |
+| F2 | > 20 % → keine Löschungen, Meldung; Wert über `DMS_DELETE_MAX_RATIO` konfigurierbar (Scanner je Freigabe, Reconcile je Collection) | PASS |
+| F3 | Obergrenze per Parameter `ignore_delete_limit` für einen manuellen Lauf aufhebbar; der Schedule hebt sie nie auf | PASS |
+| G1 | Echter Reconcile mit aufgehobener Obergrenze, Mount-Prüfung aktiv | PASS (Logik) · **Lauf nur live** |
+| G2 | Danach existiert für jedes `Image` die Datei unter `file_path` | **nur live prüfbar** |
+| G3 | Backfill findet danach nur noch Bilder mit Datei (`no_file` → 0) | **nur live prüfbar** |
+
+**Ergebnis:** 26/29 bestanden, 3 nur live prüfbar (C4-Messung, G2, G3), 0 fehlgeschlagen.
+
+### Edge Cases
+
+| Edge Case | Ergebnis |
+|-----------|----------|
+| NAS-Freigabe nicht eingehängt (leer/unlesbar) | PASS — Scanner meldet nichts und setzt keine `missing_since`-Marken; Reconcile behält das Objekt auch mit `ignore_delete_limit` |
+| Datei ersetzt (gleicher Pfad, anderer Inhalt), auch für Bilder | PASS — altes `Image` gelöst (gelöscht bzw. Kopie wird Hauptpfad) |
+| Gleiches Bild mehrfach, ein Pfad gelöscht | PASS — `remove_path`, kein `delete_file` |
+| Alle Pfade gelöscht | PASS — `delete_file`, Objekt + Thumbnail weg, Redis bereinigt |
+| MQTT/Weaviate gestört | PASS — Lookup-Fehler wirft, Redis bleibt, erneute Meldung beim nächsten Scan |
+| Weaviate-Objekt existiert nicht (mehr) / doppelte Meldung | PASS — nur Redis aufgeräumt, kein Fehler, Weaviate-DELETE 404 toleriert |
+| Hash abweichend | PASS — kein Weaviate-Treffer → `new`, bekannter Pfad → `replace` |
+| Obergrenze greift im Normalbetrieb | PASS — Warnung + `delete_limit_blocked` / `delete_blocked` |
+| Verschobene Datei (User Story) | PASS — Karenz: Path-Worker findet neuen Ort → `update_path`, Scanner löscht nicht |
+| Zusätzlich: GraphQL-Injection über `file_hash` (Lifecycle, Path-Worker) | PASS — bereinigt |
+| Zusätzlich: Redis beim Scanner-Sweep down | PASS — keine Meldungen, Statistik-Item bleibt |
+| Zusätzlich: ungültiges `DMS_DELETE_MAX_RATIO` (`abc`, `0`, `5`, `-1`) | PASS — Fallback 0,2 |
+| Zusätzlich: Datei der Fortsetzungsmarke gelöscht / Marke hinter letzter Datei | PASS — weiter bei nächstem Pfad bzw. Neustart |
+| Zusätzlich: Ordner unlesbar | PASS — kein `last_full_pass` (Karenz hält Löschungen zurück) |
+
+### Bugs
+
+**BUG-1 (Low) — Vor dem Deployment verschobenes Bild behält bis zum Reconcile seinen toten Hauptpfad**
+- *Ursache:* Die Selbstheilung (`Code: Lifecycle Check`) ergänzt einen gefundenen Pfad nur als Zusatzpfad, auch wenn der in Weaviate gespeicherte Hauptpfad nicht mehr existiert. Der tote Hauptpfad stand nie in `path_to_hash`, deshalb meldet ihn auch der Scanner nicht.
+- *Reproduktion:* Test „QA: image moved BEFORE deployment …“: `Image{file_path: old/m.jpg}`, Datei liegt unter `new/m.jpg`, Redis leer → nach dem Scan steht `file_path` weiter auf `old/m.jpg`, `new/m.jpg` ist Zusatzpfad.
+- *Auswirkung:* Bis zum Reconcile (Schritt 4 der Erstinbetriebnahme bzw. wöchentlich) zeigt die Suche den alten Pfad. Der Reconcile korrigiert ihn (getestet: „main path dead but additional path alive → promoted“).
+- *Vorschlag:* In der Selbstheilung den gefundenen Pfad zum Hauptpfad machen, wenn der gespeicherte Hauptpfad auf erreichbarer Freigabe nicht existiert.
+
+**BUG-2 (Medium) — Ein Ordner ohne abgeschlossenen Durchlauf hält alle Scanner-Löschungen still zurück**
+- *Ursache:* Die Karenz verlangt einen vollständigen Durchlauf **aller** aktiven Ordner. Endet ein Ordner dauerhaft nie regulär (Ordner unlesbar/gelöscht, aber in `dms_watched_folders` aktiv; Lock-Verlust in jedem Lauf), wird nie etwas gemeldet. Im Log steht nur die Anzahl wartender Pfade (Info-Level), nicht welcher Ordner blockiert.
+- *Reproduktion:* Test „QA: unreadable folder -> no full pass recorded“ + „C1: grace waits for EVERY folder pass“.
+- *Auswirkung/Workaround:* Weaviate folgt der Wahrheit nur noch über den wöchentlichen Reconcile (der löscht verwaiste Objekte unabhängig von der Karenz). Kein Datenverlust.
+- *Vorschlag:* Warnung mit den Ordner-IDs ohne aktuellen Durchlauf (z. B. älter als 24 h) in `Code: Find Stale Paths` und im Statistik-Item.
+
+**BUG-3 (Low) — Viele Löschungen auf einmal erzeugen eine Lifecycle-Ausführung je Datei**
+- *Ursache:* Bestehendes Muster (eine MQTT-Nachricht = eine n8n-Ausführung). Bis zur 20-%-Grenze können das bei `/mnt/nas/pictures` mehrere tausend parallele Ausführungen sein (z. B. ein bewusst gelöschter großer Bilderordner).
+- *Auswirkung:* Kurzzeitige Last auf n8n. Kein Datenfehler (doppelte und parallele Meldungen sind idempotent getestet).
+- *Vorschlag:* Bei Bedarf Folge-Feature (Bündelung oder Rate-Limit). Für PROJ-113 akzeptierbar.
+
+### Security Audit
+- Keine neuen Endpunkte und keine neuen Credentials. Neue Werte kommen nur aus Redis/Weaviate/Dateisystem bzw. aus dem internen MQTT-Topic `alice/dms/lifecycle`.
+- GraphQL-Injection: `file_hash` wird in Lifecycle und Path-Worker auf `[a-zA-Z0-9:]` reduziert, im Processor escaped. Feldnamen aus Weaviate-Fehlermeldungen werden nur entfernt, wenn sie in der festen Feldliste stehen. Getestet.
+- Thumbnailer-Aufruf nur mit Weaviate-UUIDs; der Endpoint validiert per Regex (PROJ-97).
+- `alive_paths` aus MQTT werden vor der Nutzung gegen das Dateisystem geprüft. Wer auf das interne MQTT-Topic schreiben kann, konnte schon vorher `delete_file` auslösen, das Risiko ist also unverändert.
+- Der Reconcile-Webhook bleibt ohne JWT (offener Punkt **PROJ-97 BUG-2**, Nutzerentscheidung). Neu ist nur `ignore_delete_limit`; die Freigabe-Prüfung bleibt auch dann aktiv, Schutz weiter über VPN und das `confirm`-Gate. Keine neue Lücke, die Wirkung einer missbräuchlichen Auslösung steigt aber leicht.
+- Keine Secrets in Code oder Logs (Redis-Passwort weiter über `$env`).
+
+### Regression
+- Weitere Leser der Redis-Keys: `admin_dashboard.py` zählt `path_to_hash` (Bilder zählen jetzt mit, gewünscht), `alice-mail-reconcile` nutzt nur eigene Mail-Hashes. Keine Regression.
+- Dokumenten-Pfade (Lifecycle `add_path`/`update_path`/`delete_file` inkl. BankStatement-Kaskade, Path-Worker `new`/`already_queued`/`replace`/`update_path`) per Test bestätigt.
+- Verhaltensänderung für Dokumente (gewollt, Teil von C): Löschungen werden mit Karenz gemeldet. Pfadkorrektur und Redis-Aufräumen im Reconcile greifen durch den `sha256:`-Fix erstmals.
+- Kein Frontend betroffen → keine Vitest-/Playwright-Läufe nötig.
+
+### Nach dem Deployment live zu prüfen
+1. `alice/dms/scanner/path_stats`: `registered_files` > 0 in `Haus` und `Bilder`; `new_files` für bekannte Bilder ≈ 0; beim Bilder-Ordner `resume_from` im Zeitlimit-Log, später `full_pass_completed: true` (**C4**)
+2. Reconcile (`confirm`, `ignore_delete_limit`): `checked` ≈ Gesamtbestand inkl. ~24.300 Bilder; danach **G2/G3** prüfen (Backfill `no_file` → 0)
+3. Redis: `HLEN alice:dms:path_to_hash` steigt auf ~25.000; `SCARD alice:dms:queued_files` sinkt deutlich
+
+### Production-Ready-Entscheidung
+**READY** — keine Critical- oder High-Bugs. 1 Medium (BUG-2, Workaround über den wöchentlichen Reconcile) und 2 Low sind dokumentiert. Drei Kriterien sind erst nach dem Deployment messbar und als Live-Checks oben festgehalten.
 
 ## Deployment
 _To be added by /deploy_
