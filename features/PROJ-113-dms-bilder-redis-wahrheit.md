@@ -2,7 +2,7 @@
 
 ## Status: Approved
 **Created:** 2026-10-15
-**Last Updated:** 2026-10-15 (QA bestanden)
+**Last Updated:** 2026-10-15 (QA bestanden, BUG-2 behoben)
 
 ## Dependencies
 - Baut auf: PROJ-19 (Redis-Karten `alice:dms:path_to_hash` / `alice:dms:hash_to_paths:<hash>`), PROJ-21/PROJ-44 (Scanner → `alice/dms/lifecycle`, `delete_file`), PROJ-56 (Bild-Extraktion), PROJ-97 (Reconcile + Orphan-Cleanup)
@@ -329,11 +329,12 @@ Geänderte Dateien: die fünf Workflows (`alice-dms-processor`, `-path-worker`, 
 - *Auswirkung:* Bis zum Reconcile (Schritt 4 der Erstinbetriebnahme bzw. wöchentlich) zeigt die Suche den alten Pfad. Der Reconcile korrigiert ihn (getestet: „main path dead but additional path alive → promoted“).
 - *Vorschlag:* In der Selbstheilung den gefundenen Pfad zum Hauptpfad machen, wenn der gespeicherte Hauptpfad auf erreichbarer Freigabe nicht existiert.
 
-**BUG-2 (Medium) — Ein Ordner ohne abgeschlossenen Durchlauf hält alle Scanner-Löschungen still zurück**
+**BUG-2 (Medium) — Ein Ordner ohne abgeschlossenen Durchlauf hält alle Scanner-Löschungen still zurück** — ✅ **behoben 2026-10-15**
 - *Ursache:* Die Karenz verlangt einen vollständigen Durchlauf **aller** aktiven Ordner. Endet ein Ordner dauerhaft nie regulär (Ordner unlesbar/gelöscht, aber in `dms_watched_folders` aktiv; Lock-Verlust in jedem Lauf), wird nie etwas gemeldet. Im Log steht nur die Anzahl wartender Pfade (Info-Level), nicht welcher Ordner blockiert.
 - *Reproduktion:* Test „QA: unreadable folder -> no full pass recorded“ + „C1: grace waits for EVERY folder pass“.
 - *Auswirkung/Workaround:* Weaviate folgt der Wahrheit nur noch über den wöchentlichen Reconcile (der löscht verwaiste Objekte unabhängig von der Karenz). Kein Datenverlust.
 - *Vorschlag:* Warnung mit den Ordner-IDs ohne aktuellen Durchlauf (z. B. älter als 24 h) in `Code: Find Stale Paths` und im Statistik-Item.
+- *Fix:* `Code: Find Stale Paths` ermittelt aktive Ordner, deren `last_full_pass` fehlt oder älter als 24 h ist. Sie stehen immer im Statistik-Item (`folders_without_full_pass`: ID, Pfad, letzter Durchlauf bzw. `null`). Werden dadurch Pfade zurückgehalten, folgt eine Warnung im Log mit ID, Pfad und Zeitpunkt jedes blockierenden Ordners. Verifiziert mit dem Test „QA BUG-2 fix …“ (Gegenprobe gegen den Stand vor dem Fix: rot). Suite jetzt 47/47 grün.
 
 **BUG-3 (Low) — Viele Löschungen auf einmal erzeugen eine Lifecycle-Ausführung je Datei**
 - *Ursache:* Bestehendes Muster (eine MQTT-Nachricht = eine n8n-Ausführung). Bis zur 20-%-Grenze können das bei `/mnt/nas/pictures` mehrere tausend parallele Ausführungen sein (z. B. ein bewusst gelöschter großer Bilderordner).
@@ -355,12 +356,13 @@ Geänderte Dateien: die fünf Workflows (`alice-dms-processor`, `-path-worker`, 
 - Kein Frontend betroffen → keine Vitest-/Playwright-Läufe nötig.
 
 ### Nach dem Deployment live zu prüfen
+0. `alice/dms/scanner/stats`: `folders_without_full_pass` ist nach dem ersten vollständigen Durchlauf aller Ordner leer
 1. `alice/dms/scanner/path_stats`: `registered_files` > 0 in `Haus` und `Bilder`; `new_files` für bekannte Bilder ≈ 0; beim Bilder-Ordner `resume_from` im Zeitlimit-Log, später `full_pass_completed: true` (**C4**)
 2. Reconcile (`confirm`, `ignore_delete_limit`): `checked` ≈ Gesamtbestand inkl. ~24.300 Bilder; danach **G2/G3** prüfen (Backfill `no_file` → 0)
 3. Redis: `HLEN alice:dms:path_to_hash` steigt auf ~25.000; `SCARD alice:dms:queued_files` sinkt deutlich
 
 ### Production-Ready-Entscheidung
-**READY** — keine Critical- oder High-Bugs. 1 Medium (BUG-2, Workaround über den wöchentlichen Reconcile) und 2 Low sind dokumentiert. Drei Kriterien sind erst nach dem Deployment messbar und als Live-Checks oben festgehalten.
+**READY** — keine Critical- oder High-Bugs. BUG-2 (Medium) ist behoben, 2 Low (BUG-1, BUG-3) bleiben dokumentiert. Drei Kriterien sind erst nach dem Deployment messbar und als Live-Checks oben festgehalten.
 
 ## Deployment
 _To be added by /deploy_

@@ -97,3 +97,27 @@ test('QA: image moved BEFORE deployment -> self-heal keeps the dead main path (f
   // and the scanner never reports the old path (it is not in path_to_hash)
   assert.ok(!E.redis.h(P2H).has('/mnt/nas/pictures/old/m.jpg'));
 });
+
+test('QA BUG-2 fix: folder without a recent full pass is named when it holds back reports', async () => {
+  const E = makeEnv();
+  const folders = [{ id: 14, path: '/mnt/nas/pictures' }, { id: 99, path: '/mnt/nas/pictures/gone' }];
+  const c = E.redis.client();
+  for (let i = 0; i < 10; i++) { const p = E.file(`/mnt/nas/pictures/p${i}.jpg`, 'x'); await c.hSet(P2H, p, 'sha256:' + i); }
+  E.rm('/mnt/nas/pictures/p0.jpg');
+  const sweep = () => runNode(E, 'alice-dms-scanner', 'Code: Find Stale Paths', [{ event: 'x' }], { 'PG: Active Folders': folders });
+  await sweep();
+  E.redis.kv.set('alice:dms:scanner:last_full_pass:folder:14', String(Date.now() + 1000));
+  E.logs.length = 0;
+  const out = await sweep();
+  assert.equal(out.filter(o => o._stale_for_deletion).length, 0);
+  assert.deepEqual(out.at(-1).folders_without_full_pass, [{ folder_id: 99, path: '/mnt/nas/pictures/gone', last_full_pass: null }]);
+  const warn = E.logs.find(l => l[0] === 'warn' && /held back/.test(l[2]));
+  assert.ok(warn && /99 \/mnt\/nas\/pictures\/gone \(last: never\)/.test(warn[2]));
+  // all folders recently passed -> no warning, report goes out
+  E.redis.kv.set('alice:dms:scanner:last_full_pass:folder:99', String(Date.now() + 1000));
+  E.logs.length = 0;
+  const ok = await sweep();
+  assert.deepEqual(ok.at(-1).folders_without_full_pass, []);
+  assert.equal(ok.filter(o => o._stale_for_deletion).length, 1);
+  assert.ok(!E.logs.some(l => /held back/.test(l[2])));
+});
