@@ -1,8 +1,8 @@
 # PROJ-113: DMS-Bilder in die Redis-Wahrheit aufnehmen (Lifecycle + Reconcile für Image)
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-10-15
-**Last Updated:** 2026-10-15
+**Last Updated:** 2026-10-15 (Tech Design ergänzt)
 
 ## Dependencies
 - Baut auf: PROJ-19 (Redis-Karten `alice:dms:path_to_hash` / `alice:dms:hash_to_paths:<hash>`), PROJ-21/PROJ-44 (Scanner → `alice/dms/lifecycle`, `delete_file`), PROJ-56 (Bild-Extraktion), PROJ-97 (Reconcile + Orphan-Cleanup)
@@ -104,7 +104,123 @@ Redis ist die Quelle der Wahrheit dafür, welche Dateien in den DMS-Pfaden exist
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Überblick
+
+Kein neuer Dienst und kein neuer Workflow. Fünf bestehende n8n-Workflows werden angepasst. Der Grundsatz: **Redis wird nur aus dem echten Dateisystem befüllt (Scan), und Weaviate folgt Redis.** Redis-Einträge werden erst entfernt, wenn Weaviate angepasst ist.
+
+```
+Dateisystem (NAS)
+      |
+  alice-dms-scanner  (stündlich)
+      +-- Path-Worker je Ordner: hasht Dateien
+      |     +-- neu ................................. -> Extractor -> Processor (trägt Bild jetzt in Redis ein)  [geändert]
+      |     +-- bekannt, aber ohne Pfad-Eintrag ..... -> Selbstheilung: Pfad in Redis eintragen, kein LLM       [NEU]
+      |     +-- Fortsetzung nach Zeitlimit .......... -> nächster Lauf macht dort weiter                       [NEU]
+      +-- Find Stale Paths: vergleicht Redis mit Dateisystem
+            +-- Datei weg, keine Kopie mehr ......... -> delete_file  --+
+            +-- Datei weg, Kopie lebt woanders ...... -> remove_path  --+--> alice-dms-lifecycle         [NEU/geändert]
+            +-- Schutz: Freigabe erreichbar? Anteil <= 20 %?            |      +-- findet jetzt auch Image
+                                                                        |      +-- passt Weaviate an (inkl. Thumbnail)
+                                                                        |      +-- danach erst Redis-Einträge aufräumen
+alice-dms-reconcile  (wöchentlich, Sicherheitsnetz)                     v
+      +-- prüft jetzt auch Image, gleiche Regeln + gleicher Schutz    Weaviate
+```
+
+### A) Komponenten (Workflows) und Änderungen
+
+```
+alice-dms-processor  (Bild-Zweig "Code: Process Image Item")
++-- Neues Bild eingefügt   -> path_to_hash + hash_to_paths setzen, queued_files aufräumen   [NEU]
++-- Duplikat erkannt       -> dto. für den neuen Pfad; eigener Hauptpfad wird nie Zusatzpfad [geändert]
+
+alice-dms-path-worker
++-- Selbstheilung (Lifecycle Check)                                                         [NEU]
+|   "Hash verarbeitet, aber kein Pfad bekannt" -> Weaviate-Objekt mit diesem Hash vorhanden?
+|     +-- ja:   Pfad in Redis eintragen; ist der Pfad weder Haupt- noch Zusatzpfad -> als Zusatzpfad ergänzen
+|     +-- nein: wie bisher "neu" (normale Verarbeitung)
++-- Fortsetzung nach Zeitlimit                                                              [NEU]
+|   feste Reihenfolge der Dateien; beim Zeitlimit wird die Position gemerkt,
+|   der nächste Lauf überspringt bis dorthin; am Ordnerende wird die Marke gelöscht
++-- Zähler "registered" (selbstgeheilt) in der Lauf-Zusammenfassung                        [NEU]
+
+alice-dms-scanner  ("Code: Find Stale Paths")
++-- erkennt nur noch, verändert Redis nicht mehr selbst                                    [geändert]
++-- delete_file (keine lebende Kopie) / remove_path (Kopie lebt woanders)                  [remove_path NEU]
++-- Schutz: Freigabe nicht erreichbar -> keine Meldungen für diese Freigabe                  [NEU]
++-- Schutz: > 20 % der Einträge einer Freigabe betroffen -> keine Meldungen, Warnung        [NEU]
+
+alice-dms-lifecycle
++-- Suche nach Hash auch in Image (Feld file_hash)                                         [NEU]
++-- delete_file: Weaviate-Objekt (+ Bankumsätze) + Thumbnail löschen, DANN Redis aufräumen   [geändert]
++-- remove_path: toten Pfad aus Weaviate entfernen (ggf. neuer Hauptpfad), DANN Redis       [NEU]
++-- add_path / update_path: auch für Image                                                 [geändert]
+
+alice-dms-reconcile
++-- Image-Abfrage ohne file_name; fehlende Felder generell weglassen + protokollieren       [geändert]
++-- Image: eigener Hauptpfad / tote Pfade aus Zusatzpfaden entfernen                        [NEU]
++-- Vorab-Zählung je Collection -> Obergrenze 20 % (per Parameter aufhebbar)                 [NEU]
++-- Freigabe-Erreichbarkeit vor jedem Löschen                                               [NEU]
++-- Zeitplan: montags 00:00 UTC                                                             [geändert]
+```
+
+### B) Daten
+
+Keine neuen Datenbanken oder Collections, keine neuen Weaviate-Felder.
+
+- **Redis (bestehende Karten):** `path_to_hash` und `hash_to_paths:<hash>` enthalten künftig auch Bilder.
+- **Redis (neu):** je Ordner eine Fortsetzungsmarke (zuletzt fertig verarbeitete Datei), wird am Ordnerende gelöscht.
+- **MQTT `alice/dms/lifecycle`:** neue Aktion `remove_path` (Hash, toter Pfad, lebende Pfade).
+- **Konfiguration:** Löschobergrenze (Default 20 %).
+
+### C) Tech-Entscheidungen (begründet)
+
+1. **Nachtrag per Selbstheilung im Scan statt eigenem Workflow** (Entscheidung Nutzer). Nur der Scan sieht das echte Dateisystem: Der Hash kommt aus dem tatsächlichen Dateiinhalt, und auch verschobene Bilder werden unter ihrem neuen Pfad gefunden. Ein Nachtrag aus Weaviate heraus würde verschobene Bilder als verwaist löschen und später neu beschreiben lassen. Die Prüfung „Weaviate-Objekt vorhanden" verhindert, dass ein Hash als bekannt gilt, zu dem es kein Objekt gibt.
+
+2. **Fortsetzung nach Zeitlimit.** Der Bilder-Ordner braucht nach Messung (~0,45 s pro bekannter Datei) für ~25.000 Bilder ca. 3 h, mehr als das 2-h-Limit. Ohne Fortsetzung erreicht der Scan die hinteren Dateien nie. Das ist kein inkrementelles Scannen (außerhalb des Scopes), es verteilt nur einen vollständigen Durchlauf auf mehrere Läufe. **Damit gilt AC C4 als „vollständiger Durchlauf über mehrere Läufe".** Neue Dateien weiter hinten im Baum werden dadurch spätestens nach einem vollen Zyklus (ca. 2–3 Stunden) erfasst.
+
+3. **Redis wird beim Verbraucher aufgeräumt, nicht beim Scanner.** Der Scanner meldet nur noch. Der Lifecycle passt erst Weaviate an und entfernt danach die Redis-Einträge. Geht eine Nachricht verloren oder scheitert Weaviate, bleibt der Eintrag stehen und der nächste stündliche Scan meldet erneut. Doppelte Meldungen sind harmlos (Objekt nicht gefunden → überspringen). Das erfüllt AC C2 robuster als „erst senden, dann löschen" im Scanner.
+
+4. **Neue Aktion `remove_path` statt Wiederverwendung von `update_path`.** `update_path` bedeutet „Datei verschoben, alle alten Pfade weg". `remove_path` bedeutet „ein Pfad weg, Kopien leben weiter". Die getrennte Aktion hält beide Fälle eindeutig.
+
+5. **Schutz vor Massenlöschung an zwei Stellen.** Die Erreichbarkeit der Freigabe (z.B. `/mnt/nas/pictures`) wird über das Wurzelverzeichnis der Freigabe geprüft: lesbar und nicht leer. Im **Scanner** gilt die 20-%-Grenze je Freigabe, weil der Scanner keine Collections kennt. Im **Reconcile** gilt sie je Collection wie in der Spec; dafür zählt er vor dem ersten Löschen, wie viele Objekte er löschen würde.
+
+6. **Thumbnail-Löschung im Lifecycle für alle Collections.** Bisher räumt nur der Reconcile Thumbnails weg. Der Lifecycle nutzt künftig denselben Thumbnailer-Aufruf, damit `delete_file` vollständig ist.
+
+7. **Reconcile: fehlende Felder generell abfangen.** Die bestehende Ausnahme für `thumbnail_path`/`additionalPaths` wird verallgemeinert. Fehlt ein abgefragtes Feld, wird es weggelassen, protokolliert und die Abfrage wiederholt. Eine Collection wird nie mehr still übersprungen.
+
+### D) Abläufe
+
+**Laufender Betrieb (stündlich):** Scan → neue Bilder wie bisher an den Extractor, und der Processor trägt sie jetzt in Redis ein. Bekannte Bilder ohne Eintrag werden selbstgeheilt. Gelöschte Dateien gehen als `delete_file`/`remove_path` an den Lifecycle, der erst Weaviate und dann Redis anpasst.
+
+**Erstinbetriebnahme (ersetzt AC B/G-Ablauf):**
+1. Alle fünf Workflows deployen.
+2. Die stündlichen Scans laufen. Jeder Ordner ist einmal vollständig durchlaufen, sobald seine Lauf-Zusammenfassung ohne Zeitlimit-Abbruch endet (Bilder-Ordner: voraussichtlich 2 Läufe). Die Zähler `registered` zeigen den Fortschritt der Selbstheilung.
+3. Dann ein **echter** Reconcile-Lauf per Webhook mit aufgehobener Obergrenze und ausreichendem Zeitlimit. Die Prüfung der Freigaben bleibt aktiv.
+4. Danach gilt der wöchentliche Zeitplan.
+
+**Fehlerfälle:**
+- Freigabe nicht erreichbar → keine Meldungen bzw. Löschungen für diese Freigabe, Warnung im Log.
+- Obergrenze überschritten → keine Löschungen für diese Freigabe/Collection, Warnung im Log.
+- MQTT oder Weaviate gestört → Redis bleibt unverändert, der nächste Scan meldet erneut.
+- Selbstheilung findet kein Weaviate-Objekt → das Bild wird wie bisher als neu verarbeitet.
+
+### E) Anpassungen der Spec durch das Design
+
+- **B (Nachtrag):** „Einmaliger Nachtrag" erfolgt durch die Selbstheilung im regulären Scan. Statt eines eigenen Ergebnisses mit Zählern gibt es den Zähler `registered` je Ordnerlauf. „Datei fehlt" erfasst der Reconcile (`deleted_orphan` bzw. `path_repaired`). „Hash abweichend" führt automatisch zum Ablauf „Datei geändert". Die Bereinigung des eigenen Hauptpfads in `additionalPaths` übernimmt der Reconcile.
+- **C4:** „vollständiger Scan im Zeitlimit" → „vollständiger Durchlauf, ggf. über mehrere Läufe mit Fortsetzung".
+- **F:** Im Scanner gilt die Obergrenze je Freigabe statt je Collection.
+- **G:** Der Reconcile-Erstlauf startet erst nach dem ersten vollständigen Durchlauf aller Ordner (sonst würden verschobene Bilder gelöscht).
+
+### F) Abhängigkeiten (Pakete)
+
+Keine neuen Pakete. Genutzt werden die bereits in n8n verfügbaren Module (Redis, axios, fs) sowie der Thumbnailer-Dienst (`DELETE /thumbnail/<uuid>`).
+
+### G) Betroffene Dateien
+
+- `workflows/alice-dms-processor.json`, `alice-dms-path-worker.json`, `alice-dms-scanner.json`, `alice-dms-lifecycle.json`, `alice-dms-reconcile.json`
+- Keine Änderung an `sql/`, Frontend, nginx oder Containern
+- Deployment durch den Nutzer: zuerst Lifecycle (versteht `remove_path`), dann Processor, Path-Worker, Scanner, Reconcile
 
 ## QA Test Results
 _To be added by /qa_
