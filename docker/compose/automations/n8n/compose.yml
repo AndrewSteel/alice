@@ -50,6 +50,8 @@ services:
       # PROJ-56 refinement: Geoapify reverse geocoding (2026-07-21)
       - GEOAPIFY_API_KEY=${GEOAPIFY_API_KEY}
       - GEOAPIFY_DAILY_LIMIT=${GEOAPIFY_DAILY_LIMIT}
+      # PROJ-113: max share of objects a DMS scan/reconcile run may delete (default 0.2)
+      - DMS_DELETE_MAX_RATIO=${DMS_DELETE_MAX_RATIO:-0.2}
       # PROJ-7: JWT Auth (2026-02-27)
       # PROJ-36: Change HS256 to RS256 (2026-06-10)
       # - JWT_SECRET="${JWT_SECRET}"
