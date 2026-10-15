@@ -1,8 +1,8 @@
 # PROJ-113: DMS-Bilder in die Redis-Wahrheit aufnehmen (Lifecycle + Reconcile für Image)
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-10-15
-**Last Updated:** 2026-10-15 (Tech Design ergänzt)
+**Last Updated:** 2026-10-15 (Backend implementiert)
 
 ## Dependencies
 - Baut auf: PROJ-19 (Redis-Karten `alice:dms:path_to_hash` / `alice:dms:hash_to_paths:<hash>`), PROJ-21/PROJ-44 (Scanner → `alice/dms/lifecycle`, `delete_file`), PROJ-56 (Bild-Extraktion), PROJ-97 (Reconcile + Orphan-Cleanup)
@@ -221,6 +221,44 @@ Keine neuen Pakete. Genutzt werden die bereits in n8n verfügbaren Module (Redis
 - `workflows/alice-dms-processor.json`, `alice-dms-path-worker.json`, `alice-dms-scanner.json`, `alice-dms-lifecycle.json`, `alice-dms-reconcile.json`
 - Keine Änderung an `sql/`, Frontend, nginx oder Containern
 - Deployment durch den Nutzer: zuerst Lifecycle (versteht `remove_path`), dann Processor, Path-Worker, Scanner, Reconcile
+
+## Implementation Notes (Backend, 2026-10-15)
+
+Geänderte Dateien: die fünf Workflows (`alice-dms-processor`, `-path-worker`, `-scanner`, `-lifecycle`, `-reconcile`) sowie `docker/compose/automations/n8n/compose.yml` + `.env.example` (neue Variable `DMS_DELETE_MAX_RATIO`, Default `0.2`; ohne gesetzte Variable gilt im Code ebenfalls 0,2).
+
+**Processor (`Code: Process Image Item`):** neue und als Duplikat erkannte Bilder werden in `path_to_hash`/`hash_to_paths` eingetragen, `queued_files` wird aufgeräumt. Der eigene Hauptpfad kommt nie in `additionalPaths`, und bestehender Schmutz wird beim Duplikat-Durchlauf gleich mit bereinigt. „Datei ersetzt“ (gleicher Pfad, anderer Hash in `path_to_hash`) löst das alte `Image`-Objekt: Pfad entfernen, Kopie wird Hauptpfad, oder Objekt + Thumbnail löschen.
+
+**Path-Worker:**
+- Selbstheilung in `Code: Lifecycle Check`: Ist für einen Hash kein Pfad bekannt, wird Weaviate gefragt (Bilder → `Image`, sonst Dokument-Collections). Bei einem Treffer wird der Pfad in Redis eingetragen (+ `processed`, − `queued_files`), ggf. als Zusatzpfad ergänzt und als `registered_files` gezählt. Es gibt keinen Extractor-/LLM-Aufruf. Ist Weaviate nicht erreichbar, wird die Datei in diesem Lauf übersprungen und nicht an das LLM geschickt.
+- Feste Reihenfolge (sortiert) und Fortsetzungsmarke `alice:dms:scanner:resume:folder:<id>`. Ein Durchlauf, der von vorn beginnt, setzt `…:pass_start:folder:<id>`. Am Ordnerende wird die Marke gelöscht und `…:last_full_pass:folder:<id>` gesetzt. Die Zusammenfassung enthält `registered_files` und `full_pass_completed`.
+
+**Scanner (`Code: Find Stale Paths`):** meldet nur noch `delete_file` bzw. die neue Aktion `remove_path` (mit `alive_paths`) und verändert Redis nicht mehr. Schutz: Ist die Freigabe `/mnt/nas/<share>` nicht lesbar oder leer, wird für sie nichts gemeldet. Liegt der fehlende Anteil je Freigabe über `DMS_DELETE_MAX_RATIO`, wird für diese Freigabe nichts gemeldet und eine Warnung geloggt. Der MQTT-Knoten heißt jetzt `MQTT: Publish lifecycle (stale path)`.
+
+**Lifecycle:** findet `Image` (`file_hash`/`file_path`). Ein fehlgeschlagener Lookup wird von „nicht gefunden“ unterschieden: Bei `delete_file`/`remove_path` wird dann ein Fehler geworfen und Redis bleibt unverändert. `delete_file` löscht Thumbnail + Objekt (404 = schon weg) und räumt **danach** Redis auf. Neuer Zweig `IF: Is remove_path` → `Code: Handle remove_path` → `MQTT: Done (remove_path)`. `add_path`/`update_path` nutzen das richtige Pfadfeld, der Hauptpfad kommt nie in `additionalPaths`, und tote alte Pfade fliegen bei `update_path` aus `additionalPaths`.
+
+**Reconcile:**
+- Die `Image`-Abfrage enthält kein `file_name` mehr. Fehlt ein Feld im Schema, wird es generisch weggelassen und geloggt; fehlt Pfad- oder Hash-Feld, landet das in `collection_errors`.
+- Gesunde Objekte werden schon in `Code: Query Weaviate` gezählt und laufen nicht durch die Schleife (wichtig bei ~24.000 Bildern).
+- Eine Vorab-Zählung `would_delete` je Collection prüft die Obergrenze (Parameter `ignore_delete_limit=true` hebt sie auf). Ein Objekt, dessen Freigabe nicht erreichbar ist, wird behalten (`skipped_unreachable`).
+- Der eigene Hauptpfad und tote Pfade werden aus `additionalPaths` entfernt (`additional_paths_cleaned`). Ein lebender Zusatzpfad zählt als Kandidat bei der Pfadkorrektur, statt dass das Objekt gelöscht wird.
+- Der Zeitplan heißt jetzt `0 0 * * 1` (Knoten `Schedule Trigger: Weekly`).
+- **Mitbehobener Bug:** `SHA256_RE` erwartete 64 Hex-Zeichen ohne Präfix, gespeichert wird aber `sha256:<hex>`. Dadurch griffen die Pfadkorrektur über den Hash und das Redis-Aufräumen im Reconcile bisher nie.
+
+### Abweichungen vom Tech Design
+1. **Karenz bis zum vollständigen Durchlauf (neu):** Der Scanner prüft zu Beginn jedes Laufs, die Path-Worker laufen asynchron und finden ein verschobenes Bild oft erst Stunden später. Ohne Karenz würde ein verschobenes Bild gelöscht und neu beschrieben, was der User Story widerspricht. Deshalb merkt sich der Scanner das erste Fehlen in `alice:dms:scanner:missing_since` und meldet einen Pfad erst, wenn **alle** aktiven Ordner danach einen vollständigen Durchlauf begonnen und beendet haben. Folge: Gelöschte Dateien verschwinden mit Verzögerung (bei Bildern ca. ein Bilder-Zyklus, ~3–4 h Scanzeit) statt beim nächsten Lauf. Nach dem Deployment meldet der Scanner erst etwas, wenn jeder Ordner einmal komplett durchlaufen ist, was auch als Schutz während der Selbstheilung dient.
+2. **Selbstheilung auch für nicht verarbeitete Hashes:** Die Weaviate-Prüfung greift immer, wenn für einen Hash kein Pfad bekannt ist, nicht nur bei `processed`. Grund: Live hängen 24.331 Hashes in `queued_files` (der Bild-Zweig hat dort nie aufgeräumt), und solche Bilder wären sonst als `already_queued` dauerhaft übersprungen worden. Kosten: eine GraphQL-Abfrage je wirklich neuer Datei.
+3. **`additionalPaths`-Bereinigung im Reconcile für alle Collections**, nicht nur `Image` (gleiche Regel, kein Sonderfall).
+4. Keine Mindestanzahl für die Obergrenze: Bei sehr kleinen Collections kann schon eine Löschung über 20 % liegen. Dann entscheidet der Admin (siehe Edge Case), und die Grenze lässt sich per Variable anpassen.
+
+### Verifikation
+- Ausführungstests (Node-Harness mit In-Memory-Redis, Fake-Weaviate/Thumbnailer, `/mnt/nas` → Temp-Verzeichnis), die die Code-Knoten direkt aus den Workflow-JSONs ausführen: **36/36 grün**. Gegenprobe mit den alten Workflows aus `HEAD`: 32/36 rot (die 4 grünen prüfen bewusst unverändertes Verhalten).
+- Struktur: alle Verbindungsziele existieren, Knotennamen/IDs eindeutig; Syntax aller Code-Knoten geprüft. Die n8n-MCP-Validierung wurde nicht ausgeführt (Workflow-Größe).
+
+### Deployment-Reihenfolge (durch den Nutzer)
+1. `./scripts/sync-compose.sh` und n8n neu starten (nur nötig, wenn `DMS_DELETE_MAX_RATIO` vom Default abweichen soll)
+2. Workflows: Lifecycle → Processor → Path-Worker → Scanner → Reconcile
+3. Stündliche Scans laufen lassen, bis jeder Ordner `full_pass_completed: true` meldet (`alice/dms/scanner/path_stats`)
+4. Echter Reconcile: `POST /webhook/alice-dms-reconcile` mit `{"confirm": true, "ignore_delete_limit": true}`
 
 ## QA Test Results
 _To be added by /qa_

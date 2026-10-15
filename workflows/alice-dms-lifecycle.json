@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Parse & Validate\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('Malformed MQTT message: cannot parse JSON payload. ' + e.message);\n}\n\nif (!msg.action || !msg.file_hash || !msg.file_path) {\n  throw new Error('Invalid lifecycle message: missing required fields (action, file_hash, file_path). Got keys: ' + JSON.stringify(Object.keys(msg)));\n}\n\nif (!['add_path', 'update_path', 'delete_file'].includes(msg.action)) {\n  logger.warn('[alice-dms-lifecycle] Unknown action: ' + msg.action + ' — discarding message');\n  return [];\n}\n\nreturn [{ json: { ...msg } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Parse & Validate\" } });\nconst raw = $input.first().json;\nlet msg;\ntry {\n  const payload = raw.message || raw.body || raw;\n  msg = typeof payload === 'string' ? JSON.parse(payload) : payload;\n} catch(e) {\n  throw new Error('Malformed MQTT message: cannot parse JSON payload. ' + e.message);\n}\n\nif (!msg.action || !msg.file_hash || !msg.file_path) {\n  throw new Error('Invalid lifecycle message: missing required fields (action, file_hash, file_path). Got keys: ' + JSON.stringify(Object.keys(msg)));\n}\n\nif (!['add_path', 'update_path', 'delete_file', 'remove_path'].includes(msg.action)) {\n  logger.warn('[alice-dms-lifecycle] Unknown action: ' + msg.action + ' — discarding message');\n  return [];\n}\n\nreturn [{ json: { ...msg } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -37,7 +37,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Weaviate Find by Hash\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst rawHash = item.file_hash;\n\n// BUG-4 fix: sanitize file_hash to prevent GraphQL injection\nconst fileHash = String(rawHash).replace(/[^a-zA-Z0-9:]/g, '');\nif (fileHash !== rawHash) {\n  logger.warn(`[alice-dms-lifecycle] Sanitized file_hash: '${rawHash}' -> '${fileHash}'`);\n}\nif (!fileHash) {\n  throw new Error('file_hash is empty after sanitization, cannot query Weaviate');\n}\n\nconst WEAVIATE = 'http://weaviate:8080';\nconst collections = ['Invoice', 'BankStatement', 'Document', 'Email', 'SecuritySettlement', 'Contract'];\n\nlet foundClass = null;\nlet foundId = null;\nlet foundAdditionalPaths = [];\n\nfor (const cls of collections) {\n  const q = `{ Get { ${cls}(where: { path: [\"fileHash\"], operator: Equal, valueText: \"${fileHash}\" }, limit: 1) { _additional { id } additionalPaths } } }`;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 10000\n    });\n    const hits = r.data?.data?.Get?.[cls];\n    if (hits && hits.length > 0) {\n      foundClass = cls;\n      foundId = hits[0]._additional?.id;\n      foundAdditionalPaths = hits[0].additionalPaths || [];\n      break;\n    }\n  } catch(e) {\n    // continue to next collection\n  }\n}\n\nif (!foundId) {\n  logger.warn(`[alice-dms-lifecycle] Object not found in Weaviate for hash: ${fileHash}`);\n}\n\nreturn [{ json: { ...item, _weaviate_class: foundClass, _weaviate_id: foundId, _existing_additional_paths: foundAdditionalPaths } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Weaviate Find by Hash\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst rawHash = item.file_hash;\n\n// BUG-4 fix: sanitize file_hash to prevent GraphQL injection\nconst fileHash = String(rawHash).replace(/[^a-zA-Z0-9:]/g, '');\nif (fileHash !== rawHash) {\n  logger.warn(`[alice-dms-lifecycle] Sanitized file_hash: '${rawHash}' -> '${fileHash}'`);\n}\nif (!fileHash) {\n  throw new Error('file_hash is empty after sanitization, cannot query Weaviate');\n}\n\nconst WEAVIATE = 'http://weaviate:8080';\n// PROJ-113: Image uses snake_case field names (file_hash / file_path)\nconst collections = [\n  { cls: 'Invoice', hashField: 'fileHash', pathField: 'filePath' },\n  { cls: 'BankStatement', hashField: 'fileHash', pathField: 'filePath' },\n  { cls: 'Document', hashField: 'fileHash', pathField: 'filePath' },\n  { cls: 'Email', hashField: 'fileHash', pathField: 'filePath' },\n  { cls: 'SecuritySettlement', hashField: 'fileHash', pathField: 'filePath' },\n  { cls: 'Contract', hashField: 'fileHash', pathField: 'filePath' },\n  { cls: 'Image', hashField: 'file_hash', pathField: 'file_path' }\n];\n\nlet foundClass = null;\nlet foundId = null;\nlet foundAdditionalPaths = [];\nlet foundPathField = null;\nlet foundMainPath = null;\n// PROJ-113: distinguish \"not found anywhere\" from \"lookup failed\" — Redis is\n// only cleaned up after Weaviate was handled, never after a failed lookup.\nlet lookupError = false;\n\nfor (const { cls, hashField, pathField } of collections) {\n  const q = `{ Get { ${cls}(where: { path: [\"${hashField}\"], operator: Equal, valueText: \"${fileHash}\" }, limit: 1) { _additional { id } ${pathField} additionalPaths } } }`;\n  try {\n    const r = await axios.post(`${WEAVIATE}/v1/graphql`, { query: q }, {\n      headers: { 'Content-Type': 'application/json' },\n      timeout: 10000\n    });\n    if (r.data?.errors) {\n      lookupError = true;\n      logger.warn(`[alice-dms-lifecycle] GraphQL error for ${cls}: ${JSON.stringify(r.data.errors)}`);\n      continue;\n    }\n    const hits = r.data?.data?.Get?.[cls];\n    if (hits && hits.length > 0) {\n      foundClass = cls;\n      foundId = hits[0]._additional?.id;\n      foundAdditionalPaths = hits[0].additionalPaths || [];\n      foundPathField = pathField;\n      foundMainPath = hits[0][pathField] || null;\n      break;\n    }\n  } catch(e) {\n    lookupError = true;\n    logger.warn(`[alice-dms-lifecycle] Lookup failed for ${cls}: ${e.message}`);\n  }\n}\n\nif (foundId) {\n  lookupError = false;\n} else {\n  logger.warn(`[alice-dms-lifecycle] Object not found in Weaviate for hash: ${fileHash}${lookupError ? ' (lookup incomplete)' : ''}`);\n}\n\nreturn [{ json: { ...item, _weaviate_class: foundClass, _weaviate_id: foundId, _existing_additional_paths: foundAdditionalPaths, _weaviate_path_field: foundPathField, _weaviate_main_path: foundMainPath, _lookup_error: lookupError } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -84,7 +84,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: PATCH additionalPaths\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  logger.warn(`[alice-dms-lifecycle] add_path: no Weaviate object found for hash ${item.file_hash}, skipping PATCH`);\n  return [{ json: { ...item, _weaviate_patched: false } }];\n}\n\nconst existing = Array.isArray(item._existing_additional_paths) ? item._existing_additional_paths : [];\nconst newPaths = [...new Set([...existing, item.file_path])];\n\ntry {\n  await axios.patch(\n    `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n    { properties: { additionalPaths: newPaths } },\n    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n  );\n} catch(e) {\n  throw new Error(`Weaviate PATCH failed for add_path (${item.file_hash}): ${e.message}`);\n}\n\nreturn [{ json: { ...item, _weaviate_patched: true, _new_additional_paths: newPaths } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: PATCH additionalPaths\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  logger.warn(`[alice-dms-lifecycle] add_path: no Weaviate object found for hash ${item.file_hash}, skipping PATCH`);\n  return [{ json: { ...item, _weaviate_patched: false } }];\n}\n\nconst existing = Array.isArray(item._existing_additional_paths) ? item._existing_additional_paths : [];\n// PROJ-113: the object's own main path is never an additional path\nconst newPaths = [...new Set([...existing, item.file_path])].filter(p => p !== item._weaviate_main_path);\n\ntry {\n  await axios.patch(\n    `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n    { properties: { additionalPaths: newPaths } },\n    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n  );\n} catch(e) {\n  throw new Error(`Weaviate PATCH failed for add_path (${item.file_hash}): ${e.message}`);\n}\n\nreturn [{ json: { ...item, _weaviate_patched: true, _new_additional_paths: newPaths } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -164,7 +164,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: PATCH filePath\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  logger.warn(`[alice-dms-lifecycle] update_path: no Weaviate object found for hash ${item.file_hash}, skipping PATCH`);\n  return [{ json: { ...item, _weaviate_patched: false } }];\n}\n\ntry {\n  await axios.patch(\n    `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n    { properties: { filePath: item.file_path } },\n    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n  );\n} catch(e) {\n  throw new Error(`Weaviate PATCH failed for update_path (${item.file_hash}): ${e.message}`);\n}\n\nreturn [{ json: { ...item, _weaviate_patched: true } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: PATCH filePath\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  logger.warn(`[alice-dms-lifecycle] update_path: no Weaviate object found for hash ${item.file_hash}, skipping PATCH`);\n  return [{ json: { ...item, _weaviate_patched: false } }];\n}\n\n// PROJ-113: Image stores the main path in file_path; the new main path and the\n// dead old paths must not remain in additionalPaths\nconst pathField = item._weaviate_path_field || 'filePath';\nconst oldPaths = Array.isArray(item.old_paths) ? item.old_paths : [];\nconst existing = Array.isArray(item._existing_additional_paths) ? item._existing_additional_paths : [];\nconst additionalPaths = existing.filter(p => p !== item.file_path && !oldPaths.includes(p));\n\ntry {\n  await axios.patch(\n    `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n    { properties: { [pathField]: item.file_path, additionalPaths } },\n    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n  );\n} catch(e) {\n  throw new Error(`Weaviate PATCH failed for update_path (${item.file_hash}): ${e.message}`);\n}\n\nreturn [{ json: { ...item, _weaviate_patched: true } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -211,7 +211,7 @@
     },
     {
       "parameters": {
-        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22, PROJ-44).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n- `delete_file` — File deleted from DMS; no copies remain. (PROJ-44)\n  If BankStatement: cascade-delete all BankTransaction children first.\n  Then DELETE parent Weaviate object.\n  Redis already cleaned up by alice-dms-scanner before publishing.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, no-op (already cleaned up)\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Weaviate DELETE failure → throw\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-29: BankTransaction collection with parentStatementId\n- PROJ-44: delete_file cascade-delete\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
+        "content": "## alice-dms-lifecycle\n\nMQTT-triggered, event-driven workflow (PROJ-22, PROJ-44).\nSubscribes to `alice/dms/lifecycle` (published by alice-dms-scanner).\n\n### Actions\n- `add_path` — Duplicate file found at new path.\n  PATCH Weaviate: append to additionalPaths[].\n  Redis: HSET path_to_hash + SADD hash_to_paths.\n- `update_path` — File moved; old path(s) gone.\n  PATCH Weaviate: set filePath = new path.\n  Redis: HDEL/SREM old paths + HSET/SADD new path.\n- `delete_file` — File deleted from DMS; no copies remain. (PROJ-44)\n  If BankStatement: cascade-delete all BankTransaction children first.\n  Then DELETE thumbnail (thumbnailer) + parent Weaviate object (PROJ-113).\n  THEN Redis: HDEL/SREM the dead path, SREM processed (PROJ-113: Redis is\n  cleaned up here, after Weaviate — no longer by the scanner).\n- `remove_path` — One path gone, copies live on at `alive_paths` (PROJ-113).\n  PATCH Weaviate: dead path out of additionalPaths; if it was the main path,\n  the first live path becomes the main path. THEN Redis: HDEL/SREM dead path.\n\nAll actions also find `Image` objects (field `file_hash` / `file_path`, PROJ-113).\nA failed Weaviate lookup throws — Redis stays unchanged, the scanner re-reports.\n\n### Error Handling\n- Missing fields / malformed JSON → throw (logged as failed execution)\n- Unknown action → discard (empty return, not an error)\n- Weaviate object not found → log warning, no-op (already cleaned up)\n- Weaviate PATCH failure → throw (logged, Redis skipped for consistency)\n- Weaviate DELETE failure → throw\n- Redis failure → throw (MQTT error published by n8n error handler)\n\n### Dependencies\n- PROJ-19: path_to_hash + hash_to_paths Redis mappings\n- PROJ-21: Scanner publishes to alice/dms/lifecycle\n- PROJ-29: BankTransaction collection with parentStatementId\n- PROJ-44: delete_file cascade-delete\n\n### Credentials\n- mqtt-alice (Kqy6cn7hyDDXrBA0)\n- redis-alice (DtO8rm7fWa7IYMen) — via $env.REDIS_PASSWORD",
         "height": 520,
         "width": 400,
         "color": 5
@@ -309,7 +309,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Handle delete_file\" } });\nconst axios = require('axios');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst parentId = item._weaviate_id;\nconst parentClass = item._weaviate_class;\n\n// No Weaviate object for this hash — already cleaned up or never indexed\nif (!parentId || !parentClass) {\n  logger.info('[alice-dms-lifecycle] delete_file: no Weaviate object for hash ' + item.file_hash + ' — skipping');\n  return [{ json: { ...item, _deleted_statement: false, _deleted_transactions: 0 } }];\n}\n\nlet deletedTransactions = 0;\n\n// Cascade-delete BankTransaction children if parent is a BankStatement\nif (parentClass === 'BankStatement') {\n  let cursor = null;\n  const childUuids = [];\n  for (let page = 0; page < 50; page++) {\n    const afterClause = cursor ? (', after: \"' + cursor + '\"') : '';\n    const q = '{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"' + parentId + '\" }, limit: 100' + afterClause + ') { _additional { id } } } }';\n    try {\n      const r = await axios.post(WEAVIATE + '/v1/graphql', { query: q }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n      const hits = r.data && r.data.data && r.data.data.Get && r.data.data.Get.BankTransaction ? r.data.data.Get.BankTransaction : [];\n      for (const h of hits) { if (h._additional && h._additional.id) childUuids.push(h._additional.id); }\n      if (hits.length < 100) break;\n      cursor = hits[hits.length - 1]._additional.id;\n    } catch(e) {\n      logger.warn('[alice-dms-lifecycle] GraphQL page ' + page + ' failed: ' + e.message);\n      break;\n    }\n  }\n  for (const uuid of childUuids) {\n    try {\n      await axios.delete(WEAVIATE + '/v1/objects/BankTransaction/' + uuid, { timeout: 10000 });\n      deletedTransactions++;\n    } catch(e) {\n      logger.warn('[alice-dms-lifecycle] Failed to delete BankTransaction ' + uuid + ': ' + e.message);\n    }\n  }\n  logger.info('[alice-dms-lifecycle] Deleted ' + deletedTransactions + ' BankTransaction children for ' + parentId);\n}\n\n// Delete parent object\ntry {\n  await axios.delete(WEAVIATE + '/v1/objects/' + parentClass + '/' + parentId, { timeout: 10000 });\n  logger.info('[alice-dms-lifecycle] Deleted parent ' + parentClass + '/' + parentId);\n} catch(e) {\n  throw new Error('Failed to delete parent ' + parentClass + '/' + parentId + ': ' + e.message);\n}\n\nreturn [{ json: { ...item, _deleted_statement: true, _deleted_transactions: deletedTransactions } }];"
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Handle delete_file\" } });\nconst axios = require('axios');\nconst redis = require('redis');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\nconst THUMBNAILER = 'http://alice-dms-thumbnailer:8004';\nconst parentId = item._weaviate_id;\nconst parentClass = item._weaviate_class;\n\n// PROJ-113: a failed lookup must not clean up Redis — the scanner re-reports\n// the path on its next run.\nif (item._lookup_error) {\n  throw new Error('delete_file: Weaviate lookup failed for hash ' + item.file_hash + ' — Redis left unchanged');\n}\n\nlet deletedTransactions = 0;\nlet deletedThumbnail = false;\n\nif (!parentId || !parentClass) {\n  // No Weaviate object for this hash — already cleaned up or never indexed\n  logger.info('[alice-dms-lifecycle] delete_file: no Weaviate object for hash ' + item.file_hash + ' — cleaning up Redis only');\n} else {\n  // Cascade-delete BankTransaction children if parent is a BankStatement\n  if (parentClass === 'BankStatement') {\n    let cursor = null;\n    const childUuids = [];\n    for (let page = 0; page < 50; page++) {\n      const afterClause = cursor ? (', after: \"' + cursor + '\"') : '';\n      const q = '{ Get { BankTransaction(where: { path: [\"parentStatementId\"], operator: Equal, valueText: \"' + parentId + '\" }, limit: 100' + afterClause + ') { _additional { id } } } }';\n      try {\n        const r = await axios.post(WEAVIATE + '/v1/graphql', { query: q }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });\n        const hits = r.data && r.data.data && r.data.data.Get && r.data.data.Get.BankTransaction ? r.data.data.Get.BankTransaction : [];\n        for (const h of hits) { if (h._additional && h._additional.id) childUuids.push(h._additional.id); }\n        if (hits.length < 100) break;\n        cursor = hits[hits.length - 1]._additional.id;\n      } catch(e) {\n        logger.warn('[alice-dms-lifecycle] GraphQL page ' + page + ' failed: ' + e.message);\n        break;\n      }\n    }\n    for (const uuid of childUuids) {\n      try {\n        await axios.delete(WEAVIATE + '/v1/objects/BankTransaction/' + uuid, { timeout: 10000 });\n        deletedTransactions++;\n      } catch(e) {\n        logger.warn('[alice-dms-lifecycle] Failed to delete BankTransaction ' + uuid + ': ' + e.message);\n      }\n    }\n    logger.info('[alice-dms-lifecycle] Deleted ' + deletedTransactions + ' BankTransaction children for ' + parentId);\n  }\n\n  // PROJ-113: delete the thumbnail file via the thumbnailer service (idempotent);\n  // a failure never blocks the object delete.\n  try {\n    const tr = await axios.delete(THUMBNAILER + '/thumbnail/' + parentId, { timeout: 10000, validateStatus: () => true });\n    deletedThumbnail = tr.status >= 200 && tr.status < 300 && !!(tr.data && tr.data.deleted);\n  } catch(e) {\n    logger.warn('[alice-dms-lifecycle] Thumbnail delete call failed for ' + parentId + ': ' + e.message);\n  }\n\n  // Delete parent object (404 = already gone, e.g. a parallel delete_file for another path of this hash)\n  const dr = await axios.delete(WEAVIATE + '/v1/objects/' + parentClass + '/' + parentId, { timeout: 10000, validateStatus: () => true });\n  if (!(dr.status >= 200 && dr.status < 300) && dr.status !== 404) {\n    throw new Error('Failed to delete parent ' + parentClass + '/' + parentId + ': HTTP ' + dr.status);\n  }\n  logger.info('[alice-dms-lifecycle] Deleted parent ' + parentClass + '/' + parentId);\n}\n\n// PROJ-113: Weaviate is handled — now remove the dead path from the Redis truth\n// (previously done by the scanner before publishing).\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const current = await client.hGet('alice:dms:path_to_hash', item.file_path);\n  if (current === item.file_hash) await client.hDel('alice:dms:path_to_hash', item.file_path);\n  await client.sRem('alice:dms:hash_to_paths:' + item.file_hash, item.file_path);\n  await client.sRem('alice:dms:processed', item.file_hash);\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { ...item, _deleted_statement: !!parentId, _deleted_transactions: deletedTransactions, _deleted_thumbnail: deletedThumbnail } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -323,7 +323,7 @@
     {
       "parameters": {
         "topic": "alice/dms/done",
-        "message": "={{ JSON.stringify({ action: 'delete_file', file_hash: $json.file_hash, file_path: $json.file_path, deleted_statement: $json._deleted_statement, deleted_transactions: $json._deleted_transactions, timestamp: new Date().toISOString() }) }}",
+        "message": "={{ JSON.stringify({ action: 'delete_file', file_hash: $json.file_hash, file_path: $json.file_path, deleted_statement: $json._deleted_statement, deleted_transactions: $json._deleted_transactions, deleted_thumbnail: $json._deleted_thumbnail, timestamp: new Date().toISOString() }) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.mqtt",
@@ -334,6 +334,74 @@
       ],
       "id": "proj44-mqtt-done-delete-file-v1",
       "name": "MQTT: Done (delete_file)",
+      "credentials": {
+        "mqtt": {
+          "id": "Kqy6cn7hyDDXrBA0",
+          "name": "mqtt-alice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-action-remove-path",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "remove_path",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4912,
+        1504
+      ],
+      "id": "proj113-if-is-remove-path-v1",
+      "name": "IF: Is remove_path"
+    },
+    {
+      "parameters": {
+        "jsCode": "const winston = require('winston');\nconst logger = winston.createLogger({ level: 'info', transports: [ new winston.transports.File({ filename: \"/home/node/.n8n/logs/n8n.log\" }) ], defaultMeta: { workflow: \"alice-dms-lifecycle\", node: \"Code: Handle remove_path\" } });\nconst axios = require('axios');\nconst fs = require('fs');\nconst redis = require('redis');\nconst item = $input.first().json;\nconst WEAVIATE = 'http://weaviate:8080';\n\n// PROJ-113: one path of a file is gone, copies live on at other paths.\n// Weaviate first (dead path out, a live path becomes main path if needed), then Redis.\nif (item._lookup_error) {\n  throw new Error('remove_path: Weaviate lookup failed for hash ' + item.file_hash + ' — Redis left unchanged');\n}\n\nconst deadPath = item.file_path;\nconst alivePaths = (Array.isArray(item.alive_paths) ? item.alive_paths : [])\n  .filter(p => p !== deadPath)\n  .filter(p => { try { fs.accessSync(p, fs.constants.F_OK); return true; } catch(e) { return false; } })\n  .sort();\n\nlet patched = false;\nlet newMainPath = item._weaviate_main_path || null;\n\nif (!item._weaviate_id || !item._weaviate_class) {\n  logger.info(`[alice-dms-lifecycle] remove_path: no Weaviate object for hash ${item.file_hash} — cleaning up Redis only`);\n} else {\n  const existing = Array.isArray(item._existing_additional_paths) ? item._existing_additional_paths : [];\n  if (newMainPath === deadPath) {\n    if (alivePaths.length === 0) {\n      // No live copy left any more: leave the object alone, the next scan reports delete_file\n      logger.warn(`[alice-dms-lifecycle] remove_path: main path ${deadPath} gone and no live copy found — Weaviate unchanged`);\n      newMainPath = null;\n    } else {\n      newMainPath = alivePaths[0];\n    }\n  }\n  if (newMainPath) {\n    const additionalPaths = [...new Set([...existing, ...alivePaths])].filter(p => p !== newMainPath && p !== deadPath);\n    const props = { [item._weaviate_path_field || 'filePath']: newMainPath, additionalPaths };\n    if (item._weaviate_class !== 'Image' && newMainPath !== item._weaviate_main_path) {\n      props.fileName = newMainPath.split('/').pop();\n    }\n    try {\n      await axios.patch(\n        `${WEAVIATE}/v1/objects/${item._weaviate_class}/${item._weaviate_id}`,\n        { properties: props },\n        { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }\n      );\n      patched = true;\n    } catch(e) {\n      throw new Error(`Weaviate PATCH failed for remove_path (${item.file_hash}): ${e.message}`);\n    }\n    logger.info(`[alice-dms-lifecycle] remove_path: ${deadPath} removed from ${item._weaviate_class}/${item._weaviate_id}, main path ${newMainPath}`);\n  }\n}\n\nlet redisPw = ''; try { redisPw = $env.REDIS_PASSWORD || ''; } catch(e) {}\nconst client = redis.createClient({ socket: { host: 'redis', port: 6379 }, password: redisPw || undefined });\nawait client.connect();\ntry {\n  const current = await client.hGet('alice:dms:path_to_hash', deadPath);\n  if (current === item.file_hash) await client.hDel('alice:dms:path_to_hash', deadPath);\n  await client.sRem('alice:dms:hash_to_paths:' + item.file_hash, deadPath);\n} finally {\n  await client.quit();\n}\n\nreturn [{ json: { ...item, _weaviate_patched: patched, _new_main_path: newMainPath } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5216,
+        1504
+      ],
+      "id": "proj113-code-handle-remove-path-v1",
+      "name": "Code: Handle remove_path"
+    },
+    {
+      "parameters": {
+        "topic": "alice/dms/done",
+        "message": "={{ JSON.stringify({ action: 'remove_path', file_hash: $json.file_hash, file_path: $json.file_path, new_main_path: $json._new_main_path, weaviate_patched: $json._weaviate_patched, timestamp: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1,
+      "position": [
+        5520,
+        1504
+      ],
+      "id": "proj113-mqtt-done-remove-path-v1",
+      "name": "MQTT: Done (remove_path)",
       "credentials": {
         "mqtt": {
           "id": "Kqy6cn7hyDDXrBA0",
@@ -487,6 +555,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "IF: Is remove_path",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -495,6 +570,28 @@
         [
           {
             "node": "MQTT: Done (delete_file)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is remove_path": {
+      "main": [
+        [
+          {
+            "node": "Code: Handle remove_path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Handle remove_path": {
+      "main": [
+        [
+          {
+            "node": "MQTT: Done (remove_path)",
             "type": "main",
             "index": 0
           }
