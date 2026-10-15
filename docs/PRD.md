@@ -37,6 +37,7 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 | P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
 | P1       | LLM-Gateway mit Priorisierung — Chat/Sprache vor DMS-/Mail-Analyse (PROJ-111)                                      | 3.3       | Deployed |
 | P2       | Panorama-/Großbild-Beschreibung im DMS — zentrale Bildbeschreibung mit Teilbild-Zerlegung, Backfill ohne n8n-Speicherlimit (PROJ-112) | 3.3       | Deployed |
+| P1       | DMS-Bilder in die Redis-Wahrheit aufnehmen — Lifecycle/Reconcile für Image, kein Neu-Beschreiben bekannter Bilder (PROJ-113) | 3.3       | Planned |
 | P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Verworfen (→ PROJ-106) |
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
 | P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Architected |
