@@ -21,26 +21,34 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 
 | Priority | Feature                                                                                                          | Sub-Phase | Status  |
 | -------- | ----------------------------------------------------------------------------------------------------------------- | --------- | ------- |
-| P0       | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (PROJ-78)                                                   | 3.1       | Planned |
+| P0       | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (PROJ-78)                                                   | 3.1       | Deployed |
 | P0       | DMS-Zusammenfassung Sprachkorrektur (Deutsch) — Fix + Backfill Bestand (PROJ-79)                                   | 3.1       | Deployed |
+| P0       | Bug: `confirm`-Gate wirkungslos in Sprach- und Klassifizierungs-Backfill (PROJ-92)                                  | 3.1       | Deployed |
+| P1       | DMS Path-Worker Zeitlimit — kontrollierter Abbruch nach 2h (PROJ-94)                                               | 3.1       | Deployed |
+| P1       | Image-Description-Backfill Auto-Fortsetzung + Zeitlimit (PROJ-96)                                                  | 3.1       | Deployed |
+| P1       | DMS Pfad-Drift-Reconcile + Cleanup verwaister Weaviate-Objekte (PROJ-97)                                           | 3.1       | Deployed |
+| P1       | DMS Email-Konsistenz — Cleanup verwaister Email-Objekte (PROJ-98, ausgegliedert aus PROJ-97)                        | 3.1       | Deployed |
 | P1       | DMS-Vollständigkeits-Dashboard (PROJ-80)                                                                           | 3.2       | Deployed |
 | P1       | Frontend-Übersetzung on-the-fly (PROJ-81)                                                                          | 3.2       | Roadmap |
-| P2       | Mail-Anhang DMS-Import (PROJ-53, verschoben aus Phase 4)                                                           | 3.2       | Planned |
+| P2       | Mail-Anhang DMS-Import (PROJ-53, verschoben aus Phase 4)                                                           | 3.2       | Deployed |
+| P2       | Synchroner Office-Textextraktor für Mail-Anhänge — DOCX/XLSX/ODT/ODS (PROJ-91, Folge von PROJ-53)                   | 3.2       | Deployed |
+| P2       | Bug: Mail-Objekte bekommen nie ein Thumbnail (PROJ-93, Folge von PROJ-53)                                          | 3.2       | Deployed |
 | P1       | HA-MCP-Server-Evaluierung — Spike (PROJ-82), Ergebnis: No-Go (zurückgestellt)                                      | 3.3       | Approved |
 | P1       | HA-Agent variable Intents — Prozent (Licht/Rolladen), Heizungs-Temperatur, Einkaufslisten-Eintrag (PROJ-83)        | 3.3       | Deployed |
 | P1       | HA-Agent Area-Context-Weitergabe (PROJ-84)                                                                         | 3.3       | Deployed |
-| P1       | Timer-Agent (PROJ-85) — inkl. rollen-basierter Sichtbarkeit/Berechtigung/Limits + Settings-Tab                     | 3.3       | Architected |
+| P1       | Timer-Agent (PROJ-85) — inkl. rollen-basierter Sichtbarkeit/Berechtigung/Limits + Settings-Tab; Refinement 2026-10-15: Ablauf auf allen Voice PE + globale Quittierung | 3.3       | Architected |
 | P1       | Sprecher-Erkennung verbessern (PROJ-103, ausgegliedert aus PROJ-85 — device-abhängige Speaker-ID)                   | 3.3       | Roadmap |
 | P2       | Web Push / PWA-Benachrichtigungen (PROJ-104, ausgegliedert aus PROJ-85 — zuverlässige WebApp-Hintergrund-Meldung)   | 3.3       | Roadmap |
 | P2       | Zeitgesteuerte HA-Befehle (PROJ-105, ausgegliedert aus PROJ-85 — "tu X um Uhrzeit Y", geplante Geräte-Aktion)       | 3.3       | Roadmap |
 | P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Deployed |
-| P1       | Umstellung Ollama → llama.cpp (`ollama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99)                | 3.3       | Planned |
+| P1       | Umstellung Ollama → llama.cpp (`ollama-3090` → `llama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99) | 3.3       | Deployed |
 | P1       | LLM-Gateway mit Priorisierung — Chat/Sprache vor DMS-/Mail-Analyse (PROJ-111)                                      | 3.3       | Deployed |
 | P2       | Panorama-/Großbild-Beschreibung im DMS — zentrale Bildbeschreibung mit Teilbild-Zerlegung, Backfill ohne n8n-Speicherlimit (PROJ-112) | 3.3       | Deployed |
-| P1       | DMS-Bilder in die Redis-Wahrheit aufnehmen — Lifecycle/Reconcile für Image, kein Neu-Beschreiben bekannter Bilder (PROJ-113) | 3.3       | Architected |
+| P1       | DMS-Bilder in die Redis-Wahrheit aufnehmen — Lifecycle/Reconcile für Image, kein Neu-Beschreiben bekannter Bilder (PROJ-113) | 3.3       | Deployed |
 | P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Verworfen (→ PROJ-106) |
 | P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
-| P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Architected |
+| P2       | Multi-Intent-Zerlegung + Halluzinations-Schutz (PROJ-102, aus PROJ-83 BUG-1)                                       | 3.3       | Roadmap |
+| P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Deployed |
 | P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Verworfen (→ PROJ-106) |
 | P2       | Aufgaben- & Listen-Verwaltung (lokal) — ersetzt PROJ-88/PROJ-100 (PROJ-106)                                       | 3.4       | Deployed |
 | P2       | Aufgaben-WebApp-Ansicht (PROJ-107, ausgegliedert aus PROJ-106)                                                     | 3.4       | Roadmap |
@@ -67,12 +75,11 @@ Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, du
 ## Constraints
 
 - **Lokal-First** bleibt Grundprinzip. **Ausnahme**: Google- und Websearch-Agenten benötigen zwingend Cloud-Zugriff (keine lokale Alternative) — nur Live-Abfragen, kein lokales Caching der Google-Daten. Aufgaben/Listen werden lokal verwaltet (PROJ-106)
-- **Hardware**: Ryzen 9 + RTX 3090 (LLM + Whisper) + TITAN X (Embeddings + Speaker-ID)
+- **Hardware**: Ryzen 9 + RTX 3090 (LLM `llama-3090` + Weaviate-Vektorisierung `weaviate-transformers`/`weaviate-multi2vec`) + TITAN X (`alice-speech-gateway` mit faster-whisper + Speaker-ID)
 - **Zugang**: Nur über VPN erreichbar (kein öffentliches Internet)
 - **Sprache**: Primär Deutsch; Docs auf Deutsch, Code/Commits auf Englisch
 - **Team**: Solo-Projekt (Andreas), Hobbyzeit (3–4h/Tag)
-- **Stack**: n8n + PostgreSQL + Weaviate + Ollama, wie bisher
-- **Phase 1+2 Basis**: PROJ-1–77 deployed — JWT-Auth, DMS-Pipeline, HA-Sync, Speech-Gateway, Chat-Storage, Admin-Dashboard
+- **Stack**: n8n + PostgreSQL + Weaviate + llama.cpp (`llama-3090`, seit PROJ-99, ersetzt `ollama-3090`) hinter dem LLM-Gateway `alice-llm-gateway` (PROJ-111)- **Phase 1+2 Basis**: PROJ-1–77 deployed — JWT-Auth, DMS-Pipeline, HA-Sync, Speech-Gateway, Chat-Storage, Admin-Dashboard
 
 ## Non-Goals Phase 3
 

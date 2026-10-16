@@ -1,8 +1,10 @@
 # PROJ-85: Timer-Agent
 
-## Status: Deployed
+## Status: Architected
 **Created:** 2026-09-07
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-10-15
+
+> **Refinement 2026-10-15 — geräteübergreifende Ablauf-Zustellung (offen, noch nicht umgesetzt):** Die Alltagsnutzung hat gezeigt, dass die Bindung der Ablauf-Meldung an das Setz-Gerät nicht trägt (Raumwechsel bei langen Timern → Melodie wird nicht gehört bzw. muss im Ursprungsraum quittiert werden). Neu: `timer-finished` / Melodie auf **allen** Voice PE, unabhängig vom Setz-Kanal (auch für WebApp-gesetzte Timer); **globale Quittierung** per Ansprache an einem beliebigen Voice PE oder per Schließen des WebApp-Toasts; Quittierung per Ansprache rollenunabhängig. Toast + Ton im sichtbaren WebApp-Tab bleibt. Geräteübergreifendes Ändern/Abfragen/Pausieren/Fortsetzen/Löschen ist bereits umgesetzt (alle Queries nur auf `owner_role` gescoped) und wird nur explizit festgeschrieben. Betroffene Stellen sind mit „(Refinement 2026-10-15)" markiert; Details siehe Abschnitt „Ablauf — Zustellung auf allen Geräten". Der übrige Feature-Umfang bleibt deployed.
 
 ## Dependencies
 
@@ -21,8 +23,8 @@ Alice bekommt einen **Timer-Agenten**: per Sprache (Voice PE) oder WebApp-Chat l
 
 Der Timer-Zustand liegt in einer eigenen Tabelle `alice.timers` (PostgreSQL) — Name, Ablauf-Zeitpunkt, Besitzer (User), **Besitzer-Rolle**, Setz-Gerät bzw. WebApp-Session, Status. Ein Background-Task im bestehenden `alice-chat-stream`-Container überwacht die Abläufe und löst beim Ablauf die Benachrichtigung aus:
 
-- **Voice PE:** `alice-speech-gateway` sendet über das native **Wyoming-Timer-Protokoll** ein `timer-finished`-Event an genau das Gerät, auf dem der Timer gesetzt wurde; das Gerät spielt daraufhin selbst eine Melodie/Tonfolge ab, bis der User es anspricht (Wakeword) oder eine Maximalzeit (Default 2 Minuten) abläuft. Beim Ansprechen sagt Alice die abgelaufene Timer-Meldung an ("Der 20 Minuten Timer ist abgelaufen.").
-- **WebApp:** Der Client zählt lokal auf den vom Server gelieferten Ablauf-Zeitpunkt herunter und meldet den Ablauf per Toast + Ton **im sichtbaren Tab**. Zuverlässige Hintergrund-Benachrichtigung (gesperrtes Display, anderer Tab/App im Vordergrund) ist **nicht** Teil von PROJ-85 — dafür gibt es den neuen Roadmap-Eintrag PROJ-104 (Web Push / PWA-Benachrichtigungen).
+- **Voice PE (Refinement 2026-10-15):** Beim Ablauf spielen **alle** Voice PE die Melodie, unabhängig davon, auf welchem Gerät oder in der WebApp der Timer gesetzt wurde. Die Ansprache an einem beliebigen Gerät quittiert global (alle Melodien stoppen, nur das angesprochene Gerät sagt an). *Ursprüngliche Fassung:* `alice-speech-gateway` sendet über das native **Wyoming-Timer-Protokoll** ein `timer-finished`-Event an genau das Gerät, auf dem der Timer gesetzt wurde; das Gerät spielt daraufhin selbst eine Melodie/Tonfolge ab, bis der User es anspricht (Wakeword) oder eine Maximalzeit (Default 2 Minuten) abläuft. Beim Ansprechen sagt Alice die abgelaufene Timer-Meldung an ("Der 20 Minuten Timer ist abgelaufen.").
+- **WebApp:** (Refinement 2026-10-15: unverändert beibehalten, zusätzlich quittiert das Schließen des Toasts den Timer global.) Der Client zählt lokal auf den vom Server gelieferten Ablauf-Zeitpunkt herunter und meldet den Ablauf per Toast + Ton **im sichtbaren Tab**. Zuverlässige Hintergrund-Benachrichtigung (gesperrtes Display, anderer Tab/App im Vordergrund) ist **nicht** Teil von PROJ-85 — dafür gibt es den neuen Roadmap-Eintrag PROJ-104 (Web Push / PWA-Benachrichtigungen).
 
 ### Rollen-basierte Sichtbarkeit, Berechtigung und Limits
 
@@ -44,7 +46,8 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 - **Multi-Turn-Namensdialog bei Kollision** — der HA_FAST-Pfad bleibt zustandslos (analog PROJ-83/84). Bei Namenskollision vergibt Alice sofort einen Fallback-Namen statt nachzufragen.
 - **Ausgeschriebene Zahlwörter** ("zwanzig Minuten" statt "20 Minuten") — dokumentierte, akzeptierte Lücke (Whisper transkribiert im Deutschen überwiegend Ziffern), analog PROJ-83.
 - **Relative Uhrzeit-Wecker mit Wiederholung** ("jeden Morgen um 7") — kein Scope, kein Countdown-Mechanismus.
-- **Timer-Alarm auf einem anderen als dem Setz-Gerät** (Ausweich-Routing bei Offline-Gerät) — kein Scope; ein Offline-Gerät bekommt die Meldung nachgeholt oder der Timer wird nach Maximalzeit still quittiert.
+- ~~**Timer-Alarm auf einem anderen als dem Setz-Gerät**~~ — *durch Refinement 2026-10-15 aufgehoben:* der Alarm läuft jetzt grundsätzlich auf allen Voice PE.
+- **Raum-/Präsenz-abhängige Zustellung** (Melodie nur dort, wo sich der Nutzer gerade aufhält) — kein Scope; es wird auf allen Geräten ausgegeben.
 
 ## User Stories
 
@@ -70,7 +73,7 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 
 - Als Andreas möchte ich fragen "Wie lange läuft der Kartoffel Timer noch?" und eine Antwort mit der verbleibenden Laufzeit bekommen.
 - Als Andreas möchte ich fragen "Welche Timer laufen gerade?" und eine Aufzählung der aktiven Timer in meinem Rollen-Scope mit Restlaufzeit bekommen.
-- Als Andreas möchte ich einen Timer über jedes meiner Geräte und die WebApp abfragen/ändern können, auch wenn ich ihn woanders gesetzt habe — die Melodie beim Ablauf spielt aber nur auf dem ursprünglichen Setz-Gerät.
+- Als Andreas möchte ich einen Timer über jedes Voice PE und die WebApp abfragen, ändern, pausieren/fortsetzen und löschen können, auch wenn ich ihn woanders gesetzt habe — maßgeblich ist nur meine Rolle, nicht das Setz-Gerät. (Refinement 2026-10-15; bereits so implementiert)
 
 ### Pausieren / Fortsetzen / Löschen
 
@@ -80,9 +83,11 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 
 ### Ablauf
 
-- Als Andreas möchte ich, dass wenn ein Timer abläuft, das Voice-Gerät, auf dem ich ihn gesetzt habe, eine Melodie/Tonfolge abspielt — bis ich das Gerät anspreche oder eine Maximalzeit abläuft.
-- Als Andreas möchte ich, dass wenn ich das Gerät nach dem Ablauf anspreche, die Melodie sofort aufhört und Alice mir sagt, welcher Timer abgelaufen ist ("Der 20 Minuten Timer ist abgelaufen.").
-- Als Andreas möchte ich, dass ein in der WebApp gesetzter Timer im sichtbaren Tab per Hinweis und Ton meldet, dass er abgelaufen ist.
+- Als Andreas möchte ich, dass wenn ein Timer abläuft, **alle** Voice PE im Haus eine Melodie/Tonfolge abspielen — damit ich den Alarm auch höre, wenn ich bei einem langen Timer inzwischen den Raum gewechselt habe — bis ich irgendein Gerät anspreche oder eine Maximalzeit abläuft. (Refinement 2026-10-15)
+- Als Andreas möchte ich, dass auch ein **in der WebApp gesetzter** Timer beim Ablauf auf allen Voice PE klingelt. (Refinement 2026-10-15)
+- Als Andreas möchte ich, dass wenn ich **ein beliebiges** Gerät nach dem Ablauf anspreche, die Melodie auf **allen** Geräten sofort aufhört und Alice mir auf dem angesprochenen Gerät sagt, welcher Timer abgelaufen ist ("Der 20 Minuten Timer ist abgelaufen."). (Refinement 2026-10-15)
+- Als Andreas möchte ich, dass ein abgelaufener Timer im sichtbaren WebApp-Tab per Hinweis und Ton meldet, dass er abgelaufen ist — und dass das Schließen dieses Hinweises den Alarm auch auf allen Voice PE beendet. (Refinement 2026-10-15)
+- Als Familienmitglied möchte ich einen Alarm, der neben mir klingelt, per Ansprache abstellen können, auch wenn es nicht mein Timer ist oder meine Stimme nicht erkannt wird. (Refinement 2026-10-15)
 - Als Andreas möchte ich, dass meine laufenden Timer einen Neustart der Alice-Dienste überstehen und ein währenddessen fällig gewordener Timer nachträglich ausgelöst wird.
 
 ### Rollen-basierte Sichtbarkeit & Verwaltung
@@ -163,9 +168,27 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 - [ ] "Lösche alle Timer" entfernt alle aktiven Timer im Rollen-Scope des Users; Alice bestätigt mit der Anzahl
 - [ ] Löschbefehl ohne Namensnennung bei genau einem aktiven Timer trifft diesen; bei mehreren zählt Alice sie auf und löscht nichts
 
+### Ablauf — Zustellung auf allen Geräten (Refinement 2026-10-15)
+
+Ersetzt bzw. überschreibt die gerätebezogenen Kriterien in „Ablauf — Voice PE" und „Persistenz & Neustart", wo sie widersprechen.
+
+- [ ] Läuft ein Timer ab, startet die Melodie auf **allen** Voice PE mit konfiguriertem `media_player` (`device-mapping.yaml`) — unabhängig vom Setz-Kanal (`esphome:<Raum>` oder `webapp`) und unabhängig von der Besitzer-Rolle
+- [ ] Ein in der WebApp gesetzter Timer löst beim Ablauf ebenfalls die Melodie auf allen Voice PE aus (heute: nur markiert, keine Voice-Ausgabe)
+- [ ] `origin_channel` bleibt gespeichert (Information/Logging), steuert aber nicht mehr die Zustellung
+- [ ] **Globale Quittierung per Ansprache:** Spricht jemand ein beliebiges Voice PE an, während eine Timer-Melodie läuft (oder ein abgelaufener, noch nicht quittierter Timer existiert), stoppt die Melodie auf **allen** Geräten; **nur das angesprochene Gerät** sagt die Ablauf-Meldung an (alle offenen abgelaufenen Timer in einer Meldung); die Timer gelten danach überall als quittiert
+- [ ] Die Quittierung per Ansprache ist **rollenunabhängig**: sie greift unabhängig von der erkannten Sprecher-Rolle (auch bei nicht erkanntem Sprecher) und unabhängig von der Besitzer-Rolle des Timers. Abfragen/Ändern/Pausieren/Löschen bleiben auf den Rollen-Scope des Anfragenden beschränkt
+- [ ] **Globale Quittierung per WebApp:** Das Schließen des Ablauf-Toasts in der WebApp quittiert den Timer serverseitig (neuer Acknowledge-Endpoint, Rollen-Scope des eingeloggten Users) und stoppt die Melodie auf allen Voice PE; andere offene WebApp-Tabs entfernen ihren Toast beim nächsten Abgleich
+- [ ] Eine bereits erfolgte Quittierung (Voice oder WebApp) ist idempotent: eine zweite Quittierung (anderes Gerät, anderer Tab, Maximalzeit-Ablauf) führt zu keiner weiteren Ansage und keinem Fehler
+- [ ] Reagiert niemand, stoppt die Melodie auf allen Geräten nach der Maximalzeit (Default 2 Minuten); der Timer gilt dann als quittiert
+- [ ] Das Sammel-Fenster (Default 3 s) gilt **global** statt pro Gerät: alle innerhalb des Fensters fälligen Timer bilden eine Melodie-Sitzung auf allen Geräten; ein während einer laufenden Sitzung fällig werdender Timer wird angehängt, es startet keine zweite Melodie
+- [ ] Ist ein einzelnes Voice PE beim Ablauf nicht erreichbar, wird es übersprungen; die übrigen Geräte spielen normal. Ist **kein** Gerät erreichbar, bleibt der Timer „abgelaufen, nicht zugestellt" und wird beim nächsten Kontakt **irgendeines** Voice PE (innerhalb Maximalzeit + Puffer) angesagt
+- [ ] Toast + Ton im sichtbaren WebApp-Tab bleiben unverändert für alle Timer des eigenen Rollen-Scopes, unabhängig vom Setz-Kanal (bereits so implementiert)
+- [ ] Geräteübergreifendes Ändern, Abfragen, Pausieren/Fortsetzen und Löschen funktioniert von jedem Voice PE und der WebApp aus, unabhängig vom Setz-Gerät; maßgeblich ist nur die Rolle (bereits so implementiert — Regressionstest festschreiben)
+- [ ] Unabhängig von PROJ-104 (Web Push): diese Zustellung funktioniert ohne Service Worker / Push
+
 ### Ablauf — Voice PE
 
-- [ ] Läuft ein über ein Voice PE gesetzter Timer ab, sendet `alice-speech-gateway` ein natives Wyoming-`timer-finished`-Event an genau dieses Gerät (identifiziert über die beim Setzen gespeicherte Geräte-Zuordnung)
+- [ ] ~~Läuft ein über ein Voice PE gesetzter Timer ab, sendet `alice-speech-gateway` ein natives Wyoming-`timer-finished`-Event an genau dieses Gerät~~ — *ersetzt durch Refinement 2026-10-15 (alle Geräte, siehe oben).* Ursprünglich: Läuft ein über ein Voice PE gesetzter Timer ab, sendet `alice-speech-gateway` ein natives Wyoming-`timer-finished`-Event an genau dieses Gerät
 - [ ] Das Voice PE spielt daraufhin eine Melodie/Tonfolge ab (Geräte-Firmware-Verhalten auf `timer-finished`), bis eine der Abbruch-Bedingungen eintritt
 - [ ] Mehrere Timer auf demselben Gerät, die innerhalb eines kurzen Sammel-Fensters (Default 3 Sekunden, konfigurierbar) fällig werden, werden gebündelt: es läuft **eine** Melodie, nicht mehrere; spielt bereits eine Timer-Melodie, wird kein zweiter Ton gestartet
 - [ ] Spricht der User das Gerät an (Wakeword) während die Melodie spielt, stoppt die Melodie sofort und Alice sagt **eine** Ablauf-Meldung an, die alle im Sammel-Fenster fälligen Timer nennt: "Der {Name} Timer ist abgelaufen." bzw. "Der {Name A} Timer und der {Name B} Timer sind abgelaufen."
@@ -190,7 +213,7 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 
 - [ ] Timer-Zustand liegt in `alice.timers` (PostgreSQL) und überlebt Neustarts von `alice-chat-stream`, dem Scheduler-Task und `alice-speech-gateway`
 - [ ] Nach einem Neustart prüft der Scheduler alle aktiven Timer: ein während der Downtime fällig gewordener Timer wird jetzt ausgelöst (Melodie/Meldung, ggf. mit Hinweis "Der {Name} Timer ist vor {Dauer} abgelaufen."); noch laufende Timer zählen bis zum gespeicherten Ablauf-Zeitpunkt weiter
-- [ ] Ist bei Ablauf das Setz-Gerät nicht erreichbar, wird der Timer als "abgelaufen, nicht zugestellt" markiert und beim nächsten Kontakt des Geräts (innerhalb Maximalzeit + Puffer) gemeldet; danach still als erledigt markiert
+- [ ] *(Refinement 2026-10-15: gilt jetzt für „kein Voice PE erreichbar" statt „Setz-Gerät nicht erreichbar", Nachhol-Ansage auf irgendeinem Gerät — siehe „Zustellung auf allen Geräten".)* Ist bei Ablauf das Setz-Gerät nicht erreichbar, wird der Timer als "abgelaufen, nicht zugestellt" markiert und beim nächsten Kontakt des Geräts (innerhalb Maximalzeit + Puffer) gemeldet; danach still als erledigt markiert
 
 ### Pfad & Performance
 
@@ -210,12 +233,17 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 - **Verkürzung um mehr als die Restlaufzeit** ("Verkürze den 20 Minuten Timer um 30 Minuten", 12 Minuten Rest): Änderung wird abgelehnt, Alice nennt die aktuelle Restlaufzeit. Kein sofortiges Auslösen.
 - **Verlängerung eines bereits abgelaufenen, aber noch nicht quittierten Timers** (Melodie spielt noch): Behandlung wie "Timer nicht mehr aktiv" — Alice weist darauf hin, dass der Timer schon abgelaufen ist; ein neuer Timer muss gesetzt werden.
 - **Zwei Timer werden im selben Moment fällig** (auf demselben Gerät): innerhalb des Sammel-Fensters (Default 3 s) gebündelt — eine Melodie-Sequenz, eine kombinierte Ansage beim Ansprechen ("Der 20 Minuten Timer und der Kartoffel Timer sind abgelaufen.").
-- **Zwei Timer fällig auf verschiedenen Geräten**: unabhängig — jedes Gerät bekommt sein eigenes `timer-finished`, spielt seine eigene Melodie, wird einzeln quittiert. Kein Bündeln über Geräte hinweg.
+- ~~**Zwei Timer fällig auf verschiedenen Geräten**: unabhängig — jedes Gerät einzeln quittiert.~~ *Refinement 2026-10-15:* Es gibt keine gerätebezogenen Timer mehr — gleichzeitig fällige Timer werden global gebündelt, eine Melodie-Sitzung auf allen Geräten, eine globale Quittierung.
+- **Nutzer hat bei einem langen Timer den Raum gewechselt** (Refinement 2026-10-15): die Melodie läuft auch im neuen Raum; Ansprache dort quittiert überall.
+- **Zwei Personen sprechen gleichzeitig zwei verschiedene Voice PE während der Melodie an** (Refinement 2026-10-15): genau eines der Geräte sagt die Ablauf-Meldung an (wer die Quittierung zuerst atomar übernimmt); das andere erhält keine Ablauf-Ansage — seine Äußerung zählt dennoch als reine Quittierung (keine Chat-Verarbeitung), analog der bestehenden Regel.
+- **Child-Timer klingelt im Büro, admin spricht das Gerät an** (Refinement 2026-10-15): quittiert (rollenunabhängig); die Ansage nennt den Timer-Namen.
+- **Toast in der WebApp geschlossen, während ein Voice PE gerade angesprochen wird** (Refinement 2026-10-15): einmaliger Übergang auf `acknowledged`; wer zuerst kommt, gewinnt — keine doppelte Ansage.
+- **WebApp-Timer, aber gar kein Voice PE konfiguriert/erreichbar** (Refinement 2026-10-15): Verhalten wie bisher (nur Toast im sichtbaren Tab bzw. Nachhol-Meldung).
 - **Dritter Timer wird fällig, während die Melodie der ersten beiden noch spielt** (nach Ablauf des Sammel-Fensters): der dritte Timer wird an die laufende Melodie-/Quittierungs-Sitzung dieses Geräts angehängt statt eine zweite zu starten; beim Ansprechen nennt Alice alle noch offenen abgelaufenen Timer des Geräts.
 - **Ablauf und Änderungsbefehl treffen gleichzeitig ein** (Scheduler markiert `expired`, User sagt "verlängere den Timer"): der Ablauf gewinnt (Row-Lock), die Änderung wird als "Timer schon abgelaufen" abgelehnt.
 - **Ablauf und Löschbefehl treffen gleichzeitig ein**: Löschen gewinnt — der Timer wird entfernt, eine gerade startende Melodie/Ansage für ihn wird abgebrochen.
 - **Quittierung per Ansprache und automatischer Ablauf der Maximalzeit fallen zusammen**: einmaliger Status-Übergang, kein Doppel-Quittieren (bereits als Edge Case unten geführt).
-- **Timer auf demselben Gerät läuft ab, während gerade ein Gespräch mit diesem Gerät aktiv ist**: das `timer-finished`-Event wird nach Abschluss des laufenden Turns zugestellt (kein Abbruch der laufenden Antwort); Melodie startet unmittelbar danach.
+- **Timer läuft ab, während gerade ein Gespräch mit einem Voice PE aktiv ist** (Refinement 2026-10-15: gilt für jedes Gerät, nicht nur das Setz-Gerät): das `timer-finished`-Event wird nach Abschluss des laufenden Turns zugestellt (kein Abbruch der laufenden Antwort); Melodie startet unmittelbar danach.
 - **Uhrzeit-Timer mit exakt der aktuellen Uhrzeit** ("Timer auf 15 Uhr 40", es ist genau 15:40:00): gilt als "heute schon vorbei" → morgen. (Randfall der Vergangenheits-Regel.)
 - **Uhrzeit ohne Minutenangabe** ("Timer auf 15 Uhr"): MM = 00.
 - **Mehrdeutige Uhrzeit / 12h-Angabe** ("Timer auf 4 Uhr" um 22:00): nächste Vorkommnis von 04:00 → morgen früh. Keine AM/PM-Heuristik über die Vergangenheits-Regel hinaus.
@@ -244,7 +272,8 @@ Alle rollen-basierten Einstellungen werden über den bestehenden Settings-Tab �
 - **Rollen-Auflösung im HA_FAST-Pfad:** Der Timer-Handler liest die Rolle des anfragenden Users (aus dem per-Turn-JWT / `alice.users`); ist kein User bekannt (Anonymous vom Speech-Gateway), gilt `timer_default_role`. Berechtigungs- und Limit-Prüfung erfolgen als parametrisierte PG-Queries im < 200 ms-Budget (gleiches Muster wie der Friendly-Name-Lookup in PROJ-83/84).
 - **Scheduler:** Background-Task innerhalb `alice-chat-stream` (kein neuer Container). Weckt zum jeweils nächsten fälligen `expires_at`; beim Start Reconcile-Lauf für überfällige Timer.
 - **Nebenläufigkeit:** Jeder Status-Übergang eines Timers erfolgt als atomare DB-Operation mit `SELECT … FOR UPDATE` (Row-Lock) bzw. bedingtem `UPDATE … WHERE status = …`. Der Übergang auf `expired` ist idempotent, sodass Scheduler und Neustart-Reconcile denselben Timer nicht doppelt auslösen. Politik bei Konflikt: Ablauf schlägt Änderung, Löschen schlägt Ablauf.
-- **Sammel-Fenster:** Timer desselben Geräts, die innerhalb eines konfigurierbaren Fensters (Default 3 s) fällig werden, werden zu einer Melodie- und Quittierungs-Sitzung gebündelt; weitere Abläufe während einer laufenden Sitzung werden an diese angehängt.
+- **Sammel-Fenster:** ~~Timer desselben Geräts~~ *(Refinement 2026-10-15: alle Timer, global)*, die innerhalb eines konfigurierbaren Fensters (Default 3 s) fällig werden, werden zu einer Melodie- und Quittierungs-Sitzung gebündelt; weitere Abläufe während einer laufenden Sitzung werden an diese angehängt.
+- **Geräteübergreifende Zustellung (Refinement 2026-10-15):** Der Scheduler startet die Melodie auf allen `media_player` aus `device-mapping.yaml` statt nur auf dem des `origin_channel` (auch für `webapp`-Timer). `pending_announcement()` und der Melodie-Stopp filtern nicht mehr nach Gerät: der `pending`-Poll eines beliebigen Geräts stoppt alle Melodien und übernimmt die offenen abgelaufenen Timer atomar (ein Gewinner). Neuer Acknowledge-Endpoint für die WebApp (Rollen-Scope, JWT) mit demselben globalen Stopp. Die Maximalzeit-Automation in `homeassistant/alice_timer_melody.yaml` muss mehrere Player abdecken. Exakte Umsetzung → `/architecture`.
 - **Voice-Benachrichtigung:** `alice-speech-gateway` implementiert die ausgehende Seite des Wyoming-Timer-Protokolls (`timer-started` / `timer-updated` / `timer-cancelled` / `timer-finished`) auf der bestehenden Wyoming-Verbindung zum Voice PE. Zuordnung Timer → Gerät über die `device-mapping.yaml`-Kennung, die beim Setzen als `origin_device` gespeichert wird.
 - **Ansprech-Quittierung:** Beim Wakeword während einer laufenden Timer-Melodie stoppt das Gerät die Melodie; das Speech-Gateway erkennt den Kontext "es lief eine Timer-Melodie" und lässt Alice die Ablauf-Meldung ansagen, statt die Äußerung normal zu verarbeiten. Maximalzeit als konfigurierbarer Wert (Default 2 min).
 - **Timer-Intent-Index:** Die Timer-Satzmuster werden als handgepflegte `HAIntent`-Objekte (ohne `entity_id`) in die bestehende Weaviate-Collection eingetragen — analog zu bestehenden Intents, aber vom Entity-Gate in `alice-ha-sync` ausgenommen (Eintrag über einen dedizierten Seed-Schritt, nicht über den HA-Sync). Der HA_FAST-Handler erkennt am Intent-Typ, dass keine HA-REST-Aktion, sondern der Timer-Handler zuständig ist.
@@ -524,6 +553,122 @@ Einstellungen › Nutzer-Verwaltung  (NEU, einmalig)
 - **Rollen-Aktualität im Sprach-Pfad:** Der Timer-Handler liest die Rolle frisch aus der Datenbank (nicht nur aus dem Token), damit eine Rollen-Änderung sofort greift.
 - **Namensableitung „für Kartoffeln" → „Kartoffel Timer":** regelbasierte Vereinfachung (Genitiv/Plural) mit dokumentierten Grenzen; keine Wortliste.
 - **Melodie-Datei:** kurze, dezente Tonfolge; Ablage und Bereitstellung (HA-lokale Datei vs. vom Gateway ausgeliefert) in der Bau-Phase festlegen.
+
+### H) Refinement 2026-10-15 — Zustellung auf allen Geräten (Architektur)
+
+**Feature-Typ:** Erweiterung eines deployten Features. Backend-Schwerpunkt (`alice-chat-stream`, ein HA-Package, eine kleine Migration), kleiner Frontend-Anteil (Alarm-Toast), **keine Änderung am Speech-Gateway-Ablauf** außer einer zusätzlichen Antwort-Angabe. Kein neuer Container, kein n8n, kein Weaviate-Eingriff.
+
+**Kern der Änderung in einem Satz:** Der Timer gehört weiterhin einer *Rolle* (Sichtbarkeit/Ändern/Löschen), aber der *Alarm* gehört dem *Haus* — er hat keinen Raum und keinen Besitzer mehr.
+
+#### H1) Was sich gegenüber heute ändert
+
+```
+HEUTE                                     NEU
+─────────────────────────────────────     ─────────────────────────────────────
+Timer läuft ab                            Timer läuft ab
+  └─ nur Setz-Gerät klingelt                └─ ALLE Voice PE klingeln
+  └─ WebApp-Timer: nur markiert             └─ auch bei WebApp-gesetzten Timern
+                                            └─ WebApp-Tab (sichtbar): Toast + Ton (wie bisher)
+
+Ansprache am Setz-Gerät                   Ansprache an IRGENDEINEM Voice PE
+  └─ Melodie dort stoppt                    └─ Melodie auf ALLEN Geräten stoppt
+  └─ dieses Gerät sagt an                   └─ nur das angesprochene Gerät sagt an
+                                            └─ egal welche Rolle / welcher Sprecher
+
+Toast schließen                           Toast schließen
+  └─ nur lokal                              └─ quittiert serverseitig, Melodie überall aus
+```
+
+#### H2) Datenmodell (Klartext)
+
+Keine neue Tabelle. Eine kleine Ergänzung an `alice.timers`:
+
+- **Quittiert-durch** — *wer* den Alarm beendet hat: Sprach-Ansprache / WebApp-Toast / Zeitablauf (Maximalzeit). Warum: Die WebApp-Nachhol-Meldung („Der Timer ist vor 5 Minuten abgelaufen") ist nur sinnvoll, wenn **niemand** den Alarm aktiv beendet hat. Wurde er per Zuruf am Gerät beendet, wäre die Nachhol-Meldung im Tab später reines Rauschen. Wurde er nur durch Zeitablauf still beendet (niemand zuhause), soll der zurückkehrende Tab ihn weiterhin melden.
+- **Das Feld „Setz-Kanal" bleibt**, wird aber nur noch zur Information/zum Logging gelesen — es steuert keine Zustellung mehr.
+
+**Einmalige Aufräum-Migration (wichtig!):** Alle heute noch auf „abgelaufen" hängenden Timer — insbesondere **alle früher in der WebApp gesetzten**, die bisher nie quittiert wurden — werden auf „quittiert (Zeitablauf)" gesetzt. Ohne das würde das erste „Hey Jarvis" nach dem Deploy sämtliche alten Timer ansagen, weil die Ansage künftig nicht mehr nach Gerät filtert. Zusätzlich sagt die Ansage nur Timer an, die innerhalb von Maximalzeit + Puffer abgelaufen sind (Schutz gegen Altlasten bei längerem Ausfall).
+
+Keine neuen Rollen-/Berechtigungsfelder. Settings-Tab unverändert.
+
+#### H3) Die Bausteine im Detail
+
+**Baustein A — Timer-Wächter: eine Alarm-Sitzung fürs ganze Haus** (`alice-chat-stream`)
+
+- Alle in einem Sammel-Fenster fälligen Timer werden **nicht mehr nach Gerät gruppiert**, sondern bilden *eine* Sitzung — egal ob Voice-PE- oder WebApp-Timer, egal welche Rolle.
+- Die Liste der Lautsprecher kommt aus derselben Quelle wie heute (`device-mapping.yaml` mit den `media_player`-Einträgen je Gerät, plus bestehende Override-Variable). **Neue Geräte = ein Eintrag in der Mapping-Datei**, keine Code-Änderung.
+- Der Wächter merkt sich im Speicher „es läuft gerade eine Alarm-Sitzung" (Start, Ende nach Maximalzeit). Das dient zwei Zwecken: ein weiterer Timer während der Sitzung hängt sich an (keine zweite Melodie), und die Antwort an das Gateway kann sagen „da lief gerade etwas" (siehe Baustein B).
+- Der Selbst-Stopp nach Maximalzeit quittiert jetzt alle Timer der Sitzung (Quittiert-durch = Zeitablauf).
+- Gibt es keinen einzigen erreichbaren Lautsprecher: Timer bleibt „abgelaufen, nicht zugestellt" und wird vom nächsten angesprochenen Gerät nachgeholt (Spec-Kriterium).
+
+**Baustein B — Quittierung durch Ansprache** (`alice-chat-stream` + minimal `alice-speech-gateway`)
+
+Der bestehende Mechanismus bleibt: Das Gateway fragt zu Beginn jedes Turns beim Chat-Backend „gibt es etwas anzusagen?". Was sich ändert:
+
+- Die Abfrage **filtert nicht mehr nach Gerät und nicht nach Rolle** — der Aufrufer ist ohnehin nur das Gateway (Dienst-Token); der Sprecher spielt für den Alarm keine Rolle. (Abfragen/Ändern/Löschen laufen weiter rollen-gescoped über den Chat-Pfad — das ist eine andere Tür.)
+- Die Abfrage stoppt die Melodie auf **allen** Lautsprechern (nicht nur dem angesprochenen).
+- Das Einsammeln der offenen abgelaufenen Timer ist **atomar**: Sprechen zwei Personen im selben Augenblick zwei Geräte an, bekommt genau *ein* Gerät die Ansage. Das andere Gerät bekommt als Antwort keinen Text, aber den Hinweis „es lief ein Alarm, er ist bereits quittiert". Das Gateway behandelt die Äußerung dann – wie schon bei einer Ansage – als reine Quittierung und schickt sie **nicht** zusätzlich durch die Chat-Pipeline. (Kleine, rückwärtskompatible Erweiterung der Antwort; ohne den Hinweis verhält sich das Gateway wie bisher.)
+
+**Baustein C — Quittierung aus der WebApp** (neu, `alice-chat-stream` + Frontend)
+
+- Neue Schnittstelle „Alarm quittieren" für eingeloggte WebApp-Nutzer. Sie wirkt nur auf Timer im **Rollen-Scope des Nutzers** (ein child kann keinen Admin-Timer wegklicken — gleiche Regel wie überall sonst).
+- Sie setzt die genannten Timer auf „quittiert (WebApp)" und stoppt die Melodie **nur dann** auf allen Lautsprechern, wenn danach **kein anderer** abgelaufener, unquittierter Timer (anderer Rolle) mehr klingelt. *Grund:* Sonst könnte das Schließen eines Child-Toasts den gleichzeitig klingelnden Admin-Alarm stumm schalten, ohne dass der Admin ihn je mitbekommt. Bei nur einer Rolle im Haushalt (heutige Realität) ist das Verhalten identisch zu „stoppt überall".
+- Idempotent: Wurde der Timer schon per Zuruf quittiert, ist das ein stiller Erfolg.
+
+**Baustein D — Home-Assistant-Melodie-Package** (`homeassistant/alice_timer_melody.yaml`)
+
+Das Package kennt heute **einen** Player. Neu:
+
+- Der Start-Aufruf übergibt eine **Liste** von Lautsprechern; die Melodie läuft auf allen gleichzeitig in derselben Schleife (ein gemeinsamer „Melodie aktiv"-Schalter bleibt — eine Sitzung, ein Stopp).
+- Die Liste wird im bestehenden Hilfs-Textfeld abgelegt, damit der Stopp und die Timeout-Automation (Sicherheitsnetz zusätzlich zum Wächter) alle Geräte kennen. Das Feld ist auf 255 Zeichen begrenzt — reicht für ca. 5–6 Geräte; bei mehr müsste es erweitert werden (Hinweis im Package).
+- Fällt ein einzelner Lautsprecher aus (offline), darf das die anderen nicht blockieren — der Fehler wird pro Gerät übersprungen. **Am Gerät zu verifizieren** (siehe H5).
+- Der Stopp stoppt alle Lautsprecher der Liste.
+
+**Baustein E — WebApp-Alarm-Hook** (Frontend, kleine Erweiterung)
+
+- Die Timer-Liste vom Server liefert zusätzlich **kürzlich abgelaufene, noch nicht aktiv quittierte** Timer des Rollen-Scopes (innerhalb des 15-Minuten-Nachhol-Fensters; „nicht aktiv quittiert" = noch offen **oder** nur durch Zeitablauf beendet).
+- **Toast schließen → Quittieren-Aufruf** (nur für Timer, deren Alarm im Tab angezeigt wurde). Andere offene Tabs: Beim nächsten Abgleich (Fokus / Poll / Chat-Signal) sehen sie den Timer als quittiert und **schließen ihren Toast selbst**.
+- **Nachhol-Meldung** entscheidet nicht mehr anhand des lokalen Countdowns, sondern anhand des Server-Zustands: Beim Zurückkehren in den Vordergrund wird zuerst synchronisiert, dann gemeldet, was der Server als „abgelaufen, nicht aktiv quittiert" führt. Folge: Wer den Alarm zuhause per Zuruf beendet hat, bekommt im Tab keine überflüssige Nachhol-Meldung mehr.
+- Toast + Ton im sichtbaren Tab bleiben unverändert (Anforderung des Refinements). Neue i18n-Strings über die bestehende i18n-Schicht (`de`/`en`).
+- Der Poll-Takt (2 min) und die Rate-Limit-Zone bleiben; der Quittieren-Aufruf liegt unter dem bereits freigegebenen Timer-Pfad.
+
+#### H4) Tech-Entscheidungen (begründet)
+
+| Entscheidung | Warum |
+|---|---|
+| **Alle Geräte klingeln, statt „Gerät, wo der Nutzer ist" zu erraten** | Eine Anwesenheitserkennung gibt es nicht (und wäre ein eigenes Feature). „Überall" ist verlässlich, einfach und löst genau das gemeldete Problem (Raumwechsel bei langen Timern). |
+| **Quittierung global und rollenunabhängig; Verwaltung rollen-gescoped** | Ein klingelnder Alarm ist ein Störgeräusch im Haus — jeder muss ihn abstellen können, auch wenn die Sprecher-Erkennung (PROJ-103) versagt. Daten (Timer lesen/ändern/löschen) bleiben geschützt. Die Ansage nennt nur den Timer-Namen. |
+| **WebApp-Quittierung stoppt die Melodie nur, wenn kein anderer Alarm mehr klingelt** | Verhindert, dass ein Rollen-fremder Klick einen anderen Alarm stumm macht. Im Ein-Rollen-Haushalt unmerklich. |
+| **„Quittiert-durch" als Feld** | Trennt „Mensch hat quittiert" von „niemand war da". Nur so bleibt die WebApp-Nachhol-Meldung nützlich, ohne bei jedem Zuruf-Quittieren zu nerven. |
+| **Atomares „Ansage übernehmen" in der Datenbank** | Ein Gewinner bei gleichzeitigem Ansprechen, ohne neue Infrastruktur (derselbe Row-Lock-Mechanismus wie alle Timer-Übergänge). |
+| **Keine neue Wyoming-`timer-finished`-Logik** | Hat sich schon beim Hardware-Verify als unnötig erwiesen: Melodie läuft über HA-Media-Player, Ansprech-Erkennung im Gateway. Mehr Geräte = mehr Einträge in einer bestehenden Liste. |
+| **Liste der Lautsprecher aus `device-mapping.yaml`** | Schon heute die Quelle für Geräte→Raum→Lautsprecher; kein zweites Verzeichnis, das auseinanderlaufen kann. |
+
+#### H5) In der Bau-Phase / am Gerät zu bestätigen
+
+1. **Zwei Voice PE gleichzeitig:** Spielt `media_player.play_media` mit mehreren Zielen sauber parallel, und blockiert ein *offline* gemeldeter Lautsprecher die übrigen? (Falls ja: Aufruf pro Gerät mit „Fehler überspringen".)
+2. **Stopp auf allen Geräten:** Beenden die Stopp-Aufrufe auf beiden Geräten zuverlässig die Schleife, auch wenn ein Gerät gerade eine Sprach-Session hat?
+3. **Gleichzeitiges Ansprechen** an zwei Geräten: genau eine Ansage, die andere Äußerung wird still quittiert.
+4. **Gleichzeitigkeit/Echo:** Leichter Versatz zwischen den Geräten ist akzeptabel; kein Echo-Problem bei hörbarer Überlappung zweier Räume.
+5. **Nachhol-Verhalten der WebApp:** Tab kommt nach Zuruf-Quittierung in den Vordergrund → keine Meldung; nach Zeitablauf-Quittierung innerhalb 15 min → Meldung.
+
+#### H6) Betroffene Komponenten (Überblick)
+
+| Komponente | Änderung |
+|---|---|
+| `alice.timers` + Migration 073 | Feld „Quittiert-durch"; einmalige Altlasten-Bereinigung (alte `expired`-Timer, v. a. WebApp) |
+| `alice-chat-stream` — Timer-Wächter | Globale Sitzung statt pro Gerät; alle Lautsprecher; Sitzungszustand im Speicher; Selbst-Quittierung |
+| `alice-chat-stream` — Ansage-Abfrage | Nicht mehr nach Gerät gefiltert; atomares Übernehmen; Alter-Cutoff; stoppt alle Melodien; Zusatzhinweis „bereits quittiert" |
+| `alice-chat-stream` — neue Quittieren-Schnittstelle | Rollen-gescopet, idempotent, bedingter globaler Stopp |
+| `alice-chat-stream` — Timer-Liste | Liefert zusätzlich kürzlich abgelaufene, nicht aktiv quittierte Timer |
+| `alice-speech-gateway` | Verarbeitet den Zusatzhinweis (Äußerung = reine Quittierung); sonst unverändert |
+| `homeassistant/alice_timer_melody.yaml` | Mehrere Lautsprecher in Start/Stopp/Timeout |
+| Frontend | Alarm-Hook: Toast-Schließen quittiert, Tabs gleichen Toasts ab, Nachhol-Meldung serverbasiert; Service-Funktion + i18n |
+| `device-mapping.yaml` | Unverändert (jedes Gerät mit `media_player` nimmt automatisch teil) |
+| Tests | Regression: Ändern/Abfragen/Pausieren/Löschen über Kanäle hinweg; globale Alarm-Sitzung; atomare Ansage; Quittieren-Rollenscope |
+
+**Dependencies:** keine neuen Pakete.
+
+---
 
 ## Implementation Notes (Backend + Frontend)
 
