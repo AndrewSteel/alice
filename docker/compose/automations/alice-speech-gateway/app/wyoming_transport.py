@@ -217,11 +217,11 @@ class GatewayWyomingHandler(AsyncEventHandler):
             # before STT). Its result is the German announcement, if any, for
             # a timer that expired on this device.
             try:
-                announced = await pending_task
+                announced, alarm_acknowledged = await pending_task
             except Exception as exc:
                 logger.warning("Timer pending check failed: %s", exc)
-                announced = None
-            if announced:
+                announced, alarm_acknowledged = None, False
+            if announced or alarm_acknowledged:
                 # Spec: "die Melodie stoppt sofort und Alice sagt eine
                 # Ablauf-Meldung an" — addressing the device while its melody
                 # is playing is the acknowledgement itself, not a new command.
@@ -230,7 +230,11 @@ class GatewayWyomingHandler(AsyncEventHandler):
                 # next) instead of also running this turn's transcript through
                 # enrollment/chat (live QA finding 2026-09-17: saying "Stopp"
                 # during the melody got its own, unwanted LLM reply).
-                await self._speak_text(announced)
+                # Refinement 2026-10-15: the alarm rings on all devices; if a
+                # second device was addressed at the same moment and lost the
+                # atomic claim, it gets no text but the same pure-ack handling.
+                if announced:
+                    await self._speak_text(announced)
                 continue
 
             # --- Enrollment trigger check (admin only, before AI call) ---
@@ -458,19 +462,22 @@ class GatewayWyomingHandler(AsyncEventHandler):
     async def _noop_status(self, _status: str) -> None:
         return
 
-    async def _announce_expired_timers(self, device_key: str, jwt_token: str) -> str | None:
-        """PROJ-85 — poll alice-chat-stream's /stream/timers/pending for this
-        device. Two things happen server-side on every call, in this order:
-        (1) any timer melody currently playing on this device is stopped
-        (spec: addressing the device stops the melody — HA's assist_satellite
-        state cannot drive this, "Hey Jarvis" bypasses HA's Assist pipeline
-        entirely per PROJ-42, so the gateway is the only place that knows a new
-        turn just began); (2) any expired-but-unannounced timer for this device
-        is returned as a German sentence and marked acknowledged.
+    async def _announce_expired_timers(
+        self, device_key: str, jwt_token: str
+    ) -> tuple[str | None, bool]:
+        """PROJ-85 — poll alice-chat-stream's /stream/timers/pending at the
+        start of a turn. Server-side, if a timer alarm rings, the melody stops
+        on ALL Voice PE (spec: addressing any device acknowledges house-wide —
+        HA's assist_satellite state cannot drive this, "Hey Jarvis" bypasses
+        HA's Assist pipeline entirely per PROJ-42, so the gateway is the only
+        place that knows a new turn just began), and every expired,
+        unacknowledged timer is claimed atomically for this device.
 
-        Returns the sentence to speak, or None. Best-effort: any error just
-        means "nothing to announce" — the melody-stop is still attempted
-        server-side within that same request before the error surfaces.
+        Returns (announcement to speak or None, alarm_acknowledged). The flag
+        is true when this turn ended an alarm, also without text (another
+        device took the announcement a moment earlier) — the utterance is
+        then a pure acknowledgement. Best-effort: any error means
+        (None, False), i.e. a normal turn.
         """
         import httpx
 
@@ -483,11 +490,12 @@ class GatewayWyomingHandler(AsyncEventHandler):
                     headers={"Authorization": f"Bearer {jwt_token}"},
                 )
                 if resp.status_code != 200:
-                    return None
-                return (resp.json() or {}).get("announcement")
+                    return None, False
+                body = resp.json() or {}
+                return body.get("announcement"), bool(body.get("alarm_acknowledged"))
         except Exception as exc:
             logger.debug("Timer pending check failed: %s", exc)
-            return None
+            return None, False
 
 
 def _service_token_for(user_id: str) -> str:
