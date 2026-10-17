@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-09-07
-**Last Updated:** 2026-10-16
+**Last Updated:** 2026-10-17
 
 > **Refinement 2026-10-15 — geräteübergreifende Ablauf-Zustellung (offen, noch nicht umgesetzt):** Die Alltagsnutzung hat gezeigt, dass die Bindung der Ablauf-Meldung an das Setz-Gerät nicht trägt (Raumwechsel bei langen Timern → Melodie wird nicht gehört bzw. muss im Ursprungsraum quittiert werden). Neu: `timer-finished` / Melodie auf **allen** Voice PE, unabhängig vom Setz-Kanal (auch für WebApp-gesetzte Timer); **globale Quittierung** per Ansprache an einem beliebigen Voice PE oder per Schließen des WebApp-Toasts; Quittierung per Ansprache rollenunabhängig. Toast + Ton im sichtbaren WebApp-Tab bleibt. Geräteübergreifendes Ändern/Abfragen/Pausieren/Fortsetzen/Löschen ist bereits umgesetzt (alle Queries nur auf `owner_role` gescoped) und wird nur explizit festgeschrieben. Betroffene Stellen sind mit „(Refinement 2026-10-15)" markiert; Details siehe Abschnitt „Ablauf — Zustellung auf allen Geräten". Der übrige Feature-Umfang bleibt deployed.
 
@@ -1343,3 +1343,19 @@ Zählt der Client (Uhr leicht vor) auf 0 und der Nutzer schließt sofort, findet
 **Noch nicht live geprüft (§H5):** zwei Voice PE gleichzeitig ansprechen, ein Gerät offline, Timer kurz nach einem Stopp (BUG-11, `mode: restart`), Nachhol-Meldung nach Zeitablauf-Quittierung.
 
 **Bedienhinweis WebApp:** Der Alarm wird in der WebApp durch Schließen des Toasts (X) quittiert. Per Chat-Befehl ("Lösche den Timer") ist ein *bereits abgelaufener* Timer nicht ansprechbar — Abfragen/Löschen im Chat wirken nur auf laufende/pausierte Timer.
+
+## Nachlauf — Alltagsnutzung (2026-10-17)
+
+| # | Befund | Ursache | Fix |
+|---|---|---|---|
+| 1 | „Starte einen 1 Minuten Timer" → „Es läuft gerade kein Timer." | Der lexikalische Schiedsrichter in `timer_action()` kannte für `set` nur „Timer auf/für …"; „starte" stand allein bei `resume` → Umdeutung auf Fortsetzen, kein laufender Timer. | `set` erkennt jetzt „setz/stell/start… + einen/eine/einem/Zahl"; `resume` matcht „starte" nicht mehr vor unbestimmtem Artikel oder Zahl. Zusätzlich: ein Fortsetzen-Befehl **mit Zeitangabe**, der keinen vorhandenen Timer trifft („Starte den 5 Minuten Timer"), legt einen neuen Timer an; existiert er (pausiert), wird er fortgesetzt. |
+| 2 | Nach einer Timer-Antwort wartet das Voice PE auf eine weitere Eingabe (anders als bei PROJ-106-Listen) | Der HA_FAST-Zweig in `main.py` sendete kein `conversation_end` (der LLM-Pfad tut es bei HA-Tool-Calls, PROJ-106 bei Listen-Antworten). | HA_FAST sendet nach jeder Antwort `conversation_end` → das Gateway schließt die Sitzung direkt nach der TTS-Ausgabe. |
+| 3 | Scope-Erweiterung: dasselbe für **alle** HA_FAST-Befehle | wie 2 — dieselbe Stelle | Mit 2 erledigt: gilt für Geräte-Befehle und Timer gleichermaßen. Ebenso schließt das Gateway die Sitzung jetzt nach der Timer-Ablauf-Ansage bzw. reinen Alarm-Quittierung (vorher Folgegespräch). |
+
+**Bewusste Konsequenz:** Auch Rückfragen aus dem schnellen Pfad („Welchen meinst du?", „Auf wie viele Minuten …?") schließen jetzt die Sitzung. Da HA_FAST zustandslos ist (keine Dialog-Fortsetzung), musste die Antwort ohnehin als vollständiger Satz kommen — jetzt mit neuem Wakeword. WebApp unverändert (der Text-Chat ignoriert `conversation_end`, der WebApp-Voice-Modus ebenfalls).
+
+**Tests:** `TestStartMeansSet` (14 Fälle) in `tests/test_timers.py`; `alice-chat-stream` gesamt **386 grün**; Gateway `test_timer_pending.py` grün, `py_compile` ok. Keine Migration, kein Reseed, kein Frontend.
+
+**Deploy:** `alice-chat-stream` + `alice-speech-gateway` neu bauen/erstellen.
+
+**Deployed 2026-10-17 (Nachlauf Alltagsnutzung):** `alice-chat-stream` + `alice-speech-gateway` neu gebaut und erstellt (keine Migration, kein Reseed, kein Frontend). **Live-Test am Voice PE positiv:** „Starte einen X Minuten Timer" legt einen neuen Timer an; Voice PE schließt direkt nach der Antwort aus dem schnellen Pfad (Gerätebefehle, Timer) und nach der Timer-Ablauf-Ansage.

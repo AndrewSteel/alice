@@ -517,6 +517,12 @@ async def stream_chat_endpoint(
                             "ok": all(r.get("success") for r in ha_results) if ha_results else True,
                             "result_preview": json.dumps(ha_results, ensure_ascii=False)[:300],
                         }]
+                        # Every HA_FAST reply (device commands, timers) is a
+                        # complete acknowledgement: the Voice PE closes right
+                        # after the TTS instead of listening for a follow-up
+                        # (same as HA tool calls on the LLM path and PROJ-106
+                        # list replies). A new request needs a new wakeword.
+                        yield b'data: {"type":"conversation_end"}\n\n'
                         yield f'data: {{"type":"done","usage":{json.dumps(usage)}}}\n\n'.encode("utf-8")
                         yield b"data: [DONE]\n\n"
                         return

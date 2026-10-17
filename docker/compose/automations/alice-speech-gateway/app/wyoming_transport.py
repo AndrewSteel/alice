@@ -225,17 +225,22 @@ class GatewayWyomingHandler(AsyncEventHandler):
                 # Spec: "die Melodie stoppt sofort und Alice sagt eine
                 # Ablauf-Meldung an" — addressing the device while its melody
                 # is playing is the acknowledgement itself, not a new command.
-                # Speak only the announcement and stay in continued-conversation
-                # (no re-wakeword needed for whatever the user actually wants
-                # next) instead of also running this turn's transcript through
-                # enrollment/chat (live QA finding 2026-09-17: saying "Stopp"
-                # during the melody got its own, unwanted LLM reply).
+                # Speak only the announcement instead of also running this
+                # turn's transcript through enrollment/chat (live QA finding
+                # 2026-09-17: saying "Stopp" during the melody got its own,
+                # unwanted LLM reply), then close the session like every other
+                # acknowledgement (Alltagsnutzung 2026-10-17: listening for a
+                # follow-up was disruptive; a new request needs a new wakeword).
                 # Refinement 2026-10-15: the alarm rings on all devices; if a
                 # second device was addressed at the same moment and lost the
                 # atomic claim, it gets no text but the same pure-ack handling.
                 if announced:
                     await self._speak_text(announced)
-                continue
+                logger.info(
+                    "Wyoming conversation ended by timer acknowledgement",
+                    extra={"session_id": session_id, "device": device_label},
+                )
+                break
 
             # --- Enrollment trigger check (admin only, before AI call) ---
             is_trigger, enroll_role = enroll_mod.is_enrollment_intent(transcript)

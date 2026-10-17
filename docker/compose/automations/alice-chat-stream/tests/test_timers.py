@@ -887,3 +887,57 @@ def test_delete_of_running_timer_no_alarm_stop():
         user_id="u1", source="webapp_cc", now=NOW,
     ))
     assert r.cancelled_expired is False
+
+
+# ---------------------------------------------------------------------------
+# Alltagsnutzung 2026-10-17 — "Starte einen 1 Minuten Timer" was arbitrated
+# to resume ("starte") and answered "Es läuft gerade kein Timer".
+# ---------------------------------------------------------------------------
+class TestStartMeansSet:
+    @pytest.mark.parametrize("service", ["timer.set", "timer.resume"])
+    @pytest.mark.parametrize("text", [
+        "Starte einen 1 Minuten Timer",
+        "Starte 3 Minuten Timer",
+        "Stelle einen 5 Minuten Timer",
+        "Setze einen Timer auf 10 Minuten",
+    ])
+    def test_new_timer_phrasings_are_set(self, service, text):
+        assert timers.timer_action(service, None, text) == "set"
+
+    @pytest.mark.parametrize("text", [
+        "Starte den Kartoffel Timer wieder",
+        "Setze den Kartoffel Timer fort",
+        "Starte den Timer",
+    ])
+    def test_resume_phrasings_stay_resume(self, text):
+        assert timers.timer_action("timer.resume", None, text) == "resume"
+
+    def test_start_named_timer_without_such_timer_creates_it(self):
+        pool = FakePool()
+        r = run(timers.handle_timer_part(
+            pool, "Starte den 5 Minuten Timer", "resume",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert "gesetzt" in r.text
+        assert len(pool.rows) == 1 and pool.rows[0]["status"] == "running"
+
+    def test_start_existing_paused_timer_resumes_it(self):
+        pool = FakePool(timers_rows=[_mk_row(
+            id="t1", name="5 Minuten Timer", status="paused",
+            paused_remaining_seconds=120,
+        )])
+        r = run(timers.handle_timer_part(
+            pool, "Starte den 5 Minuten Timer", "resume",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert "läuft weiter" in r.text
+        assert len(pool.rows) == 1
+
+    def test_resume_without_time_and_no_timer_unchanged(self):
+        pool = FakePool()
+        r = run(timers.handle_timer_part(
+            pool, "Starte den Timer wieder", "resume",
+            user_id="u1", source="esphome:Küche", now=NOW,
+        ))
+        assert r.text == "Es läuft gerade kein Timer."
+        assert pool.rows == []

@@ -339,8 +339,12 @@ _INTENT_BY_SERVICE = {
 # name-less ones). Each action's own verb is lexically unambiguous, so it
 # arbitrates a close/wrong semantic match rather than trusting the embedding.
 _ACTION_VERB_RE = {
+    # "Starte/Stelle/Setze einen 1 Minuten Timer": an indefinite article or a
+    # number right after the verb always means a new timer (Alltagsnutzung
+    # 2026-10-17 — "starte" alone used to win for resume).
     "set": re.compile(
         r"\btimer\w*\s+(?:auf|f[üu]r)\b|\bauf\s+\d|\bneuer?\s+timer|"
+        r"\b(?:setz|stell|start)\w*\s+(?:eine[nm]?\b|\d)|"
         r"\bweck\w*\s+mich|\berinnere\s+mich",
         re.IGNORECASE,
     ),
@@ -358,7 +362,8 @@ _ACTION_VERB_RE = {
         re.IGNORECASE,
     ),
     "resume": re.compile(
-        r"\bfort\b|\bweiter|\bwieder\b|\bstarte\w*\b", re.IGNORECASE
+        r"\bfort\b|\bweiter|\bwieder\b|\bstarte\w*\b(?!\s+(?:eine[nm]?\b|\d))",
+        re.IGNORECASE,
     ),
     # "ab" alone is too common a German word/preposition to use as a bare
     # standalone signal (false positives); require it paired with "zieh"
@@ -774,6 +779,11 @@ async def handle_timer_part(
     origin_channel = _origin_channel(source)
     owner_user_id = user_id if (user_id and user_id != "00000000-0000-0000-0000-000000000000") else None
 
+    # "Starte den 5 Minuten Timer" with no such timer to resume: start a new
+    # one instead of answering "kein Timer" (Alltagsnutzung 2026-10-17).
+    if action == "resume" and await _resume_means_set(pool, part, role, now):
+        action = "set"
+
     if action == "set":
         return await _do_set(pool, part, role, cfg, owner_user_id, origin_channel, now)
     if action in ("extend", "shorten"):
@@ -795,6 +805,15 @@ def _origin_channel(source: str | None) -> str:
     if source == "esphome":
         return "esphome"
     return "webapp"
+
+
+async def _resume_means_set(pool, part, role, now) -> bool:
+    """A resume command carries a time and names no existing timer."""
+    parsed = parse_time(part, now=now)
+    if parsed.seconds is None or parsed.rejected:
+        return False
+    target, _err = await _pick_target(pool, part, role, now)
+    return target is None
 
 
 async def _do_set(pool, part, role, cfg: RoleConfig, owner_user_id, origin_channel, now) -> TimerReply:
