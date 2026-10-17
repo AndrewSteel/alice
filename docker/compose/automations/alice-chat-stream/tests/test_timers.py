@@ -811,3 +811,79 @@ class TestHandleChange:
             user_id="u1", source="webapp_cc", now=NOW,
         ))
         assert "nicht freigeschaltet" in s.text
+
+
+# ---------------------------------------------------------------------------
+# Refinement 2026-10-15 — cross-device management is role-scoped only; the
+# setting device / channel never matters (regression lock-in).
+# ---------------------------------------------------------------------------
+class TestCrossDeviceManagement:
+    def _pool(self):
+        return FakePool(timers_rows=[_mk_row(
+            id="t1", name="Kartoffel Timer", origin_channel="esphome:Büro",
+        )])
+
+    @pytest.mark.parametrize("source", ["esphome:Küche", "webapp_cc"])
+    def test_query_extend_pause_resume_delete_from_other_channel(self, source):
+        pool = self._pool()
+        q = run(timers.handle_timer_part(
+            pool, "Wie lange läuft der Kartoffel Timer noch", "query",
+            user_id="u1", source=source, now=NOW,
+        ))
+        assert "Kartoffel Timer" in q.text
+        run(timers.handle_timer_part(
+            pool, "Verlängere den Kartoffel Timer um 5 Minuten", "extend",
+            user_id="u1", source=source, now=NOW,
+        ))
+        assert pool.rows[0]["expires_at"] == NOW + timedelta(minutes=25)
+        run(timers.handle_timer_part(
+            pool, "Pausiere den Kartoffel Timer", "pause",
+            user_id="u1", source=source, now=NOW,
+        ))
+        assert pool.rows[0]["status"] == "paused"
+        run(timers.handle_timer_part(
+            pool, "Setze den Kartoffel Timer fort", "resume",
+            user_id="u1", source=source, now=NOW,
+        ))
+        assert pool.rows[0]["status"] == "running"
+        d = run(timers.handle_timer_part(
+            pool, "Lösche den Kartoffel Timer", "delete",
+            user_id="u1", source=source, now=NOW,
+        ))
+        assert "gelöscht" in d.text
+        assert pool.rows == []
+
+    def test_other_role_does_not_see_it_from_any_device(self):
+        pool = FakePool(role="child", timers_rows=[_mk_row(
+            id="t1", name="Kartoffel Timer", origin_channel="esphome:Büro",
+        )])
+        q = run(timers.handle_timer_part(
+            pool, "Welche Timer laufen gerade", "query",
+            user_id="u1", source="esphome:Büro", now=NOW,
+        ))
+        assert "Kartoffel" not in q.text
+
+
+def test_delete_of_ringing_timer_signals_alarm_stop(monkeypatch):
+    # Race: picked while running, expired by the watcher before the delete
+    # lock — delete still wins and the reply asks to stop the alarm.
+    pool = FakePool(timers_rows=[_mk_row(id="t1", name="Kartoffel Timer")])
+
+    async def fake_delete(_pool, _tid):
+        return {"name": "Kartoffel Timer", "origin_channel": "webapp", "was_expired": True}
+
+    monkeypatch.setattr(timers, "delete_timer", fake_delete)
+    r = run(timers.handle_timer_part(
+        pool, "Lösche den Kartoffel Timer", "delete",
+        user_id="u1", source="webapp_cc", now=NOW,
+    ))
+    assert r.cancelled_expired is True
+
+
+def test_delete_of_running_timer_no_alarm_stop():
+    pool = FakePool(timers_rows=[_mk_row(id="t1", name="Kartoffel Timer")])
+    r = run(timers.handle_timer_part(
+        pool, "Lösche den Kartoffel Timer", "delete",
+        user_id="u1", source="webapp_cc", now=NOW,
+    ))
+    assert r.cancelled_expired is False

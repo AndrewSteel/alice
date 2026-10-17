@@ -1,8 +1,11 @@
 # alice_timer_melody.yaml — PROJ-85 Timer-Agent melody mediator
 #
-# Alice's timer watcher (alice-chat-stream) plays the expiry melody on the
-# Voice PE by calling this package's scripts over HA's REST API — start on
-# expiry, stop on delete-during-alarm.
+# Alice's timer watcher (alice-chat-stream) plays the expiry melody on ALL
+# Voice PE at once by calling this package's scripts over HA's REST API —
+# start on expiry, stop when the alarm is acknowledged (Refinement
+# 2026-10-15: the alarm belongs to the house, not to the setting device).
+# The speaker list comes from Alice (every `media_player` in the speech
+# gateway's device-mapping.yaml); a new device needs no change here.
 #
 # "Stop on wake" deliberately does NOT live in HA: "Hey Jarvis" bypasses HA's
 # Assist pipeline entirely and streams straight to alice-speech-gateway over
@@ -12,11 +15,14 @@
 # GET /stream/timers/pending on alice-chat-stream (see
 # GatewayWyomingHandler._announce_expired_timers in wyoming_transport.py),
 # which calls TimerScheduler.stop_melody() -> script.alice_timer_melody_stop
-# below, same as the delete-during-alarm path.
+# below. Closing the WebApp toast and deleting a ringing timer do the same.
 #
-# Verified at the device (2026-09-16): start/loop, timeout self-stop, and
-# manual stop all work end-to-end with a real media_player entity and a
-# media-source:// file (see input_text.alice_timer_melody_url below).
+# One offline speaker must not block the others: every per-player call runs
+# with continue_on_error. >>> HARDWARE-VERIFY with two devices (spec §H5).
+#
+# Verified at the device (2026-09-16, single player): start/loop, timeout
+# self-stop, and manual stop all work end-to-end with a real media_player
+# entity and a media-source:// file (see input_text.alice_timer_melody_url).
 #
 # Install: copy into HA's packages/ dir (requires
 # `homeassistant: packages: !include_dir_named packages` in
@@ -29,6 +35,8 @@ input_boolean:
     icon: mdi:timer-alert
 
 input_text:
+  # Comma-separated media_player list of the running session. 255 chars
+  # fit about 5-6 Voice PE entity ids — extend (or shorten the ids) beyond.
   alice_timer_melody_player:
     name: Alice Timer-Melodie Player
     max: 255
@@ -53,27 +61,32 @@ input_number:
 script:
   alice_timer_melody_start:
     alias: Alice Timer-Melodie starten
+    # restart, not the default single: after a stop the loop keeps running
+    # until its current delay ends (<= 6 s); a new expiry in that window must
+    # restart the melody instead of being dropped as "already running".
+    mode: restart
     # Called as: POST /api/services/script/turn_on
     #   { "entity_id": "script.alice_timer_melody_start",
-    #     "variables": { "media_player": "...", "max_seconds": 120 } }
+    #     "variables": { "media_players": "media_player.a,media_player.b",
+    #                    "max_seconds": 120 } }
     fields:
-      media_player:
-        description: media_player entity of the setting Voice PE
+      media_players:
+        description: comma-separated media_player entities of all Voice PE
       max_seconds:
         description: self-stop after this many seconds
     sequence:
       - variables:
-          player: "{{ media_player }}"
+          players: "{{ media_players.split(',') | map('trim') | reject('eq', '') | list }}"
           maxsec: "{{ max_seconds | default(120) }}"
       - service: input_text.set_value
         target: { entity_id: input_text.alice_timer_melody_player }
-        data: { value: "{{ player }}" }
+        data: { value: "{{ players | join(',') }}" }
       - service: input_number.set_value
         target: { entity_id: input_number.alice_timer_melody_max_seconds }
         data: { value: "{{ maxsec }}" }
-      # Bundle window: if a melody is already playing on this device, just keep
-      # it — a second timer coming due within a few seconds attaches to the
-      # same session instead of starting a new tone (spec collect window).
+      # One house-wide session: if a melody is already playing, keep it — a
+      # timer coming due meanwhile attaches to the same session instead of
+      # starting a second tone (spec collect window, global).
       - if:
           - condition: state
             entity_id: input_boolean.alice_timer_melody_active
@@ -81,41 +94,56 @@ script:
         then:
           - service: input_boolean.turn_on
             target: { entity_id: input_boolean.alice_timer_melody_active }
-          - service: media_player.volume_set
-            target: { entity_id: "{{ player }}" }
-            data: { volume_level: 0.6 }
           - repeat:
-              # Loop the tone until the "melody active" flag is cleared (by the
-              # stop script — called either from alice-chat-stream on delete,
-              # from alice-speech-gateway at the start of the next turn, or by
-              # the timeout automation below).
+              for_each: "{{ players }}"
+              sequence:
+                - service: media_player.volume_set
+                  continue_on_error: true
+                  target: { entity_id: "{{ repeat.item }}" }
+                  data: { volume_level: 0.6 }
+          - repeat:
+              # Loop the tone on every speaker until the "melody active" flag
+              # is cleared (by the stop script — called from alice-chat-stream
+              # on acknowledgement / delete, or by the timeout automation).
               while:
                 - condition: state
                   entity_id: input_boolean.alice_timer_melody_active
                   state: "on"
               sequence:
                 # media_player.play_media accepts a media-source:// id directly
-                # — the integration resolves it itself. (An earlier version of
-                # this script tried to pre-resolve via a
-                # media_source.resolve_media *service*, which does not exist;
-                # resolution is an internal call, not a callable action.)
-                - service: media_player.play_media
-                  target: { entity_id: "{{ player }}" }
-                  data:
-                    media_content_id: "{{ states('input_text.alice_timer_melody_url') }}"
-                    media_content_type: music
+                # — the integration resolves it itself.
+                - repeat:
+                    for_each: "{{ players }}"
+                    sequence:
+                      - service: media_player.play_media
+                        continue_on_error: true
+                        target: { entity_id: "{{ repeat.item }}" }
+                        data:
+                          media_content_id: "{{ states('input_text.alice_timer_melody_url') }}"
+                          media_content_type: music
                 - delay: { seconds: 6 }
 
   alice_timer_melody_stop:
     alias: Alice Timer-Melodie stoppen
-    # Called on "delete during melody", and by alice-speech-gateway at the
-    # start of every new turn on this device (see file header).
+    # Called by alice-chat-stream when the alarm is acknowledged (any Voice PE
+    # addressed, WebApp toast closed), on delete-during-alarm, and by the
+    # timeout automation below (then without variables: the stored list).
+    fields:
+      media_players:
+        description: comma-separated media_player entities (default the session's list)
     sequence:
+      - variables:
+          players: >-
+            {{ (media_players | default(states('input_text.alice_timer_melody_player'), true))
+               .split(',') | map('trim') | reject('eq', '') | list }}
       - service: input_boolean.turn_off
         target: { entity_id: input_boolean.alice_timer_melody_active }
-      - service: media_player.media_stop
-        target:
-          entity_id: "{{ states('input_text.alice_timer_melody_player') }}"
+      - repeat:
+          for_each: "{{ players }}"
+          sequence:
+            - service: media_player.media_stop
+              continue_on_error: true
+              target: { entity_id: "{{ repeat.item }}" }
 
 # --- Automations ---------------------------------------------------------
 automation:

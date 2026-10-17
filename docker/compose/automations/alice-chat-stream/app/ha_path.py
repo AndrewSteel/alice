@@ -677,7 +677,7 @@ async def execute_ha_intents(
                 "created": reply.created,
             })
             if on_timer_change is not None and (
-                reply.wake_scheduler or reply.created or reply.cancelled_channels
+                reply.wake_scheduler or reply.created or reply.cancelled_expired
             ):
                 try:
                     await on_timer_change(reply)

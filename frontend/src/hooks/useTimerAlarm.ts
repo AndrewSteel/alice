@@ -5,15 +5,21 @@
  *
  * Timers are created / changed / deleted through the chat; this hook only
  * shows the alarm. It:
- *   - loads the caller's role-scoped active timers from the server
- *     (authoritative source) on mount, on an interval, on tab focus and when
- *     the chat signals a new timer ("alice:timers-changed")
- *   - counts down locally to each timer's absolute `expires_at`
- *   - when a timer's countdown reaches zero while the tab is visible: a toast
- *     (stays until dismissed) + a short chime
- *   - when the tab is brought back to the foreground after an expiry that
- *     happened while it was hidden: a catch-up toast ("… ist vor X abgelaufen"),
- *     as long as it is within the catch-up window
+ *   - loads the caller's role-scoped timers from the server (authoritative
+ *     source) on mount, on an interval, on tab focus and when the chat
+ *     signals a timer change ("alice:timers-changed") — the active ones plus
+ *     those that expired recently and nobody actively acknowledged
+ *   - counts down locally to each running timer's absolute `expires_at`
+ *   - when a countdown reaches zero while the tab is visible: a toast (stays
+ *     until dismissed) + a short chime
+ *   - when the tab is visible after an expiry it did not alarm live: a
+ *     catch-up toast ("… ist vor X abgelaufen") for every timer the server
+ *     still reports as expired — a timer acknowledged meanwhile by voice or
+ *     another tab is no longer reported, so there is no stale catch-up
+ *   - closing a toast acknowledges the alarm server-side, which also stops
+ *     the melody on all Voice PE (Refinement 2026-10-15); a toast whose timer
+ *     the server no longer reports (acknowledged elsewhere, deleted) closes
+ *     itself on the next sync
  *
  * Reliable background notification (locked screen / closed tab) is out of
  * scope — that is PROJ-104 (Web Push).
@@ -25,15 +31,17 @@ import type { TFunction } from "i18next";
 
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { getActiveTimers, type ActiveTimer } from "@/services/timers";
+import {
+  acknowledgeTimers,
+  getActiveTimers,
+  type ActiveTimer,
+} from "@/services/timers";
 
 // The chat fires `alice:timers-changed` on every timer create, so the poll is
 // only a safety net for changes made from another device / voice. 2 min keeps
-// it light on the (separate) timer rate-limit budget.
+// it light on the (separate) timer rate-limit budget. The catch-up window
+// (spec "Nachhol-Fenster", 15 min) is applied server-side.
 const POLL_INTERVAL_MS = 120_000;
-// A timer that expired while the tab was hidden is still worth a catch-up
-// toast if the tab returns within this window (spec "Nachhol-Fenster").
-const CATCH_UP_WINDOW_MS = 15 * 60_000;
 
 function playChime() {
   try {
@@ -81,27 +89,62 @@ export function useTimerAlarm() {
 
   // Timers we have already alarmed / caught up on, by id.
   const handledRef = useRef<Set<string>>(new Set());
+  // Open alarm toasts, by timer id. An entry is removed before a programmatic
+  // dismiss, so a close with the entry still present was the user's.
+  const toastsRef = useRef<Map<string, () => void>>(new Map());
   // Per-timer countdown timeout handles.
   const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const timersRef = useRef<ActiveTimer[]>([]);
 
   const clearTimeouts = useCallback(() => {
     timeoutsRef.current.forEach((h) => clearTimeout(h));
     timeoutsRef.current.clear();
   }, []);
 
-  const fireExpiry = useCallback(
-    (timer: ActiveTimer) => {
+  const showAlarm = useCallback(
+    (timer: ActiveTimer, description: string) => {
       if (handledRef.current.has(timer.id)) return;
       handledRef.current.add(timer.id);
-      toast({
+      const { dismiss } = toast({
         title: t("timerAlarm.title"),
-        description: t("timerAlarm.expired", { name: timer.name }),
+        description,
         duration: Infinity,
+        onOpenChange: (open) => {
+          if (open || !toastsRef.current.has(timer.id)) return;
+          toastsRef.current.delete(timer.id);
+          // Best effort — on failure the alarm still ends by voice / timeout.
+          acknowledgeTimers([timer.id]).catch(() => {});
+        },
       });
+      toastsRef.current.set(timer.id, dismiss);
       playChime();
     },
     [toast, t]
+  );
+
+  const fireExpiry = useCallback(
+    (timer: ActiveTimer) => {
+      // Hidden tab: no toast now; the next sync on return reports it if
+      // nobody acknowledged it meanwhile.
+      if (document.visibilityState !== "visible") return;
+      showAlarm(timer, t("timerAlarm.expired", { name: timer.name }));
+    },
+    [showAlarm, t]
+  );
+
+  const catchUp = useCallback(
+    (timers: ActiveTimer[]) => {
+      if (document.visibilityState !== "visible") return;
+      const nowMs = Date.now();
+      for (const timer of timers) {
+        if (timer.status !== "expired") continue;
+        const overdueBy = Math.max(0, nowMs - new Date(timer.expires_at).getTime());
+        showAlarm(
+          timer,
+          t("timerAlarm.expiredAgo", { name: timer.name, ago: formatAgo(overdueBy, t) })
+        );
+      }
+    },
+    [showAlarm, t]
   );
 
   const scheduleAll = useCallback(
@@ -111,12 +154,10 @@ export function useTimerAlarm() {
       for (const timer of timers) {
         if (timer.status !== "running") continue;
         if (handledRef.current.has(timer.id)) continue;
-        const dueMs = new Date(timer.expires_at).getTime();
-        const delay = dueMs - nowMs;
+        const delay = new Date(timer.expires_at).getTime() - nowMs;
         if (delay <= 0) {
-          // Already past. Alarm now if the tab is visible; otherwise leave it
-          // for the visibility handler to catch up.
-          if (document.visibilityState === "visible") fireExpiry(timer);
+          // Already past but not yet fired server-side.
+          fireExpiry(timer);
           continue;
         }
         const h = setTimeout(() => fireExpiry(timer), delay);
@@ -130,57 +171,40 @@ export function useTimerAlarm() {
     if (!user) return;
     try {
       const { timers } = await getActiveTimers();
-      timersRef.current = timers;
-      // Drop handled ids that are no longer active (deleted / acknowledged) so
-      // a re-used name can alarm again later.
-      const activeIds = new Set(timers.map((x) => x.id));
+      const listedIds = new Set(timers.map((x) => x.id));
+      // Acknowledged elsewhere (voice, another tab) or deleted: close the
+      // toast here too, and forget the id so a re-used name can alarm again.
+      toastsRef.current.forEach((dismiss, id) => {
+        if (listedIds.has(id)) return;
+        toastsRef.current.delete(id);
+        dismiss();
+      });
       handledRef.current.forEach((id) => {
-        if (!activeIds.has(id)) handledRef.current.delete(id);
+        if (!listedIds.has(id)) handledRef.current.delete(id);
       });
       scheduleAll(timers);
+      catchUp(timers);
     } catch {
       // Network hiccup — keep the existing schedule, try again next poll.
     }
-  }, [user, scheduleAll]);
-
-  // Catch-up on returning to the foreground.
-  const handleVisibility = useCallback(() => {
-    if (document.visibilityState !== "visible") return;
-    const nowMs = Date.now();
-    for (const timer of timersRef.current) {
-      if (handledRef.current.has(timer.id)) continue;
-      const dueMs = new Date(timer.expires_at).getTime();
-      const overdueBy = nowMs - dueMs;
-      if (overdueBy <= 0) continue;
-      handledRef.current.add(timer.id);
-      if (overdueBy <= CATCH_UP_WINDOW_MS) {
-        toast({
-          title: t("timerAlarm.title"),
-          description: t("timerAlarm.expiredAgo", {
-            name: timer.name,
-            ago: formatAgo(overdueBy, t),
-          }),
-          duration: Infinity,
-        });
-        playChime();
-      }
-    }
-    // Re-sync with the server (authoritative).
-    void refresh();
-  }, [toast, t, refresh]);
+  }, [user, scheduleAll, catchUp]);
 
   useEffect(() => {
     if (!user) return;
     void refresh();
     const poll = setInterval(refresh, POLL_INTERVAL_MS);
-    document.addEventListener("visibilitychange", handleVisibility);
+    // Back in the foreground: sync first, then catch up from server state.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     const onChanged = () => void refresh();
     window.addEventListener("alice:timers-changed", onChanged);
     return () => {
       clearInterval(poll);
       clearTimeouts();
-      document.removeEventListener("visibilitychange", handleVisibility);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("alice:timers-changed", onChanged);
     };
-  }, [user, refresh, handleVisibility, clearTimeouts]);
+  }, [user, refresh, clearTimeouts]);
 }

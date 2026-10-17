@@ -6,35 +6,40 @@ next running timer is due, fires it, and repeats. `wake()` is called by the
 timer handler whenever a timer is created / changed / deleted so the sleep is
 recomputed.
 
-Delivery per channel:
-  * Voice PE  — Alice calls Home Assistant over REST to play a melody on the
-    media_player of the setting device, then a companion HA automation stops
-    it when the satellite is addressed or a max time elapses.
-    >>> HARDWARE-VERIFY (spec open point): whether the Voice PE media_player
-        is usable while the "Hey Jarvis" Wyoming session is idle, and how
-        reliably the HA automation sees "satellite is being addressed". The
-        REST call + automation trigger below are the intended path; confirm at
-        the device and adjust `_deliver_voice` / homeassistant/timer_melody.yaml
-        if the fallback (fixed short tone over the TTS channel) is needed.
-  * WebApp    — no server push. The browser counts down to the `expires_at`
-    it got at creation and shows the toast itself; the watcher only marks the
-    row so a returning tab can show a catch-up message (PROJ-104 covers real
-    background push).
+Delivery (Refinement 2026-10-15 — the alarm belongs to the house, not to a
+device or a role):
+  * Voice PE  — every expiry starts ONE house-wide alarm session: Alice calls
+    Home Assistant over REST to loop the melody on ALL Voice-PE media_players
+    from device-mapping.yaml, regardless of where (voice / WebApp) or by which
+    role the timer was set. Timers coming due while a session rings attach to
+    it (no second melody). Addressing any Voice PE stops the melody everywhere
+    (GET /stream/timers/pending, called by alice-speech-gateway at the start of
+    every turn); closing the WebApp toast does too, unless another role's alarm
+    is still unacknowledged. After the max time the session acknowledges its
+    timers itself ('timeout').
+  * WebApp    — no server push. The browser counts down to `expires_at` and
+    shows the toast itself; a returning tab reads expired-but-not-actively-
+    acknowledged rows for its catch-up message (PROJ-104 covers real push).
 
 Concurrency (spec): the transition to `expired` is a conditional UPDATE that
 only touches a row still `running`, so the restart reconcile and the steady
-loop never fire the same timer twice.
+loop never fire the same timer twice. The announcement claim is a conditional
+UPDATE on `expired` too, so of two devices addressed at once exactly one gets
+the announcement.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import httpx
 import yaml
+
+from . import timers as _timers
 
 logger = logging.getLogger("alice-chat-stream.timer_scheduler")
 
@@ -43,52 +48,68 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 HA_URL = os.environ.get("HA_URL", "http://homeassistant:8123").rstrip("/")
 HA_TOKEN = os.environ.get("HA_TOKEN", "")
 
-# Collect timers of the same device due within this window into one melody +
-# one announcement (spec default 3 s).
+# Collect timers due within this window into one alarm session (spec default
+# 3 s, global since Refinement 2026-10-15).
 COLLECT_WINDOW_SECONDS = float(os.environ.get("TIMER_COLLECT_WINDOW_SECONDS", "3"))
-# Self-stop for an un-acknowledged Voice-PE melody (spec default 2 min).
+# Self-stop for an un-acknowledged alarm session (spec default 2 min).
 MELODY_MAX_SECONDS = int(os.environ.get("TIMER_MELODY_MAX_SECONDS", "120"))
+# An expired timer that could not be delivered (no speaker reachable) is still
+# announced on the next contact of any Voice PE within max time + this buffer
+# (spec "innerhalb Maximalzeit + Puffer"); older ones are swept as 'timeout'.
+ANNOUNCE_GRACE_SECONDS = 300
+ANNOUNCE_CUTOFF_SECONDS = MELODY_MAX_SECONDS + ANNOUNCE_GRACE_SECONDS
+# A device addressed this shortly after another device took the announcement
+# counts as a pure acknowledgement too (two people, two devices, same moment).
+VOICE_ACK_GRACE_SECONDS = 5.0
 # Idle cap so a far-future timer still gets a periodic sanity check.
 MAX_SLEEP_SECONDS = 3600
 
-# HA automation entity that owns the melody playback (see
-# homeassistant/timer_melody.yaml). Alice only signals start/stop.
+# HA scripts that own the melody playback (homeassistant/alice_timer_melody.yaml).
+# Alice only signals start/stop.
 HA_MELODY_START_SCRIPT = os.environ.get("TIMER_MELODY_START_SCRIPT", "script.alice_timer_melody_start")
 HA_MELODY_STOP_SCRIPT = os.environ.get("TIMER_MELODY_STOP_SCRIPT", "script.alice_timer_melody_stop")
 
 # alice-speech-gateway's device-mapping.yaml, mounted read-only into this
-# container too (same config volume). alice.ha_entities.area_name is only
-# populated for HA-Assist-exposed entities — a Voice PE talking to Alice over
-# raw Wyoming need not be Assist-exposed at all, so that lookup is unreliable
-# for this purpose (live-found 2026-09-16: media_player rows existed but with
-# no area_name, is_active=false). device-mapping.yaml is the source of truth
-# for a device's room anyway (PROJ-40/42); it now also carries the
-# media_player entity per device.
+# container too (same config volume) — the source of truth for which Voice PE
+# exists and which media_player it has (PROJ-40/42). A new device takes part
+# in the alarm by getting a media_player entry there; no code change.
 DEVICE_MAPPING_PATH = os.environ.get(
     "DEVICE_MAPPING_PATH", "/config/device-mapping.yaml"
 )
 
 
-def _load_room_to_media_player() -> dict[str, str]:
-    """room (lowercased) -> media_player entity_id, from device-mapping.yaml."""
+def _load_mapping_media_players() -> list[str]:
+    """Every media_player entity listed in device-mapping.yaml."""
     try:
         with open(DEVICE_MAPPING_PATH) as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
-        return {}
+        return []
     except yaml.YAMLError as exc:
         logger.error("device-mapping.yaml is invalid: %s", exc)
-        return {}
+        return []
 
-    mapping: dict[str, str] = {}
+    players: list[str] = []
     for entry in (data.get("devices") or {}).values():
         if not isinstance(entry, dict):
             continue
-        room = str(entry.get("room") or "").strip().lower()
         media_player = str(entry.get("media_player") or "").strip()
-        if room and media_player:
-            mapping[room] = media_player
-    return mapping
+        if media_player:
+            players.append(media_player)
+    return players
+
+
+def all_media_players() -> list[str]:
+    """All Voice-PE speakers taking part in the alarm, deduplicated.
+
+    device-mapping.yaml plus the explicit TIMER_MEDIA_PLAYER_MAP override
+    ("esphome:<Raum>=media_player.<entity>,…" — only the values matter now).
+    """
+    players = _load_mapping_media_players()
+    for pair in os.environ.get("TIMER_MEDIA_PLAYER_MAP", "").split(","):
+        if "=" in pair:
+            players.append(pair.split("=", 1)[1].strip())
+    return list(dict.fromkeys(p for p in players if p))
 
 
 class TimerScheduler:
@@ -97,6 +118,14 @@ class TimerScheduler:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._stopped = False
+        # House-wide alarm session (in memory — after a restart the HA timeout
+        # automation is the safety net for a melody that was still looping).
+        self._session_id = 0
+        self._session_active = False
+        self._session_timer_ids: set[str] = set()
+        self._session_task: asyncio.Task | None = None
+        self._last_voice_ack = 0.0
+        self._last_voice_ack_channel: str | None = None
 
     # -- lifecycle -----------------------------------------------------------
     def start(self) -> None:
@@ -106,13 +135,15 @@ class TimerScheduler:
     async def stop(self) -> None:
         self._stopped = True
         self._wake.set()
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+        for task in (self._task, self._session_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._task = None
+        self._session_task = None
 
     def wake(self) -> None:
         """Ask the loop to recompute its sleep (timer added / changed / deleted)."""
@@ -180,9 +211,17 @@ class TimerScheduler:
         The claim is a conditional UPDATE (`status = 'running'` guard) so a
         concurrent delete / change / a second pass cannot double-fire. The
         collect window pulls in timers coming due within the next few seconds
-        so several near-simultaneous timers of one device fire together (spec
-        "Sammel-Fenster", one melody, one announcement).
+        so near-simultaneous timers share one alarm session (spec
+        "Sammel-Fenster", global since Refinement 2026-10-15).
         """
+        # Undelivered leftovers past the announcement cutoff end silently.
+        await self._pool().execute(
+            "UPDATE alice.timers SET status = 'acknowledged', "
+            "acknowledged_by = 'timeout', updated_at = NOW() "
+            "WHERE status = 'expired' "
+            "AND fired_at < NOW() - make_interval(secs => $1)",
+            ANNOUNCE_CUTOFF_SECONDS,
+        )
         claimed = await self._pool().fetch(
             "UPDATE alice.timers SET status = 'expired', fired_at = NOW() "
             "WHERE status = 'running' "
@@ -192,81 +231,123 @@ class TimerScheduler:
         )
         if not claimed:
             return
+        timers = [dict(r) for r in claimed]
+        logger.info(
+            "Timer(s) expired: %s",
+            [(t["name"], t["origin_channel"], t["owner_role"]) for t in timers],
+        )
+        try:
+            await self._deliver(timers)
+        except Exception as exc:
+            logger.error("Timer alarm delivery failed: %s", exc)
 
-        # Group by origin channel for the 3 s collect window (Voice PE only —
-        # WebApp rows just get marked).
-        by_channel: dict[str, list[dict]] = {}
-        for r in claimed:
-            by_channel.setdefault(r["origin_channel"], []).append(dict(r))
+    async def _deliver(self, timers: list[dict]) -> None:
+        """Ring all Voice PE for `timers`, or attach them to the running session.
 
-        for channel, timers in by_channel.items():
-            if channel == "webapp":
-                # Nothing to push; the browser countdown handles the alarm and
-                # a returning tab reads the row. Mark as acknowledged after the
-                # catch-up window so the list clears.
-                for t in timers:
-                    logger.info("WebApp timer expired: %s", t["name"])
-                continue
-            try:
-                await self._deliver_voice(channel, timers)
-            except Exception as exc:
-                logger.error("Voice timer delivery failed for %s: %s", channel, exc)
-
-    async def _deliver_voice(self, channel: str, timers: list[dict]) -> None:
-        """Start the melody on the setting device via HA and schedule its stop.
-
-        `channel` is the device key from device-mapping.yaml, stored as
-        'esphome:<Raum>' or 'esphome'. The media_player entity for the device
-        is resolved from alice.ha_entities by area, or from the
-        TIMER_MEDIA_PLAYER_MAP override.
+        When nothing can be delivered (no HA token, no speaker configured, HA
+        unreachable) the rows stay 'expired, not delivered' and are announced
+        by the next Voice PE that is addressed within the cutoff.
         """
-        if not HA_TOKEN:
-            logger.warning("HA_TOKEN missing — cannot deliver voice timer")
+        ids = {str(t["id"]) for t in timers}
+        if self._session_active:
+            # Spec: a timer coming due while the melody rings attaches to the
+            # session — no second melody.
+            self._session_timer_ids |= ids
             return
 
-        media_player = await self._media_player_for(channel)
-        if not media_player:
+        configured = all_media_players()
+        if not HA_TOKEN or not configured:
             logger.warning(
-                "No media_player for timer channel %s — timer marked expired, "
-                "will announce on next contact", channel
+                "Timer alarm not delivered (HA_TOKEN set: %s, media_players: %d) — "
+                "will announce on next Voice-PE contact", bool(HA_TOKEN), len(configured),
             )
             return
 
-        names = [t["name"] for t in timers]
-        logger.info("Voice timer melody: device=%s timers=%s", channel, names)
-
         headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # Signal the companion HA automation to start the melody. It owns
-            # the loop + the "stop when the satellite is addressed" logic that
-            # Alice cannot see. >>> HARDWARE-VERIFY.
-            try:
-                await client.post(
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Skip offline speakers; with none reachable the alarm counts
+                # as not delivered (HA would accept the script call anyway).
+                players = [p for p in configured if await self._player_available(client, p, headers)]
+                if not players:
+                    logger.warning(
+                        "Timer alarm not delivered — no media_player reachable of %s; "
+                        "will announce on next Voice-PE contact", configured,
+                    )
+                    return
+                resp = await client.post(
                     f"{HA_URL}/api/services/script/turn_on",
                     json={
                         "entity_id": HA_MELODY_START_SCRIPT,
                         "variables": {
-                            "media_player": media_player,
+                            "media_players": ",".join(players),
                             "max_seconds": MELODY_MAX_SECONDS,
                         },
                     },
                     headers=headers,
                 )
-            except Exception as exc:
-                logger.error("Melody start call failed: %s", exc)
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.error("Melody start call failed — timer(s) stay undelivered: %s", exc)
+            return
 
-        # After the max time, mark the collected timers acknowledged if they
-        # are still 'expired' (nobody addressed the device).
-        asyncio.create_task(self._auto_acknowledge([t["id"] for t in timers]))
+        logger.info("Timer alarm session started on %s", players)
+        self._session_id += 1
+        self._session_active = True
+        self._session_timer_ids = ids
+        self._session_task = asyncio.create_task(self._end_session_after_max(self._session_id))
 
-    async def stop_melody(self, channel: str) -> None:
-        """Stop a melody already playing for `channel` — used when a timer is
-        deleted while its expiry alarm is still active (spec: delete beats a
-        not-yet-acknowledged expiry).
-        """
+    @staticmethod
+    async def _player_available(client, entity_id: str, headers: dict) -> bool:
+        try:
+            resp = await client.get(f"{HA_URL}/api/states/{entity_id}", headers=headers)
+        except Exception as exc:
+            logger.warning("media_player state check failed for %s: %s", entity_id, exc)
+            return False
+        if resp.status_code != 200:
+            return False
+        return (resp.json() or {}).get("state") not in ("unavailable", "unknown", None)
+
+    async def _end_session_after_max(self, session_id: int) -> None:
+        """Nobody reacted within the max time: stop everywhere and acknowledge
+        the session's timers as 'timeout'."""
+        await asyncio.sleep(MELODY_MAX_SECONDS)
+        if session_id != self._session_id or not self._session_active:
+            return  # already ended by voice / WebApp, or a newer session
+        ids = list(self._session_timer_ids)
+        await self.stop_melody()
+        try:
+            await self._pool().execute(
+                "UPDATE alice.timers SET status = 'acknowledged', "
+                "acknowledged_by = 'timeout', updated_at = NOW() "
+                "WHERE id = ANY($1::uuid[]) AND status = 'expired'",
+                ids,
+            )
+        except Exception as exc:
+            logger.warning("Auto-acknowledge failed: %s", exc)
+
+    # -- alarm session control -------------------------------------------
+    def alarm_active(self) -> bool:
+        return self._session_active
+
+    def note_voice_ack(self, channel: str | None) -> None:
+        self._last_voice_ack = time.monotonic()
+        self._last_voice_ack_channel = channel
+
+    def recent_voice_ack_elsewhere(self, channel: str | None) -> bool:
+        """Another device took the announcement a moment ago. The device that
+        took it is excluded — its follow-up turn is a real command."""
+        return (
+            channel != self._last_voice_ack_channel
+            and time.monotonic() - self._last_voice_ack <= VOICE_ACK_GRACE_SECONDS
+        )
+
+    async def stop_melody(self) -> None:
+        """End the alarm session and stop the melody on all speakers."""
+        self._session_active = False
+        self._session_timer_ids = set()
         if not HA_TOKEN:
             return
-        media_player = await self._media_player_for(channel)
         headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -274,86 +355,88 @@ class TimerScheduler:
                     f"{HA_URL}/api/services/script/turn_on",
                     json={
                         "entity_id": HA_MELODY_STOP_SCRIPT,
-                        "variables": {"media_player": media_player} if media_player else {},
+                        "variables": {"media_players": ",".join(all_media_players())},
                     },
                     headers=headers,
                 )
         except Exception as exc:
-            logger.warning("Melody stop call failed for %s: %s", channel, exc)
+            logger.warning("Melody stop call failed: %s", exc)
 
-    async def _auto_acknowledge(self, timer_ids: list) -> None:
-        await asyncio.sleep(MELODY_MAX_SECONDS)
-        try:
-            await self._pool().execute(
-                "UPDATE alice.timers SET status = 'acknowledged' "
-                "WHERE id = ANY($1::uuid[]) AND status = 'expired'",
-                [str(i) for i in timer_ids],
-            )
-        except Exception as exc:
-            logger.warning("Auto-acknowledge failed: %s", exc)
+    async def stop_if_nothing_ringing(self) -> None:
+        """Stop the melody unless another expired, unacknowledged timer is
+        still within the alarm — so closing one role's toast (or deleting one
+        timer) cannot silence another role's alarm nobody has noticed yet."""
+        if not self._session_active:
+            return  # nothing rings — leave the speakers alone
+        row = await self._pool().fetchrow(
+            "SELECT 1 FROM alice.timers WHERE status = 'expired' "
+            "AND fired_at >= NOW() - make_interval(secs => $1) LIMIT 1",
+            ANNOUNCE_CUTOFF_SECONDS,
+        )
+        if row is None:
+            await self.stop_melody()
 
-    async def _media_player_for(self, channel: str) -> str | None:
-        """Resolve the HA media_player entity for a timer's origin device.
+    # -- acknowledgement entry points (the /stream/timers endpoints) -------
+    async def acknowledge_by_voice(self, channel: str | None) -> dict:
+        """A turn started on Voice PE `channel`: stop a ringing alarm on all
+        speakers, claim every expired timer for this device's announcement.
+        `alarm_acknowledged` marks the utterance as a pure acknowledgement —
+        also for the device that lost the race against another device
+        addressed at the same moment (it gets no text)."""
+        ringing = self._session_active
+        if ringing:
+            await self.stop_melody()
+        text = await pending_announcement(self._pool())
+        if text:
+            self.note_voice_ack(channel)
+            logger.info("Timer alarm acknowledged by voice on %s", channel)
+            if not ringing:
+                # Undelivered alarm, or a melody still looping from before a
+                # restart (no in-memory session) — make sure it is silent.
+                await self.stop_melody()
+        return {
+            "announcement": text,
+            "alarm_acknowledged": (
+                bool(text) or ringing or self.recent_voice_ack_elsewhere(channel)
+            ),
+        }
 
-        Order: explicit env override > device-mapping.yaml (source of truth
-        for a Voice PE's room + speaker, PROJ-40/42) > alice.ha_entities
-        (fallback — only populated for HA-Assist-exposed entities, so it
-        misses a Voice PE that is not Assist-exposed).
-        """
-        room = channel.split(":", 1)[1] if ":" in channel else None
-
-        # Explicit override map: "esphome:Büro=media_player.voice_pe_buero,..."
-        raw = os.environ.get("TIMER_MEDIA_PLAYER_MAP", "")
-        for pair in raw.split(","):
-            if "=" in pair:
-                k, v = pair.split("=", 1)
-                if k.strip() == channel:
-                    return v.strip()
-
-        if not room:
-            return None
-
-        from_mapping = _load_room_to_media_player().get(room.replace("_", " ").lower())
-        if from_mapping:
-            return from_mapping
-
-        try:
-            row = await self._pool().fetchrow(
-                "SELECT entity_id FROM alice.ha_entities "
-                "WHERE domain = 'media_player' AND is_active = TRUE "
-                "AND LOWER(area_name) = LOWER($1) ORDER BY entity_id LIMIT 1",
-                room.replace("_", " "),
-            )
-        except Exception as exc:
-            logger.warning("media_player lookup failed: %s", exc)
-            return None
-        return row["entity_id"] if row else None
+    async def acknowledge_webapp(self, role: str, timer_ids: list[str]) -> int:
+        """The WebApp toast was closed: acknowledge in the role scope, then
+        stop the melody unless another alarm still rings."""
+        count = await _timers.acknowledge_webapp(self._pool(), role, timer_ids)
+        await self.stop_if_nothing_ringing()
+        return count
 
 
 # ---------------------------------------------------------------------------
-# Voice-PE announcement lookup (called by the /stream/timers/pending endpoint
-# that alice-speech-gateway polls when a wakeword lands after a melody).
+# Voice-PE announcement claim (called by /stream/timers/pending, which
+# alice-speech-gateway polls at the start of every turn on any device).
 # ---------------------------------------------------------------------------
-async def pending_announcement(pool, channel: str) -> str | None:
-    """German sentence naming every expired-but-unannounced timer of a device,
-    then mark them acknowledged. None when there is nothing to announce."""
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            rows = await conn.fetch(
-                "SELECT id, name FROM alice.timers "
-                "WHERE origin_channel = $1 AND status = 'expired' "
-                "FOR UPDATE",
-                channel,
-            )
-            if not rows:
-                return None
-            await conn.execute(
-                "UPDATE alice.timers SET status = 'acknowledged' "
-                "WHERE id = ANY($1::uuid[])",
-                [str(r["id"]) for r in rows],
-            )
-    names = [r["name"] for r in rows]
+def announcement_text(names: list[str]) -> str:
     if len(names) == 1:
         return f"Der {names[0]} ist abgelaufen."
     joined = " und ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 2 else " und ".join(names)
     return f"Der {joined} sind abgelaufen."
+
+
+async def pending_announcement(pool) -> str | None:
+    """German sentence naming every expired, unacknowledged timer — of any
+    device, any role (the acknowledgement is house-wide and role-independent)
+    — and mark them acknowledged ('voice'). None when there is nothing to say.
+
+    A single conditional UPDATE is the atomic claim: of two devices addressed
+    at the same moment, the second finds no 'expired' row left.
+    """
+    rows = await pool.fetch(
+        "UPDATE alice.timers SET status = 'acknowledged', "
+        "acknowledged_by = 'voice', updated_at = NOW() "
+        "WHERE status = 'expired' "
+        "AND fired_at >= NOW() - make_interval(secs => $1) "
+        "RETURNING name, expires_at",
+        ANNOUNCE_CUTOFF_SECONDS,
+    )
+    if not rows:
+        return None
+    names = [r["name"] for r in sorted(rows, key=lambda r: r["expires_at"])]
+    return announcement_text(names)

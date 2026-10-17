@@ -2,15 +2,18 @@ import { fetchWithAuth } from "./fetchWithAuth";
 import { STREAM_API_URL } from "./api";
 
 // PROJ-85 — Timer-Agent. Timers are created / changed / deleted through the
-// chat (voice or WebApp). These endpoints are read-only for the alarm and
-// admin-only for the per-role config.
+// chat (voice or WebApp). The alarm reads the role-scoped list and
+// acknowledges an alarm when its toast is closed; the per-role config is
+// admin-only.
 
 // ---------- Types ----------
 
 export interface ActiveTimer {
   id: string;
   name: string;
-  status: "running" | "paused";
+  // "expired": ran out within the catch-up window and nobody actively
+  // acknowledged it yet (still ringing, or only ended by the max-time timeout).
+  status: "running" | "paused" | "expired";
   expires_at: string; // ISO-8601, absolute
   remaining_seconds: number;
 }
@@ -57,6 +60,26 @@ export async function getActiveTimers(): Promise<ActiveTimersResponse> {
     throw new Error(`Serverfehler (${res.status}) beim Laden der Timer.`);
   }
   return res.json();
+}
+
+/**
+ * The user closed an expiry toast: acknowledge the alarm server-side (role
+ * scope, idempotent). Stops the melody on all Voice PE unless another alarm
+ * still rings.
+ */
+export async function acknowledgeTimers(ids: string[]): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetchWithAuth(`${base()}/timers/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  } catch {
+    throw new Error("Netzwerkfehler -- Timer-Alarm nicht quittiert.");
+  }
+  if (!res.ok) {
+    throw new Error(`Serverfehler (${res.status}) beim Quittieren des Timers.`);
+  }
 }
 
 /** Per-role timer config + the default role (admin only). */

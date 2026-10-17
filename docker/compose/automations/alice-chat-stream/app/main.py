@@ -476,9 +476,8 @@ async def stream_chat_endpoint(
                             scheduler.wake()
                             if reply.created:
                                 created_timers.append(reply.created)
-                            for ch in reply.cancelled_channels:
-                                if ch and ch != "webapp":
-                                    await scheduler.stop_melody(ch)
+                            if reply.cancelled_expired:
+                                await scheduler.stop_if_nothing_ringing()
 
                         text, ha_results = await ha_path.execute_ha_intents(
                             decision.intents, client,
@@ -670,9 +669,15 @@ def _iso(dt) -> str | None:
 
 @app.get("/stream/timers")
 async def list_timers(jwt_payload: dict = Depends(verify_jwt)):
-    """Active timers visible to the caller (their role scope)."""
+    """Timers visible to the caller (their role scope): the active ones, plus
+    those that expired within the catch-up window and that nobody actively
+    acknowledged (status "expired") — the WebApp alarm shows those as a
+    catch-up toast and drops a toast whose timer is no longer listed."""
     role = await _timers.resolve_role(memory.pool(), jwt_payload.get("user_id"))
     rows = await _timers.list_active(memory.pool(), role)
+    expired = await _timers.list_recent_expired(
+        memory.pool(), role, TIMER_CATCH_UP_WINDOW_SECONDS
+    )
     now = _timers.now_local()
     return {
         "role": role,
@@ -685,38 +690,65 @@ async def list_timers(jwt_payload: dict = Depends(verify_jwt)):
                 "remaining_seconds": _timers.secs_left(r, now),
             }
             for r in rows
+        ] + [
+            {
+                "id": str(r["id"]),
+                "name": r["name"],
+                "status": "expired",
+                "expires_at": _iso(r["expires_at"]),
+                "remaining_seconds": 0,
+            }
+            for r in expired
         ],
     }
 
 
+# Matches the WebApp's catch-up window (spec "Nachhol-Fenster", 15 min).
+TIMER_CATCH_UP_WINDOW_SECONDS = 15 * 60
+
+
+class TimerAcknowledge(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
+@app.post("/stream/timers/acknowledge")
+async def acknowledge_timers(body: TimerAcknowledge, jwt_payload: dict = Depends(verify_jwt)):
+    """WebApp: the user closed the expiry toast. Acknowledges the timers in the
+    caller's role scope (idempotent) and stops the melody on all Voice PE —
+    unless another expired, unacknowledged timer (e.g. of another role) still
+    rings, so one role's click cannot silence an alarm nobody else noticed."""
+    role = await _timers.resolve_role(memory.pool(), jwt_payload.get("user_id"))
+    count = await scheduler.acknowledge_webapp(role, [str(i) for i in body.ids])
+    return {"acknowledged": count}
+
+
 @app.get("/stream/timers/pending")
-async def pending_timer(channel: str, jwt_payload: dict = Depends(verify_jwt)):
-    """Speech-gateway poll: the German announcement for any expired-but-unannounced
-    timer of `channel` (a device key like 'esphome:Büro'), marking them acknowledged.
-    Returns {"announcement": null} when there is nothing to say.
+async def pending_timer(channel: str | None = None, jwt_payload: dict = Depends(verify_jwt)):
+    """Speech-gateway poll at the start of every turn on any Voice PE.
 
-    Also stops a currently playing melody on this device (spec: addressing the
-    device stops the melody). alice-chat-stream cannot see HA's assist_satellite
-    state — "Hey Jarvis" bypasses HA's Assist pipeline entirely and streams
-    straight to alice-speech-gateway (PROJ-42), so that entity never changes.
-    The gateway is the only place that knows a new turn just started, hence it
-    calls this endpoint at the top of every turn and the stop happens here,
-    before STT even runs. Idempotent: media_player.media_stop on an already
-    stopped player is a no-op.
+    Refinement 2026-10-15 — the acknowledgement is house-wide and
+    role-independent: if an alarm rings, the melody stops on ALL speakers;
+    every expired, unacknowledged timer (any device, any role) is claimed
+    atomically and returned as one German announcement for the addressed
+    device only. `channel` (the addressed device) is only logged.
 
-    This endpoint mutates state (marks timers acknowledged, stops a melody) and
-    is only meant for the speech gateway, whose service token carries
-    iss="alice-speech-gateway". WebApp tokens (no iss) are rejected so a
-    browser client cannot suppress or enumerate another device's timers
-    (PROJ-85 QA BUG-7).
+    Response: {"announcement": str | null, "alarm_acknowledged": bool}.
+    `alarm_acknowledged` is true when this turn ended an alarm — also for the
+    device that lost the race against a second device addressed at the same
+    moment (no text, but the utterance is a pure acknowledgement and must not
+    go through the chat pipeline).
+
+    alice-chat-stream cannot see HA's assist_satellite state — "Hey Jarvis"
+    bypasses HA's Assist pipeline (PROJ-42) — so the gateway is the only place
+    that knows a new turn just started. The melody is only stopped while an
+    alarm is active, so a normal turn never touches the other speakers.
+
+    Mutates state, hence only for the speech gateway, whose service token
+    carries iss="alice-speech-gateway" (PROJ-85 QA BUG-7).
     """
     if jwt_payload.get("iss") != "alice-speech-gateway":
         raise HTTPException(status_code=403, detail="Nur für das Sprach-Gateway")
-    if not channel.startswith("esphome:") and channel != "esphome":
-        raise HTTPException(status_code=400, detail="channel muss ein Voice-PE-Gerät sein")
-    await scheduler.stop_melody(channel)
-    text = await _timer_scheduler.pending_announcement(memory.pool(), channel)
-    return {"announcement": text}
+    return await scheduler.acknowledge_by_voice(channel)
 
 
 class TimerRoleConfig(BaseModel):

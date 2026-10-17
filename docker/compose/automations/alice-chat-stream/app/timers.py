@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -499,6 +499,47 @@ async def list_active(pool, role: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def list_recent_expired(pool, role: str, window_seconds: int) -> list[dict]:
+    """Timers of the role scope that expired within `window_seconds` and that
+    nobody actively acknowledged (still ringing / undelivered, or only ended
+    by the max-time timeout) — what a returning WebApp tab still reports.
+    A timer acknowledged by voice or by a toast elsewhere is left out."""
+    rows = await pool.fetch(
+        "SELECT id, name, expires_at, fired_at FROM alice.timers "
+        "WHERE owner_role = $1 "
+        "AND (status = 'expired' OR (status = 'acknowledged' AND acknowledged_by = 'timeout')) "
+        "AND fired_at >= NOW() - make_interval(secs => $2) "
+        "ORDER BY expires_at ASC LIMIT 100",
+        role, window_seconds,
+    )
+    return [dict(r) for r in rows]
+
+
+# How far ahead of the server a browser countdown may be for its toast close
+# to still count (client clock skew + the watcher's wake latency).
+EARLY_ACK_SECONDS = 10
+
+
+async def acknowledge_webapp(pool, role: str, timer_ids: list[str]) -> int:
+    """Closing the WebApp toast acknowledges the timers (role scope only — a
+    child cannot click away an admin alarm). Idempotent: a timer already
+    acknowledged by voice / another tab is simply not counted. A catch-up
+    toast (timer ended by timeout) is re-marked 'webapp' so other tabs drop it.
+    A running timer whose expiry is (nearly) reached — the browser countdown
+    ran ahead of the watcher — is acknowledged before it fires, so it never
+    rings."""
+    row = await pool.fetchrow(
+        "WITH a AS (UPDATE alice.timers SET status = 'acknowledged', "
+        "acknowledged_by = 'webapp', fired_at = COALESCE(fired_at, NOW()), updated_at = NOW() "
+        "WHERE id = ANY($1::uuid[]) AND owner_role = $2 "
+        "AND (status = 'expired' OR (status = 'acknowledged' AND acknowledged_by = 'timeout') "
+        "OR (status = 'running' AND expires_at <= NOW() + make_interval(secs => $3))) "
+        "RETURNING 1) SELECT COUNT(*) AS c FROM a",
+        timer_ids, role, EARLY_ACK_SECONDS,
+    )
+    return int(row["c"])
+
+
 async def find_by_name(pool, role: str, name: str) -> list[dict]:
     """Active timers in the role scope whose name matches case-insensitively
     (exact, or the '<name> Timer' variant)."""
@@ -707,7 +748,9 @@ class TimerReply:
     # the WebApp response can carry the absolute expiry.
     wake_scheduler: bool = False
     created: dict | None = None       # {id, name, expires_at} for a new timer
-    cancelled_channels: list[str] = field(default_factory=list)  # stop a melody
+    # An expired, still ringing timer was deleted — stop the alarm unless
+    # another timer still rings (spec: delete beats a not-yet-acked expiry).
+    cancelled_expired: bool = False
 
 
 async def handle_timer_part(
@@ -985,8 +1028,7 @@ async def _do_delete(pool, part, role, now) -> TimerReply:
     res = await delete_timer(pool, target["id"])
     if res is None:
         return TimerReply(f"Der {target['name']} ist nicht mehr aktiv.")
-    channels = [res["origin_channel"]] if res.get("was_expired") else []
     return TimerReply(
         f"Der {res['name']} ist gelöscht.",
-        wake_scheduler=True, cancelled_channels=channels,
+        wake_scheduler=True, cancelled_expired=bool(res.get("was_expired")),
     )

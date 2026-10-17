@@ -18,7 +18,8 @@
 #   name          (optional)  human-readable device name (used in logs)
 #   room          (optional)  room label (passed to alice-chat-stream as device_id context)
 #   media_player  (optional)  HA media_player entity_id for this device's speaker
-#                             (PROJ-85 — Timer-Agent melody delivery). alice.ha_entities
+#                             (PROJ-85 — Timer-Agent melody delivery; every device with
+#                             this field rings on every timer expiry). alice.ha_entities
 #                             is Assist-expose-dependent and unreliable for a Voice PE
 #                             that talks to Alice over raw Wyoming and is not
 #                             necessarily HA-Assist-exposed, so the timer scheduler

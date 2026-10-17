@@ -1,8 +1,8 @@
 # PROJ-85: Timer-Agent
 
-## Status: Architected
+## Status: Deployed
 **Created:** 2026-09-07
-**Last Updated:** 2026-10-15
+**Last Updated:** 2026-10-16
 
 > **Refinement 2026-10-15 — geräteübergreifende Ablauf-Zustellung (offen, noch nicht umgesetzt):** Die Alltagsnutzung hat gezeigt, dass die Bindung der Ablauf-Meldung an das Setz-Gerät nicht trägt (Raumwechsel bei langen Timern → Melodie wird nicht gehört bzw. muss im Ursprungsraum quittiert werden). Neu: `timer-finished` / Melodie auf **allen** Voice PE, unabhängig vom Setz-Kanal (auch für WebApp-gesetzte Timer); **globale Quittierung** per Ansprache an einem beliebigen Voice PE oder per Schließen des WebApp-Toasts; Quittierung per Ansprache rollenunabhängig. Toast + Ton im sichtbaren WebApp-Tab bleibt. Geräteübergreifendes Ändern/Abfragen/Pausieren/Fortsetzen/Löschen ist bereits umgesetzt (alle Queries nur auf `owner_role` gescoped) und wird nur explizit festgeschrieben. Betroffene Stellen sind mit „(Refinement 2026-10-15)" markiert; Details siehe Abschnitt „Ablauf — Zustellung auf allen Geräten". Der übrige Feature-Umfang bleibt deployed.
 
@@ -1203,3 +1203,143 @@ Geräte-Offline-Fall nur code-seitig verifiziert.
 
 **Nachlauf-Fix vom 2026-09-17 (Alltagsnutzung) deployt und live verifiziert**
 — siehe Nachlauf-Abschnitt oben.
+
+---
+
+## Refinement 2026-10-15 — Implementation Notes (Backend + Frontend)
+
+**Build date:** 2026-10-16. Umsetzung nach Tech Design §H. Kein neuer Container, kein n8n, kein Weaviate-Eingriff, keine neuen Pakete.
+
+### Database — `sql/migrations/073-proj85-timer-house-wide-alarm.sql` (neu)
+- `alice.timers.acknowledged_by` (`voice` / `webapp` / `timeout`, NULL = nicht quittiert bzw. vor 073 quittiert).
+- Einmalige Altlasten-Bereinigung: alle noch `expired`-Timer (v. a. alle früher in der WebApp gesetzten) → `acknowledged` / `timeout`. **Muss vor dem Container-Update angewendet werden**, sonst sagt das erste „Hey Jarvis" alle Altlasten an.
+- Partieller Index auf `fired_at` (`status IN ('expired','acknowledged')`) für Ansage-Claim und WebApp-Nachhol-Liste.
+
+### `alice-chat-stream`
+- **`app/timer_scheduler.py`** — hausweite Alarm-Sitzung statt Gruppierung pro Gerät:
+  - `all_media_players()`: alle `media_player`-Einträge aus `device-mapping.yaml` + Werte aus `TIMER_MEDIA_PLAYER_MAP`, dedupliziert. Der DB-Fallback über `alice.ha_entities.area_name` entfällt (ohne Raum-Bezug nicht mehr sinnvoll, hätte sonst z. B. TVs erfasst).
+  - `_deliver()`: ein Start-Aufruf mit allen Playern (`media_players` als Komma-Liste), unabhängig von `origin_channel` (auch `webapp`) und Rolle. Läuft schon eine Sitzung, wird der Timer nur angehängt (keine zweite Melodie). Kein Token / kein Player / HA nicht erreichbar → Timer bleibt `expired` („nicht zugestellt") und wird vom nächsten angesprochenen Gerät angesagt.
+  - Sitzungs-Ende nach `TIMER_MELODY_MAX_SECONDS`: Stopp auf allen Playern + Sitzungs-Timer → `acknowledged`/`timeout`. No-Op, wenn die Sitzung vorher per Sprache/WebApp beendet wurde.
+  - Sweep in jedem Fire-Pass: nicht zugestellte `expired`-Timer älter als Maximalzeit + 300 s Puffer → `timeout` (Spec „innerhalb Maximalzeit + Puffer").
+  - `acknowledge_by_voice(channel)`: stoppt die Melodie **nur, wenn eine Sitzung läuft** (ein normaler Turn berührt keine fremden Lautsprecher), dann atomarer Claim per bedingtem `UPDATE … WHERE status='expired' RETURNING` über **alle** Geräte/Rollen → `voice`. Antwort `{announcement, alarm_acknowledged}`; `alarm_acknowledged` ist auch für das Gerät wahr, das den gleichzeitigen Claim verloren hat (Grace 5 s, nur für *andere* Geräte — das ansagende Gerät bleibt im Folgegespräch voll bedienbar).
+  - `acknowledge_webapp(role, ids)` + `stop_if_nothing_ringing()`: Stopp nur, wenn danach kein anderer `expired`-Timer mehr klingelt (Child-Toast schaltet Admin-Alarm nicht stumm).
+- **`app/timers.py`** — `list_recent_expired()` (Rolle, `expired` oder `timeout`-quittiert, `fired_at` im 15-min-Fenster), `acknowledge_webapp()` (Rollen-Scope, idempotent, markiert auch `timeout`-Nachhol-Timer als `webapp`, damit andere Tabs den Toast schließen). `TimerReply.cancelled_channels` → `cancelled_expired: bool`.
+- **`app/main.py`** — `GET /stream/timers` liefert zusätzlich die kürzlich abgelaufenen, nicht aktiv quittierten Timer (`status: "expired"`); neu `POST /stream/timers/acknowledge` (`{ids: uuid[1..50]}`, JWT, Rollen-Scope); `GET /stream/timers/pending` ohne Geräte-Filter (`channel` optional, nur Logging), weiterhin nur `iss=alice-speech-gateway`. Löschen eines gerade klingelnden Timers → `stop_if_nothing_ringing()`.
+- `.env.example`: Timer-Kommentare auf „alle Voice PE" aktualisiert; keine neuen Variablen.
+- nginx: unverändert (`/api/stream/timers`-Location erlaubt GET+POST, Zone `timer_limit`).
+
+### `alice-speech-gateway`
+- `wyoming_transport.py` — `_announce_expired_timers()` liefert `(announcement, alarm_acknowledged)`; bei `alarm_acknowledged` ohne Text wird die Äußerung ebenfalls als reine Quittierung behandelt (keine Chat-Pipeline). Rückwärtskompatibel (fehlendes Feld = `False`).
+- `config/device-mapping.example.yaml` — Hinweis: jedes Gerät mit `media_player` klingelt bei jedem Ablauf.
+
+### Home Assistant — `homeassistant/alice_timer_melody.yaml`
+- Start-Script nimmt `media_players` (Komma-Liste), speichert sie in `input_text.alice_timer_melody_player` (255 Zeichen ≈ 5–6 Geräte, Hinweis im Package), setzt Lautstärke und spielt die Schleife pro Player mit `continue_on_error` (ein Offline-Gerät blockiert die anderen nicht). Stop-Script stoppt alle Player (Variable oder gespeicherte Liste); Timeout-Automation unverändert.
+
+### Frontend
+- `src/hooks/use-toast.ts` — `toast()` reicht ein übergebenes `onOpenChange` durch (vorher überschrieben); nötig, um das Schließen durch den Nutzer zu erkennen.
+- `src/services/timers.ts` — `acknowledgeTimers(ids)`; `ActiveTimer.status` um `"expired"` erweitert.
+- `src/hooks/useTimerAlarm.ts` — Toast schließen → `acknowledgeTimers`; Toasts, deren Timer der Server nicht mehr listet (anderswo quittiert/gelöscht), schließen sich beim nächsten Abgleich selbst; Nachhol-Meldung anhand des Server-Zustands (`status: "expired"`) statt lokalem Countdown, im versteckten Tab kein Live-Toast mehr. Keine neuen i18n-Strings nötig (bestehende `timerAlarm.*`).
+- `npx tsc --noEmit` sauber, `next build` erfolgreich.
+
+### Tests
+- `alice-chat-stream/tests/test_timer_scheduler.py` neu geschrieben (25 Fälle): globale Sitzung über Kanäle/Rollen, Anhängen, nicht zugestellt (kein Player / HA down), Timeout-Quittierung, Sweep, atomare Ansage (zwei Geräte gleichzeitig), Folge-Turn desselben Geräts normal, normaler Turn ohne Alarm berührt keinen Lautsprecher, WebApp-Quittierung (Stopp-Bedingung, Rollen-Scope, Idempotenz), Nachhol-Liste, Player-Liste.
+- `tests/test_timers.py`: `TestCrossDeviceManagement` (Abfragen/Verlängern/Pausieren/Fortsetzen/Löschen von anderem Gerät und WebApp; andere Rolle sieht nichts) + Lösch-Signal `cancelled_expired`.
+- `alice-speech-gateway/tests/test_timer_pending.py` (neu, 5 Fälle): Antwort-Parsing inkl. „verlorenes Rennen" und Fehlerfälle.
+- `alice-chat-stream` gesamt (exkl. redis-loser `test_admin_dashboard`): **368 grün**.
+
+### Am Gerät zu verifizieren (§H5)
+Zwei Voice PE parallel inkl. Offline-Gerät, Stopp auf allen, gleichzeitiges Ansprechen, Echo/Versatz, WebApp-Nachhol-Verhalten — nach dem Deploy.
+
+---
+
+## QA Test Results — Refinement 2026-10-15 (2026-10-16)
+
+**Methode:** statisch + ausführbare Unit-Tests (Stack läuft nicht lokal; Projekt hat kein Vitest/Playwright-Setup — `package.json` ohne `test`-Scripts, wie bei den vorherigen PROJ-85-QA-Läufen). Code-Review des gesamten Refinement-Diffs, Security-Review, Regression über die vollständige `alice-chat-stream`-Suite. Hardware-Punkte (§H5) → nach Deploy am Gerät.
+
+### Automated test status
+| Suite | Ergebnis |
+|---|---|
+| `alice-chat-stream` (exkl. redis-loser `test_admin_dashboard`) | **368 passed** |
+| `alice-speech-gateway/tests/test_timer_pending.py` (neu) | 5 passed |
+| `alice-speech-gateway` gesamt | 66 passed, **10 failed — vorbestehend seit PROJ-43** (`config.Device` hat kein `user_id` mehr, Test-Fixtures übergeben es noch; identisch vor und nach dem Refinement-Diff, keine PROJ-85-Regression) |
+| Frontend `npx tsc --noEmit` / `next build` | sauber / erfolgreich |
+| `homeassistant/alice_timer_melody.yaml` | YAML valide |
+
+### Acceptance Criteria — Ablauf: Zustellung auf allen Geräten
+| AC | Ergebnis |
+|---|---|
+| Melodie auf allen Voice PE mit `media_player`, unabhängig von Setz-Kanal und Rolle | PASS (`test_alarm_rings_on_all_speakers_for_any_channel_and_role`) |
+| WebApp-gesetzter Timer klingelt auf allen Voice PE | PASS |
+| `origin_channel` gespeichert, steuert keine Zustellung | PASS (nur Logging in `_fire_due`) |
+| Globale Quittierung per Ansprache: Stopp überall, nur angesprochenes Gerät sagt an, alle offenen Timer in einer Meldung | PASS (`test_voice_ack_stops_all_and_announces`, `test_pending_announcement_any_device_any_role`) |
+| Quittierung per Ansprache rollenunabhängig; Verwaltung bleibt rollen-gescoped | PASS |
+| Globale Quittierung per WebApp-Toast (Rollen-Scope, Stopp überall, andere Tabs schließen Toast beim Abgleich) | PASS (Code-Review Hook + `test_webapp_ack_*`) — siehe BUG-12 (Randfall) |
+| Idempotente Zweit-Quittierung | PASS (`test_webapp_ack_idempotent_after_voice`, `test_two_devices_at_once_one_announcement`) |
+| Selbst-Stopp nach Maximalzeit überall, Timer gilt als quittiert | PASS (`test_session_timeout_stops_everywhere_and_acks_timeout`) |
+| Sammel-Fenster global, Anhängen an laufende Sitzung | PASS (`test_timer_due_during_session_attaches`) — siehe BUG-11 (HA-Script-Modus) |
+| Einzelnes Gerät offline → übersprungen; **kein** Gerät erreichbar → „nicht zugestellt", Ansage beim nächsten Kontakt | **FAIL** → BUG-10 (nur „HA nicht erreichbar / kein Player konfiguriert" erkannt, nicht „alle Player offline") |
+| Toast + Ton im sichtbaren Tab unverändert | PASS |
+| Geräteübergreifendes Ändern/Abfragen/Pausieren/Löschen (Regressionstest) | PASS (`TestCrossDeviceManagement`) |
+| Unabhängig von PROJ-104 | PASS |
+
+### Edge Cases (Refinement)
+| Edge Case | Ergebnis |
+|---|---|
+| Raumwechsel bei langem Timer | PASS (alle Geräte klingeln) |
+| Zwei Personen, zwei Geräte gleichzeitig | PASS (eine Ansage; Verlierer = reine Quittierung via `alarm_acknowledged`) |
+| Child-Timer, admin spricht an | PASS |
+| Toast schließen vs. Ansprache gleichzeitig | PASS (bedingtes UPDATE, ein Gewinner) |
+| WebApp-Timer ohne Voice PE | PASS (Toast/Nachhol wie bisher) |
+| Dritter Timer während laufender Melodie | PASS (angehängt) |
+| Folge-Befehl am ansagenden Gerät direkt nach der Ansage | PASS (`test_same_device_follow_up_turn_is_normal`) |
+| Normaler Turn ohne Alarm berührt keine Lautsprecher | PASS |
+| Altlasten nach Deploy | PASS (Migration 073 + Sweep + Ansage-Cutoff) |
+
+### Security Audit
+- `POST /stream/timers/acknowledge`: JWT Pflicht, Rolle frisch aus `alice.users`, Update hart auf `owner_role` gescoped, Pydantic-Validierung (`uuid`, 1–50 ids), parametrisierte Query, nginx-Zone `timer_limit`. Child kann keinen Admin-Alarm quittieren (`test_webapp_ack_is_role_scoped`). PASS.
+- `GET /stream/timers/pending`: weiterhin nur `iss=alice-speech-gateway` (BUG-7 bleibt geschlossen); `channel` nur noch geloggt. Die Ansage nennt Timer-Namen anderer Rollen — bewusste Produktentscheidung (§H4).
+- `GET /stream/timers`: zusätzliche Felder nur aus dem eigenen Rollen-Scope. Kein neuer Secret-/Env-Bedarf. Keine RLS-Änderung (keine neue Tabelle). PASS.
+
+### Bugs Found
+#### BUG-10 (Medium): Alle Voice PE offline → Alarm gilt als zugestellt und wird nie angesagt
+`_deliver()` wertet nur den HA-REST-Aufruf aus. `script.turn_on` antwortet 200, auch wenn alle Player `unavailable` sind → Sitzung aktiv → nach Maximalzeit `timeout`-quittiert → beim nächsten Kontakt keine Ansage. Repro: beide Voice PE vom Strom, Timer ablaufen lassen, nach > 2 min Voice PE wieder an, „Hey Jarvis" → keine Ansage. Verstößt gegen AC „kein Gerät erreichbar …".
+#### BUG-11 (Medium): Neuer Ablauf kurz nach einem Stopp wird von HA verworfen
+`alice_timer_melody_start` läuft im Default-Modus `single`. Nach einem Stopp läuft die Schleife bis zum Ende des laufenden `delay` (≤ 6 s) weiter; ein Start-Aufruf in diesem Fenster wird von HA mit „Already running" ignoriert, während Alice die Sitzung als aktiv führt → keine Melodie. Mit globalen Sitzungen wahrscheinlicher (jeder Timer im Haus). Repro: Timer A klingelt, Ansprache, Timer B läuft 3 s später ab → stumm.
+#### BUG-12 (Low): Toast geschlossen, bevor der Server den Timer ausgelöst hat
+Zählt der Client (Uhr leicht vor) auf 0 und der Nutzer schließt sofort, findet die Quittierung noch `running` → No-Op; Sekunden später klingelt die Melodie überall, der Tab zeigt keinen Toast mehr (bereits „handled").
+#### BUG-13 (Low): Schließen eines Nachhol-Toasts stoppt alle Lautsprecher, obwohl nichts klingelt
+`acknowledge_webapp` → `stop_if_nothing_ringing()` ruft `media_stop` auf allen Playern auch ohne laufende Sitzung (z. B. Nachhol-Toast nach `timeout`) — kann eine unabhängige Wiedergabe auf einem Voice PE abbrechen. Gleiches gilt für Löschen.
+
+### Summary
+- AC: 12 PASS, 1 FAIL (BUG-10); Edge Cases: alle PASS.
+- Bugs: 0 Critical, 0 High, 2 Medium, 2 Low.
+- Security: PASS.
+- **Production Ready: YES** (keine Critical/High) — Fix der Medium/Low-Bugs vor Deploy empfohlen.
+
+## Re-QA — Refinement, nach Fixes (2026-10-16)
+
+| Bug | Fix | Verifikation |
+|---|---|---|
+| BUG-10 (Medium) | `_deliver()` prüft vor dem Start jeden Player über `GET /api/states/<entity>`; `unavailable`/`unknown`/Fehler → übersprungen. Kein Player erreichbar → keine Sitzung, Timer bleibt `expired` und wird beim nächsten Kontakt angesagt. Nur erreichbare Player gehen an das Start-Script. | `test_offline_speaker_is_skipped`, `test_all_speakers_offline_leaves_timer_undelivered` |
+| BUG-11 (Medium) | `alice_timer_melody_start` mit `mode: restart` — ein Start während der Auslauf-Phase der alten Schleife startet die Melodie neu statt verworfen zu werden. | Code-Review; am Gerät mit §H5 gegenzuprüfen |
+| BUG-12 (Low) | `acknowledge_webapp()` quittiert auch einen noch `running` Timer, dessen Ablauf ≤ 10 s bevorsteht (`EARLY_ACK_SECONDS`), setzt `fired_at` → der Wächter löst ihn nicht mehr aus. | `test_webapp_ack_before_watcher_fired_prevents_ringing`, `test_webapp_ack_does_not_touch_far_future_timer` |
+| BUG-13 (Low) | `stop_if_nothing_ringing()` tut ohne aktive Alarm-Sitzung nichts (WebApp-Quittierung, Löschen). | `test_webapp_ack_of_catch_up_marks_webapp_and_leaves_speakers_alone` |
+
+**Automated:** `alice-chat-stream` **372 passed** (exkl. redis-loser `test_admin_dashboard`); Gateway `test_timer_pending.py` 5 passed (die 10 vorbestehenden PROJ-43-Fixture-Fehler unverändert); `py_compile` aller geänderten Python-Module ok; `npx tsc --noEmit` sauber; HA-Package YAML valide.
+
+**AC:** 13/13 PASS (BUG-10-AC jetzt erfüllt). **Bugs:** 4 gefunden, 4 behoben, 0 offen. **Security:** PASS (unverändert). **Production Ready: YES** — §H5-Hardware-Punkte (zwei Geräte parallel, Offline-Gerät, Stopp überall, gleichzeitiges Ansprechen, WebApp-Nachhol) nach dem Deploy am Gerät. Deploy-Reihenfolge: Migration 073 **vor** dem Container-Update, HA-Package neu laden.
+
+## Deployment — Refinement 2026-10-15 (hausweite Alarm-Zustellung)
+
+**Deployed:** 2026-10-17 (Migration 073, Frontend, `alice-chat-stream`, `alice-speech-gateway`, HA-Package `alice_timer_melody.yaml` neu geladen).
+
+**Dependency-Fix beim Deploy (kein PROJ-85-Code):** Der Neubau des `alice-speech-gateway`-Images hatte die Pins ausgehebelt — torch 2.14.1 (keine Maxwell-Kernel → „CUDA error: no kernel image", Speaker-ID aus) und av 19.0.1 (`metadata_errors` entfernt → STT-Fehler bei jeder Äußerung). Behoben mit `av>=11,<14`, `speechbrain>=1.0,<1.1` und neuer `constraints.txt` (`torch==2.3.1+cu121`, `torchaudio==2.3.1+cu121`), die das Dockerfile per `-c` anwendet; ein Versionskonflikt bricht den Build jetzt ab, statt still zu upgraden. Auf dem Server bestätigt: STT und Speaker-ID laufen wieder.
+
+**Live-Test am Gerät (2026-10-17):**
+- Timer per Voice PE gesetzt → Melodie auf **allen** Voice PE → Stop per Ansprache eines Geräts ✅
+- Timer in der WebApp gesetzt → Melodie auf allen Voice PE, Toast in der WebApp → Stop per Voice PE ✅
+- Toast in der WebApp schließen → Timer quittiert, Melodie stoppt ✅ (Chat-Quittierung bewusst nicht vorgesehen)
+
+**Noch nicht live geprüft (§H5):** zwei Voice PE gleichzeitig ansprechen, ein Gerät offline, Timer kurz nach einem Stopp (BUG-11, `mode: restart`), Nachhol-Meldung nach Zeitablauf-Quittierung.
+
+**Bedienhinweis WebApp:** Der Alarm wird in der WebApp durch Schließen des Toasts (X) quittiert. Per Chat-Befehl ("Lösche den Timer") ist ein *bereits abgelaufener* Timer nicht ansprechbar — Abfragen/Löschen im Chat wirken nur auf laufende/pausierte Timer.
