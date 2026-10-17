@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
 faster-whisper>=1.0,<2.0
+# faster-whisper decodes via av.open(..., metadata_errors=...), a parameter
+# PyAV removed in 14 ("Whisper transcription failed: open() got an unexpected
+# keyword argument 'metadata_errors'", 2026-10-17).
+av>=11,<14
 wyoming>=1.5,<2.0
 httpx>=0.27,<0.29
 httpx-sse>=0.4,<0.5
@@ -9,7 +13,9 @@ cryptography>=42,<44
 PyYAML>=6.0,<7.0
 webrtcvad>=2.0,<3.0
 # PROJ-43: Speaker Recognition
-speechbrain>=1.0,<2.0
+# <1.1: 1.1.x pulls a torch newer than the Maxwell-capable 2.3.1 pinned in
+# constraints.txt.
+speechbrain>=1.0,<1.1
 asyncpg>=0.29,<0.31
 numpy>=1.24,<3.0
 python-multipart>=0.0.9,<0.1

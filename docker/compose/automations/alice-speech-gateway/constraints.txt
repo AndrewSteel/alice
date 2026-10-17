@@ -1,0 +1,8 @@
+# Hard pins applied to `pip install -r requirements.txt` (see Dockerfile).
+# torch/torchaudio are installed beforehand from the PyTorch cu121 index: the
+# last release with Maxwell (CC 5.2 / TITAN X) CUDA kernels. Without this
+# constraint pip silently upgraded them while resolving SpeechBrain
+# (torch 2.14 -> "CUDA error: no kernel image is available", 2026-10-17); with
+# it, a conflicting dependency fails the build instead.
+torch==2.3.1+cu121
+torchaudio==2.3.1+cu121
