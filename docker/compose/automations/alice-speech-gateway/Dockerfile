@@ -34,8 +34,10 @@ RUN pip install --no-cache-dir \
     "torchaudio==2.3.1+cu121" \
     --index-url https://download.pytorch.org/whl/cu121
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt constraints.txt ./
+# -c constraints.txt: keep the torch pin above — pip must not upgrade it while
+# resolving SpeechBrain (it did, 2026-10-17); a conflict now fails the build.
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 COPY app/ ./app/
 
