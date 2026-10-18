@@ -607,7 +607,8 @@
     "timeSavedMode": "fixed",
     "errorWorkflow": "po2OuxzG5htVHK6E",
     "callerPolicy": "workflowsFromSameOwner",
-    "executionTimeout": -1
+    "executionTimeout": -1,
+    "saveDataSuccessExecution": "none"
   },
   "versionId": "d99e342a-9633-4e4f-a521-9da0bbdda716",
   "meta": {
