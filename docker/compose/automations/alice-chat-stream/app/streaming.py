@@ -60,6 +60,13 @@ OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "true").strip().lower() not in (
 )
 
 MAX_TOOL_ROUNDS = 4
+# Appended in the last round (no tools offered). Internal instruction, so
+# English; the reply language follows the conversation.
+FINAL_ROUND_HINT = (
+    "No more tool calls are possible. Answer the original question now, using "
+    "only the tool results above, in the language of this conversation. If the "
+    "results do not contain the answer, say so plainly and summarise what was found."
+)
 
 # Hard cap per LLM round (reasoning + answer). Without it a degenerate model
 # output ran for 14 799 tokens / 93 s, read aloud sentence by sentence on the
@@ -306,6 +313,15 @@ async def stream_chat(
             # PROJ-87/106: calendar / lists tools when permitted; such a request
             # forces a matching tool call in the first round (no invented results).
             round_tool_list, tool_choice = lists_tools.round_tools(base_tools, calendar, lists, rounds)
+            # Last allowed round: no tools, so the model must answer from the
+            # results so far — a tool call here would end the loop without any
+            # reply (PROJ-99 BUG-4: Qwen3.8 chains search + several body fetches).
+            # Without tools alone the model still wrote <tool_call> markup as plain
+            # text, so it is also told explicitly (user role: Qwen templates only
+            # accept a system message at the start).
+            if rounds > MAX_TOOL_ROUNDS:
+                round_tool_list, tool_choice = [], None
+                payload["messages"] = messages + [{"role": "user", "content": FINAL_ROUND_HINT}]
             # In a forced tool round the reply comes from the tool result; text
             # the model writes before its call is dropped, not streamed / read
             # aloud (live: an invented reminder question before list_events).

@@ -58,3 +58,38 @@ def test_normal_answer_is_not_degenerate():
 
 def test_max_tokens_default():
     assert LLM_MAX_TOKENS == 4096
+
+
+def test_last_round_offers_no_tools_and_answers(monkeypatch):
+    """PROJ-99 BUG-4: a model that keeps calling tools must still end with an
+    answer — the last allowed round gets no tools."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app import streaming
+    from tests.test_streaming_calendar import (
+        _Exc, _FakeLLMClient, _text_round, _tokens, _tool_call_round,
+    )
+
+    monkeypatch.setattr(streaming.httpx, "AsyncClient", _FakeLLMClient, raising=False)
+    monkeypatch.setattr(streaming.httpx, "TimeoutException", _Exc, raising=False)
+    monkeypatch.setattr(streaming.httpx, "HTTPError", _Exc, raising=False)
+    tool = {"type": "function", "function": {"name": "get_email_body", "parameters": {}}}
+    streaming.tools.tool_schema.return_value = [tool]
+    monkeypatch.setattr(streaming.tools, "execute_tool", AsyncMock(return_value={"body": "x"}))
+    _FakeLLMClient.rounds = [_tool_call_round("get_email_body", {"uid": "1"})] * streaming.MAX_TOOL_ROUNDS \
+        + [_text_round("Nichts gefunden.")]
+    _FakeLLMClient.payloads = []
+
+    async def collect():
+        return [sse.decode() async for sse, _ in streaming.stream_chat(
+            user_message="x", history=[], system_prompt="s", user_id="u")]
+    events = asyncio.run(collect())
+
+    payloads = _FakeLLMClient.payloads
+    assert len(payloads) == streaming.MAX_TOOL_ROUNDS + 1
+    assert all("tools" in p for p in payloads[:-1])
+    assert "tools" not in payloads[-1]
+    assert payloads[-1]["messages"][-1] == {"role": "user", "content": streaming.FINAL_ROUND_HINT}
+    assert all(m.get("content") != streaming.FINAL_ROUND_HINT for p in payloads[:-1] for m in p["messages"])
+    assert _tokens(events) == "Nichts gefunden."

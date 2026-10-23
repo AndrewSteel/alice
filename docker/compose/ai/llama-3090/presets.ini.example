@@ -10,7 +10,9 @@
 ;   rewrites it (e.g. [qwen3.5:27b-q4_K_M] was exposed as "qwen3.5:Q4_K_M").
 ;   So the IDs must be colon-free — hence the plain names below.
 ;
+;   qwen3.8-27b            -> Qwen3.8-27B  (dense, hybrid thinking, weights + mmproj)
 ;   qwen3-vl-30b           -> Qwen3-VL-30B-A3B-Instruct  (MoE, weights + mmproj)
+;                             NON-thinking — kept only as fallback (PROJ-99 bug)
 ;   mistral-small-3.2-24b  -> Mistral-Small-3.2-24B-Instruct-2506  (dense, text)
 ;
 ; PATHS: must be ABSOLUTE. The router spawns each sub-server with a working
@@ -32,11 +34,31 @@ flash-attn  = on
 ; other model evicts it (router --models-max 1). This mirrors the old Ollama
 ; OLLAMA_KEEP_ALIVE=-1 so qwen does not drop out during the working day.
 
+[qwen3.8-27b]
+; bartowski/Qwen3.8-27B-GGUF. Replaces qwen3-vl-30b, which is an Instruct-only
+; (non-thinking) model and silently disabled the PROJ-37 reasoning stream.
+model      = /models/Qwen3.8-27B-Q4_K_M.gguf
+mmproj     = /models/mmproj-Qwen3.8-27B-f16.gguf
+; Warm qwen right after a container (re)start so the first chat is instant.
+load-on-startup = true
+parallel = 1
+; 32k instead of the global 16k: email bodies in the tool loop overflowed 16k
+; (PROJ-99 BUG-4). Only every 4th layer is full attention (Gated DeltaNet), so
+; the KV cache is small: measured ~22.0 / 24 GB total incl. Weaviate.
+ctx-size = 32768
+; Hybrid thinking: on by default, alice-chat-stream turns it off per request
+; via chat_template_kwargs.enable_thinking=false (OLLAMA_THINK=false).
+reasoning-format = deepseek
+; Qwen-recommended sampling for thinking mode. alice-chat-stream sends no
+; sampling params, so these server-side defaults apply.
+temp  = 1.0
+top-p = 0.95
+top-k = 20
+min-p = 0.0
+
 [qwen3-vl-30b]
 model      = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
 mmproj     = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
-; Warm qwen right after a container (re)start so the first chat is instant.
-load-on-startup = true
 ; Qwen3-VL needs >=1024 image tokens for reliable grounding; without this it
 ; down-samples the (already <=1024 px) DMS images too far and the descriptions
 ; get vague. See https://github.com/ggml-org/llama.cpp/issues/16842

@@ -31,6 +31,9 @@ N8N_TOOL_SEARCH_URL = os.environ.get("N8N_TOOL_SEARCH_URL", "").strip()
 N8N_TOOL_HA_URL = os.environ.get("N8N_TOOL_HA_URL", "").strip()
 N8N_TOOL_MAIL_URL = os.environ.get("N8N_TOOL_MAIL_URL", "").strip()
 TOOL_TIMEOUT_SECONDS = float(os.environ.get("TOOL_TIMEOUT_SECONDS", "40"))
+# Cap for a single email body in the tool result (~3-4k tokens). Without it two
+# long mails overflowed the 16k llama.cpp context mid tool loop (HTTP 400).
+EMAIL_BODY_MAX_CHARS = int(os.environ.get("EMAIL_BODY_MAX_CHARS", "12000"))
 
 
 # ---------------------------------------------------------------------------
@@ -385,12 +388,17 @@ async def execute_tool(
         if name == "get_email_body":
             if not N8N_TOOL_MAIL_URL:
                 return {"error": "Mail-Tool ist nicht konfiguriert."}
-            return await _call_n8n_mail({
+            result = await _call_n8n_mail({
                 "operation": "get_email_body",
                 "user_id": user_id,
                 "mailbox_id": str(args.get("mailbox_id") or ""),
                 "uid": str(args.get("uid") or ""),
             }, client)
+            body = result.get("body")
+            if isinstance(body, str) and len(body) > EMAIL_BODY_MAX_CHARS:
+                result["body"] = body[:EMAIL_BODY_MAX_CHARS] + "\n[… gekürzt]"
+                result["truncated"] = True
+            return result
 
         return {"error": f"Unbekanntes Tool: {name}"}
 

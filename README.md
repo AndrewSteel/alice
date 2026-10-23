@@ -31,7 +31,7 @@ SPEECH GATEWAY (alice-speech-gateway — Python: Whisper large-v3 STT, Piper TTS
     ↓
 CHAT SERVICE (alice-chat-stream — Python/FastAPI, SSE streaming)
     ↓
-ORCHESTRATION (llama.cpp — Qwen3-VL-30B-A3B-Instruct via native tool-use;
+ORCHESTRATION (llama.cpp — Qwen3.8-27B via native tool-use;
     n8n sub-workflows for HA, DMS, Mail tools)
     ↓
 DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
@@ -71,7 +71,7 @@ DATA (Weaviate, PostgreSQL alice schema, Redis, NAS documents)
 
 | Container                     | GPU      | VRAM    | Purpose                                |
 | ----------------------------- | -------- | ------- | -------------------------------------- |
-| llama-3090 (llama.cpp router) | RTX 3090 | ~20.9 GB | Qwen3-VL-30B-A3B-Instruct Q4_K_M + F16 mmproj (chat/vision, id `qwen3-vl-30b`, ctx 16384, parallel 1) OR Mistral-Small-3.2-24B Q4_K_M ~14 GB (DMS, id `mistral-small-3.2-24b`) — one model resident at a time |
+| llama-3090 (llama.cpp router) | RTX 3090 | ~19.5 GB | Qwen3.8-27B Q4_K_M + F16 mmproj (chat/vision, id `qwen3.8-27b`, ctx 32768, parallel 1) OR Mistral-Small-3.2-24B Q4_K_M ~14 GB (DMS, id `mistral-small-3.2-24b`) — one model resident at a time |
 | weaviate-transformers         | RTX 3090 | ~0.8 GB | text2vec embeddings (MiniLM-L12-v2); CUDA allocator capped (`PYTORCH_CUDA_ALLOC_CONF`) — was ~3.3 GB |
 | weaviate-multi2vec            | RTX 3090 | ~1.4 GB | CLIP image+text embeddings (kept on GPU)|
 | alice-speech-gateway          | RTX 3090 | shared  | Piper TTS                              |
@@ -110,7 +110,7 @@ slot) and the allocator cap on `weaviate-transformers` are what make it fit;
 | `n8n`                   | Workflow engine: HA + DMS + mail tools, DMS pipeline, auth/session webhooks                 |
 | `wyoming-whisper`       | Whisper large-v3 STT (Wyoming protocol, port 10300)                                         |
 | `wyoming-piper`         | Piper TTS (Wyoming protocol, port 10200)                                                    |
-| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads Qwen3-VL-30B-A3B (id `qwen3-vl-30b`) / Mistral-Small-3.2-24B (id `mistral-small-3.2-24b`), one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
+| `llama-3090`            | llama.cpp router (RTX 3090) — the single inference endpoint for chat, DMS and vision; dynamically loads Qwen3.8-27B (id `qwen3.8-27b`) / Mistral-Small-3.2-24B (id `mistral-small-3.2-24b`), one resident, no idle-unload; `alice-llm-model-warmup` reloads qwen at 07:00. External: `llama3090.happy-mining.de` (old `ollama3090…` → 301). |
 | `alice-llm-gateway`     | Priority gateway in front of `llama-3090` (PROJ-111): the only route to the GPU; hands the single slot to interactive callers (chat, OpenWebUI, external vhost) before background ones (n8n, extractor). Per-caller keys, Prometheus job `llm-gateway` |
 | `ollama-titan`          | Ollama on the TITAN X — Jupyter / GPU experiments only, not in the Alice request path       |
 | `weaviate`              | Vector search                                                                               |

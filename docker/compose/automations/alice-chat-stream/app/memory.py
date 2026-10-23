@@ -51,13 +51,13 @@ LANGUAGES: list[dict[str, str]] = [
         "code": "de",
         "displayName_de": "Deutsch",
         "displayName_en": "German",
-        "llm_instruction": "Antworte immer auf Deutsch. Sei präzise und hilfreich.",
+        "llm_instruction": "Antworte und denke immer auf Deutsch. Sei präzise und hilfreich.",
     },
     {
         "code": "en",
         "displayName_de": "Englisch",
         "displayName_en": "English",
-        "llm_instruction": "Reply in English.",
+        "llm_instruction": "Reply and think in English.",
     },
 ]
 

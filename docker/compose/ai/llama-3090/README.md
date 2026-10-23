@@ -32,7 +32,8 @@ strings in the `model` field (`$env.OLLAMA_MODEL` / `OLLAMA_MODEL_DMS` /
 
 | Model ID (`model` field) | Actual model | Role |
 | --- | --- | --- |
-| `qwen3-vl-30b` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | chat/agent + vision |
+| `qwen3.8-27b` | **Qwen3.8-27B** (dense 27 B, hybrid thinking), Q4_K_M + F16 mmproj (bartowski) | chat/agent + vision |
+| `qwen3-vl-30b` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | fallback only — **non-thinking**, no PROJ-37 reasoning stream |
 | `mistral-small-3.2-24b` | **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M, text only | DMS text extraction |
 
 ### VRAM budget (the 3090's 24 GB is shared)
@@ -42,6 +43,7 @@ Measured on 2026-09-02 with qwen loaded and `parallel = 1`:
 | Process | VRAM | Note |
 | --- | --- | --- |
 | `llama-server` (qwen3-vl-30b, ctx 16384, mmproj, image-min-tokens 1024, parallel 1) | **~20.9 GB** | one model resident |
+| `llama-server` (qwen3.8-27b, ctx 32768, mmproj, parallel 1) — measured 2026-10-23 | ~19.5 GB | total ~22.0 / 24 GB incl. Weaviate, ~2.5 GB free |
 | `weaviate-transformers` (MiniLM) | ~0.8 GB | was ~3.3 GB → `PYTORCH_CUDA_ALLOC_CONF` cap on the container brought it down |
 | `weaviate-multi2vec` (CLIP) | ~1.4 GB | unchanged — vision encoder, kept on GPU |
 | **Total** | **~23.1 / 24 GB** | ~1.5 GB free |
@@ -149,6 +151,13 @@ hf download Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF \
   mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf \
   --local-dir .
 
+# --- chat model: Qwen3.8-27B (hybrid thinking; needs llama.cpp >= b10896) ---
+# Qwen3-VL-30B-A3B-*Instruct* above never thinks — PROJ-99 bugfix.
+hf download bartowski/Qwen3.8-27B-GGUF \
+  Qwen3.8-27B-Q4_K_M.gguf \
+  mmproj-Qwen3.8-27B-f16.gguf \
+  --local-dir .
+
 # --- DMS text model: Mistral-Small-3.2-24B-Instruct-2506, weights only ---
 # Option A: official repo (GATED — run `hf auth login` first + accept the
 #           licence at https://huggingface.co/mistralai/Mistral-Small-3.2-24B-Instruct-2506)
@@ -166,10 +175,21 @@ router spawns each sub-server with a working directory that is not `/models`,
 so a bare filename fails with "No such file or directory":
 
 ```ini
+[qwen3.8-27b]
+model  = /models/Qwen3.8-27B-Q4_K_M.gguf
+mmproj = /models/mmproj-Qwen3.8-27B-f16.gguf
+load-on-startup  = true
+parallel         = 1
+ctx-size         = 32768  ; mail bodies in the tool loop overflow 16k
+reasoning-format = deepseek
+temp = 1.0                ; Qwen-recommended thinking-mode sampling
+top-p = 0.95
+top-k = 20
+min-p = 0.0
+
 [qwen3-vl-30b]
 model  = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
 mmproj = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
-load-on-startup  = true
 image-min-tokens = 1024   ; Qwen3-VL grounding quality
 parallel         = 1      ; one KV slot — VRAM (see VRAM budget above)
 reasoning-format = deepseek
@@ -181,7 +201,7 @@ model = /models/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
 Check the file names first: `docker exec llama-3090 ls -la /models/`.
 Verify sizes: Qwen Q4_K_M ≈ 18.6 GB, mmproj-F16 ≈ 1.1 GB, Mistral Q4_K_M ≈ 14 GB.
 After (re)start, `GET /v1/models` (with the bearer token) must list exactly
-`qwen3-vl-30b` and `mistral-small-3.2-24b`.
+`qwen3.8-27b`, `qwen3-vl-30b` and `mistral-small-3.2-24b`.
 
 ### Alternative — let llama.cpp pull from HF on first request
 

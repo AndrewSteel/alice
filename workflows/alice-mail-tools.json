@@ -140,7 +140,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Fetch full email body from IMAP via alice-mail-reader\n// Requires mailbox credentials from Postgres\nconst axios = require('axios');\nconst input = $('Input Normalizer').first().json;\nconst { userId, mailboxId, uid } = input;\n\nif (!mailboxId || !uid) {\n  return [{ json: { body: null, error: 'mailbox_id und uid sind erforderlich' } }];\n}\n\ntry {\n  // Get mailbox credentials\n  const pgRes = await axios.post('http://n8n:5678/webhook-test/dummy', {}).catch(() => null); // placeholder\n  // We use a different approach: credentials come pre-resolved from the caller (alice-chat-stream passes them),\n  // or we fetch them in the PG node below\n  return [{ json: { _fetch_body: true, mailboxId, uid } }];\n} catch(e) {\n  return [{ json: { body: null, error: e.message } }];\n}"
+        "jsCode": "// Fetch full email body from IMAP via alice-mail-reader\n// Requires mailbox credentials from Postgres (fetched in the PG node below)\nconst input = $('Input Normalizer').first().json;\nconst { mailboxId, uid } = input;\n\nif (!mailboxId || !uid) {\n  return [{ json: { body: null, error: 'mailbox_id und uid sind erforderlich' } }];\n}\n\nreturn [{ json: { _fetch_body: true, mailboxId, uid } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -171,7 +171,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const creds = $json;\nif (!creds.imap_host) return [{ json: { body: null, error: 'Postfach nicht gefunden oder kein Zugriff' } }];\n// Decrypt password\nconst crypto = require('crypto');\nconst KEY = crypto.createHash('sha256').update('alice-mail-enc-key-2026').digest();\nconst [ivHex, encHex] = creds.password_enc.split(':');\nconst iv = Buffer.from(ivHex, 'hex');\nconst enc = Buffer.from(encHex, 'hex');\nconst decipher = crypto.createDecipheriv('aes-256-cbc', KEY, iv);\nconst password = Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');\nconst uid = $('Prep: Get Body').first().json.uid;\nreturn [{ json: { host: creds.imap_host, port: creds.imap_port, username: creds.imap_username, password, ssl: creds.ssl_enabled, uid } }];"
+        "jsCode": "const creds = $json;\nif (!creds.imap_host) return [{ json: { body: null, error: 'Postfach nicht gefunden oder kein Zugriff' } }];\n// Password stays encrypted; alice-mail-reader decrypts it (same as alice-mail-sync)\nconst uid = $('Prep: Get Body').first().json.uid;\nreturn [{ json: { host: creds.imap_host, port: creds.imap_port, username: creds.imap_username, password_enc: creds.password_enc, ssl: creds.ssl_enabled, uid } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -181,10 +181,11 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "http://alice-mail-reader:8007/body",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ host: $json.host, port: $json.port, username: $json.username, password: $json.password, ssl: $json.ssl, uid: $json.uid }) }}",
+        "jsonBody": "={{ JSON.stringify({ host: $json.host, port: $json.port, username: $json.username, password_enc: $json.password_enc, ssl: $json.ssl, uid: $json.uid }) }}",
         "options": { "timeout": 30000 }
       },
       "type": "n8n-nodes-base.httpRequest",
