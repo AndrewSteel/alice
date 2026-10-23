@@ -2,7 +2,7 @@
 
 ## Status: Deployed
 **Created:** 2026-09-01
-**Last Updated:** 2026-09-02
+**Last Updated:** 2026-10-23
 
 ## Kontext & Motivation
 
@@ -929,3 +929,160 @@ kein Idle-Unload. Modell-Wechsel qwen ↔ mistral automatisch über das
   `env_file`). Fix: `environment:`-Zeile ergänzt.
 - Preset-`:`-Sektionsnamen + relative Pfade (s. QA-Nachträge 2026-09-02).
 - `parallel = 4` (Default) → `parallel = 1` fürs VRAM-Budget.
+
+## Bugfix BUG-4: Kein Thinking seit dem Cutover (2026-10-23, deployed)
+
+### Symptom
+
+Seit dem Cutover (2026-09-02) erscheinen im Chat keine Thinking-Abschnitte mehr;
+Antworten kommen sehr schnell, sind aber qualitativ schwächer. Beispiel: „Suche in
+den Mails nach Datum und Uhrzeit für das Konzert Zauberflöte im Isernhagenhof.“ →
+das Modell startet keine Mail-Suche, sondern fragt zurück. In `alice.messages`
+gibt es seit 2026-09-02 **0** Einträge mit `msg_type='llm_thinking'` (bei >250
+Assistant-Antworten).
+
+### Ursache
+
+Kein Code-Fehler — `alice-chat-stream` liest `delta.reasoning_content` korrekt,
+`OLLAMA_THINK=true`, `reasoning-format = deepseek` gesetzt. Das gewählte Modell
+**Qwen3-VL-30B-A3B-Instruct** ist eine reine **Instruct-Variante ohne Denkphase**
+(Qwen3-VL gibt es getrennt als Instruct und Thinking). Das abgelöste Ollama-Modell
+`qwen3.5:27b` war dagegen ein **dichtes 27B-Hybrid-Thinking-Modell**. Die
+Annahme „Qwen3-VL-30B-A3B = Äquivalent“ im Tech Design war falsch (anderer
+Modellstand, MoE mit ~3B aktiv statt dense 27B, kein Thinking) — und erklärt
+auch den Tempo-Faktor ~5,6× in der Performance-Tabelle oben.
+
+### Fix
+
+Chat-Modell auf **Qwen3.8-27B** (offizielles Qwen-Release, Aug. 2026; dense 27B,
+Hybrid-Thinking, nativ multimodal) umstellen, GGUF von
+`bartowski/Qwen3.8-27B-GGUF`:
+
+- `Qwen3.8-27B-Q4_K_M.gguf` (17,44 GB) + `mmproj-Qwen3.8-27B-f16.gguf`
+- Neue Preset-Sektion `[qwen3.8-27b]` (`parallel = 1`, `reasoning-format =
+  deepseek`, `load-on-startup = true`, Qwen-Sampling für Thinking:
+  `temp 1.0 / top-p 0.95 / top-k 20 / min-p 0`). `qwen3-vl-30b` bleibt als
+  Fallback und (vorerst) Vision-Modell erhalten, `load-on-startup` entfällt dort.
+- Thinking an/aus funktioniert wie bei Ollama über
+  `chat_template_kwargs.enable_thinking` — keine Code-Änderung nötig.
+- Voraussetzung llama.cpp ≥ b10896; Server läuft auf Build 11610 ✓.
+- Schrittweise: zuerst nur `alice-chat-stream` (`OLLAMA_MODEL=qwen3.8-27b`).
+  `dms-extractor-image`, n8n (`OLLAMA_MODEL`, `OLLAMA_VISION_MODEL`) und
+  `alice-llm-model-warmup` folgen nach erfolgreichem Test.
+
+Geändert: `docker/compose/ai/llama-3090/presets.ini.example`,
+`docker/compose/ai/llama-3090/README.md`,
+`docker/compose/automations/alice-chat-stream/.env.example`.
+
+### Offene Punkte / zu prüfen
+
+- **VRAM** neben Weaviate (Ladetest; Gated-DeltaNet-Layer → KV-Cache voraussichtlich
+  kleiner als bei Qwen3-VL).
+- **`LLM_MAX_TOKENS = 4096`** pro Runde (Thinking + Antwort) wurde am 2026-10-05
+  eingeführt, also nie mit einem denkenden Modell getestet. Qwen3.8 denkt
+  standardmäßig mit `reasoning_effort = xhigh` — Abschneiden möglich.
+- **Tempo:** dense 27B ist deutlich langsamer als das MoE (~178 tok/s); Erwartung
+  ≥ Ollama-Baseline (~31,9 tok/s). Optional MTP-Speculative-Decoding
+  (`spec-type = draft-mtp`) testen.
+
+### Ergebnisse Live-Test (2026-10-23)
+
+- **VRAM:** `llama-server` (qwen3.8-27b, ctx 16384, mmproj, parallel 1) **~18,5 GB**
+  (statt ~20,9 GB) — gesamt ~21,0 / 24 GB inkl. Weaviate, ~3,5 GB frei.
+- **Benchmark** (direkt gegen `llama-3090`, 3 Läufe je Modus, stabil):
+
+  | | Ollama qwen3.5:27b | llama.cpp qwen3-vl-30b | llama.cpp **qwen3.8-27b** |
+  | --- | --- | --- | --- |
+  | Token-Generierung | ~31,9 tok/s | ~178 tok/s (MoE, kein Thinking) | **~42,3 tok/s (+33 % ggü. Ollama)** |
+  | Prompt-Eval (Chat, 6,6k Tokens) | ~1150 tok/s | ~3450 tok/s | ~1470 tok/s |
+
+  Ziel „≥ +20 % ggü. Ollama bei vergleichbarem Modell“ erfüllt.
+- **Thinking:** an/aus über `enable_thinking` funktioniert; im Chat erscheinen
+  Thinking-Abschnitte wieder. Mit Standard-`reasoning_effort` (xhigh) denkt das
+  Modell bei einer offenen Erklärfrage > 2000 Tokens; mit
+  `chat_template_kwargs.reasoning_effort = "medium"` ~825 Zeichen, sauberes
+  `stop`. Im Chat-Tool-Loop blieben die Runden kurz (112–174 Tokens) — Absenkung
+  vorerst nicht nötig, Option bleibt (zentral per Preset).
+- **Folgefehler `alice-mail-tools`:** Das neue Modell ruft jetzt tatsächlich
+  `get_email_body` auf (Qwen3-VL tat das nie). Die Node `Prep: Get Body` brach
+  reproduzierbar mit „Node execution failed“ (Task-Runner-Disconnect) ab.
+  Ursache: ein seit PROJ-46 (2026-06-24) enthaltener Platzhalter-Aufruf
+  `axios.post('http://n8n:5678/webhook-test/dummy')` ohne Funktion. Fix: Aufruf
+  entfernt, Node gibt nur noch `mailboxId`/`uid` weiter.
+- **Zweiter Folgefehler `alice-mail-tools`:** Danach scheiterte `HTTP: Fetch Body`
+  mit HTTP 405 — der Node hatte keinen `method`-Parameter (n8n-Default GET),
+  `alice-mail-reader` bietet `/body` nur als POST an. Fix: `"method": "POST"`
+  ergänzt (wie in `alice-mail-sync`). `get_email_body` hat damit seit PROJ-46
+  nie funktioniert.
+- **Dritter Folgefehler `alice-mail-tools`:** Danach HTTP 500 `'password_enc'`
+  vom Reader. `Decrypt: Body Creds` entschlüsselte das IMAP-Passwort in n8n mit
+  einem hartkodierten Schlüssel und schickte `password`; `alice-mail-reader`
+  `/body` erwartet aber `password_enc` und entschlüsselt selbst. Fix: Node reicht
+  `password_enc` unverändert durch (wie `alice-mail-sync`) — der hartkodierte
+  Schlüssel ist damit aus dem Workflow entfernt.
+- **Kontext-Überlauf:** Mit funktionierendem Mail-Abruf scheiterte die 5. LLM-Runde
+  mit `LLM HTTP 400 — request (18791 tokens) exceeds the available context size
+  (16384 tokens)`. Der Prompt wuchs pro Runde (6,7k → 8,4k → 13,6k → 16k → 18,8k),
+  weil Mail-Bodies ungekürzt in die Tool-Ergebnisse gingen. Fix in
+  `alice-chat-stream` (`tools.py`): `get_email_body` kürzt den Body auf
+  `EMAIL_BODY_MAX_CHARS` (Default 12000 Zeichen ≈ 3–4k Tokens) und setzt
+  `truncated: true`; Tests in `tests/test_mail_tools.py`. Zusätzlich
+  `ctx-size = 32768` als Override in `[qwen3.8-27b]` (global bleibt 16384):
+  gemessen **~22,0 / 24 GB** gesamt inkl. Weaviate (+~1 GB ggü. 16k, Gated-DeltaNet
+  → kleiner KV-Cache), ~2,5 GB frei; `n_ctx_slot = 32768` im Log bestätigt.
+- **Abbruch ohne Antwort am Runden-Limit:** Qwen3.8 verkettet Suche + mehrere
+  Body-Abrufe und erreichte `MAX_TOOL_ROUNDS` (4). Forderte das Modell in der
+  letzten Runde noch ein Tool an, wurde es ausgeführt, der Loop endete aber ohne
+  weitere LLM-Runde — Chat blieb bei „Führe get_email_body aus…“ stehen. Fix in
+  `streaming.py`: In der letzten erlaubten Runde werden keine Tools angeboten,
+  das Modell muss aus den bisherigen Ergebnissen antworten. Nachbesserung: ohne
+  Tools schrieb das Modell `<tool_call>`-Markup als Klartext — daher wird in
+  dieser Runde zusätzlich `FINAL_ROUND_HINT` als `user`-Nachricht angehängt
+  (Qwen-Templates erlauben `system` nur am Anfang). Test
+  `test_last_round_offers_no_tools_and_answers` (schlägt ohne Fix fehl).
+
+### Abschluss BUG-4: restliche Konsumenten + Denksprache
+
+- **Vision auf qwen3.8-27b:** `OLLAMA_VISION_MODEL=qwen3.8-27b` für
+  `dms-extractor-image` und n8n; `dms-extractor-image` sendet jetzt
+  `chat_template_kwargs.enable_thinking=false` (sonst Denkphase pro Bild bei
+  ~42 tok/s und 300-s-Timeout). `image-min-tokens = 1024` war Qwen3-VL-spezifisch
+  und ist in `[qwen3.8-27b]` bewusst nicht gesetzt — Qualität der
+  Bildbeschreibung im Live-Test prüfen.
+- **n8n:** `OLLAMA_MODEL=qwen3.8-27b`; `alice-llm-model-warmup` liest
+  `$env.OLLAMA_MODEL`, Fallback-Strings auf `qwen3.8-27b` gezogen.
+- **`qwen3-vl-30b`** bleibt nur noch als Preset-Fallback, kein Konsument mehr.
+- **Denksprache:** Qwen3.8 dachte auf Englisch, obwohl Deutsch eingestellt ist.
+  Sprachanweisung in `alice-chat-stream/app/memory.py` erweitert: „Antworte und
+  denke immer auf Deutsch.“ / „Reply and think in English.“ (Kopien in
+  `alice-auth` und `alice-speech-gateway` werden dort nicht ausgewertet, daher
+  unverändert). **Live-Test: wirkungslos** — Qwen3.8 denkt weiterhin auf
+  Englisch; Antworten sind korrekt deutsch. Von Andreas akzeptiert, Anweisung
+  bleibt (unschädlich).
+- **Live-Test Vision (2026-10-23):** `/describe` direkt aufgerufen, ~7,4 s pro
+  Bild (alt ~5 s). Beschreibung ~1.100 Zeichen statt bisher typischerweise
+  ~450–580 (2–3 Sätze), deutlich detaillierter (Architektur, Licht, Stimmung,
+  Personen). Auffällig: das Modell nennt spekulativ konkrete Orte („vermutlich
+  das Edogawa-Tor der Edo-Burg“) — solche Namen werden durchsuchbar, auch wenn
+  sie falsch sind.
+- `README.md` und `llama-3090/README.md` auf das neue Modell aktualisiert.
+
+### Beobachtung Mail-Indexierung (außerhalb PROJ-99, nur Befund)
+
+Anlass: „Heuer“ + „gedrechselte Zauberflöte“ stehen im weitergeleiteten Teil einer
+Mail vom Juli 2026, `search_documents`/`search_emails` finden sie nicht.
+
+- `alice-mail-sync` speichert in Weaviate (`Email.content`) nur `body_preview` aus
+  `alice-mail-reader` `/fetch` = **erste 500 Zeichen des ersten `text/plain`-Teils**
+  (`_get_text`). Weitergeleiteter/zitierter Text jenseits davon wird weder
+  vektorisiert noch per BM25 indexiert.
+- Bei HTML-Mails (z. B. GMX-App) bestehen diese 500 Zeichen überwiegend aus
+  HTML-Markup; Mails ohne `text/plain`-Teil haben `content = ""`
+  (Beispiel: „Wg: Anzeige Programmheft Zauberflöte“, 15.07.2026).
+- BM25 auf „Heuer“ über alle 5117 `Email`-Objekte: 2 Treffer, beide 2021 — keiner
+  der Zauberflöte-Mails.
+- `summary` ist bei den geprüften Mails leer; 5112 von 5117 Mails haben
+  `category = unklassifiziert` (die LLM-Klassifizierung im Sync läuft mit
+  15-s-Timeout gegen `mistral-small-3.2-24b`).
+- Indexierte Felder: `subject`, `content`, `summary` (vektorisiert + BM25);
+  `sender`/`senderName` nur BM25; `attachments` nur Dateinamen, nicht indexiert.

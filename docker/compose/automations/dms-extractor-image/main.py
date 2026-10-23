@@ -390,6 +390,9 @@ def _chat(content) -> str:
             "messages": [{"role": "user", "content": content}],
             "stream": False,
             "temperature": 0.3,
+            # Qwen3.8 thinks by default (PROJ-99 BUG-4) — a reasoning phase per
+            # image would multiply the time per description for no gain.
+            "chat_template_kwargs": {"enable_thinking": False},
         },
         timeout=300,
     )
