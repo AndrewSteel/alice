@@ -117,6 +117,7 @@ Thumbs.db
 *.backup
 *.sql.bak
 
-# Dokumentationen
-docs/planning/*
-docs/html/diagrams/*
+# Local-only project documentation and Claude Code configuration
+/features/
+/docs/
+/.claude/
