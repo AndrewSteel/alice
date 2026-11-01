@@ -35,7 +35,7 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 MIN_DURATION_SECONDS = 10
 
 # Fallback limits when a role template carries no timer keys (should not
-# happen after migration 069, but keeps the handler safe).
+# happen, but keeps the handler safe).
 _FALLBACK_MAX_ACTIVE = 10
 _FALLBACK_MAX_DURATION = 86400
 

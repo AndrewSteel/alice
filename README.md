@@ -283,9 +283,9 @@ alice/
 │   ├── setup-database.sh         # Create DB + apply init-schema.sql
 │   ├── set-initial-passwords.sh  # Interactive bcrypt password setup
 │   ├── init-weaviate-schema.sh   # Initialize Weaviate collections
-│   ├── proj55-add-thumbnail-path.sh  # Migrate thumbnail_path field to Weaviate
+│   ├── seed-timer-intents.sh     # Seed timer intents into Weaviate
 │   ├── deploy-frontend.sh        # Build + copy to nginx html/
-│   └── sync-compose.sh           # Sync compose files to production server
+│   └── sync-compose.example.sh   # Template for sync-compose.sh (set your host)
 ├── sql/
 │   ├── init-schema.sql           # Consolidated schema
 │   └── seed-users.example.sql    # Template for initial users
@@ -298,8 +298,9 @@ alice/
 ## Quick Start (Development)
 
 ```bash
-# 1. Copy and fill in environment file
+# 1. Copy and fill in environment file, list your NAS shares
 cp .env.n8n.example docker/compose/automations/n8n/.env
+cp docker/compose/automations/nas-volumes.example.yml docker/compose/automations/nas-volumes.yml
 
 # 2. Apply PostgreSQL schema
 docker exec -i postgres psql -U user -d alice < sql/init-schema.sql
@@ -315,8 +316,8 @@ docker exec -i postgres psql -U user -d alice < sql/seed-users.sql
 # 5. Initialize Weaviate collections
 ./scripts/init-weaviate-schema.sh http://weaviate:8080
 
-# 6. Add thumbnail_path field to Weaviate collections (PROJ-55)
-./scripts/proj55-add-thumbnail-path.sh
+# 6. Seed timer intents into Weaviate
+./scripts/seed-timer-intents.sh
 
 # 7. Start frontend dev server
 cd frontend && npm ci && npm run dev
@@ -329,7 +330,8 @@ See `CLAUDE.md` for full development reference and AI assistant instructions.
 ## Deployment
 
 ```bash
-# Sync compose files to production server (your-server)
+# Sync compose files to production server (first time: copy the template, set your host)
+cp scripts/sync-compose.example.sh scripts/sync-compose.sh
 ./scripts/sync-compose.sh
 
 # Reload nginx after config changes
@@ -346,7 +348,7 @@ ssh user@your-server "docker compose -f /srv/compose/automations/alice-chat-stre
 curl -X POST https://alice.happy-mining.de/api/webhook/alice-dms-thumbnailer-backfill
 ```
 
-Access is restricted to VPN. Production host: `your-server`.
+Access is restricted to VPN.
 
 ---
 

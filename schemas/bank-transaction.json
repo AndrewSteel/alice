@@ -198,6 +198,19 @@
           "vectorizePropertyName": false
         }
       }
+    },
+    {
+      "name": "thumbnail_path",
+      "description": "Path to generated thumbnail (set by alice-dms-thumbnailer after done event)",
+      "dataType": ["text"],
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true,
+          "vectorizePropertyName": false
+        }
+      }
     }
   ]
 }

@@ -55,7 +55,7 @@ Find the tag at https://github.com/esphome/home-assistant-voice-pe/releases .
 
 In `espHome.yaml` `substitutions:`
 
-- `alice_gateway_host` → the **gateway's fixed IP** (the `your-server` host). Use an
+- `alice_gateway_host` → the **gateway's fixed IP** (the Docker host). Use an
   IP, not a hostname — the device may not resolve `.lan`/`.local` names.
 - `alice_gateway_port` → `10300` (standard Wyoming port; wyoming-whisper container was removed).
 - `mic_id` / `speaker_id` → must match the IDs the pinned package declares.

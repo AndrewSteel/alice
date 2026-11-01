@@ -1,6 +1,6 @@
 """
-Integration tests against a real PostgreSQL with sql/init-schema.sql and the
-migrations up to 071 applied. Skipped unless CALENDAR_TEST_DSN is set, e.g.
+Integration tests against a real PostgreSQL with sql/init-schema.sql
+applied. Skipped unless CALENDAR_TEST_DSN is set, e.g.
 
     CALENDAR_TEST_DSN=postgresql://user:x@172.17.0.2:5432/alice .venv/bin/pytest
 """

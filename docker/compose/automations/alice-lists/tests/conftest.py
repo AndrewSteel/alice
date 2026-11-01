@@ -1,6 +1,6 @@
 """
 Shared fixtures. The DB-backed tests need a PostgreSQL with sql/init-schema.sql
-and the migrations up to 072 applied; they are skipped unless LISTS_TEST_DSN
+applied; they are skipped unless LISTS_TEST_DSN
 is set, e.g.
 
     LISTS_TEST_DSN=postgresql://user:x@localhost:55432/alice .venv/bin/pytest

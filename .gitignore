@@ -86,6 +86,8 @@ docker/compose/infra/nginx/html/
 
 # Lokale Konfigurationen
 config.local.json
+scripts/sync-compose.sh
+docker/compose/automations/nas-volumes.yml
 settings.local.yaml
 .mcp.json
 

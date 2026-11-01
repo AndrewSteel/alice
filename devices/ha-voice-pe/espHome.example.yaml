@@ -8,7 +8,7 @@
 # voice backend:
 #
 #   "Hey Jarvis"  -> direct TCP Wyoming connection to the Alice speech gateway
-#                    (your-server:10300). Home Assistant is NOT in this path — the
+#                    (host:10300). Home Assistant is NOT in this path — the
 #                    firmware streams mic audio straight to Alice and plays the
 #                    TTS audio Alice streams back. Continued-conversation,
 #                    silence timeout and conversation_end are handled by the
@@ -69,13 +69,13 @@
 # =============================================================================
 
 substitutions:
-  name: "ha-voice-pe-<room>"          # mDNS hostname + HA device name; must be unique per device
+  name: "ha-voice-pe-<room>" # mDNS hostname + HA device name; must be unique per device
   friendly_name: "<Raum> HA Voice PE" # display name in HA UI
   # Alice speech gateway Wyoming endpoint (PROJ-40).
   # Prefer the gateway's fixed IP over a hostname — the device resolves this
   # via lwip getaddrinfo and ".lan"/".local" names may not resolve on-device.
-  alice_gateway_host: "<gateway-ip>"  # LAN IP of the server running alice-speech-gateway
-  alice_gateway_port: "10300"         # standard Wyoming port (wyoming-whisper removed)
+  alice_gateway_host: "<gateway-ip>" # LAN IP of the server running alice-speech-gateway
+  alice_gateway_port: "10300" # standard Wyoming port (wyoming-whisper removed)
   # IDs of the microphone + speaker declared by the official HA Voice PE package.
   # VERIFY against the pinned package before flashing:
   #   esphome config espHome-<room>.yaml | grep -E 'id:.*(mic|speaker|media)'
@@ -100,7 +100,7 @@ esphome:
 # the LED ring and button events stay available.
 api:
   encryption:
-    key: !secret api_encryption_key_<room>  # rename per device, see secrets.yaml
+    key: !secret api_encryption_key_<room> # rename per device, see secrets.yaml
 
 logger:
   level: DEBUG
@@ -130,10 +130,11 @@ wyoming_satellite:
   port: ${alice_gateway_port}
   microphone: ${mic_id} # reuse the mic defined by the official package
   speaker: ${speaker_id} # reuse the speaker defined by the official package
-  light: voice_assistant_leds  # LED ring state machine (PROJ-49)
+  light: voice_assistant_leds # LED ring state machine (PROJ-49)
   # On-device VAD / continued-conversation tuning (tune on hardware):
-  silence_threshold: 700  # PROJ-57: floor + boot-time starting point for the
-                          # adaptive noise-floor threshold, not a fixed value
+  silence_threshold:
+    700 # PROJ-57: floor + boot-time starting point for the
+    # adaptive noise-floor threshold, not a fixed value
   silence_ms: 900
   listen_timeout_ms: 6000 # total utterance window; keep short to minimise STT latency
 

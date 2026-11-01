@@ -131,7 +131,7 @@ without it the model silently ignores images.
 If you ever need to re-check what the Ollama tags map to:
 
 ```bash
-# on your-server
+# on the server
 docker exec ollama-3090 ollama show qwen3.5:27b-q4_K_M          # arch qwen35, 27.8B, vision, Q4_K_M
 docker exec ollama-3090 ollama show mistral-small3.2:24b        # Mistral Small 3.2
 ```

@@ -1,0 +1,15 @@
+# Template: cp nas-volumes.example.yml nas-volumes.yml, then list your own shares.
+# Central NAS volume mounts for all DMS containers.
+# Edit nas-volumes.yml when adding/removing NAS mount points.
+# Referenced via `extends: file: ../nas-volumes.yml` in each compose.yml.
+# Every share must live under /mnt/nas: the DMS extractors reject other paths.
+services:
+  nas-base:
+    user: "1000:100" # UID:GID of the NAS account — read ACL on all shares below
+    volumes:
+      - /mnt/nas/ai:/mnt/nas/ai:rw # the only writable share
+      - /mnt/nas/user1:/mnt/nas/user1:ro # one share per person
+      - /mnt/nas/user2:/mnt/nas/user2:ro
+      - /mnt/nas/family:/mnt/nas/family:ro
+      - /mnt/nas/photo:/mnt/nas/photo:ro
+      - /mnt/nas/scanner:/mnt/nas/scanner:ro

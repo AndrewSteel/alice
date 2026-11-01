@@ -81,7 +81,7 @@ TEMPLATES_JSON=$(docker exec -i "${PG_CONTAINER}" psql -U "${PG_USER}" -d "${PG_
 
 COUNT=$(echo "$TEMPLATES_JSON" | jq 'length')
 if [ "$COUNT" -eq 0 ]; then
-  echo -e "${RED}none found — run migration 069 first${NC}"
+  echo -e "${RED}none found — apply sql/init-schema.sql first${NC}"
   exit 1
 fi
 echo -e "${GREEN}${COUNT} template(s)${NC}"

@@ -89,13 +89,14 @@ Docs are in German; code comments and commit messages should be in English.
 cd frontend && npm ci          # Install dependencies
 cd frontend && npm run build   # Build for production
 ./scripts/deploy-frontend.sh   # Build + deploy to nginx html/
+cp scripts/sync-compose.example.sh scripts/sync-compose.sh   # First time, then set your host
 ./scripts/sync-compose.sh      # Sync compose files to production server
 ```
 
 ### Database
 
 ```bash
-# Apply consolidated schema (Phase 1 final)
+# Apply consolidated schema
 docker exec -i postgres psql -U user -d alice < sql/init-schema.sql
 
 # Seed users (copy example, edit, then run)
@@ -117,7 +118,7 @@ Logging: never use `console.log` in n8n workflows (Code/Function nodes) — it o
 
 ### Docker
 
-Each service has its own compose file under `docker/compose/<category>/`. Use `./scripts/sync-compose.sh` to sync compose files to the server.
+Each service has its own compose file under `docker/compose/<category>/`. Use `./scripts/sync-compose.sh` to sync compose files to the server. First time: copy `docker/compose/automations/nas-volumes.example.yml` to `nas-volumes.yml` and list your NAS shares (gitignored, used by all DMS containers).
 
 ---
 
