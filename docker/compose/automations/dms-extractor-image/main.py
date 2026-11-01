@@ -36,7 +36,7 @@ import requests
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageFile
 from pydantic import BaseModel
 
 # Register HEIC support if available
@@ -376,6 +376,24 @@ def _prepare_jpegs(file_path: str) -> tuple[list[str], bool]:
         return images, width >= height
 
 
+def _prepare_jpegs_tolerant(file_path: str) -> tuple[list[str], bool]:
+    """_prepare_jpegs, retried once with Pillow's truncated-image tolerance.
+    Samsung panoramas carry a non-standard marker (0xa1) after the scan data:
+    libjpeg only warns (image viewers show it fine), Pillow aborts with
+    "broken data stream" although the pixel data is complete."""
+    try:
+        return _prepare_jpegs(file_path)
+    except OSError as exc:
+        if exc.errno is not None:  # file system error (missing, permission), not a decoder error
+            raise
+        log("warn", "Broken image data stream, retrying tolerant", file_path=file_path, error=str(exc))
+    ImageFile.LOAD_TRUNCATED_IMAGES = True  # global, but safe: callers hold _describe_lock
+    try:
+        return _prepare_jpegs(file_path)
+    finally:
+        ImageFile.LOAD_TRUNCATED_IMAGES = False
+
+
 def _chat(content) -> str:
     """Single chat completion; raises on HTTP error or empty answer."""
     headers = {"Content-Type": "application/json"}
@@ -425,7 +443,7 @@ def get_ai_description(file_path: str) -> str:
     """
     with _describe_lock:
         try:
-            images, landscape = _prepare_jpegs(file_path)
+            images, landscape = _prepare_jpegs_tolerant(file_path)
         except DescriptionError:
             raise
         except Exception as exc:
