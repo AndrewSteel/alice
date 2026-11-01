@@ -16,7 +16,7 @@ A local-first, speech-first personal assistant that unifies smart home control, 
 | Phase 2.1 | ✅ Deployed | Speech gateway: Whisper STT + Piper TTS, WebApp voice, TTS latency tuning  |
 | Phase 2.2 | ✅ Deployed | HA Voice Integration, Speaker-ID, ESPHome feedback, chat storage & archive |
 | Phase 2.3 | ✅ Deployed | Mail IMAP integration, Vision-Chat Flip-Cards, DMS thumbnail generation    |
-| Phase 3   | 🗓 Planned  | DMS quality & coverage (classification/language fixes, completeness dashboard), Timer/Calendar/Tasks/Contacts/Websearch agents, HA variable intents & area context |
+| Phase 3   | ⏸ Paused   | DMS quality & coverage (classification/language fixes, completeness dashboard), Timer/Calendar/Tasks/Contacts/Websearch agents, HA variable intents & area context — temporarily closed 2026-11-01 for ETL replanning |
 | Phase 4   | 🗓 Planned  | Display routing (PROJ-45), multi-display output, deeper financial analysis (PROJ-59) |
 
 ---
