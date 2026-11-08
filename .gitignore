@@ -84,6 +84,9 @@ docker/compose/automations/mqtt/config/passwordfile
 docker/compose/infra/nginx/html/finance_upload/
 docker/compose/infra/nginx/html/
 
+# Financial Service - Artefakte
+finance/
+
 # Lokale Konfigurationen
 config.local.json
 scripts/sync-compose.sh
