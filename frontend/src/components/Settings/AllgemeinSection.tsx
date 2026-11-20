@@ -21,7 +21,7 @@ export function AllgemeinSection() {
           </div>
           <div>
             <p className="text-sm text-muted-foreground">{t("settings.allgemein.role")}</p>
-            <p className="text-foreground font-medium capitalize">{user?.role}</p>
+            <p className="text-foreground font-medium">{user?.role ? t(`settings.timers.roleNames.${user.role}`, { defaultValue: user.role }) : ""}</p>
           </div>
           <p className="text-sm text-muted-foreground pt-2">
             {t("settings.allgemein.moreSoon")}

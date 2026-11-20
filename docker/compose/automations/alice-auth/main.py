@@ -201,6 +201,11 @@ class HashPasswordRequest(BaseModel):
     password: str
 
 
+# PROJ-121: household role model. Legacy roles 'user' / 'child' are rejected,
+# never mapped silently.
+VALID_ROLES = ("admin", "haushalt", "guest")
+
+
 class CreateUserRequest(BaseModel):
     username: str
     email: str
@@ -1175,9 +1180,8 @@ async def admin_create_user(
     _require_admin(authorization)
 
     # Validate role
-    valid_roles = {"admin", "user", "guest", "child"}
-    if body.role not in valid_roles:
-        raise HTTPException(status_code=422, detail=f"Ungültige Rolle. Erlaubt: {', '.join(valid_roles)}")
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail=f"Ungültige Rolle. Erlaubt: {', '.join(VALID_ROLES)}")
 
     # Validate optional preference values
     if body.anrede and body.anrede not in {"du", "sie"}:

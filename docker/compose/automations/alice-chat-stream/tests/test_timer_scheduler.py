@@ -203,11 +203,11 @@ def test_fire_due_claims_once(ha):
 
 def test_alarm_rings_on_all_speakers_for_any_channel_and_role(ha):
     # Refinement 2026-10-15: a WebApp timer, a voice timer of another room and
-    # a child timer share ONE melody on ALL speakers.
+    # a guest timer share ONE melody on ALL speakers.
     pool = FakePool([
         _row(id="a", name="A Timer", origin_channel="webapp"),
         _row(id="b", name="B Timer", origin_channel="esphome:Küche"),
-        _row(id="c", name="C Timer", origin_channel="esphome:Büro", owner_role="child"),
+        _row(id="c", name="C Timer", origin_channel="esphome:Büro", owner_role="guest"),
     ])
     sched = _sched(pool)
     run(_fire(sched))
@@ -325,7 +325,7 @@ def test_pending_announcement_any_device_any_role():
         _expired(id="a", name="20 Minuten Timer", origin_channel="webapp",
                  expires_at=_now() - timedelta(seconds=9)),
         _expired(id="b", name="Kartoffel Timer", origin_channel="esphome:Büro",
-                 owner_role="child", expires_at=_now() - timedelta(seconds=8)),
+                 owner_role="guest", expires_at=_now() - timedelta(seconds=8)),
     ])
     text = run(pending_announcement(pool))
     assert text == "Der 20 Minuten Timer und Kartoffel Timer sind abgelaufen."
@@ -399,10 +399,10 @@ def test_webapp_ack_stops_melody_when_nothing_else_rings(ha):
 
 
 def test_webapp_ack_other_role_keeps_melody(ha):
-    pool = FakePool([_row(id="a", owner_role="child"), _row(id="b", owner_role="admin")])
+    pool = FakePool([_row(id="a", owner_role="guest"), _row(id="b", owner_role="admin")])
     sched = _sched(pool)
     run(_fire(sched))
-    assert run(sched.acknowledge_webapp("child", ["a"])) == 1
+    assert run(sched.acknowledge_webapp("guest", ["a"])) == 1
     assert ha.scripts() == [START]  # admin alarm still rings
     assert sched.alarm_active()
 
@@ -410,7 +410,7 @@ def test_webapp_ack_other_role_keeps_melody(ha):
 def test_webapp_ack_is_role_scoped(ha):
     pool = FakePool([_expired(id="a", owner_role="admin")])
     sched = _sched(pool)
-    assert run(sched.acknowledge_webapp("child", ["a"])) == 0
+    assert run(sched.acknowledge_webapp("guest", ["a"])) == 0
     assert pool.rows[0]["status"] == "expired"
 
 
@@ -458,7 +458,7 @@ def test_list_recent_expired_excludes_actively_acknowledged():
         _row(id="timeout", status="acknowledged", acknowledged_by="timeout", fired_at=recent),
         _row(id="voice", status="acknowledged", acknowledged_by="voice", fired_at=recent),
         _row(id="webapp", status="acknowledged", acknowledged_by="webapp", fired_at=recent),
-        _row(id="other-role", status="expired", fired_at=recent, owner_role="child"),
+        _row(id="other-role", status="expired", fired_at=recent, owner_role="guest"),
         _row(id="too-old", status="expired", fired_at=_now() - timedelta(minutes=20)),
     ])
     rows = run(timers.list_recent_expired(pool, "admin", 15 * 60))

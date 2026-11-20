@@ -502,9 +502,8 @@ const en = {
       savedDesc: "Changes apply to newly set timers.",
       roleNames: {
         admin: "Administrator",
-        user: "User",
+        haushalt: "Household",
         guest: "Guest",
-        child: "Child",
       },
     },
 
@@ -571,7 +570,7 @@ const en = {
 
     listsRoles: {
       heading: "Lists",
-      hint: "Which roles may use tasks and lists (chat/voice). Children may read, add and tick off entries on shared lists; guests have no access.",
+      hint: "Which roles may use tasks and lists (chat/voice). Guests with list access may only read, add and tick off entries on shared lists.",
       saved: "Lists permissions saved",
       saveFailed: "The lists permissions could not be saved.",
       loadFailed: "The lists permissions could not be loaded.",
@@ -620,11 +619,12 @@ const en = {
 
     mail: {
       adminTitle: "All mailboxes",
-      userTitle: "My mailboxes",
+      userTitle: "Household mailboxes",
       refresh: "Refresh",
       addMailbox: "Add mailbox",
       emptyTitle: "No mailbox configured yet.",
       emptyDesc: "Add an IMAP mailbox so Alice indexes your mail.",
+      emptyDescMember: "An admin adds mailboxes.",
       createError: "Error while creating.",
       updateError: "Error while updating.",
       deleteError: "Error while deleting.",
@@ -640,10 +640,7 @@ const en = {
         owner: "Owner",
         status: "Status",
         mails: "Mails",
-        access: "Access",
         actions: "Actions",
-        ownerOnly: "owner only",
-        accessRights: "Access rights",
         edit: "Edit",
         delete: "Delete",
       },
@@ -679,12 +676,6 @@ const en = {
         title: "Delete mailbox?",
         desc: "{{name}} ({{host}}) will be permanently deleted. All {{count}} indexed mails will be removed from search. This action cannot be undone.",
         confirmDelete: "Delete permanently",
-      },
-      accessDialog: {
-        title: "Access rights — {{name}}",
-        desc: "Selected users can query this mailbox's mail and receive notifications.",
-        noUsers: "No users found.",
-        loadError: "Error while loading.",
       },
     },
 

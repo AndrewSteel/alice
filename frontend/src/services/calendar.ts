@@ -42,7 +42,7 @@ export interface CalendarSelection {
   is_default: boolean;
 }
 
-export type CalendarRole = "admin" | "user" | "guest" | "child";
+export type CalendarRole = "admin" | "haushalt" | "guest";
 
 export interface CalendarRoleFlag {
   role: CalendarRole;

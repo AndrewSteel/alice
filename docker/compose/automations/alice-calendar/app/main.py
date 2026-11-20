@@ -138,12 +138,12 @@ class RoleFlag(BaseModel):
     @classmethod
     def _role(cls, v: str) -> str:
         if v not in db.ROLES:
-            raise ValueError("role muss admin, user, guest oder child sein")
+            raise ValueError("role muss admin, haushalt oder guest sein")
         return v
 
 
 class RoleUpdate(BaseModel):
-    roles: list[RoleFlag] = Field(..., max_length=4)
+    roles: list[RoleFlag] = Field(..., max_length=3)
 
 
 @app.get("/calendar/admin/roles")

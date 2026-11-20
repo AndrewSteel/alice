@@ -25,7 +25,7 @@ import {
   type TimerRoleConfig,
 } from "@/services/timers";
 
-const ROLES: TimerRole[] = ["admin", "user", "guest", "child"];
+const ROLES: TimerRole[] = ["admin", "haushalt", "guest"];
 
 /**
  * PROJ-85 — per-role timer permission + caps, plus the default role for a

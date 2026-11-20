@@ -39,7 +39,7 @@ def keypair(tmp_path_factory):
 def _make_token(private_pem: str, *, user_id="7", exp_offset=300) -> str:
     now = int(time.time())
     return jwt.encode(
-        {"user_id": user_id, "username": "tester", "role": "user",
+        {"user_id": user_id, "username": "tester", "role": "haushalt",
          "iat": now, "exp": now + exp_offset},
         private_pem,
         algorithm="RS256",
@@ -50,7 +50,7 @@ def test_valid_token_returns_payload(keypair):
     private_pem, _ = keypair
     payload = auth.verify_token(_make_token(private_pem))
     assert payload["user_id"] == "7"
-    assert payload["role"] == "user"
+    assert payload["role"] == "haushalt"
 
 
 def test_missing_token_raises():

@@ -25,7 +25,7 @@ from fastapi.responses import Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, field_validator
 
-from . import admin_dashboard, calendar_tools, ha_path, lists_replies, lists_tools, memory, metrics, streaming
+from . import admin_dashboard, calendar_tools, ha_path, lists_replies, lists_tools, memory, metrics, streaming, tools
 from . import timer_scheduler as _timer_scheduler
 from . import timers as _timers
 from .auth import verify_jwt
@@ -442,7 +442,12 @@ async def stream_chat_endpoint(
 
     # Tier 2: long-term memory — best-effort, never blocks (errors return [])
     long_term = await memory.recall_long_term(user_id, user_message)
-    system_prompt = memory.build_system_prompt(profile, long_term_memories=long_term)
+    # PROJ-121: documents / images / mails only for admin and haushalt (role
+    # read fresh from the DB; guests and unrecognised speakers are declined).
+    archive_ok = await tools.archive_access(user_id)
+    system_prompt = memory.build_system_prompt(
+        profile, long_term_memories=long_term, archive_access=archive_ok,
+    )
 
     # 2. Stream generator — runs the HA fast-path first, otherwise the LLM stream.
     async def event_generator():
@@ -603,6 +608,7 @@ async def stream_chat_endpoint(
                 anrede=anrede,
                 calendar=calendar_turn,
                 lists=lists_turn,
+                archive_access=archive_ok,
             ):
                 # Detect client disconnect — stop iterating gracefully.
                 if await request.is_disconnected():
@@ -757,6 +763,10 @@ async def pending_timer(channel: str | None = None, jwt_payload: dict = Depends(
     return await scheduler.acknowledge_by_voice(channel)
 
 
+# PROJ-121: household role model; legacy 'user' / 'child' are rejected.
+ROLES = ("admin", "haushalt", "guest")
+
+
 class TimerRoleConfig(BaseModel):
     role: str
     can_use_timers: bool
@@ -766,8 +776,8 @@ class TimerRoleConfig(BaseModel):
     @field_validator("role")
     @classmethod
     def _role_ok(cls, v: str) -> str:
-        if v not in ("admin", "user", "guest", "child"):
-            raise ValueError("role muss admin, user, guest oder child sein")
+        if v not in ROLES:
+            raise ValueError("role muss admin, haushalt oder guest sein")
         return v
 
 
@@ -778,8 +788,8 @@ class TimerConfigUpdate(BaseModel):
     @field_validator("default_role")
     @classmethod
     def _default_ok(cls, v: str | None) -> str | None:
-        if v is not None and v not in ("admin", "user", "guest", "child"):
-            raise ValueError("default_role muss admin, user, guest oder child sein")
+        if v is not None and v not in ROLES:
+            raise ValueError("default_role muss admin, haushalt oder guest sein")
         return v
 
 

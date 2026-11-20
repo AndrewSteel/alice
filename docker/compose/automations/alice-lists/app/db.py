@@ -16,7 +16,7 @@ import asyncpg
 logger = logging.getLogger("alice-lists.db")
 
 POSTGRES_DSN = os.environ.get("POSTGRES_DSN", "")
-ROLES = ("admin", "user", "guest", "child")
+ROLES = ("admin", "haushalt", "guest")  # PROJ-121
 MY_TASKS = "Meine Aufgaben"
 ITEM_FETCH_LIMIT = 5000
 LIST_FETCH_LIMIT = 500
@@ -65,7 +65,7 @@ async def healthy() -> bool:
 # ---------------------------------------------------------------------------
 async def caller_access(user_id: str) -> tuple[str | None, bool]:
     """(role, can_use_lists), read fresh per request — the gateway JWT always
-    claims "user" and a revoked role must lock immediately."""
+    claims the same role and a revoked role must lock immediately."""
     row = await pool().fetchrow(
         """
         SELECT u.role, u.is_active, pa.can_use_lists

@@ -15,7 +15,7 @@ import {
   type ListsRoleFlag,
 } from "@/services/lists";
 
-const ROLES: ListsRole[] = ["admin", "user", "guest", "child"];
+const ROLES: ListsRole[] = ["admin", "haushalt", "guest"];
 
 /**
  * PROJ-106 — per-role lists permission. Rendered inside the

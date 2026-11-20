@@ -30,7 +30,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT doc_type FROM alice.permissions_dms WHERE user_id = $1 AND can_read = TRUE",
+        "query": "SELECT role FROM alice.users WHERE id = $1::uuid AND is_active = TRUE AND role IN ('admin', 'haushalt')",
         "options": {
           "queryReplacement": "{{ $json.userId }}"
         }
@@ -49,11 +49,12 @@
           "name": "pg-alice"
         }
       },
-      "onError": "continueErrorOutput"
+      "onError": "continueErrorOutput",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "// Apply DMS Permission Filter — restrict collections to those the user has can_read=TRUE\nconst inputData = $('Input Normalizer').first().json;\nconst permRows = $input.all().map(item => item.json);\n\n// If no user_id was provided or permission query failed, deny all access\nif (!inputData.userId || permRows.length === 0) {\n  if (inputData.operation === 'search' || inputData.operation === 'search_images') {\n    return [{ json: { ...inputData, collections: [] } }];\n  }\n  // For details: check if the requested collection is allowed\n  return [{ json: { ...inputData, allowedCollections: [] } }];\n}\n\n// Build list of allowed collection names from permission rows\nconst allowedDocTypes = permRows.map(r => r.doc_type);\n\n// Wildcard '*' means all collections are allowed\nconst ALL_COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract', 'Image'];\nconst hasWildcard = allowedDocTypes.includes('*');\nconst allowedCollections = hasWildcard ? ALL_COLLECTIONS : allowedDocTypes.filter(t => ALL_COLLECTIONS.includes(t));\n\nif (inputData.operation === 'search' || inputData.operation === 'search_images') {\n  // Filter requested collections to only allowed ones\n  const filteredCollections = inputData.collections.filter(c => allowedCollections.includes(c));\n  return [{ json: { ...inputData, collections: filteredCollections } }];\n} else {\n  // For details: pass allowed collections so the details node can check\n  return [{ json: { ...inputData, allowedCollections } }];\n}"
+        "jsCode": "// Apply role-based archive access (PROJ-121): admin and haushalt may read every\n// collection; guests, unrecognised speakers and unknown users get none.\nconst inputData = $('Input Normalizer').first().json;\nconst ARCHIVE_ROLES = ['admin', 'haushalt'];\nconst ALL_COLLECTIONS = ['Invoice', 'BankStatement', 'BankTransaction', 'Document', 'Email', 'SecuritySettlement', 'Contract', 'Image'];\n\n// \"Check DMS Permissions\" returns the caller's role only when it is active and\n// one of ARCHIVE_ROLES; an empty result or a query error denies access.\nconst allowed = !!inputData.userId && $input.all().some(item => ARCHIVE_ROLES.includes(item.json.role));\nconst allowedCollections = allowed ? ALL_COLLECTIONS : [];\n\nif (inputData.operation === 'search' || inputData.operation === 'search_images') {\n  const filteredCollections = inputData.collections.filter(c => allowedCollections.includes(c));\n  return [{ json: { ...inputData, collections: filteredCollections } }];\n}\n// For details: pass allowed collections so the details node can check\nreturn [{ json: { ...inputData, allowedCollections } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

@@ -503,9 +503,8 @@ const de = {
       savedDesc: "Aenderungen gelten fuer neu gesetzte Timer.",
       roleNames: {
         admin: "Administrator",
-        user: "Nutzer",
+        haushalt: "Haushalt",
         guest: "Gast",
-        child: "Kind",
       },
     },
 
@@ -575,7 +574,7 @@ const de = {
 
     listsRoles: {
       heading: "Listen",
-      hint: "Welche Rollen Aufgaben und Listen (Chat/Sprache) nutzen duerfen. Kinder duerfen auf gemeinsamen Listen lesen, eintragen und abhaken; Gaeste haben keinen Zugriff.",
+      hint: "Welche Rollen Aufgaben und Listen (Chat/Sprache) nutzen duerfen. Gaeste mit Listenrecht duerfen gemeinsame Listen nur lesen, eintragen und abhaken.",
       saved: "Listen-Berechtigungen gespeichert",
       saveFailed: "Die Listen-Berechtigungen konnten nicht gespeichert werden.",
       loadFailed: "Die Listen-Berechtigungen konnten nicht geladen werden.",
@@ -624,11 +623,12 @@ const de = {
 
     mail: {
       adminTitle: "Alle Postfaecher",
-      userTitle: "Meine Postfaecher",
+      userTitle: "Postfaecher des Haushalts",
       refresh: "Aktualisieren",
       addMailbox: "Postfach hinzufuegen",
       emptyTitle: "Noch kein Postfach konfiguriert.",
       emptyDesc: "Fuege ein IMAP-Postfach hinzu, damit Alice deine Mails indexiert.",
+      emptyDescMember: "Postfaecher legt ein Admin an.",
       createError: "Fehler beim Erstellen.",
       updateError: "Fehler beim Aktualisieren.",
       deleteError: "Fehler beim Loeschen.",
@@ -644,10 +644,7 @@ const de = {
         owner: "Besitzer",
         status: "Status",
         mails: "Mails",
-        access: "Zugriff",
         actions: "Aktionen",
-        ownerOnly: "nur Eigentuemer",
-        accessRights: "Zugriffsrechte",
         edit: "Bearbeiten",
         delete: "Loeschen",
       },
@@ -683,12 +680,6 @@ const de = {
         title: "Postfach loeschen?",
         desc: "{{name}} ({{host}}) wird dauerhaft geloescht. Alle {{count}} indexierten Mails werden aus der Suche entfernt. Diese Aktion kann nicht rueckgaengig gemacht werden.",
         confirmDelete: "Endgueltig loeschen",
-      },
-      accessDialog: {
-        title: "Zugriffsrechte — {{name}}",
-        desc: "Ausgewaehlte Nutzer koennen Mails dieses Postfachs abfragen und erhalten Benachrichtigungen.",
-        noUsers: "Keine Nutzer gefunden.",
-        loadError: "Fehler beim Laden.",
       },
     },
 

@@ -139,9 +139,9 @@ Each service has its own compose file under `docker/compose/<category>/`. Use `.
 All tables live in the `alice` schema. Schema source: `sql/init-schema.sql`.
 
 Key tables:
-- `alice.users` — users with role (`admin`/`user`/`guest`/`child`), bcrypt password, must_change_password
+- `alice.users` — users with role (`admin`/`haushalt`/`guest`), bcrypt password, must_change_password
 - `alice.permissions_home_assistant` — per-domain HA permissions with optional area/entity/time filters
-- `alice.permissions_dms` — per-doc-type DMS permissions (doc_types: Invoice, BankStatement, BankTransaction, SecuritySettlement, Document, Email, Contract, *)
+- Documents, images, mails (all mailboxes): readable by role only — `admin` and `haushalt` yes, `guest` no (PROJ-121, no per-doc-type or per-mailbox tables)
 - `alice.permissions_system` / `alice.permissions_assistant` — system and chat feature permissions
 - `alice.role_templates` — seeded permission templates; applied via `alice.init_user_permissions(user_id, role)`
 - `alice.messages` / `alice.sessions` / `alice.user_profiles` — agent memory
@@ -149,7 +149,7 @@ Key tables:
 - `alice.dms_watched_folders` — NAS folders watched by DMS scanner (with sort_order)
 - `alice.ha_entities` / `alice.ha_intent_templates` / `alice.ha_sync_log` — HA sync state
 
-Permission check functions: `alice.check_ha_permission()`, `alice.check_dms_permission()`.
+Permission check function: `alice.check_ha_permission()`.
 
 ### Key Environment Variables
 

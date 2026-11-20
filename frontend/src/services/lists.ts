@@ -5,7 +5,7 @@ import { fetchWithAuth } from "./fetchWithAuth";
 
 const LISTS_BASE = "/api/lists";
 
-export type ListsRole = "admin" | "user" | "guest" | "child";
+export type ListsRole = "admin" | "haushalt" | "guest";
 
 export interface ListsRoleFlag {
   role: ListsRole;

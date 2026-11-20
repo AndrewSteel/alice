@@ -60,7 +60,8 @@ def mint_service_token(user_id: str) -> str:
     payload = {
         "user_id": user_id,
         "username": f"voice-device-{user_id}",
-        "role": "user",
+        # The DB role decides in every service; the claim is only informative.
+        "role": "haushalt",
         "iat": now,
         "exp": now + SERVICE_JWT_TTL_SECONDS,
         "iss": "alice-speech-gateway",

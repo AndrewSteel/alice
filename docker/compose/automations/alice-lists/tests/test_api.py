@@ -38,7 +38,7 @@ async def client(keys, monkeypatch):
         yield c
 
 
-def _auth(keys, user_id, role="user"):
+def _auth(keys, user_id, role="haushalt"):
     import jwt
 
     now = int(time.time())
@@ -66,15 +66,20 @@ async def test_admin_roles_endpoint(client, keys):
     r = await client.get("/lists/admin/roles", headers=_auth(keys, ADMIN, "admin"))
     assert r.status_code == 200
     assert {x["role"]: x["can_use_lists"] for x in r.json()["roles"]} == \
-        {"admin": True, "user": True, "child": True, "guest": False}
+        {"admin": True, "haushalt": True, "guest": False}
     r = await client.put("/lists/admin/roles", headers=_auth(keys, ADMIN, "admin"),
-                         json={"roles": [{"role": "user", "can_use_lists": False}]})
+                         json={"roles": [{"role": "haushalt", "can_use_lists": False}]})
     assert r.status_code == 200
     res = await _tool(client, keys, USER, "query_items", {})
     assert res["error"] == "forbidden"
     r = await client.put("/lists/admin/roles", headers=_auth(keys, ADMIN, "admin"),
                          json={"roles": [{"role": "boss", "can_use_lists": True}]})
     assert r.status_code == 422
+    # PROJ-121: legacy roles are rejected, no silent mapping (AK-13, EC-3)
+    for legacy in ("user", "child"):
+        r = await client.put("/lists/admin/roles", headers=_auth(keys, ADMIN, "admin"),
+                             json={"roles": [{"role": legacy, "can_use_lists": True}]})
+        assert r.status_code == 422
 
 
 async def test_turn_start(client, keys):

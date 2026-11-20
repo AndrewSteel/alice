@@ -4,12 +4,6 @@ const BASE = "/api/webhook/alice";
 
 // ---------- Types ----------
 
-export interface MailboxAccessUser {
-  user_id: string;
-  display_name: string;
-  username: string;
-}
-
 export interface Mailbox {
   id: string;
   owner_id: string;
@@ -26,14 +20,6 @@ export interface Mailbox {
   last_synced_at: string | null;
   last_error: string | null;
   created_at: string;
-  access_users: MailboxAccessUser[];
-}
-
-export interface AccessListUser {
-  user_id: string;
-  display_name: string;
-  username: string;
-  has_access: boolean;
 }
 
 export interface AliceUser {
@@ -137,25 +123,6 @@ export async function deleteMailbox(id: string): Promise<void> {
   const res = await fetchWithAuth(`${BASE}/mailboxes`, {
     method: "DELETE",
     body: JSON.stringify({ id }),
-  });
-  if (res.status === 403 || res.status === 404) {
-    const b = await res.json().catch(() => ({})) as Record<string, string>;
-    throw new Error(b.error || `Fehler (${res.status}).`);
-  }
-  if (!res.ok) throw new Error(`Serverfehler (${res.status}).`);
-}
-
-export async function getMailboxAccess(mailboxId: string): Promise<AccessListUser[]> {
-  const res = await fetchWithAuth(`${BASE}/mailboxes/access?id=${encodeURIComponent(mailboxId)}`);
-  if (!res.ok) throw new Error(`Fehler beim Laden der Zugriffsrechte (${res.status}).`);
-  const body = await res.json();
-  return unwrapBody<AccessListUser>(body, "users");
-}
-
-export async function updateMailboxAccess(mailboxId: string, userIds: string[]): Promise<void> {
-  const res = await fetchWithAuth(`${BASE}/mailboxes/access`, {
-    method: "PUT",
-    body: JSON.stringify({ mailbox_id: mailboxId, user_ids: userIds }),
   });
   if (res.status === 403 || res.status === 404) {
     const b = await res.json().catch(() => ({})) as Record<string, string>;

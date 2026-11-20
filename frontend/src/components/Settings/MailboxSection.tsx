@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Users, AlertCircle, Mail, RefreshCw } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertCircle, Mail, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,12 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { useAuth } from "@/hooks/useAuth";
 import { useMailboxes } from "@/hooks/useMailboxes";
 import { AddMailboxDialog } from "./AddMailboxDialog";
 import { EditMailboxDialog } from "./EditMailboxDialog";
 import { DeleteMailboxDialog } from "./DeleteMailboxDialog";
-import { AccessDialog } from "./AccessDialog";
 import type { Mailbox, CreateMailboxInput, UpdateMailboxInput, CreateMailboxResult } from "@/services/mailApi";
 
 function StatusBadge({ status }: { status: Mailbox["status"] }) {
@@ -32,22 +30,20 @@ function StatusBadge({ status }: { status: Mailbox["status"] }) {
 
 interface MailboxSectionProps {
   /**
-   * PROJ-66: whether the current user may see all mailboxes, the owner column
-   * and manage other users' mailboxes. Resolved by SettingsPage (with fail-open
-   * to `role === "admin"`) so permissions are fetched once per Settings session.
+   * PROJ-121: every admin / haushalt member sees all mailboxes; only a user
+   * with this flag (admin) may add, edit or delete them and sees host and
+   * owner. Resolved by the Settings shell (fail-open to `role === "admin"`).
    */
   canManageMailboxes: boolean;
 }
 
 export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
   const { t } = useTranslation();
-  const { user } = useAuth();
   const { mailboxes, isLoading, error, addMailbox, editMailbox, removeMailbox, reload } = useMailboxes();
 
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Mailbox | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Mailbox | null>(null);
-  const [accessTarget, setAccessTarget] = useState<Mailbox | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function handleAdd(data: CreateMailboxInput): Promise<CreateMailboxResult> {
@@ -123,11 +119,13 @@ export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
             title={t("settings.mail.refresh")}>
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button onClick={() => { setActionError(null); setAddOpen(true); }}
-            size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white">
-            <Plus className="h-4 w-4" />
-            {t("settings.mail.addMailbox")}
-          </Button>
+          {canManageMailboxes && (
+            <Button onClick={() => { setActionError(null); setAddOpen(true); }}
+              size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white">
+              <Plus className="h-4 w-4" />
+              {t("settings.mail.addMailbox")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -136,7 +134,7 @@ export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
           <Mail className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground font-medium">{t("settings.mail.emptyTitle")}</p>
           <p className="text-sm text-muted-foreground mt-1">
-            {t("settings.mail.emptyDesc")}
+            {canManageMailboxes ? t("settings.mail.emptyDesc") : t("settings.mail.emptyDescMember")}
           </p>
         </div>
       ) : (
@@ -149,19 +147,18 @@ export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
                 {canManageMailboxes && <TableHead className="text-muted-foreground">{t("settings.mail.table.owner")}</TableHead>}
                 <TableHead className="text-muted-foreground">{t("settings.mail.table.status")}</TableHead>
                 <TableHead className="text-muted-foreground text-right">{t("settings.mail.table.mails")}</TableHead>
-                <TableHead className="text-muted-foreground">{t("settings.mail.table.access")}</TableHead>
-                <TableHead className="text-muted-foreground text-right">{t("settings.mail.table.actions")}</TableHead>
+                {canManageMailboxes && (
+                  <TableHead className="text-muted-foreground text-right">{t("settings.mail.table.actions")}</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {mailboxes.map((mb) => {
-                const isOwner = mb.owner_id === user?.id;
-                const canManage = isOwner || canManageMailboxes;
                 return (
                   <TableRow key={mb.id} className="border-border hover:bg-accent/50">
                     <TableCell className="text-foreground font-medium">{mb.display_name}</TableCell>
                     <TableCell className="text-muted-foreground text-sm font-mono">
-                      {canManage ? `${mb.imap_host}:${mb.imap_port}` : "••••••••"}
+                      {canManageMailboxes ? `${mb.imap_host}:${mb.imap_port}` : "••••••••"}
                     </TableCell>
                     {canManageMailboxes && (
                       <TableCell className="text-muted-foreground text-sm">{mb.owner_name ?? "—"}</TableCell>
@@ -177,33 +174,20 @@ export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm text-right">{mb.mails_indexed}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {(mb.access_users ?? []).length === 0
-                        ? t("settings.mail.table.ownerOnly")
-                        : (mb.access_users ?? []).map((u) => u.display_name).join(", ")}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {isOwner && (
-                          <Button variant="ghost" size="icon" onClick={() => setAccessTarget(mb)}
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground" title={t("settings.mail.table.accessRights")}>
-                            <Users className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {isOwner && (
+                    {canManageMailboxes && (
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon" onClick={() => setEditTarget(mb)}
                             className="h-8 w-8 text-muted-foreground hover:text-foreground" title={t("settings.mail.table.edit")}>
                             <Pencil className="h-4 w-4" />
                           </Button>
-                        )}
-                        {canManage && (
                           <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(mb)}
                             className="h-8 w-8 text-muted-foreground hover:text-red-400" title={t("settings.mail.table.delete")}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        )}
-                      </div>
-                    </TableCell>
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })}
@@ -229,15 +213,6 @@ export function MailboxSection({ canManageMailboxes }: MailboxSectionProps) {
           open={!!deleteTarget}
           onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}
           onConfirm={handleDelete}
-        />
-      )}
-
-      {accessTarget && (
-        <AccessDialog
-          mailbox={accessTarget}
-          open={!!accessTarget}
-          onOpenChange={(o) => { if (!o) setAccessTarget(null); }}
-          onSaved={reload}
         />
       )}
     </div>

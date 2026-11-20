@@ -159,7 +159,7 @@ export function VoiceProfilesSection() {
                         variant="secondary"
                         className="text-xs bg-muted/40 text-foreground border-border"
                       >
-                        {p.role}
+                        {t(`settings.timers.roleNames.${p.role}`, { defaultValue: p.role })}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-foreground text-sm tabular-nums">
@@ -201,7 +201,7 @@ export function VoiceProfilesSection() {
                       variant="secondary"
                       className="text-xs bg-muted/40 text-foreground border-border"
                     >
-                      {p.role}
+                      {t(`settings.timers.roleNames.${p.role}`, { defaultValue: p.role })}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       {t("settings.voiceProfiles.samplesCount", { count: p.sample_count })}

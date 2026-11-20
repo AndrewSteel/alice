@@ -39,12 +39,12 @@ def is_enrollment_intent(transcript: str) -> tuple[bool, str]:
     """
     Detect enrollment trigger in a transcript.
 
-    Returns (is_trigger, role) where role is 'user' or 'guest'.
+    Returns (is_trigger, role) where role is 'haushalt' or 'guest' (PROJ-121).
     """
     text = transcript.lower().strip()
     for pattern in _ENROLLMENT_RE:
         if pattern.search(text):
-            role = "guest" if "gast" in text else "user"
+            role = "guest" if "gast" in text else "haushalt"
             return True, role
     return False, ""
 
@@ -81,7 +81,7 @@ class EnrollmentSession:
     username_checker: async callable (username: str) -> bool (True = taken).
     """
 
-    role: str  # 'user' | 'guest'
+    role: str  # 'haushalt' | 'guest'
     username_checker: Optional[Callable[[str], Awaitable[bool]]] = None
 
     # Collected data

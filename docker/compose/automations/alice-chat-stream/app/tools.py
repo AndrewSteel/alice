@@ -35,11 +35,50 @@ TOOL_TIMEOUT_SECONDS = float(os.environ.get("TOOL_TIMEOUT_SECONDS", "40"))
 # long mails overflowed the 16k llama.cpp context mid tool loop (HTTP 400).
 EMAIL_BODY_MAX_CHARS = int(os.environ.get("EMAIL_BODY_MAX_CHARS", "12000"))
 
+# PROJ-121: documents, images and mails (the archive) are open to every
+# household member and the admin; guests and unrecognised speakers get none.
+ARCHIVE_ROLES = frozenset({"admin", "haushalt"})
+ARCHIVE_TOOLS = frozenset({
+    "search_documents", "get_document_details", "search_images",
+    "search_emails", "get_email_body",
+})
+ACCESS_DENIED = {
+    "error": "access_denied",
+    "message": "Keine Berechtigung für Dokumente, Bilder und E-Mails. "
+               "Lehne die Anfrage freundlich ab, ohne Inhalte zu nennen.",
+}
+
+
+async def archive_access(user_id: str) -> bool:
+    """True when the user may search documents, images and mails.
+
+    The role is read fresh from alice.users, never from the JWT: voice-gateway
+    tokens always carry the same role and tokens issued before the PROJ-121
+    migration still say 'user'. Any lookup failure denies access."""
+    try:
+        role = await memory.pool().fetchval(
+            "SELECT role FROM alice.users WHERE id = $1::uuid AND is_active",
+            user_id,
+        )
+    except Exception as exc:
+        logger.warning("Archive access lookup failed for %s: %s", user_id, exc)
+        return False
+    return role in ARCHIVE_ROLES
+
 
 # ---------------------------------------------------------------------------
 # Tool schema (Ollama function-calling format)
 # ---------------------------------------------------------------------------
-def tool_schema() -> list[dict]:
+def tool_schema(archive_access: bool = False) -> list[dict]:
+    """Tools offered to the LLM. Without archive access the document, image
+    and mail tools are left out (PROJ-121)."""
+    schema = _full_schema()
+    if archive_access:
+        return schema
+    return [t for t in schema if t["function"]["name"] not in ARCHIVE_TOOLS]
+
+
+def _full_schema() -> list[dict]:
     schema: list[dict] = [
         {
             "type": "function",
@@ -236,7 +275,7 @@ def tool_schema() -> list[dict]:
             "function": {
                 "name": "search_emails",
                 "description": (
-                    "Durchsucht indexierte E-Mails des Nutzers semantisch. "
+                    "Durchsucht indexierte E-Mails aller Postfächer des Haushalts semantisch. "
                     "Für Fragen wie 'Habe ich eine Mail von der Sparkasse?' oder "
                     "'Zeig mir wichtige Mails der letzten Woche'."
                 ),
@@ -311,10 +350,15 @@ async def execute_tool(
     args: dict[str, Any],
     user_id: str,
     client: httpx.AsyncClient,
+    *,
+    archive_access: bool = False,
 ) -> dict[str, Any]:
     """
     Run a single tool call. Always returns a dict — never raises.
+    Archive tools without archive access return ACCESS_DENIED (PROJ-121).
     """
+    if name in ARCHIVE_TOOLS and not archive_access:
+        return dict(ACCESS_DENIED)
     try:
         if name == "search_documents":
             return await _call_n8n_search({

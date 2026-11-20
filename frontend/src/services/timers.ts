@@ -23,7 +23,7 @@ export interface ActiveTimersResponse {
   timers: ActiveTimer[];
 }
 
-export type TimerRole = "admin" | "user" | "guest" | "child";
+export type TimerRole = "admin" | "haushalt" | "guest";
 
 export interface TimerRoleConfig {
   role: TimerRole;
