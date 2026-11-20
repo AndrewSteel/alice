@@ -1,6 +1,6 @@
 # Features
 
-Nächste freie ID: PROJ-115
+Nächste freie ID: PROJ-143
 
 Ablage wie im Starter Kit der Software Factory: pro Feature ein Ordner `features/PROJ-X-<name>/` mit `spec.md` (WAS, vom Menschen), `design.md` (WIE, Factory) und `qa-report.md` (Testbericht, Factory).
 
@@ -12,7 +12,7 @@ Status: `Roadmap` → `Planned` (Spec fertig) → `Architected` → `In Progress
 |----|-------|---------|--------|--------|
 | PROJ-81 | 3.2 | Frontend-Übersetzung on-the-fly — deutsche Zusammenfassung → Nutzersprache; Abhängigkeit von PROJ-79 | Roadmap | |
 | PROJ-89 | 3.4 | Kontakte-Agent — Settings-Tab „Kontakte" (mehrere Google-Kontaktbücher pro User) + Chat-CRUD; Abhängigkeit von PROJ-86 | Roadmap | |
-| PROJ-90 | 3.4 | Websearch-Agent — Plan → begrenzter Such-Loop → qualifiziertes Ergebnis, hartes Loop-Limit | Roadmap | |
+| PROJ-90 | 3.4 | Websearch-Agent — Plan → begrenzter Such-Loop → qualifiziertes Ergebnis, hartes Loop-Limit | Verworfen (ersetzt durch PROJ-136) | |
 | PROJ-101 | 3.3 | HA-Status-Abfragen — allgemeine Zustands-/Werte-Fragen zu beliebigen HA-Entities per Sprache (z.B. "Wie ist der Status der Heizung im Wohnzimmer?", "Auf welche Temperatur ist die Heizung im Esszimmer eingestellt?"); vermutlich HYBRID/LLM-Pfad statt HA_FAST; ausgegliedert aus PROJ-83-Spec-Interview 2026-09-03 (Scope-Split, Single-Responsibility) | Roadmap | |
 | PROJ-102 | 3.3 | Multi-Intent-Zerlegung + Halluzinations-Schutz — ein Aufforderungssatz mit mehreren Intents unterschiedlicher Domänen ("Setze Milch, Butter und Eier auf die Einkaufsliste, schalte das Licht ein und zeige mir die letzten Emails") korrekt in Einzel-Intents zerlegen und jeden ausführen. Aus PROJ-83-BUG-1: reine Trennung an "und"/Komma reicht nicht (Einkaufslisten-Artikel enthalten selbst "und"/Kommas; HA Assist kann das original auch nicht). **Kernproblem:** wenn die Zerlegung scheitert und der Request an den LLM fällt, **halluziniert** dieser aktuell eine Erfolgsmeldung ("Ich habe Milch und Butter zur Einkaufsliste hinzugefügt"), ohne ein Tool aufzurufen — der Nutzer weiß nicht, was tatsächlich (nicht) passiert ist. Umfasst: (a) robuste Intent-Zerlegung, (b) LLM darf keine Aktionserfolge behaupten, die es nicht per Tool ausgeführt hat, (c) für den Nutzer nachvollziehbar machen, welche Aktion wirklich lief | Roadmap | |
 | PROJ-103 | 3.3 | Sprecher-Erkennung verbessern — die aktuelle Speaker-ID im `alice-speech-gateway` ist stark device-abhängig und erkennt einen Sprecher oft nicht sicher (Ähnlichkeits-Threshold, darunter Anonymous-Kontext, kein Geräte-Default-User). Ausgelöst beim PROJ-85-Spec-Interview 2026-09-07 (User-Zuordnung von Timern). Ziel: robustere Identifikation per Stimme, ggf. Enrollment-Qualität, Threshold-Tuning, Mehr-Sample-Matching, Kontext-Priors (Raum/Tageszeit). Priorisiert (P1), da mehrere kommende Agenten (Timer, Kalender, Aufgaben, Kontakte) auf verlässliche User-Zuordnung angewiesen sind | Roadmap | |
@@ -23,3 +23,39 @@ Status: `Roadmap` → `Planned` (Spec fertig) → `Architected` → `In Progress
 | PROJ-109 | 3.4 | Wiederkehrende Aufgaben — Wiederholungsregeln (täglich/wöchentlich/monatlich/jährlich, Ende), nächstes Vorkommen beim Erledigen; Abhängigkeit von PROJ-106; ausgegliedert beim PROJ-106-Spec-Interview 2026-10-08 | Roadmap | |
 | PROJ-110 | 3.4 | Unteraufgaben — Aufgaben hierarchisch untergliedern (anlegen, anzeigen, erledigen) per Chat/Sprache; Abhängigkeit von PROJ-106; Bedarf vor Spec prüfen; ausgegliedert beim PROJ-106-Spec-Interview 2026-10-08 | Roadmap | |
 | PROJ-114 | 3.3 | Neu-Beschreibung aller DMS-Bilder mit Qwen3.8-27B — die 52.259 vorhandenen Bildbeschreibungen (kurz, 2–3 Sätze, älteres Modell) mit dem neuen Vision-Modell neu erzeugen (~1.100 Zeichen, detaillierter: Architektur, Licht, Stimmung, Personen); ~7,4 s/Bild ≈ 107 h GPU-Zeit. Vorab klären: Prompt gegen spekulative Orts-/Gebäudenamen (Live-Test: erfundenes „Edogawa-Tor der Edo-Burg“), Stichprobe 30–50 Bilder, eigene Zeitfenster abgestimmt mit nächtlichem DMS-Lauf (Modellwechsel qwen ↔ mistral), Fortschritts-Markierung je Bild (bestehender Backfill verarbeitet nur `extraction_failed=true`); Abhängigkeit von PROJ-99, PROJ-111, PROJ-112 | Roadmap | |
+| PROJ-115 | 4.1 | Quelle-der-Wahrheit-Repo + Quellen-Register — eigener, Git-versionierter NAS-Ordner; Markdown-Format mit YAML-Frontmatter (Quelle, Hash, Typ, Klassifikation, Felder); Register aller Quellen (Dateien, Mails, Bilder) mit Verarbeitungszustand je Stufe, Fehler und Retry in PostgreSQL; Redis nur noch Queue/Lock | Roadmap | |
+| PROJ-116 | 4.1 | Datei-Erkennung — Service scannt `alice.dms_watched_folders`, Hash/Dedup, Größenstabilität, erkennt Neu/Verschieben/Umbenennen/Löschen und reicht es an alle abgeleiteten Daten weiter; ersetzt `alice-dms-scanner`, `-path-worker`, `-lifecycle`, `-reconcile` (kein Loop-in-Loop-Split mehr) | Roadmap | |
+| PROJ-117 | 4.1 | Text-Extraktion → Quell-Markdown — bestehende Extraktoren (pdf/ocr/office/txt) anbinden, Inhalt als Markdown in die Quelle der Wahrheit schreiben, Retry mit Backoff, begrenzte Parallelität | Roadmap | |
+| PROJ-118 | 4.1 | Klassifizierung + Feldextraktion — lokales LLM bestimmt Dokumenttyp, extrahiert Felder und deutsche Zusammenfassung ins Frontmatter; Kontoauszug → Buchungen; ersetzt `alice-dms-processor`, `-classify-document`, `-language-check` und die Backfills | Roadmap | |
+| PROJ-119 | 4.1 | Strukturierte Dokumentdaten in PostgreSQL — Tabellen für Rechnung, Kontoauszug/Buchung, Wertpapierabrechnung, Vertrag, Dokument, abgeleitet aus dem Frontmatter; Korrekturen von Hand in der Quell-Markdown werden übernommen und beim Neuaufbau nicht überschrieben | Roadmap | |
+| PROJ-120 | 4.1 | Neuaufbau + Vollständigkeitsabgleich — kompletter Neuaufbau (Quell-Markdown, DB, später RAG/Wiki) aus den Originalen als Hintergrundlast mit Fortschritt; Abgleich Quellen ↔ Quelle der Wahrheit ohne stille Lücken | Roadmap | |
+| PROJ-121 | 4.1 | Rollenmodell Haushalt — Rollen `admin`/`haushalt`/`guest`: `haushalt` sieht alle Dokumente, Postfächer und das Wiki, `admin` zusätzlich Verwaltung, `guest` wie bisher ohne DMS/Mail/Wiki; Rechte je Dokumenttyp und Postfach entfallen, Rolle `child` gestrichen | Roadmap | |
+| PROJ-122 | 4.1 | ETL-Status-Ansicht (Admin, WebApp) — Verarbeitungsstand je Quelle und Stufe, Fehler, erneut versuchen, Neuaufbau-Fortschritt | Roadmap | |
+| PROJ-123 | 4.2 | Mail-Import in den ETL — IMAP-Postfächer → `*.eml` ohne Anhänge (mit Links auf die Anhangsdateien) + Mail-Markdown + Kategorie (Wichtig/Werbung/Social/Spam); ersetzt `alice-mail-sync`, `-attachment-processor`, `-attachment-backfill`, `-reconcile` | Roadmap | |
+| PROJ-124 | 4.2 | Mail-Anhänge als Quelldokumente — separat gespeicherte Anhänge laufen ohne Umweg über `/mnt/nas/ai` durch die Pipeline, mit Verweis auf die Mail | Roadmap | |
+| PROJ-125 | 4.2 | Bilder in der Quelle der Wahrheit — Bild-Markdown mit Beschreibung, EXIF, Ort (Reverse-Geocoding) und Link aufs Original; Neuaufbau übernimmt vorhandene Beschreibungen aus Weaviate, nur neue Bilder gehen ans Vision-Modell | Roadmap | |
+| PROJ-126 | 4.2 | Vorschaubilder aus dem neuen ETL — Thumbnails für Dokumente, Mails und Bilder, begrenzte Parallelität; ersetzt `alice-dms-thumbnailer`-Workflow und -Backfill | Roadmap | |
+| PROJ-127 | 4.3 | RAG-Index aus der Quell-Markdown — neue Weaviate-Collections aus den Markdown-Dateien statt Plaintext, Sync bei Änderung/Löschung, Bildsuche bleibt erhalten | Roadmap | |
+| PROJ-128 | 4.3 | Such-Tools als Service — Dokument-, Mail- und Bildsuche plus Details für den Agenten; ersetzt `alice-tool-search` und `alice-mail-tools` | Roadmap | |
+| PROJ-129 | 4.3 | Wiki-Ingest — lokales LLM pflegt je neuer Quell-Markdown die betroffenen Wiki-Seiten (Personen, Organisationen, Verträge, Konten/Depots, Orte, Themen, Index) im Hintergrund, Quellenlink je Aussage, Git-Commit | Roadmap | |
+| PROJ-130 | 4.3 | Wiki-Lint nächtlich — Widersprüche, verwaiste Seiten, fehlende/kaputte Links finden und beheben | Roadmap | |
+| PROJ-131 | 4.3 | Wiki-Ansicht in der WebApp — nur lesen, Navigation über Links, Suche, Sprung zur Quell-Markdown bzw. zum Original; für `haushalt`/`admin` | Roadmap | |
+| PROJ-132 | 4.3 | Wiki-Tool für den Agenten — Wiki-Seiten lesen, suchen und Links folgen, zusätzlich zum RAG | Roadmap | |
+| PROJ-133 | 4.4 | Spike Agent-Framework — DeepSeek Harness (Favorit) vs. Alternativen (z. B. Pydantic AI, LangGraph, OpenAI Agents SDK, smolagents), Prototyp, DMS-Testkatalog (~30 Fragen) mit Mess-Skript, Go/No-Go; Ausgangs- und Vergleichsmessung gegen das produktive LLM macht der Mensch | Roadmap | |
+| PROJ-134 | 4.4 | Agent-Kern auf neuem Framework — ersetzt die Tool-Schleife in `alice-chat-stream`: mehrschrittige Planung, SSE, Sessions, Gedächtnis; HA-Schnellpfad, Kalender, Listen, Timer und Memory angebunden; HA-Tool ohne n8n-Webhook | Roadmap | |
+| PROJ-135 | 4.4 | Agent-Schritte im Chat sichtbar — Plan, Tool-Aufrufe und Kennzeichnung bei Cloud-Nutzung | Roadmap | |
+| PROJ-136 | 4.4 | Cloud-Recherche — Recherche-Sub-Agent mit Websuche über austauschbaren Cloud-Provider, Start mit `claude -p` nur für Admin-Anfragen; Datenschutzgrenze mit Freigabe pro Anfrage, Protokoll aller Cloud-Aufrufe; per Sprache Kurzantwort mit Hinweis auf die WebApp; ersetzt PROJ-90 | Roadmap | |
+| PROJ-137 | 4.4 | Cloud-Provider per API mit Budget-Stopp — API-Key, hartes Monatsbudget, Kostenanzeige je Anfrage, Freigabe der Recherche für die Rolle `haushalt` | Roadmap | |
+| PROJ-138 | 4.5 | Session-API + Session-Cleanup als Service — ersetzt `alice-session-api` und `alice-session-cleanup` | Roadmap | |
+| PROJ-139 | 4.5 | DMS-Ordner-API als Service — ersetzt `alice-dms-folder-api` und `alice-dms-folder-conflict-check` | Roadmap | |
+| PROJ-140 | 4.5 | Postfach-API als Service — ersetzt `alice-mail-api` | Roadmap | |
+| PROJ-141 | 4.5 | Modell-Warmup im LLM-Gateway — ersetzt `alice-llm-model-warmup` | Roadmap | |
+| PROJ-142 | 4.5 | n8n-Abschaltung + Altbestand aufräumen — alte Workflows, Weaviate-Collections und Redis-Keys entfernen, n8n-Container und Stack-Pack `n8n` raus, Doku angleichen | Roadmap | |
+
+## Bau-Reihenfolge Phase 4
+
+- **P0:** PROJ-121 → PROJ-115 → PROJ-116 → PROJ-117 → PROJ-118 → PROJ-119 → PROJ-120 · parallel: PROJ-133 (einziges Parallel-Feature, Factory `maxParallel` ≤ 2)
+- **P1:** PROJ-122 (braucht PROJ-120) · PROJ-123 → PROJ-124 (braucht PROJ-117) · PROJ-125, PROJ-126 (brauchen PROJ-116) · PROJ-127 → PROJ-128 (brauchen PROJ-119) · PROJ-129 → PROJ-130, PROJ-131, PROJ-132 · PROJ-134 (braucht PROJ-133, PROJ-128) → PROJ-135, PROJ-136
+- **P2:** PROJ-137 (braucht PROJ-136) · PROJ-138, PROJ-139, PROJ-140, PROJ-141 · PROJ-142 (braucht alle übrigen Phase-4-Features)
+
+Phase-3-Einträge oben (PROJ-81 bis PROJ-114) sind für Phase 4 zurückgestellt (`docs/PRD.md`, Non-Goals).

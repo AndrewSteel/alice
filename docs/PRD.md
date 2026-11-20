@@ -1,95 +1,113 @@
-# Product Requirements Document — Phase 3
+# Product Requirements Document — Phase 4
 
-> Phase 1 (PROJ-1–PROJ-39) und Phase 2 (PROJ-40–PROJ-77) sind abgeschlossen.
+> Phase 1 (PROJ-1–PROJ-39), Phase 2 (PROJ-40–PROJ-77) und Phase 3 (PROJ-78–PROJ-114) sind abgeschlossen.
 > Phase-1-Roadmap → `docs/PRD.Phase1.md`
 > Phase-2-Roadmap → `docs/PRD.Phase2.md`
+> Phase-3-Roadmap → `docs/PRD.Phase3.md`
+> Briefing dieser Phase → `docs/briefing.Phase4.md`
 >
-> **Status Phase 3:** Seit 2026-11-01 vorübergehend geschlossen — der ETL-Prozess wird neu geplant.
+> **Status Phase 4:** Geplant am 2026-11-20 — Umbau: Quelle der Wahrheit, Microservices, Agent-Framework.
 
 ## Vision
 
-Phase 3 macht die DMS-Datenbasis vertrauenswürdig (korrekte Klassifizierung, durchgängig deutsche Zusammenfassungen, volle Sichtbarkeit über den Verarbeitungsstand) und erweitert Alice um eigenständige Agenten (Timer, Google Kalender/Kontakte, eigene lokale Aufgaben-/Listenverwaltung, Websuche) sowie eine leistungsfähigere Smart-Home-Steuerung mit variablen Intents und Raumkontext.
+Phase 4 ersetzt das gewachsene Fundament von Alice durch ein belastbares: Jedes Dokument, jede Mail und jedes Bild wird in eine **Markdown-Datei als Quelle der Wahrheit** überführt (Git-versioniert, für Menschen lesbar, von Hand korrigierbar). Alles Weitere — strukturierte Daten in PostgreSQL, der Weaviate-RAG-Index und ein vom lokalen LLM gepflegtes, verlinktes **LLM-Wiki** — wird daraus abgeleitet und ist jederzeit neu erzeugbar. Alle n8n-Workflows werden durch **Docker-Microservices** ersetzt, n8n entfällt. Ein neues **Agent-Framework** beantwortet DMS-Fragen mehrschrittig und zuverlässig und nutzt für tiefe, internetgestützte Recherchen ein **Cloud-Modell** — local-first, nicht local-only.
+
+Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich akzeptiert; das alte System läuft weiter, bis der Neuaufbau steht.
 
 ## Target Users
 
-**Primär: Admin**
-- Primärer und aktuell einziger aktiver Nutzer
-- Verlässt sich zunehmend auf die DMS-Wissensbasis (Rechnungen, Dokumente) und erwartet korrekte Klassifizierung und Sprache
-- Möchte Alice als vollwertigen Assistenten nutzen — Timer, Kalender, Aufgaben, Kontakte, aktuelle Web-Informationen, präzisere Smart-Home-Steuerung
+**Haushalt (Rolle `haushalt`, zwei Haushaltsmitglieder)**
+- Beide haben identische Rechte: alle DMS-Dokumente, alle Postfächer, das gesamte Wiki — keine Unterscheidung untereinander
+- Nutzen Chat und Sprache für Fragen an DMS, Mails, Wiki und für Recherchen
 
-**Schmerz Phase 3:** Falsch klassifizierte bzw. englische DMS-Daten untergraben das Vertrauen in die Wissensbasis; kein Überblick über die Verarbeitungs-Vollständigkeit der DMS-Pipeline; der Assistent kann keine Timer, Kalender, Aufgaben oder Kontakte verwalten und keine aktuellen Web-Informationen abrufen; Smart-Home-Befehle mit Werten (%, Mengen) oder Raumbezug scheitern.
+**Admin (Rolle `admin`)**
+- Ein Haushaltsmitglied mit zusätzlichen Verwaltungsrechten (Nutzer, Ordner, Postfächer, Logs, ETL-Status, Neuaufbau)
 
-## Core Features (Roadmap Phase 3)
+**Gäste (Rolle `guest`)**
+- Stark eingeschränkt wie bisher: kein Zugriff auf DMS, Mail und Wiki; nur freigegebene HA-Funktionen
 
-| Priority | Feature                                                                                                          | Sub-Phase | Status  |
-| -------- | ----------------------------------------------------------------------------------------------------------------- | --------- | ------- |
-| P0       | DMS-Dokumentenklassifizierung — Fix + Backfill Bestand (PROJ-78)                                                   | 3.1       | Deployed |
-| P0       | DMS-Zusammenfassung Sprachkorrektur (Deutsch) — Fix + Backfill Bestand (PROJ-79)                                   | 3.1       | Deployed |
-| P0       | Bug: `confirm`-Gate wirkungslos in Sprach- und Klassifizierungs-Backfill (PROJ-92)                                  | 3.1       | Deployed |
-| P1       | DMS Path-Worker Zeitlimit — kontrollierter Abbruch nach 2h (PROJ-94)                                               | 3.1       | Deployed |
-| P1       | Image-Description-Backfill Auto-Fortsetzung + Zeitlimit (PROJ-96)                                                  | 3.1       | Deployed |
-| P1       | DMS Pfad-Drift-Reconcile + Cleanup verwaister Weaviate-Objekte (PROJ-97)                                           | 3.1       | Deployed |
-| P1       | DMS Email-Konsistenz — Cleanup verwaister Email-Objekte (PROJ-98, ausgegliedert aus PROJ-97)                        | 3.1       | Deployed |
-| P1       | DMS-Vollständigkeits-Dashboard (PROJ-80)                                                                           | 3.2       | Deployed |
-| P1       | Frontend-Übersetzung on-the-fly (PROJ-81)                                                                          | 3.2       | Roadmap |
-| P2       | Mail-Anhang DMS-Import (PROJ-53, verschoben aus Phase 4)                                                           | 3.2       | Deployed |
-| P2       | Synchroner Office-Textextraktor für Mail-Anhänge — DOCX/XLSX/ODT/ODS (PROJ-91, Folge von PROJ-53)                   | 3.2       | Deployed |
-| P2       | Bug: Mail-Objekte bekommen nie ein Thumbnail (PROJ-93, Folge von PROJ-53)                                          | 3.2       | Deployed |
-| P1       | HA-MCP-Server-Evaluierung — Spike (PROJ-82), Ergebnis: No-Go (zurückgestellt)                                      | 3.3       | Approved |
-| P1       | HA-Agent variable Intents — Prozent (Licht/Rolladen), Heizungs-Temperatur, Einkaufslisten-Eintrag (PROJ-83)        | 3.3       | Deployed |
-| P1       | HA-Agent Area-Context-Weitergabe (PROJ-84)                                                                         | 3.3       | Deployed |
-| P1       | Timer-Agent (PROJ-85) — inkl. rollen-basierter Sichtbarkeit/Berechtigung/Limits + Settings-Tab; Refinement 2026-10-15: Ablauf auf allen Voice PE + globale Quittierung | 3.3       | Architected |
-| P1       | Sprecher-Erkennung verbessern (PROJ-103, ausgegliedert aus PROJ-85 — device-abhängige Speaker-ID)                   | 3.3       | Roadmap |
-| P2       | Web Push / PWA-Benachrichtigungen (PROJ-104, ausgegliedert aus PROJ-85 — zuverlässige WebApp-Hintergrund-Meldung)   | 3.3       | Roadmap |
-| P2       | Zeitgesteuerte HA-Befehle (PROJ-105, ausgegliedert aus PROJ-85 — "tu X um Uhrzeit Y", geplante Geräte-Aktion)       | 3.3       | Roadmap |
-| P1       | Google-API-Infrastruktur (PROJ-86)                                                                                 | 3.3       | Deployed |
-| P1       | Umstellung Ollama → llama.cpp (`ollama-3090` → `llama-3090`) — höhere Token-Generierungsrate für Agenten (PROJ-99) | 3.3       | Deployed |
-| P1       | LLM-Gateway mit Priorisierung — Chat/Sprache vor DMS-/Mail-Analyse (PROJ-111)                                      | 3.3       | Deployed |
-| P2       | Panorama-/Großbild-Beschreibung im DMS — zentrale Bildbeschreibung mit Teilbild-Zerlegung, Backfill ohne n8n-Speicherlimit (PROJ-112) | 3.3       | Deployed |
-| P1       | DMS-Bilder in die Redis-Wahrheit aufnehmen — Lifecycle/Reconcile für Image, kein Neu-Beschreiben bekannter Bilder (PROJ-113) | 3.3       | Deployed |
-| P2       | Todo-Listen-Agent — Multi-Liste, CRUD, Vorlesen, Anlegen (PROJ-100, ausgegliedert aus PROJ-83)                     | 3.3       | Verworfen (→ PROJ-106) |
-| P2       | HA-Status-Abfragen — allgemeine Entity-Status per Sprache (PROJ-101, ausgegliedert aus PROJ-83)                    | 3.3       | Roadmap |
-| P2       | Multi-Intent-Zerlegung + Halluzinations-Schutz (PROJ-102, aus PROJ-83 BUG-1)                                       | 3.3       | Roadmap |
-| P2       | Kalender-Agent — inkl. Settings-Tab „Kalender", mehrere Google-Kalender pro User (PROJ-87)                         | 3.4       | Deployed |
-| P2       | Aufgaben-Agent — inkl. Settings-Tab „Aufgaben", mehrere Google-Aufgabenlisten pro User (PROJ-88)                   | 3.4       | Verworfen (→ PROJ-106) |
-| P2       | Aufgaben- & Listen-Verwaltung (lokal) — ersetzt PROJ-88/PROJ-100 (PROJ-106)                                       | 3.4       | Deployed |
-| P2       | Aufgaben-WebApp-Ansicht (PROJ-107, ausgegliedert aus PROJ-106)                                                     | 3.4       | Roadmap |
-| P2       | Aufgaben-Erinnerungen (PROJ-108, ausgegliedert aus PROJ-106)                                                       | 3.4       | Roadmap |
-| P2       | Wiederkehrende Aufgaben (PROJ-109, ausgegliedert aus PROJ-106)                                                     | 3.4       | Roadmap |
-| P2       | Unteraufgaben (PROJ-110, ausgegliedert aus PROJ-106)                                                               | 3.4       | Roadmap |
-| P2       | Kontakte-Agent — inkl. Settings-Tab „Kontakte", mehrere Google-Kontaktbücher pro User (PROJ-89)                    | 3.4       | Roadmap |
-| P2       | Websearch-Agent — Plan → begrenzter Such-Loop → Antwort (PROJ-90)                                                  | 3.4       | Roadmap |
+**Schmerz Phase 4:** Der ETL erfüllt die Anforderungen nicht — die Wahrheit ist über Redis, Weaviate und NAS verstreut und driftet, Inhalte sind nicht lesbar oder korrigierbar. n8n-Workflows fallen immer wieder aus (Speicher, Timeouts, Loop-in-Loop-Aufteilungen, Fan-out). Mails sind ein Sonderweg, Anhänge kommen erst nach bis zu einem Tag im DMS an. Der Chat-Agent ist eine reaktive Tool-Schleife ohne Planung und beantwortet viele DMS-Fragen nicht sauber; Web-Recherche fehlt.
+
+## Core Features (Roadmap Phase 4)
+
+| Priority | Feature | Sub-Phase | Status |
+| -------- | ------- | --------- | ------ |
+| P0 | Rollenmodell Haushalt — `admin`/`haushalt`/`guest`, Rechte je Dokumenttyp und Postfach entfallen, `child` gestrichen (PROJ-121) | 4.1 | Roadmap |
+| P0 | Quelle-der-Wahrheit-Repo + Quellen-Register — Git-versionierter NAS-Ordner, Markdown-/Frontmatter-Format, Register aller Quellen mit Verarbeitungszustand (PROJ-115) | 4.1 | Roadmap |
+| P0 | Datei-Erkennung — Scan, Hash/Dedup, Verschieben/Umbenennen/Löschen; ersetzt Scanner, Path-Worker, Lifecycle, Reconcile (PROJ-116) | 4.1 | Roadmap |
+| P0 | Text-Extraktion → Quell-Markdown (PROJ-117) | 4.1 | Roadmap |
+| P0 | Klassifizierung + Feldextraktion ins Frontmatter, deutsche Zusammenfassung (PROJ-118) | 4.1 | Roadmap |
+| P0 | Strukturierte Dokumentdaten in PostgreSQL, abgeleitet aus der Quell-Markdown (PROJ-119) | 4.1 | Roadmap |
+| P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Roadmap |
+| P0 | Spike Agent-Framework — DeepSeek Harness und Alternativen, Go/No-Go, DMS-Testkatalog (PROJ-133) | 4.4 | Roadmap |
+| P1 | ETL-Status-Ansicht (Admin, WebApp) (PROJ-122) | 4.1 | Roadmap |
+| P1 | Mail-Import in den ETL — `.eml` ohne Anhänge + Links, Mail-Markdown, Kategorie (PROJ-123) | 4.2 | Roadmap |
+| P1 | Mail-Anhänge als Quelldokumente (PROJ-124) | 4.2 | Roadmap |
+| P1 | Bilder in der Quelle der Wahrheit — Übernahme bestehender Beschreibungen (PROJ-125) | 4.2 | Roadmap |
+| P1 | Vorschaubilder aus dem neuen ETL (PROJ-126) | 4.2 | Roadmap |
+| P1 | RAG-Index aus der Quell-Markdown (PROJ-127) | 4.3 | Roadmap |
+| P1 | Such-Tools als Service — Dokumente, Mails, Bilder (PROJ-128) | 4.3 | Roadmap |
+| P1 | Wiki-Ingest — LLM-Pflege je neuer Quell-Markdown (PROJ-129) | 4.3 | Roadmap |
+| P1 | Wiki-Lint nächtlich (PROJ-130) | 4.3 | Roadmap |
+| P1 | Wiki-Ansicht in der WebApp (PROJ-131) | 4.3 | Roadmap |
+| P1 | Wiki-Tool für den Agenten (PROJ-132) | 4.3 | Roadmap |
+| P1 | Agent-Kern auf neuem Framework — ersetzt die Tool-Schleife in `alice-chat-stream` (PROJ-134) | 4.4 | Roadmap |
+| P1 | Agent-Schritte im Chat sichtbar (PROJ-135) | 4.4 | Roadmap |
+| P1 | Cloud-Recherche — Recherche-Sub-Agent, austauschbarer Provider, Start mit `claude -p` (PROJ-136) | 4.4 | Roadmap |
+| P2 | Cloud-Provider per API mit Budget-Stopp, Freigabe für `haushalt` (PROJ-137) | 4.4 | Roadmap |
+| P2 | Session-API + Session-Cleanup als Service (PROJ-138) | 4.5 | Roadmap |
+| P2 | DMS-Ordner-API als Service (PROJ-139) | 4.5 | Roadmap |
+| P2 | Postfach-API als Service (PROJ-140) | 4.5 | Roadmap |
+| P2 | Modell-Warmup im LLM-Gateway (PROJ-141) | 4.5 | Roadmap |
+| P2 | n8n-Abschaltung + Altbestand aufräumen (PROJ-142) | 4.5 | Roadmap |
+
+Unterphasen: **4.1** ETL-Kern · **4.2** Mail und Bilder · **4.3** RAG und Wiki · **4.4** Agent-Framework · **4.5** n8n-Ablösung. Bau-Reihenfolge und Abhängigkeiten: `features/INDEX.md`.
+
+### Produktentscheidungen
+
+- **Quelle der Wahrheit:** eine Markdown-Datei je Quelldokument, Mail und Bild in einem eigenen, Git-versionierten NAS-Ordner; Originale bleiben unverändert an ihrem Ort. Der Mensch darf Quell-Markdowns von Hand korrigieren; die Pipeline übernimmt die Korrektur in DB, RAG und Wiki und überschreibt sie bei einem Neuaufbau nicht.
+- **Mails:** gespeichert als `*.eml` ohne Anhänge, stattdessen mit Links auf die separat gespeicherten Anhangsdateien; Mailtext als Markdown; Anhänge sind eigene Quelldokumente mit Verweis auf die Mail.
+- **Bilder:** Bild-Markdown mit Beschreibung, EXIF, Ort und Link aufs Original. Beim Neuaufbau werden die vorhandenen Beschreibungen übernommen; nur neue Bilder werden mit dem aktuellen Vision-Modell beschrieben (Neubeschreibung des Bestands = PROJ-114, zurückgestellt).
+- **LLM-Wiki:** Seitentypen Personen, Organisationen, Verträge, Konten/Depots, Orte, Themen plus Index-Seiten. Jede neue Quell-Markdown löst einen Ingest im Hintergrund aus; ein nächtlicher Lint prüft Widersprüche, verwaiste Seiten und Links. Jede Aussage verlinkt auf ihre Quelle. Das Wiki ist reines LLM-Erzeugnis, in der WebApp nur lesbar; ein gemeinsames Wiki ohne gefilterte Sichten (Rollenmodell).
+- **Agent-Framework:** Entscheidung per Spike (PROJ-133) mit Go/No-Go. Favorit DeepSeek Harness (MIT, TypeScript/Node, Developer Preview); Alternativen u. a. Pydantic AI, LangGraph, OpenAI Agents SDK, smolagents. Ausgeschlossen: Lösungen auf Basis von n8n. Kriterien: mehrschrittige Planung, Sub-Agents, Tools über MCP oder Python, SSE-Streaming zur WebApp, Sessions/Gedächtnis, Modellwahl je Aufgabe, lokaler llama.cpp über OpenAI-kompatible API hinter `alice-llm-gateway`, i18n der Ausgaben.
+- **Multi-Model:** lokales LLM für alle ETL-Schritte und DMS-Analysen; Cloud-Modell nur für tiefergehende, internetgestützte Recherche. Cloud-Zugang austauschbar: Start mit dem unveränderten Claude Code CLI (`claude -p`) und dem Abo des Admins — nur für Anfragen des Admins; für weitere Haushaltsnutzer oder bei erreichten Limits per API mit Budget-Stopp (PROJ-137).
+- **Sprache (Voice):** unverändert; lange Recherchen liefern per Sprache eine Kurzantwort mit Hinweis auf die WebApp.
+- **WebApp:** neue bzw. geänderte Oberflächen — Wiki-Ansicht, ETL-Status (Admin), Agent-Schritte im Chat. Regeln: `docs/planning/frontend-design.md`, Abschnitt 9.
 
 ## Success Metrics
 
-| Metrik                                                                    | Zielwert                                     |
-| -------------------------------------------------------------------------- | --------------------------------------------- |
-| Fälschlich klassifizierte Rechnungen im `Document`-Schema nach Backfill    | 0                                             |
-| Zusammenfassungen (Bestand + neu) auf Deutsch                              | 100 %                                         |
-| DMS-Vollständigkeits-Dashboard zeigt Coverage-% je Schritt und Pfad        | Weaviate/Thumbnail/Geo je Dokumenttyp sichtbar |
-| Variable HA-Intents (%-Werte, Mengen) funktionsfähig                       | Rolladen, Licht, Einkaufsliste                |
-| Timer/Wecker per Sprache setz-, änder-, abfrag-, löschbar                  | ja                                            |
-| Google-Agenten ohne lokale Datenspeicherung                                | nur Live-Abfragen                             |
-| Mehrere Google-Kalender/-Kontaktbücher pro User verwaltbar                 | im Settings-Tab, analog Postfach-Verwaltung   |
-| Aufgaben mit Uhrzeit, Frist und Erinnerung per Sprache verwaltbar          | ja                                            |
-| Websearch-Agent Such-Loop begrenzt                                         | hartes Maximum, keine Endlosschleife          |
+| Metrik | Zielwert |
+| ------ | -------- |
+| Vollständigkeit des Neuaufbaus | 100 % der Quelldateien, Mails und Bilder haben eine Quell-Markdown oder einen sichtbaren Fehlerstatus; Abgleich NAS/IMAP ↔ Quelle der Wahrheit findet 0 stille Lücken |
+| Aktualität | neue Datei/Mail inkl. Anhänge in Quelle der Wahrheit, DB und RAG ≤ 15 min; im Wiki ≤ 24 h |
+| Stabilität | 14 Tage ETL-Betrieb ohne manuellen Eingriff und ohne verlorene Elemente |
+| DMS-Antwortqualität | ≥ 80 % korrekt mit Quellenangabe auf dem DMS-Testkatalog (~30 Fragen, Ausgangswert in PROJ-133 gemessen) |
+| Wiki-Qualität | jede Wiki-Seite hat Quellenlinks; nächtlicher Lint findet 0 kaputte Links |
+| n8n abgelöst | 0 aktive Workflows, n8n-Container entfernt |
+| Datenschutz Cloud | 0 Cloud-Anfragen mit DMS-, Mail- oder Wiki-Inhalt ohne Freigabe (Protokoll der Cloud-Aufrufe) |
+| Keine Regression | HA-Schnellpfad, Kalender, Listen, Timer funktionieren unverändert mit gleicher Antwortzeit |
 
 ## Constraints
 
-- **Lokal-First** bleibt Grundprinzip. **Ausnahme**: Google- und Websearch-Agenten benötigen zwingend Cloud-Zugriff (keine lokale Alternative) — nur Live-Abfragen, kein lokales Caching der Google-Daten. Aufgaben/Listen werden lokal verwaltet (PROJ-106)
-- **Hardware**: Ryzen 9 + RTX 3090 (LLM `llama-3090` + Weaviate-Vektorisierung `weaviate-transformers`/`weaviate-multi2vec`) + TITAN X (`alice-speech-gateway` mit faster-whisper + Speaker-ID)
-- **Zugang**: Nur über VPN erreichbar (kein öffentliches Internet)
-- **Sprache**: Primär Deutsch; Docs auf Deutsch, Code/Commits auf Englisch
-- **Team**: Solo-Projekt, Hobbyzeit (3–4h/Tag)
-- **Stack**: n8n + PostgreSQL + Weaviate + llama.cpp (`llama-3090`, seit PROJ-99, ersetzt `ollama-3090`) hinter dem LLM-Gateway `alice-llm-gateway` (PROJ-111)- **Phase 1+2 Basis**: PROJ-1–77 deployed — JWT-Auth, DMS-Pipeline, HA-Sync, Speech-Gateway, Chat-Storage, Admin-Dashboard
+- **Local-first, nicht local-only.** ETL, Wiki-Pflege und DMS-Analysen laufen ausschließlich lokal. Die Cloud sieht nur Recherche-Kontext (Frage, Web-Inhalte); DMS-, Mail- und Wiki-Inhalte gehen nur mit expliziter Freigabe pro Anfrage hinaus. Jeder Cloud-Aufruf wird protokolliert. Google-Agenten bleiben wie bisher (nur Live-Abfragen).
+- **Cloud-Zugang:** `claude -p` (unverändertes Claude Code CLI) mit dem Abo des Admins nur für dessen eigene Anfragen — Anfragen anderer Nutzer laufen nicht über dieses Abo (Anthropic-Nutzungsbedingungen). Das Abo teilt sich sein Kontingent mit der Software Factory.
+- **Hardware:** Ryzen 9 + RTX 3090 (`llama-3090`, ein Slot, teilt VRAM mit den Weaviate-Vektorisierern) + TITAN X (Speech). Chat und ETL konkurrieren um den Slot → `alice-llm-gateway` mit Prioritäten bleibt; Neuaufbau und Wiki-Pflege laufen als Hintergrundlast.
+- **Neustart:** keine Migration der alten Weaviate-/Redis-Bestände nötig (Ausnahme: Übernahme der Bildbeschreibungen). Das alte System läuft parallel, bis der Neuaufbau steht; Abschaltung in PROJ-142.
+- **Stack:** Python/FastAPI-Services, PostgreSQL, Redis, Weaviate, MQTT, Next.js (statischer Export), nginx bleiben. Neu: Git im Ordner der Quelle der Wahrheit; Claude Code CLI als Cloud-Zugang; ggf. Node/TypeScript-Runtime, falls der Spike das DeepSeek Harness wählt. n8n entfällt am Ende von 4.5. Keine neue Queue-/Event-Infrastruktur. Details: `docs/stack.md`.
+- **Software Factory:** testet ohne GPU und ohne Produktivsysteme — lokales LLM, Cloud-LLM (`claude`-CLI und API) und Vision-Modell werden gemockt. Messungen gegen das produktive LLM (Ausgangswert und Vergleich im Spike PROJ-133, DMS-Testkatalog) führt der Mensch aus. Factory-Parallelität: höchstens zwei Läufe; nur PROJ-133 läuft parallel zur ETL-Kette.
+- **Zugang:** nur über VPN.
+- **Sprache:** primär Deutsch; LLM-Ausgaben in der Nutzersprache; Docs Deutsch, Code/Commits Englisch.
+- **Team:** Solo-Projekt, Hobbyzeit (3–4 h/Tag).
 
-## Non-Goals Phase 3
+## Non-Goals Phase 4
 
-- Kein PROJ-45 Display Registry / Multi-Display-Routing (→ Phase 4)
-- Keine vertiefte Finanzanalyse / PROJ-59 (→ Phase 4)
-- Kein Sprache-vs-TV/Radio-Trennung / PROJ-58 (→ Phase 5)
-- Kein Multi-Provider-Kalender/-Aufgaben/-Kontakte (nur Google; mehrere Konten/Kalender innerhalb Google sind vorgesehen)
-- Keine lokale Synchronisation/Spiegelung der Google-Daten in PostgreSQL/Weaviate
+- Alle offenen Roadmap-Einträge aus Phase 3 bleiben zurückgestellt: PROJ-81, 89, 101, 102, 103, 104, 105, 107, 108, 109, 110, 114. PROJ-90 (Websearch-Agent) ist verworfen, ersetzt durch PROJ-136
+- Keine Neubeschreibung des Bild-Bestands (PROJ-114)
+- Keine Bearbeitung des Wikis in der WebApp; keine nach Rolle gefilterten Wiki-Sichten
+- Keine Rechte je Dokumenttyp oder Postfach mehr; keine Rolle `child`
+- Keine Migration der alten Weaviate-/Redis-Daten (außer Bildbeschreibungen)
+- Keine neuen Funktionen für HA-Steuerung, Sprache, Kalender, Listen, Timer — nur Anbindung an das neue Agent-Framework
+- Kein PROJ-45 Display Registry, kein PROJ-59 Finanzanalyse, kein PROJ-58 Sprache-vs-TV-Trennung
 
 ---
 

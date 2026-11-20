@@ -216,3 +216,16 @@ Aus der `/write-spec`-Runde 2026-07-19 (PROJ-60–71) ergeben sich zwei Fragen, 
 2. **Stack-Migration → Kein Wechsel.** Bei keiner der 12 Architekturen ergab sich ein Anwendungsfall, den Next.js/React/Tailwind/shadcn nicht sauber abbildet — im Gegenteil, mehrere Specs (PROJ-66/67/68/69/71) nutzen bewusst bereits vorhandene Stack-Bausteine (React-Hooks, `useReducer`, Next.js App-Router, dynamische Imports) statt neuer Abhängigkeiten. Kein Hinweis auf einen Stack-Wechsel-Bedarf, damit entfällt die Ausnahme aus Abschnitt 7 für diesen Feature-Umfang; „keine Stack-Migration" bleibt bindend.
 
 Beide Ergebnisse sind **Momentaufnahmen für den PROJ-60–71-Umfang**, keine dauerhafte Festlegung für alle künftigen Redesign-Phasen — bei neuen, grundlegend anderen Anforderungen (z. B. der Alice-Seitengenerierung-Idee) sind sie erneut zu prüfen.
+
+---
+
+## 9. Phase 4 — neue und geänderte Oberflächen (Planung 2026-11-20)
+
+Vereinbart in der Phasenplanung (`docs/PRD.md`). Details präzisiert die jeweilige Spec.
+
+- **Wiki-Ansicht (PROJ-131):** nur lesen, kein Editor. Navigation über die Links zwischen Seiten, Suche, von jeder Aussage Sprung zur Quell-Markdown bzw. zum Original. Sichtbar für `haushalt` und `admin`, nicht für `guest`.
+- **ETL-Status (PROJ-122):** nur `admin`. Verarbeitungsstand je Quelle und Stufe, Fehler mit Ursache, „erneut versuchen“, Fortschritt des Neuaufbaus.
+- **Agent-Schritte im Chat (PROJ-135):** Plan und Tool-Aufrufe sind während und nach der Antwort nachvollziehbar (einklappbar). Antworten, für die die Cloud genutzt wurde, sind sichtbar gekennzeichnet; eine Freigabe für die Weitergabe lokaler Inhalte an die Cloud fragt der Chat pro Anfrage ab.
+- **Sprache:** unverändert. Lange Recherchen liefern per Sprache eine Kurzantwort mit Hinweis, dass das vollständige Ergebnis in der WebApp steht.
+- Alle neuen Texte laufen über die i18n-Schicht.
+

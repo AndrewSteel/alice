@@ -24,6 +24,18 @@ Verbindlich für die Software Factory und für die lokale Entwicklung. Details z
 | Inferenz | lokal (llama.cpp/Ollama hinter `alice-llm-gateway`) | `docker/compose/ai/` |
 | Routing | nginx | `docker/compose/infra/nginx/` |
 
+## Änderungen Phase 4 (geplant)
+
+Beschlossen in der Phasenplanung 2026-11-20 (`docs/PRD.md`). Was noch nicht gebaut ist, gilt erst mit dem jeweiligen Feature.
+
+| Bereich | Änderung | Feature | Test in der Factory |
+|---|---|---|---|
+| Quelle der Wahrheit | Eigener NAS-Ordner mit Markdown-Dateien, Git-versioniert (`git` im Dienst-Container) | PROJ-115 | temporäres Git-Repo im Job-Ordner |
+| Orchestrierung | n8n entfällt; alle Workflows werden Python/FastAPI-Dienste. Stack-Pack `n8n` und `scripts/check-workflows.sh` werden erst bei der Abschaltung entfernt | PROJ-142 | wie alle Dienste |
+| Agent-Framework | offen bis zum Spike; Favorit DeepSeek Harness (Node/TypeScript). Fällt die Wahl darauf, braucht `.factory/setup.json` einen Node-Check (setzt der Mensch lokal) | PROJ-133 | lokales LLM gemockt (OpenAI-kompatibler Fake-Server) |
+| Cloud-LLM | unverändertes Claude Code CLI (`claude -p`) im Container, Login des Admins als Volume; später zusätzlich Anthropic API mit Budget-Stopp | PROJ-136, PROJ-137 | Fake-`claude`-Binary bzw. HTTP-Mock; nie echte Zugangsdaten |
+| Queues/Events | keine neue Infrastruktur: MQTT, Redis (nur Queue/Lock), PostgreSQL (Zustand) | PROJ-115 ff. | Wegwerf-Postgres/Redis/MQTT |
+
 ## Tests
 
 - Dienste: `scripts/test-services.sh` (pytest pro Dienst; Integrationstests gegen Wegwerf-Postgres/Redis aus `docker/test/compose.test.yml`)
