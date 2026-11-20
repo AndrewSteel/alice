@@ -29,7 +29,7 @@ interface CreateUserDialogProps {
   onConfirm: (data: CreateUserInput) => Promise<void>;
 }
 
-const ROLES = ["admin", "user", "guest", "child"] as const;
+const ROLES = ["admin", "haushalt", "guest"] as const;
 const ANREDE_OPTIONS = ["du", "sie"] as const;
 const SPRACHE_OPTIONS = ["de", "en"] as const;
 const DETAILGRAD_OPTIONS = ["technisch", "normal", "einfach", "kindlich"] as const;
@@ -42,7 +42,7 @@ export function CreateUserDialog({
   const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<string>("user");
+  const [role, setRole] = useState<string>("haushalt");
   const [name, setName] = useState("");
   const [rolle, setRolle] = useState("");
   const [anrede, setAnrede] = useState<string>("du");
@@ -54,7 +54,7 @@ export function CreateUserDialog({
   function resetForm() {
     setUsername("");
     setEmail("");
-    setRole("user");
+    setRole("haushalt");
     setName("");
     setRolle("");
     setAnrede("du");
@@ -180,7 +180,7 @@ export function CreateUserDialog({
                       value={r}
                       className="focus:bg-accent focus:text-foreground"
                     >
-                      {r}
+                      {t(`settings.timers.roleNames.${r}`)}
                     </SelectItem>
                   ))}
                 </SelectContent>

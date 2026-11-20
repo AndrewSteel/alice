@@ -54,7 +54,7 @@ export function UserCard({ variant = "sidebar" }: UserCardProps) {
           forced to full sidebar width in the compact header variant. */}
       <div className="flex flex-col items-start min-w-0">
         <span className="text-sm font-medium text-foreground truncate">{user.username}</span>
-        <span className="text-xs text-muted-foreground capitalize">{user.role}</span>
+        <span className="text-xs text-muted-foreground">{t(`settings.timers.roleNames.${user.role}`, { defaultValue: user.role })}</span>
       </div>
     </button>
   );

@@ -15,7 +15,7 @@ import {
   type CalendarRoleFlag,
 } from "@/services/calendar";
 
-const ROLES: CalendarRole[] = ["admin", "user", "guest", "child"];
+const ROLES: CalendarRole[] = ["admin", "haushalt", "guest"];
 
 /**
  * PROJ-87 — per-role calendar permission. Rendered inside the

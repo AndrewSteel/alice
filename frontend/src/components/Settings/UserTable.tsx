@@ -40,11 +40,11 @@ interface UserTableProps {
 }
 
 function RoleBadge({ role }: { role: string }) {
+  const { t } = useTranslation();
   const styles: Record<string, string> = {
     admin: "bg-purple-900/40 text-purple-300 border-purple-800",
-    user: "bg-blue-900/40 text-blue-300 border-blue-800",
+    haushalt: "bg-blue-900/40 text-blue-300 border-blue-800",
     guest: "bg-muted/40 text-foreground border-border",
-    child: "bg-green-900/40 text-green-300 border-green-800",
   };
 
   return (
@@ -52,7 +52,7 @@ function RoleBadge({ role }: { role: string }) {
       variant="secondary"
       className={`text-xs ${styles[role] || "bg-muted/40 text-foreground border-border"}`}
     >
-      {role}
+      {t(`settings.timers.roleNames.${role}`, { defaultValue: role })}
     </Badge>
   );
 }
