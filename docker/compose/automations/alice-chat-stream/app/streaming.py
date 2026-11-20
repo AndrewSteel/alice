@@ -273,6 +273,7 @@ async def stream_chat(
     anrede: str = "du",
     calendar: calendar_tools.CalendarTurn | None = None,
     lists: lists_tools.ListsTurn | None = None,
+    archive_access: bool = False,
 ) -> AsyncIterator[tuple[bytes, dict]]:
     """
     Yields (sse_bytes, side_effect_dict). side_effect_dict carries data the
@@ -283,8 +284,11 @@ async def stream_chat(
     `calendar` (PROJ-87): when enabled, the calendar tools are offered and
     their calls are routed to alice-calendar instead of tools.execute_tool.
     `lists` (PROJ-106): the same for the lists tools / alice-lists.
+    `archive_access` (PROJ-121): document / image / mail tools are offered
+    and executed only when True (admin, haushalt).
     """
-    base_tools = tools.tool_schema()
+    # PROJ-121: archive tools only for admin / haushalt.
+    base_tools = tools.tool_schema(archive_access)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
@@ -491,7 +495,8 @@ async def stream_chat(
                         template_replies.append(reply)
                         round_terminal = round_terminal and lists_replies.is_terminal(result)
                 else:
-                    result = await tools.execute_tool(tool_name, args, user_id, client)
+                    result = await tools.execute_tool(tool_name, args, user_id, client,
+                                                      archive_access=archive_access)
                 ok = "error" not in result
                 outcome = (
                     "timeout" if result.get("error") == "timeout"

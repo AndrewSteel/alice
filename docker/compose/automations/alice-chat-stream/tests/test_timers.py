@@ -364,7 +364,7 @@ class FakeConn:
 class FakePool:
     """Minimal in-memory alice.timers + role config."""
 
-    def __init__(self, *, role="admin", default_role="user", allowed=True,
+    def __init__(self, *, role="admin", default_role="haushalt", allowed=True,
                  max_active=20, max_duration=86400, timers_rows=None, user_role=None):
         self._role = role
         self._default_role = default_role
@@ -609,7 +609,7 @@ class TestHandleSet:
         assert pool.rows == []
 
     def test_max_duration_rejected(self):
-        pool = FakePool(max_duration=7200)  # child-like 2 h
+        pool = FakePool(max_duration=7200)  # restricted 2 h
         r = run(timers.handle_timer_part(
             pool, "Timer auf 5 Stunden", "set", user_id="u1", source="webapp_cc", now=NOW,
         ))
@@ -854,7 +854,7 @@ class TestCrossDeviceManagement:
         assert pool.rows == []
 
     def test_other_role_does_not_see_it_from_any_device(self):
-        pool = FakePool(role="child", timers_rows=[_mk_row(
+        pool = FakePool(role="guest", timers_rows=[_mk_row(
             id="t1", name="Kartoffel Timer", origin_channel="esphome:Büro",
         )])
         q = run(timers.handle_timer_part(

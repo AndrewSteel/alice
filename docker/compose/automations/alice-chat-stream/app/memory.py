@@ -185,11 +185,16 @@ async def load_user_profile(user_id: str) -> dict[str, Any]:
 def build_system_prompt(
     profile: dict[str, Any],
     long_term_memories: list[dict] | None = None,
+    archive_access: bool = False,
 ) -> str:
     """
     Build the system prompt that goes to Ollama. Injects the user profile
     so Alice knows the user's name, salutation, language, and interests.
     Optionally injects relevant long-term memories (Tier 2).
+
+    Without `archive_access` (PROJ-121: guests, unrecognised speakers) the
+    document / image / mail tools are not described and the model is told to
+    decline such requests; the reply language follows the user's setting.
     """
     facts = profile.get("facts") or {}
     prefs = profile.get("preferences") or {}
@@ -200,21 +205,21 @@ def build_system_prompt(
     sprache = prefs.get("sprache") or "deutsch"
     detailgrad = prefs.get("detailgrad") or "normal"
 
-    lines = [
-        "Du bist Alice, ein persönlicher Assistent und Smart-Home-Controller.",
-        "",
-        "Du hast Zugriff auf folgende Tools:",
+    archive_tool_lines = [
         "- search_documents: Durchsucht das Dokumentenarchiv (Rechnungen, Kontoauszüge, BankTransactions, Verträge, E-Mails, Wertpapierabrechnungen). "
         "Für Fragen nach konkreten Zahlungen/Buchungen doc_type='BankTransaction' verwenden.",
         "- get_document_details: Holt alle Details zu einem Dokument per weaviate_id + collection.",
         "- search_images: Durchsucht die Bilder-Sammlung (Ort, Motiv, Aktualität). Ergebnisse "
         "erscheinen immer als Kachel-Raster, auch ohne 'zeige mir' in der Anfrage.",
-        "- search_emails: Durchsucht indexierte E-Mails des Nutzers semantisch.",
+        "- search_emails: Durchsucht indexierte E-Mails aller Postfächer des Haushalts semantisch.",
         "- get_email_body: Lädt den vollständigen Inhalt einer E-Mail (benötigt mailbox_id + uid aus search_emails).",
+    ]
+    common_tool_lines = [
         "- home_assistant: Steuert Home-Assistant-Geräte direkt (Licht, Heizung, Schalter, ...).",
         "- remember: Speichert dauerhafte Fakten oder Präferenzen über den Nutzer.",
         "- recall: Sucht semantisch in vergangenen Gesprächen.",
-        "",
+    ]
+    archive_rule_lines = [
         "Bei search_documents, search_emails und search_images: vom Nutzer genannte konkrete "
         "Begriffe (Firmennamen, Themen, Orte, Motive, Stichworte) unverändert als query/location "
         "übernehmen, nicht paraphrasieren. Bei rein zeitlichen Anfragen ('die letzten...', "
@@ -229,9 +234,23 @@ def build_system_prompt(
         "die Rückfrage aus, auch wenn eine frühere bereits bestätigt wurde. Enthält ein "
         "Werkzeugergebnis more_available=true, weise im Antworttext explizit darauf hin, dass es "
         "weitere, nicht angezeigte Treffer gibt.",
-        "",
-        _current_datetime_line(),
     ]
+    no_archive_lines = [
+        "Dieser Nutzer hat keinen Zugriff auf Dokumente, Rechnungen, Kontoauszüge, Verträge, "
+        "Bilder und E-Mails. Fragt er danach, lehne kurz und freundlich ab und sage, dass ihm "
+        "dafür die Berechtigung fehlt. Nenne keine Inhalte und erfinde keine Treffer.",
+    ]
+
+    lines = [
+        "Du bist Alice, ein persönlicher Assistent und Smart-Home-Controller.",
+        "",
+        "Du hast Zugriff auf folgende Tools:",
+    ]
+    if archive_access:
+        lines += archive_tool_lines + common_tool_lines + [""] + archive_rule_lines
+    else:
+        lines += common_tool_lines + [""] + no_archive_lines
+    lines += ["", _current_datetime_line()]
 
     if name:
         lines.append(f"Der Nutzer heißt {name}.")

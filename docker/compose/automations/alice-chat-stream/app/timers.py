@@ -436,6 +436,10 @@ async def resolve_role(pool, user_id: str | None) -> str:
     return await default_role(pool)
 
 
+# Fallback owner role for timers of unrecognised speakers (PROJ-121).
+DEFAULT_ROLE = "haushalt"
+
+
 async def default_role(pool) -> str:
     try:
         row = await pool.fetchrow(
@@ -443,13 +447,13 @@ async def default_role(pool) -> str:
         )
     except Exception as exc:
         logger.warning("timer_default_role lookup failed: %s", exc)
-        return "user"
+        return DEFAULT_ROLE
     if not row:
-        return "user"
+        return DEFAULT_ROLE
     val = row["value"]
     if isinstance(val, str):
-        return val.strip('"') or "user"
-    return "user"
+        return val.strip('"') or DEFAULT_ROLE
+    return DEFAULT_ROLE
 
 
 async def load_role_config(pool, role: str) -> RoleConfig:
@@ -527,7 +531,7 @@ EARLY_ACK_SECONDS = 10
 
 async def acknowledge_webapp(pool, role: str, timer_ids: list[str]) -> int:
     """Closing the WebApp toast acknowledges the timers (role scope only — a
-    child cannot click away an admin alarm). Idempotent: a timer already
+    guest cannot click away an admin alarm). Idempotent: a timer already
     acknowledged by voice / another tab is simply not counted. A catch-up
     toast (timer ended by timeout) is re-marked 'webapp' so other tabs drop it.
     A running timer whose expiry is (nearly) reached — the browser countdown

@@ -25,7 +25,7 @@ def _run(monkeypatch, n8n_result):
         return dict(n8n_result)
     monkeypatch.setattr(tools, "_call_n8n_mail", fake_call)
     return asyncio.run(tools.execute_tool(
-        "get_email_body", {"mailbox_id": "m", "uid": "1"}, "u", None))
+        "get_email_body", {"mailbox_id": "m", "uid": "1"}, "u", None, archive_access=True))
 
 
 def test_long_body_is_truncated(monkeypatch):
