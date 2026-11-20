@@ -193,7 +193,7 @@ def make_ctx():
     def _make(now=datetime(2026, 10, 7, 9, 30, tzinfo=TZ), channel="chat", session="s1", turn=1,
               user=USER):
         return agent.Ctx(
-            caller=Caller(user_id=user, role="user", token="jwt", issuer=None),
+            caller=Caller(user_id=user, role="haushalt", token="jwt", issuer=None),
             client=None, tz_name="Europe/Berlin", tz=TZ, now=now,
             channel=channel, session_id=session, turn=turn,
         )

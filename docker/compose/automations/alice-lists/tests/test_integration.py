@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from app import agent, db
-from tests.conftest import ADMIN, CHILD, TZ, USER, USER2, make_ctx
+from tests.conftest import ADMIN, GUEST_LISTS, TZ, USER, USER2, make_ctx
 
 pytestmark = pytest.mark.usefixtures("pool")
 
@@ -113,7 +113,7 @@ async def test_shared_list_rename_delete_only_admin_or_creator():
     await agent.manage_list(make_ctx(USER), {"action": "create", "name": "Urlaub", "shared": True})
     r = await agent.manage_list(make_ctx(USER2), {"action": "rename", "name": "Urlaub", "new_name": "Ferien"})
     assert r["error"] == "not_list_owner"
-    r = await agent.manage_list(make_ctx(CHILD), {"action": "delete", "name": "Urlaub"})
+    r = await agent.manage_list(make_ctx(GUEST_LISTS), {"action": "delete", "name": "Urlaub"})
     assert "error" in r
     r = await agent.manage_list(make_ctx(ADMIN), {"action": "rename", "name": "Urlaub", "new_name": "Ferien"})
     assert r["status"] == "list_renamed"
@@ -121,10 +121,10 @@ async def test_shared_list_rename_delete_only_admin_or_creator():
     assert r["status"] == "confirm_delete_list"
 
 
-async def test_child_cannot_create_shared_list():
-    r = await agent.manage_list(make_ctx(CHILD), {"action": "create", "name": "Spiele", "shared": True})
+async def test_restricted_cannot_create_shared_list():
+    r = await agent.manage_list(make_ctx(GUEST_LISTS), {"action": "create", "name": "Spiele", "shared": True})
     assert r["error"] == "forbidden"
-    r = await agent.manage_list(make_ctx(CHILD), {"action": "create", "name": "Spiele"})
+    r = await agent.manage_list(make_ctx(GUEST_LISTS), {"action": "create", "name": "Spiele"})
     assert r["status"] == "list_created"
 
 
@@ -187,9 +187,9 @@ async def test_shopping_list_delete_only_admin_then_none():
     assert r["error"] == "no_shopping_list"
 
 
-async def test_shopping_remove_without_question_child_refused():
+async def test_shopping_remove_without_question_restricted_refused():
     await _add(USER, "Milch, Butter und Eier", list="Einkaufsliste")
-    r = await agent.remove_items(make_ctx(CHILD), {"items": "Butter", "list": "Einkaufsliste"})
+    r = await agent.remove_items(make_ctx(GUEST_LISTS), {"items": "Butter", "list": "Einkaufsliste"})
     assert r["error"] == "forbidden_child_remove"
     r = await agent.remove_items(make_ctx(USER), {"items": "Butter und Eier und Käse", "list": "Einkaufsliste"})
     assert r["status"] == "removed" and _titles(r) == ["Butter", "Eier"] and r["not_found"] == ["Käse"]
@@ -197,10 +197,10 @@ async def test_shopping_remove_without_question_child_refused():
     assert _titles(q) == ["Milch"]
 
 
-async def test_child_can_read_add_complete_shared():
-    await _add(CHILD, "Schokolade", list="Einkaufsliste")
-    assert (await agent.complete_items(make_ctx(CHILD), {"items": "Schokolade"}))["status"] == "completed"
-    q = await agent.query_items(make_ctx(CHILD), {"list": "Einkaufsliste", "done": True})
+async def test_restricted_can_read_add_complete_shared():
+    await _add(GUEST_LISTS, "Schokolade", list="Einkaufsliste")
+    assert (await agent.complete_items(make_ctx(GUEST_LISTS), {"items": "Schokolade"}))["status"] == "completed"
+    q = await agent.query_items(make_ctx(GUEST_LISTS), {"list": "Einkaufsliste", "done": True})
     assert _titles(q) == ["Schokolade"]
 
 
@@ -388,12 +388,12 @@ async def test_update_fields_and_move():
     assert r["status"] == "not_found"
 
 
-async def test_child_cannot_update_shared_but_own_private():
+async def test_restricted_cannot_update_shared_but_own_private():
     await _add(USER, "Milch", list="Einkaufsliste")
-    r = await agent.update_item(make_ctx(CHILD), {"item": "Milch", "new_title": "Hafermilch"})
+    r = await agent.update_item(make_ctx(GUEST_LISTS), {"item": "Milch", "new_title": "Hafermilch"})
     assert r["error"] == "forbidden"
-    await _add(CHILD, "Hausaufgaben")
-    r = await agent.update_item(make_ctx(CHILD), {"item": "Hausaufgaben", "new_priority": "high"})
+    await _add(GUEST_LISTS, "Hausaufgaben")
+    r = await agent.update_item(make_ctx(GUEST_LISTS), {"item": "Hausaufgaben", "new_priority": "high"})
     assert r["status"] == "updated"
 
 
@@ -469,11 +469,11 @@ async def test_purge_after_30_days(pool):
 # Permissions per role
 # ---------------------------------------------------------------------------
 async def test_role_flag_and_revocation(pool):
-    assert await db.caller_access(USER) == ("user", True)
-    assert await db.caller_access(CHILD) == ("child", True)
+    assert await db.caller_access(USER) == ("haushalt", True)
+    assert await db.caller_access(GUEST_LISTS) == ("guest", True)
     assert (await db.caller_access("b0000000-0000-0000-0000-00000000000e"))[1] is False   # guest
-    await db.set_role_config([{"role": "child", "can_use_lists": False}])
-    assert await db.caller_access(CHILD) == ("child", False)
+    await db.set_role_config([{"role": "guest", "can_use_lists": False}])
+    assert await db.caller_access(GUEST_LISTS) == ("guest", False)
     # Not the all-zero UUID: sql/init-schema.sql seeds it as the guest for unidentified speakers
     assert await db.caller_access("b0000000-0000-0000-0000-0000000000ff") == (None, False)
 

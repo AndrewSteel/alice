@@ -89,14 +89,14 @@ def permission_error(ctx: Ctx, action: str, lst: dict | None) -> dict | None:
     if action in ("read", "add", "complete", "set_default"):
         return None
     if action in ("update", "remove", "cleanup"):
-        if role in ("admin", "user"):
+        if role in ("admin", "haushalt"):
             return None
         if action == "remove" and lst is not None and lst.get("is_shopping"):
             return _err("forbidden_child_remove",
-                        "Kinder dürfen nichts von der Einkaufsliste entfernen, nur abhaken.")
+                        "Gäste dürfen nichts von der Einkaufsliste entfernen, nur abhaken.")
         return _err(*ERR_FORBIDDEN)
     if action == "create_shared":
-        return None if role in ("admin", "user") else _err(*ERR_FORBIDDEN)
+        return None if role in ("admin", "haushalt") else _err(*ERR_FORBIDDEN)
     if action == "flag_shopping":
         return None if role == "admin" else _err("admin_only", "Nur ein Admin kann die Einkaufsliste festlegen.")
     if action in ("rename", "delete"):
@@ -104,7 +104,7 @@ def permission_error(ctx: Ctx, action: str, lst: dict | None) -> dict | None:
             return None
         if lst is not None and lst.get("is_shopping") and action == "delete":
             return _err("admin_only", "Die Einkaufsliste kann nur ein Admin löschen.")
-        if role == "user" and lst is not None and lst.get("created_by") == ctx.user_id:
+        if role == "haushalt" and lst is not None and lst.get("created_by") == ctx.user_id:
             return None
         return _err("not_list_owner", "Gemeinsame Listen dürfen nur ein Admin und der Ersteller umbenennen "
                                       "oder löschen.")

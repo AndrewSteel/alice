@@ -132,12 +132,12 @@ def _ctx(user_id, role):
 
 
 @pytest.mark.parametrize("role, action, lst, allowed", [
-    ("child", "read", SHARED, True), ("child", "add", SHOP, True), ("child", "complete", SHOP, True),
-    ("child", "remove", SHOP, False), ("child", "update", SHARED, False), ("child", "cleanup", SHARED, False),
-    ("child", "create_shared", None, False), ("child", "delete", SHARED, False),
-    ("child", "remove", PRIV, True), ("child", "delete", PRIV, True),
-    ("user", "remove", SHOP, True), ("user", "create_shared", None, True), ("user", "flag_shopping", SHARED, False),
-    ("user", "delete", SHARED, False), ("user", "rename", SHARED, False), ("user", "delete", SHOP, False),
+    ("guest", "read", SHARED, True), ("guest", "add", SHOP, True), ("guest", "complete", SHOP, True),
+    ("guest", "remove", SHOP, False), ("guest", "update", SHARED, False), ("guest", "cleanup", SHARED, False),
+    ("guest", "create_shared", None, False), ("guest", "delete", SHARED, False),
+    ("guest", "remove", PRIV, True), ("guest", "delete", PRIV, True),
+    ("haushalt", "remove", SHOP, True), ("haushalt", "create_shared", None, True), ("haushalt", "flag_shopping", SHARED, False),
+    ("haushalt", "delete", SHARED, False), ("haushalt", "rename", SHARED, False), ("haushalt", "delete", SHOP, False),
     ("admin", "delete", SHOP, True), ("admin", "flag_shopping", SHARED, True), ("admin", "rename", SHARED, True),
 ])
 def test_permission_matrix(role, action, lst, allowed):
@@ -145,13 +145,13 @@ def test_permission_matrix(role, action, lst, allowed):
 
 
 def test_creator_may_manage_own_shared_list():
-    ctx = _ctx("creator", "user")
+    ctx = _ctx("creator", "haushalt")
     assert agent.permission_error(ctx, "rename", SHARED) is None
     assert agent.permission_error(ctx, "delete", SHARED) is None
 
 
-def test_child_remove_from_shopping_hint():
-    assert agent.permission_error(_ctx("me", "child"), "remove", SHOP)["error"] == "forbidden_child_remove"
+def test_restricted_remove_from_shopping_hint():
+    assert agent.permission_error(_ctx("me", "guest"), "remove", SHOP)["error"] == "forbidden_child_remove"
 
 
 def test_unknown_speaker_only_adds_to_shopping():

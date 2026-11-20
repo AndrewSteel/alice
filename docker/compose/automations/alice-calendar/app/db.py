@@ -15,7 +15,7 @@ import asyncpg
 logger = logging.getLogger("alice-calendar.db")
 
 POSTGRES_DSN = os.environ.get("POSTGRES_DSN", "")
-ROLES = ("admin", "user", "guest", "child")
+ROLES = ("admin", "haushalt", "guest")  # PROJ-121
 
 _pool: asyncpg.Pool | None = None
 

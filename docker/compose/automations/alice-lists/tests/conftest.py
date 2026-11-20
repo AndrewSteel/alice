@@ -21,10 +21,12 @@ DSN = os.environ.get("LISTS_TEST_DSN")
 ADMIN = "b0000000-0000-0000-0000-00000000000a"
 USER = "b0000000-0000-0000-0000-00000000000b"
 USER2 = "b0000000-0000-0000-0000-00000000000d"
-CHILD = "b0000000-0000-0000-0000-00000000000c"
+# A guest whose admin granted lists individually: the restricted lists rules
+# (formerly role 'child') apply to every role other than admin/haushalt.
+GUEST_LISTS = "b0000000-0000-0000-0000-00000000000c"
 GUEST = "b0000000-0000-0000-0000-00000000000e"
-USERS = ((ADMIN, "lt-admin", "admin"), (USER, "lt-user", "user"), (USER2, "lt-user2", "user"),
-         (CHILD, "lt-child", "child"), (GUEST, "lt-guest", "guest"))
+USERS = ((ADMIN, "lt-admin", "admin"), (USER, "lt-user", "haushalt"), (USER2, "lt-user2", "haushalt"),
+         (GUEST_LISTS, "lt-guest-lists", "guest"), (GUEST, "lt-guest", "guest"))
 ROLE_OF = {uid: role for uid, _, role in USERS}
 
 
@@ -67,9 +69,11 @@ async def pool(monkeypatch):
         await p.execute("INSERT INTO alice.users (id, username, role, is_active) VALUES ($1::uuid, $2, $3, TRUE)",
                         uid, name, role)
         await p.execute("SELECT alice.init_user_permissions($1::uuid, $2)", uid, role)
+    await p.execute("UPDATE alice.permissions_assistant SET can_use_lists = TRUE WHERE user_id = $1::uuid",
+                    GUEST_LISTS)
     yield p
     await p.execute("DELETE FROM alice.users WHERE id = ANY($1::uuid[])", [u[0] for u in USERS])
-    await db.set_role_config([{"role": r, "can_use_lists": r != "guest"} for r in ("admin", "user", "guest", "child")])
+    await db.set_role_config([{"role": r, "can_use_lists": r != "guest"} for r in ("admin", "haushalt", "guest")])
     await db.close_pool()
 
 

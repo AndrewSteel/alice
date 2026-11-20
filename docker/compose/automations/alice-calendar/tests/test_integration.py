@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(not DSN, reason="CALENDAR_TEST_DSN not set")
 
 ADMIN = "a0000000-0000-0000-0000-00000000000a"
 USER = "a0000000-0000-0000-0000-00000000000b"
-CHILD = "a0000000-0000-0000-0000-00000000000c"
+GUEST = "a0000000-0000-0000-0000-00000000000c"
 CONN = "c0000000-0000-0000-0000-000000000001"
 CONN_OTHER = "c0000000-0000-0000-0000-000000000002"
 
@@ -44,9 +44,9 @@ async def pool(keys, monkeypatch):
     monkeypatch.setattr(db, "POSTGRES_DSN", DSN)
     await db.init_pool()
     p = db.pool()
-    await p.execute("DELETE FROM alice.users WHERE id = ANY($1::uuid[])", [ADMIN, USER, CHILD])
+    await p.execute("DELETE FROM alice.users WHERE id = ANY($1::uuid[])", [ADMIN, USER, GUEST])
     await p.execute("DELETE FROM alice.google_connections WHERE id = ANY($1::uuid[])", [CONN, CONN_OTHER])
-    for uid, name, role in ((ADMIN, "it-admin", "admin"), (USER, "it-user", "user"), (CHILD, "it-child", "child")):
+    for uid, name, role in ((ADMIN, "it-admin", "admin"), (USER, "it-user", "haushalt"), (GUEST, "it-guest", "guest")):
         await p.execute(
             "INSERT INTO alice.users (id, username, role, is_active) VALUES ($1::uuid, $2, $3, TRUE)",
             uid, name, role,
@@ -59,14 +59,14 @@ async def pool(keys, monkeypatch):
             cid, uid, acc,
         )
     yield p
-    await p.execute("DELETE FROM alice.users WHERE id = ANY($1::uuid[])", [ADMIN, USER, CHILD])
+    await p.execute("DELETE FROM alice.users WHERE id = ANY($1::uuid[])", [ADMIN, USER, GUEST])
     # role templates may have been changed by the admin test — restore defaults
-    await db.set_role_config([{"role": r, "can_use_calendar": r in ("admin", "user")}
-                              for r in ("admin", "user", "guest", "child")])
+    await db.set_role_config([{"role": r, "can_use_calendar": r in ("admin", "haushalt")}
+                              for r in ("admin", "haushalt", "guest")])
     await db.close_pool()
 
 
-def _token(priv, user_id, role="user", iss=None):
+def _token(priv, user_id, role="haushalt", iss=None):
     import jwt
 
     payload = {"user_id": user_id, "role": role, "iat": int(time.time()), "exp": int(time.time()) + 300}
@@ -133,7 +133,7 @@ async def test_permission_flags(pool):
     from app import db
     assert await db.can_use_calendar(ADMIN)
     assert await db.can_use_calendar(USER)
-    assert not await db.can_use_calendar(CHILD)
+    assert not await db.can_use_calendar(GUEST)
     assert not await db.can_use_calendar("00000000-0000-0000-0000-000000000000")
     assert not await db.can_use_calendar(str(uuid.uuid4()))
 
@@ -153,10 +153,10 @@ async def api(pool, keys):
 
 async def test_tab_requires_calendar_permission(api):
     client, priv = api
-    r = await client.get("/calendar/accounts", headers={"Authorization": f"Bearer {_token(priv, CHILD, 'child')}"})
+    r = await client.get("/calendar/accounts", headers={"Authorization": f"Bearer {_token(priv, GUEST, 'guest')}"})
     assert r.status_code == 403
     r = await client.put("/calendar/selection", json={"connection_id": CONN, "calendar_id": "c1", "is_active": True},
-                         headers={"Authorization": f"Bearer {_token(priv, CHILD, 'child')}"})
+                         headers={"Authorization": f"Bearer {_token(priv, GUEST, 'guest')}"})
     assert r.status_code == 403
     r = await client.get("/calendar/accounts")
     assert r.status_code == 401
@@ -165,7 +165,7 @@ async def test_tab_requires_calendar_permission(api):
 async def test_tool_forbidden_and_unknown_speaker(api):
     client, priv = api
     r = await client.post("/internal/tools/list_events", json={"args": {"range": "today"}},
-                          headers={"Authorization": f"Bearer {_token(priv, CHILD, 'child')}"})
+                          headers={"Authorization": f"Bearer {_token(priv, GUEST, 'guest')}"})
     assert r.status_code == 200 and r.json()["error"] == "forbidden"
     nil = _token(priv, "00000000-0000-0000-0000-000000000000", iss="alice-speech-gateway")
     r = await client.post("/internal/tools/create_event", json={"args": {"title": "x", "date": "2030-01-01"}},
@@ -176,9 +176,9 @@ async def test_tool_forbidden_and_unknown_speaker(api):
 
 
 async def test_voice_token_role_claim_is_ignored(api):
-    """Gateway tokens always claim role=user; the DB flag decides (child → forbidden)."""
+    """Gateway tokens always claim the same role; the DB flag decides (guest → forbidden)."""
     client, priv = api
-    tok = _token(priv, CHILD, role="user", iss="alice-speech-gateway")
+    tok = _token(priv, GUEST, role="haushalt", iss="alice-speech-gateway")
     r = await client.post("/internal/tools/list_events", json={"args": {}},
                           headers={"Authorization": f"Bearer {tok}"})
     assert r.json()["error"] == "forbidden"
@@ -191,21 +191,26 @@ async def test_admin_roles_endpoint(api):
     hdr = {"Authorization": f"Bearer {_token(priv, ADMIN, 'admin')}"}
     r = await client.get("/calendar/admin/roles", headers=hdr)
     assert {x["role"]: x["can_use_calendar"] for x in r.json()["roles"]} == \
-        {"admin": True, "user": True, "guest": False, "child": False}
-    r = await client.put("/calendar/admin/roles", json={"roles": [{"role": "child", "can_use_calendar": True}]},
+        {"admin": True, "haushalt": True, "guest": False}
+    r = await client.put("/calendar/admin/roles", json={"roles": [{"role": "guest", "can_use_calendar": True}]},
                          headers=hdr)
     assert r.status_code == 200
     from app import db
-    assert await db.can_use_calendar(CHILD)       # per-user flag kept in step
+    assert await db.can_use_calendar(GUEST)       # per-user flag kept in step
     r = await client.put("/calendar/admin/roles", json={"roles": [{"role": "root", "can_use_calendar": True}]},
                          headers=hdr)
     assert r.status_code == 422
+    # PROJ-121: legacy roles are rejected, no silent mapping (AK-13, EC-3)
+    for legacy in ("user", "child"):
+        r = await client.put("/calendar/admin/roles",
+                             json={"roles": [{"role": legacy, "can_use_calendar": True}]}, headers=hdr)
+        assert r.status_code == 422
 
 
 async def test_role_revocation_locks_immediately(api):
     client, priv = api
     hdr = {"Authorization": f"Bearer {_token(priv, ADMIN, 'admin')}"}
-    await client.put("/calendar/admin/roles", json={"roles": [{"role": "user", "can_use_calendar": False}]},
+    await client.put("/calendar/admin/roles", json={"roles": [{"role": "haushalt", "can_use_calendar": False}]},
                      headers=hdr)
     r = await client.get("/calendar/accounts", headers={"Authorization": f"Bearer {_token(priv, USER)}"})
     assert r.status_code == 403
@@ -241,9 +246,9 @@ async def test_pending_question_survives_to_next_turn_only(api, monkeypatch):
         assert later["pending"] is None
         other = (await client.post("/internal/turn", headers=hdr, json={"session_id": "s2", "turn": 4})).json()
         assert other["pending"] is None
-        child = (await client.post("/internal/turn", json={"session_id": "s1", "turn": 4},
-                                   headers={"Authorization": f"Bearer {_token(priv, CHILD, 'child')}"})).json()
-        assert child == {"enabled": False, "reason": "forbidden", "pending": None}
+        guest = (await client.post("/internal/turn", json={"session_id": "s1", "turn": 4},
+                                   headers={"Authorization": f"Bearer {_token(priv, GUEST, 'guest')}"})).json()
+        assert guest == {"enabled": False, "reason": "forbidden", "pending": None}
     finally:
         tickets.set_client(None)
 
