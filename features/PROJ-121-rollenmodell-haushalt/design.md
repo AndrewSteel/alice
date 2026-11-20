@@ -24,7 +24,7 @@ alice-speech-gateway Einrollen per Sprache legt "haushalt" statt "user" an; Dien
 n8n: alice-tool-search   Zugriff je Rolle statt je Dokumenttyp
 n8n: alice-mail-tools    alle Postfächer für admin/haushalt, keine für guest
 n8n: alice-mail-api      Liste für admin/haushalt komplett; Anlegen/Ändern/Löschen nur admin;
-                         Endpunkte für Zugriff je Postfach (+ Nutzerliste dafür) entfernt
+                         Endpunkte für Zugriff je Postfach entfernt
 n8n: alice-mail-sync     Benachrichtigung „wichtige Mail" an alle aktiven admin/haushalt
 
 Frontend: Einstellungen › Nutzer (Anlegen-Dialog, Rollen-Badges, Kalender-/Listen-/Timer-Rollen)
@@ -94,3 +94,21 @@ Deploy-Schritte für den Menschen:
 | `child` → Vorlage `guest` neu anwenden | nur Rolle umbenennen | Nur Umbenennen ließe Kinder-Rechte (z. B. Listen, Timer) an einem „Gast" hängen; Kinder sind nicht vorgesehen |
 | Mail-Benachrichtigung an alle admin/haushalt | nur Eigentümer | Sichtbarkeit aller Postfächer für alle ist Product Decision; Eigentümer allein wäre ein Rückschritt für bisher Freigegebene |
 | Zugriffs-Endpunkte im Workflow entfernen | stehen lassen | Sie schreiben in die entfernte Tabelle und würden fehlschlagen (AK-14) |
+
+## Umsetzung
+
+**Gebaut (2026-11-20):**
+- **Schema:** `sql/init-schema.sql` enthält den Zielzustand (Rollen-Prüfregel an `users`/`timers`, Standardrolle `haushalt`, Vorlagen `admin`/`haushalt`/`guest` ohne Spalte `dms_permissions`, `init_user_permissions` ohne DMS-Teil, Timer-Voreinstellung `haushalt`). Entfernt: `permissions_dms`, `check_dms_permission`, `v_dms_permissions`, `imap_mailbox_access`. Migration `sql/migrations/2026-11-20_PROJ-121_rollenmodell-haushalt.sql`; gegen eine Datenbank im alten Stand zweimal angewendet, danach ist das Schema identisch mit einem frischen Aufbau.
+- **alice-auth:** Nutzer anlegen nur mit `admin`/`haushalt`/`guest` (sonst 422). Neue Tests (`tests/`) inkl. Anlegen gegen die Test-Datenbank und Rauchtest im Container.
+- **alice-calendar, alice-lists:** Rollen-API nur noch drei Rollen (`user`/`child` → 422); Listenregeln `user` → `haushalt`. Die bisherigen Regeln für `child` gelten weiter für alle übrigen Rollen, d. h. für Gäste, falls ein Admin ihnen Listen freigibt.
+- **alice-chat-stream:** `tools.archive_access()` liest die Rolle frisch aus `alice.users` (aktiv + `admin`/`haushalt`), bei Fehlern kein Zugriff. Ohne Zugriff: Archiv-Werkzeuge nicht im Werkzeugangebot, Systemprompt mit Ablehnungsanweisung (Sprache folgt der Nutzereinstellung), Aufruf trotzdem → `access_denied`. Timer-Rollen-API nur drei Rollen; Rückfall-Rolle `haushalt`.
+- **alice-speech-gateway:** Einrollen per Sprache legt `haushalt` an; Dienst-Token tragen `haushalt` (informativ, die Dienste lesen die Rolle aus der DB).
+- **n8n:** `alice-tool-search` prüft die Rolle statt Dokumenttyp-Rechten (Postgres-Knoten liefert jetzt auch bei leerem Ergebnis ein Item, damit Gäste eine leere Antwort statt keiner bekommen); `alice-mail-tools` alle Postfächer für `admin`/`haushalt`; `alice-mail-api` Liste für `admin`/`haushalt` (Rolle aus der DB, max. 200), Anlegen/Ändern/Löschen nur `admin` (403), Zugriffs-Endpunkte entfernt; `alice-mail-sync` benachrichtigt alle aktiven `admin`/`haushalt`.
+- **WebApp:** Rollenauswahl und Rollen-Einstellungen (Kalender, Listen, Timer) mit drei Rollen, Anzeigenamen über i18n (auch Rollen-Badges, Profil, Stimmprofile, Seitenleiste); E-Mail-Tab ohne Zugriffsspalte und -dialog, Hinzufügen/Bearbeiten/Löschen nur mit `can_manage_mailboxes` (Admin).
+- **Doku:** `CLAUDE.md` (Code-Referenz) angepasst.
+
+**Abweichungen / Hinweise:**
+- Eine Oberfläche zum Ändern der Rolle eines bestehenden Nutzers gibt es nicht (gab es vorher auch nicht); AK-11 ist für das Anlegen umgesetzt, Rollenwechsel bleibt außerhalb des Umfangs.
+- Der Workflow-Endpunkt `GET alice/users` (Nutzerliste, im Frontend ungenutzt) bleibt unverändert; er referenziert keine entfernte Tabelle.
+- `docs/` (Briefing, Planungsnotizen, `dms-pipeline-map.html`) erwähnt die alten Tabellen noch als Historie; nicht geändert.
+- Der E-Mail-Tab bleibt für Gäste sichtbar, zeigt ihnen aber eine leere Liste.
