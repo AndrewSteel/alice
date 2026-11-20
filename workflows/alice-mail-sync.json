@@ -289,7 +289,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH access_users AS (\n  SELECT a.user_id\n  FROM alice.imap_mailbox_access a\n  WHERE a.mailbox_id = $1::uuid\n  UNION SELECT m.owner_id FROM alice.imap_mailboxes m WHERE m.id = $1::uuid\n),\ntarget_sessions AS (\n  SELECT DISTINCT ON (s.user_id) s.session_id, s.user_id\n  FROM alice.sessions s\n  INNER JOIN access_users au ON au.user_id = s.user_id\n  WHERE s.session_type = 'llm'\n  ORDER BY s.user_id, s.last_activity DESC\n)\nINSERT INTO alice.messages (session_id, user_id, role, content, msg_type)\nSELECT ts.session_id, ts.user_id, 'assistant', $2, 'llm_response'\nFROM target_sessions ts\nWHERE $3::integer > 0",
+        "query": "WITH access_users AS (\n  -- PROJ-121: every mailbox is visible to all active admin / haushalt users\n  SELECT u.id AS user_id\n  FROM alice.users u\n  WHERE u.is_active = TRUE\n    AND u.role IN ('admin', 'haushalt')\n    AND EXISTS (SELECT 1 FROM alice.imap_mailboxes m WHERE m.id = $1::uuid)\n),\ntarget_sessions AS (\n  SELECT DISTINCT ON (s.user_id) s.session_id, s.user_id\n  FROM alice.sessions s\n  INNER JOIN access_users au ON au.user_id = s.user_id\n  WHERE s.session_type = 'llm'\n  ORDER BY s.user_id, s.last_activity DESC\n)\nINSERT INTO alice.messages (session_id, user_id, role, content, msg_type)\nSELECT ts.session_id, ts.user_id, 'assistant', $2, 'llm_response'\nFROM target_sessions ts\nWHERE $3::integer > 0",
         "options": {
           "queryReplacement": "={{ [$('Prepare Mailbox Data').first().json.mailboxId, '📧 Neue wichtige Mails:\\n' + ($json.wichtig || []).map(e => `• **${e.subject || '(kein Betreff)'}** von ${e.sender}\\n  ${e.summary || ''}`).join('\\n\\n'), ($json.wichtig || []).length] }}"
         }

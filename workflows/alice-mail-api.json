@@ -26,7 +26,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nreturn [{ json: { userId: payload.sub || payload.user_id, role: payload.role || 'user' } }];"
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nreturn [{ json: { userId: payload.sub || payload.user_id, role: payload.role || '' } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -40,9 +40,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT m.id::text, m.owner_id::text, u.display_name AS owner_name, m.display_name, m.imap_host, m.imap_port, m.imap_username, m.ssl_enabled, m.sync_interval, m.start_date::text, m.status, m.mails_indexed, m.last_synced_at::text, m.last_error, m.next_sync_at::text, m.created_at::text, m.updated_at::text, COALESCE(JSON_AGG(JSON_BUILD_OBJECT('user_id', a.user_id::text, 'display_name', au.display_name, 'username', au.username)) FILTER (WHERE a.user_id IS NOT NULL), '[]'::json) AS access_users FROM alice.imap_mailboxes m LEFT JOIN alice.users u ON u.id = m.owner_id LEFT JOIN alice.imap_mailbox_access a ON a.mailbox_id = m.id LEFT JOIN alice.users au ON au.id = a.user_id WHERE (m.owner_id = $1::uuid OR $2 = 'admin') GROUP BY m.id, u.display_name ORDER BY m.created_at DESC",
+        "query": "SELECT m.id::text, m.owner_id::text, u.display_name AS owner_name, m.display_name, m.imap_host, m.imap_port, m.imap_username, m.ssl_enabled, m.sync_interval, m.start_date::text, m.status, m.mails_indexed, m.last_synced_at::text, m.last_error, m.next_sync_at::text, m.created_at::text, m.updated_at::text FROM alice.imap_mailboxes m LEFT JOIN alice.users u ON u.id = m.owner_id WHERE EXISTS (SELECT 1 FROM alice.users c WHERE c.id = $1::uuid AND c.is_active = TRUE AND c.role IN ('admin', 'haushalt')) ORDER BY m.created_at DESC LIMIT 200",
         "options": {
-          "queryReplacement": "={{ [$json.userId, $json.role] }}"
+          "queryReplacement": "={{ [$json.userId] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
@@ -114,7 +114,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst body = $json.body || {};\n\nconst displayName = String(body.display_name || '').trim();\nconst imapHost = String(body.imap_host || '').trim();\nconst imapPort = parseInt(body.imap_port) || 993;\nconst imapUsername = String(body.imap_username || '').trim();\nconst password = String(body.password || '').trim();\nconst sslEnabled = body.ssl_enabled !== false;\nconst syncInterval = parseInt(body.sync_interval) || 15;\nconst startDate = body.start_date || null;\n\nif (!displayName) return [{ json: { _error: 'display_name ist erforderlich', _status: 400 } }];\nif (!imapHost)    return [{ json: { _error: 'imap_host ist erforderlich', _status: 400 } }];\nif (!imapUsername) return [{ json: { _error: 'imap_username ist erforderlich', _status: 400 } }];\nif (!password)    return [{ json: { _error: 'password ist erforderlich', _status: 400 } }];\nif (imapPort < 1 || imapPort > 65535) return [{ json: { _error: 'imap_port muss zwischen 1 und 65535 liegen', _status: 400 } }];\nif (syncInterval < 1 || syncInterval > 1440) return [{ json: { _error: 'sync_interval muss zwischen 1 und 1440 liegen', _status: 400 } }];\n\nconst axios = require('axios');\nconst encResp = await axios.post('http://alice-mail-reader:8007/encrypt', { password }, { timeout: 5000 });\nconst passwordEnc = encResp.data.password_enc;\n\nreturn [{ json: { userId, displayName, imapHost, imapPort, imapUsername, passwordEnc, sslEnabled, syncInterval, startDate } }];"
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\n// PROJ-121: only an admin creates mailboxes\nif (payload.role !== 'admin') return [{ json: { _error: 'Nur ein Admin darf Postfächer anlegen', _status: 403 } }];\nconst body = $json.body || {};\n\nconst displayName = String(body.display_name || '').trim();\nconst imapHost = String(body.imap_host || '').trim();\nconst imapPort = parseInt(body.imap_port) || 993;\nconst imapUsername = String(body.imap_username || '').trim();\nconst password = String(body.password || '').trim();\nconst sslEnabled = body.ssl_enabled !== false;\nconst syncInterval = parseInt(body.sync_interval) || 15;\nconst startDate = body.start_date || null;\n\nif (!displayName) return [{ json: { _error: 'display_name ist erforderlich', _status: 400 } }];\nif (!imapHost)    return [{ json: { _error: 'imap_host ist erforderlich', _status: 400 } }];\nif (!imapUsername) return [{ json: { _error: 'imap_username ist erforderlich', _status: 400 } }];\nif (!password)    return [{ json: { _error: 'password ist erforderlich', _status: 400 } }];\nif (imapPort < 1 || imapPort > 65535) return [{ json: { _error: 'imap_port muss zwischen 1 und 65535 liegen', _status: 400 } }];\nif (syncInterval < 1 || syncInterval > 1440) return [{ json: { _error: 'sync_interval muss zwischen 1 und 1440 liegen', _status: 400 } }];\n\nconst axios = require('axios');\nconst encResp = await axios.post('http://alice-mail-reader:8007/encrypt', { password }, { timeout: 5000 });\nconst passwordEnc = encResp.data.password_enc;\n\nreturn [{ json: { userId, displayName, imapHost, imapPort, imapUsername, passwordEnc, sslEnabled, syncInterval, startDate } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -271,7 +271,7 @@
     {
       "parameters": {
         "options": {
-          "responseCode": 400
+          "responseCode": "={{ $('JWT+Validate: POST Mailbox').first().json._status || 400 }}"
         }
       },
       "type": "n8n-nodes-base.respondToWebhook",
@@ -309,7 +309,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst body = $json.body || {};\nconst id = String(body.id || '').trim();\nif (!id) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\n\nconst updates = {};\nif (body.display_name !== undefined) updates.displayName = String(body.display_name).trim();\nif (body.imap_host !== undefined) updates.imapHost = String(body.imap_host).trim();\nif (body.imap_port !== undefined) updates.imapPort = parseInt(body.imap_port);\nif (body.imap_username !== undefined) updates.imapUsername = String(body.imap_username).trim();\nif (body.ssl_enabled !== undefined) updates.sslEnabled = body.ssl_enabled !== false;\nif (body.sync_interval !== undefined) updates.syncInterval = parseInt(body.sync_interval);\nif (body.start_date !== undefined) updates.startDate = body.start_date || null;\n\nif (body.password) {\n  const axios = require('axios');\n  const encResp = await axios.post('http://alice-mail-reader:8007/encrypt', { password: String(body.password) }, { timeout: 5000 });\n  updates.passwordEnc = encResp.data.password_enc;\n}\n\nreturn [{ json: { userId, role, id, updates } }];"
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || '';\nconst body = $json.body || {};\nconst id = String(body.id || '').trim();\nif (!id) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\n\nconst updates = {};\nif (body.display_name !== undefined) updates.displayName = String(body.display_name).trim();\nif (body.imap_host !== undefined) updates.imapHost = String(body.imap_host).trim();\nif (body.imap_port !== undefined) updates.imapPort = parseInt(body.imap_port);\nif (body.imap_username !== undefined) updates.imapUsername = String(body.imap_username).trim();\nif (body.ssl_enabled !== undefined) updates.sslEnabled = body.ssl_enabled !== false;\nif (body.sync_interval !== undefined) updates.syncInterval = parseInt(body.sync_interval);\nif (body.start_date !== undefined) updates.startDate = body.start_date || null;\n\nif (body.password && role === 'admin') {\n  const axios = require('axios');\n  const encResp = await axios.post('http://alice-mail-reader:8007/encrypt', { password: String(body.password) }, { timeout: 5000 });\n  updates.passwordEnc = encResp.data.password_enc;\n}\n\nreturn [{ json: { userId, role, id, updates } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -346,7 +346,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $('JWT+Parse: PUT Mailbox').first().json;\nconst row = $input.first().json;\nif (!row.id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nif (row.owner_id !== input.userId && input.role !== 'admin') {\n  return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\n}\n// Build dynamic SQL SET clause\nconst u = input.updates;\nconst sets = [];\nconst params = [input.id];\nlet idx = 2;\nif (u.displayName !== undefined) { sets.push(`display_name = $${idx++}`); params.push(u.displayName); }\nif (u.imapHost !== undefined) { sets.push(`imap_host = $${idx++}`); params.push(u.imapHost); }\nif (u.imapPort !== undefined) { sets.push(`imap_port = $${idx++}::integer`); params.push(u.imapPort); }\nif (u.imapUsername !== undefined) { sets.push(`imap_username = $${idx++}`); params.push(u.imapUsername); }\nif (u.sslEnabled !== undefined) { sets.push(`ssl_enabled = $${idx++}::boolean`); params.push(u.sslEnabled); }\nif (u.syncInterval !== undefined) { sets.push(`sync_interval = $${idx++}::integer`); params.push(u.syncInterval); }\nif (u.startDate !== undefined) { sets.push(`start_date = $${idx++}::date`); params.push(u.startDate); }\nif (u.passwordEnc !== undefined) { sets.push(`password_enc = $${idx++}`); params.push(u.passwordEnc); }\nif (sets.length === 0) return [{ json: { _error: 'Keine Felder zum Aktualisieren', _status: 400 } }];\nconst sql = `UPDATE alice.imap_mailboxes SET ${sets.join(', ')}, status = 'active', last_error = NULL WHERE id = $1::uuid RETURNING id::text, display_name, imap_host, imap_port, imap_username, ssl_enabled, sync_interval, start_date::text, status, mails_indexed, updated_at::text`;\nreturn [{ json: { sql, params, mailboxId: input.id } }];"
+        "jsCode": "const input = $('JWT+Parse: PUT Mailbox').first().json;\nconst row = $input.first().json;\n// PROJ-121: only an admin changes mailboxes\nif (input.role !== 'admin') return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\nif (!row.id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\n// Build dynamic SQL SET clause\nconst u = input.updates;\nconst sets = [];\nconst params = [input.id];\nlet idx = 2;\nif (u.displayName !== undefined) { sets.push(`display_name = $${idx++}`); params.push(u.displayName); }\nif (u.imapHost !== undefined) { sets.push(`imap_host = $${idx++}`); params.push(u.imapHost); }\nif (u.imapPort !== undefined) { sets.push(`imap_port = $${idx++}::integer`); params.push(u.imapPort); }\nif (u.imapUsername !== undefined) { sets.push(`imap_username = $${idx++}`); params.push(u.imapUsername); }\nif (u.sslEnabled !== undefined) { sets.push(`ssl_enabled = $${idx++}::boolean`); params.push(u.sslEnabled); }\nif (u.syncInterval !== undefined) { sets.push(`sync_interval = $${idx++}::integer`); params.push(u.syncInterval); }\nif (u.startDate !== undefined) { sets.push(`start_date = $${idx++}::date`); params.push(u.startDate); }\nif (u.passwordEnc !== undefined) { sets.push(`password_enc = $${idx++}`); params.push(u.passwordEnc); }\nif (sets.length === 0) return [{ json: { _error: 'Keine Felder zum Aktualisieren', _status: 400 } }];\nconst sql = `UPDATE alice.imap_mailboxes SET ${sets.join(', ')}, status = 'active', last_error = NULL WHERE id = $1::uuid RETURNING id::text, display_name, imap_host, imap_port, imap_username, ssl_enabled, sync_interval, start_date::text, status, mails_indexed, updated_at::text`;\nreturn [{ json: { sql, params, mailboxId: input.id } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -481,7 +481,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst body = $json.body || {};\nconst id = String(body.id || '').trim();\nif (!id) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, id } }];"
+        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || '';\nconst body = $json.body || {};\nconst id = String(body.id || '').trim();\nif (!id) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, id } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -518,7 +518,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $('JWT: DELETE Mailbox').first().json;\nif (input._error) return [{ json: input }];\nconst row = $input.first().json;\nif (!row.id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nif (row.owner_id !== input.userId && input.role !== 'admin') {\n  return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\n}\nreturn [{ json: { mailboxId: input.id } }];"
+        "jsCode": "const input = $('JWT: DELETE Mailbox').first().json;\nif (input._error) return [{ json: input }];\nconst row = $input.first().json;\n// PROJ-121: only an admin deletes mailboxes\nif (input.role !== 'admin') return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\nif (!row.id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nreturn [{ json: { mailboxId: input.id } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -660,277 +660,6 @@
       ],
       "id": "r4-respond-err",
       "name": "Respond: DELETE Error"
-    },
-    {
-      "parameters": {
-        "path": "alice/mailboxes/access",
-        "authentication": "jwtAuth",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [
-        -848,
-        1920
-      ],
-      "id": "r5-webhook",
-      "name": "Webhook: GET Access",
-      "webhookId": "alice-mail-api-get-access",
-      "credentials": {
-        "jwtAuth": {
-          "id": "4iUJhbFCSgQeHAGL",
-          "name": "JWT Auth account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst mailboxId = String($json.query?.id || '').trim();\nif (!mailboxId) return [{ json: { _error: 'id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, mailboxId } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -560,
-        1920
-      ],
-      "id": "r5-jwt",
-      "name": "JWT: GET Access"
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT m.owner_id::text, u.id::text AS user_id, u.display_name, u.username, (a.user_id IS NOT NULL) AS has_access FROM alice.imap_mailboxes m CROSS JOIN alice.users u LEFT JOIN alice.imap_mailbox_access a ON a.mailbox_id = m.id AND a.user_id = u.id WHERE m.id = $1::uuid AND ($2 = 'admin' OR m.owner_id = $3::uuid) AND u.is_active = true ORDER BY u.display_name",
-        "options": {
-          "queryReplacement": "={{ [$json.mailboxId, $json.role, $json.userId] }}"
-        }
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        -288,
-        1920
-      ],
-      "id": "r5-pg",
-      "name": "PG: Get Access List",
-      "credentials": {
-        "postgres": {
-          "id": "2YBtxcocRMLQuAdF",
-          "name": "pg-alice"
-        }
-      },
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "jsCode": "const rows = $input.all().map(i => i.json);\nreturn [{ json: { users: rows } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        0,
-        1920
-      ],
-      "id": "r5-agg",
-      "name": "Agg: Access List"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        288,
-        1920
-      ],
-      "id": "r5-respond",
-      "name": "Respond: GET Access 200"
-    },
-    {
-      "parameters": {
-        "httpMethod": "PUT",
-        "path": "alice/mailboxes/access",
-        "authentication": "jwtAuth",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [
-        -848,
-        2400
-      ],
-      "id": "r6-webhook",
-      "name": "Webhook: PUT Access",
-      "webhookId": "alice-mail-api-put-access",
-      "credentials": {
-        "jwtAuth": {
-          "id": "4iUJhbFCSgQeHAGL",
-          "name": "JWT Auth account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const authHeader = $json.headers?.authorization || $json.headers?.Authorization || '';\nconst token = authHeader.replace(/^Bearer\\s+/i, '');\nif (!token) throw new Error('Missing JWT token');\nconst payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));\nconst userId = payload.sub || payload.user_id;\nconst role = payload.role || 'user';\nconst body = $json.body || {};\nconst mailboxId = String(body.mailbox_id || '').trim();\nconst userIds = Array.isArray(body.user_ids) ? body.user_ids.map(String) : [];\nif (!mailboxId) return [{ json: { _error: 'mailbox_id ist erforderlich', _status: 400 } }];\nreturn [{ json: { userId, role, mailboxId, userIds } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -560,
-        2400
-      ],
-      "id": "r6-jwt",
-      "name": "JWT: PUT Access"
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT owner_id::text FROM alice.imap_mailboxes WHERE id = $1::uuid",
-        "options": {
-          "queryReplacement": "={{ [$json.mailboxId] }}"
-        }
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        -288,
-        2400
-      ],
-      "id": "r6-pg-owner",
-      "name": "PG: Check Owner",
-      "credentials": {
-        "postgres": {
-          "id": "2YBtxcocRMLQuAdF",
-          "name": "pg-alice"
-        }
-      },
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "jsCode": "const input = $('JWT: PUT Access').first().json;\nconst row = $input.first().json;\nif (!row.owner_id) return [{ json: { _error: 'Postfach nicht gefunden', _status: 404 } }];\nif (row.owner_id !== input.userId && input.role !== 'admin') {\n  return [{ json: { _error: 'Keine Berechtigung', _status: 403 } }];\n}\nreturn [{ json: { mailboxId: input.mailboxId, userIds: input.userIds } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        0,
-        2400
-      ],
-      "id": "r6-auth",
-      "name": "Auth: PUT Access"
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "r6-err",
-              "leftValue": "={{ $json._error }}",
-              "rightValue": "",
-              "operator": {
-                "type": "string",
-                "operation": "notExists"
-              }
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        288,
-        2400
-      ],
-      "id": "r6-if-ok",
-      "name": "IF: PUT Access Ok"
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "DELETE FROM alice.imap_mailbox_access WHERE mailbox_id = $1::uuid; INSERT INTO alice.imap_mailbox_access (mailbox_id, user_id) SELECT $1::uuid, unnest($2::uuid[]) ON CONFLICT DO NOTHING",
-        "options": {
-          "queryReplacement": "={{ [$json.mailboxId, $json.userIds] }}"
-        }
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        576,
-        2320
-      ],
-      "id": "r6-pg-update",
-      "name": "PG: Replace Access",
-      "credentials": {
-        "postgres": {
-          "id": "2YBtxcocRMLQuAdF",
-          "name": "pg-alice"
-        }
-      },
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{ json: { updated: true, mailbox_id: $('Auth: PUT Access').first().json.mailboxId } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        864,
-        2320
-      ],
-      "id": "r6-ok-body",
-      "name": "Body: PUT Access Ok"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        1152,
-        2320
-      ],
-      "id": "r6-respond-200",
-      "name": "Respond: PUT Access 200"
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{ json: { error: $json._error } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        288,
-        2560
-      ],
-      "id": "r6-err-body",
-      "name": "Body: PUT Access Error"
-    },
-    {
-      "parameters": {
-        "options": {
-          "responseCode": "={{ $('Auth: PUT Access').first().json._status || 400 }}"
-        }
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        576,
-        2560
-      ],
-      "id": "r6-respond-err",
-      "name": "Respond: PUT Access Error"
     },
     {
       "parameters": {
@@ -1328,145 +1057,6 @@
         [
           {
             "node": "Respond: DELETE Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Webhook: GET Access": {
-      "main": [
-        [
-          {
-            "node": "JWT: GET Access",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "JWT: GET Access": {
-      "main": [
-        [
-          {
-            "node": "PG: Get Access List",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "PG: Get Access List": {
-      "main": [
-        [
-          {
-            "node": "Agg: Access List",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Agg: Access List": {
-      "main": [
-        [
-          {
-            "node": "Respond: GET Access 200",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Webhook: PUT Access": {
-      "main": [
-        [
-          {
-            "node": "JWT: PUT Access",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "JWT: PUT Access": {
-      "main": [
-        [
-          {
-            "node": "PG: Check Owner",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "PG: Check Owner": {
-      "main": [
-        [
-          {
-            "node": "Auth: PUT Access",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Auth: PUT Access": {
-      "main": [
-        [
-          {
-            "node": "IF: PUT Access Ok",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF: PUT Access Ok": {
-      "main": [
-        [
-          {
-            "node": "PG: Replace Access",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Body: PUT Access Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "PG: Replace Access": {
-      "main": [
-        [
-          {
-            "node": "Body: PUT Access Ok",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Body: PUT Access Ok": {
-      "main": [
-        [
-          {
-            "node": "Respond: PUT Access 200",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Body: PUT Access Error": {
-      "main": [
-        [
-          {
-            "node": "Respond: PUT Access Error",
             "type": "main",
             "index": 0
           }

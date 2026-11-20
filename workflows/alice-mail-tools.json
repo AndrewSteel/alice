@@ -80,7 +80,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT m.id::text AS mailbox_id FROM alice.imap_mailboxes m WHERE m.owner_id = $1::uuid UNION SELECT a.mailbox_id::text FROM alice.imap_mailbox_access a WHERE a.user_id = $1::uuid",
+        "query": "SELECT m.id::text AS mailbox_id FROM alice.imap_mailboxes m WHERE EXISTS (SELECT 1 FROM alice.users u WHERE u.id = $1::uuid AND u.is_active = TRUE AND u.role IN ('admin', 'haushalt'))",
         "options": {
           "queryReplacement": "={{ [$('Input Normalizer').first().json.userId] }}"
         }
@@ -96,7 +96,8 @@
           "name": "pg-alice"
         }
       },
-      "continueOnFail": true
+      "continueOnFail": true,
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -151,7 +152,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT m.imap_host, m.imap_port, m.imap_username, m.password_enc, m.ssl_enabled FROM alice.imap_mailboxes m WHERE m.id = $1::uuid AND (m.owner_id = $2::uuid OR EXISTS (SELECT 1 FROM alice.imap_mailbox_access a WHERE a.mailbox_id = m.id AND a.user_id = $2::uuid))",
+        "query": "SELECT m.imap_host, m.imap_port, m.imap_username, m.password_enc, m.ssl_enabled FROM alice.imap_mailboxes m WHERE m.id = $1::uuid AND EXISTS (SELECT 1 FROM alice.users u WHERE u.id = $2::uuid AND u.is_active = TRUE AND u.role IN ('admin', 'haushalt'))",
         "options": {
           "queryReplacement": "={{ [$json.mailboxId, $('Input Normalizer').first().json.userId] }}"
         }
@@ -167,7 +168,8 @@
           "name": "pg-alice"
         }
       },
-      "continueOnFail": true
+      "continueOnFail": true,
+      "alwaysOutputData": true
     },
     {
       "parameters": {
