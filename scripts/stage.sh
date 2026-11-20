@@ -61,10 +61,10 @@ else
 fi
 SRC="docker/compose/$REL"
 git cat-file -e "$SHA:$SRC/compose.yml" 2>/dev/null || { echo "$SRC/compose.yml does not exist in $REF" >&2; exit 2; }
-BASE=$(git merge-base origin/main "$SHA")
+BASE=$(git merge-base origin/dev "$SHA")
 
 # ---- show what will run with the real secrets ----
-echo "Changes in $SRC (origin/main → $REF):"
+echo "Changes in $SRC (origin/dev → $REF):"
 git --no-pager diff --stat "$BASE" "$SHA" -- "$SRC" | sed 's/^/  /'
 if ! git diff --quiet "$BASE" "$SHA" -- "$SRC/compose.yml"; then
   echo
