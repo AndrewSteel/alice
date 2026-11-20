@@ -474,7 +474,8 @@ async def test_role_flag_and_revocation(pool):
     assert (await db.caller_access("b0000000-0000-0000-0000-00000000000e"))[1] is False   # guest
     await db.set_role_config([{"role": "child", "can_use_lists": False}])
     assert await db.caller_access(CHILD) == ("child", False)
-    assert await db.caller_access("00000000-0000-0000-0000-000000000000") == (None, False)
+    # Not the all-zero UUID: sql/init-schema.sql seeds it as the guest for unidentified speakers
+    assert await db.caller_access("b0000000-0000-0000-0000-0000000000ff") == (None, False)
 
 
 async def test_concurrent_complete_reports_already_done():

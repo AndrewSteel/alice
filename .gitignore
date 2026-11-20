@@ -122,7 +122,6 @@ Thumbs.db
 *.backup
 *.sql.bak
 
-# Local-only project documentation and Claude Code configuration
-/features/
-/docs/
-/.claude/
+# Claude Code: local-only files (features/, docs/ and .claude/ are tracked again
+# because the Software Factory reads specs, docs and project rules from GitHub)
+.claude/scheduled_tasks.lock

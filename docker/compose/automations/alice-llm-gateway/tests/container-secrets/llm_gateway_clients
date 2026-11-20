@@ -1,0 +1,3 @@
+# Container test only (scripts/test-containers.sh): fake callers, no real keys.
+sf-test-chat interactive test-key-chat
+sf-test-batch background test-key-batch

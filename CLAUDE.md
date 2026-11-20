@@ -76,7 +76,7 @@ Docs are in German; code comments and commit messages should be in English.
 - **Product-internal language is English**: container names, frontend code, n8n workflow/node names, database identifiers (tables, columns, etc.), code comments, commit messages.
 - **Frontend must support i18n**: no hardcoded user-facing strings, route them through the i18n layer.
 - **LLM output** (Alice's assistant responses, including any thinking/intermediate output shown to the user) must follow the user's configured language setting, not be hardcoded.
-- **Feature documentation** in `features/PROJ-XX-*.md` is written in German.
+- **Feature documentation** in `features/PROJ-XX-*/` (and the history in `features/old/`) is written in German.
 - **Communication between the user and Claude Code** happens in German.
 
 ---
@@ -178,16 +178,15 @@ Config lives in `docker/compose/infra/nginx/`. Key proxy rules:
 
 ## Feature Tracking
 
-All features are tracked in `features/INDEX.md`. Read it before starting any new feature. Feature specs go in `features/PROJ-X-feature-name.md`. Use `/requirements` skill to create new specs.
+All features are tracked in `features/INDEX.md`. Read it before starting any new feature. Each feature gets its own folder `features/PROJ-X-feature-name/` with `spec.md`, `design.md` and `qa-report.md` (Software Factory layout). Use `/write-spec` to create new specs, `/to-factory PROJ-X` to hand them to the Software Factory. Features up to PROJ-114 are kept as history in `features/old/` (flat files).
 
 ---
 
 ## Workflow Skills
 
-Use skills for structured work:
-- `/requirements` — create feature specs
-- `/architecture` — design before building
-- `/frontend` — build React components
-- `/backend` — build n8n workflows / DB schemas
-- `/qa` — test against acceptance criteria
-- `/deploy` — deploy to production
+Features are built by the Software Factory (see `docs/stack.md` and `.claude/rules/general.md`). Locally:
+- `/init` — plan a new phase or a larger extension from `docs/briefing.md` + interview (new PRD + feature map; archives the previous PRD and the briefing)
+- `/write-spec` — write a feature spec (`features/PROJ-X-<name>/spec.md`)
+- `/refine PROJ-X` — change an existing spec
+- `/to-factory PROJ-X` — hand the spec to the Software Factory (personal skill from the software-factory repo)
+- `/deploy PROJ-X` — deploy a merged feature (the human always deploys)

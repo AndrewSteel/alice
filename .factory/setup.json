@@ -1,0 +1,11 @@
+{
+  "install": "cd frontend && npm ci",
+  "dev": "cd frontend && npx next dev -p $PORT",
+  "checks": {
+    "frontend-typecheck": "cd frontend && npx tsc --noEmit",
+    "frontend-build": "cd frontend && npm run build",
+    "service-tests": "SKIP=alice-speech-gateway scripts/test-services.sh",
+    "n8n-workflows": "scripts/check-workflows.sh",
+    "container-tests": "SKIP=alice-speech-gateway scripts/test-containers.sh"
+  }
+}

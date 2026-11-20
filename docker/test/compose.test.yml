@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Throwaway test infrastructure for Alice (used by scripts/test-services.sh).
+#
+# NOT a production stack: no external networks, no /srv paths, no .env files.
+# Credentials below are fixed test values for disposable containers only.
+#
+# In the Software Factory the job reaches the services by name (test-postgres,
+# test-redis, test-weaviate). Locally, add compose.ports.yml to publish them on
+# 127.0.0.1 (see scripts/test-services.sh).
+#
+#   docker compose -p sf-alice-test -f docker/test/compose.test.yml up -d --wait
+#   docker compose -p sf-alice-test -f docker/test/compose.test.yml --profile weaviate up -d --wait
+#   (profiles: weaviate, mqtt)
+# ---------------------------------------------------------------------------
+services:
+  test-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: alice
+      POSTGRES_USER: alice
+      POSTGRES_PASSWORD: test # gitleaks:allow — disposable test container
+    volumes:
+      # Same schema as production, applied on first start
+      - ../../sql/init-schema.sql:/docker-entrypoint-initdb.d/10-init-schema.sql:ro
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alice -d alice"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  test-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Optional: vector store without vectorizer modules (no GPU in tests).
+  # Tests must supply vectors themselves or mock the vectorizer.
+  test-weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.33.0
+    profiles: [weaviate]
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: node1
+    tmpfs:
+      - /var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/.well-known/ready || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # Optional: MQTT broker without authentication (anonymous access, test only).
+  test-mqtt:
+    image: eclipse-mosquitto:2
+    profiles: [mqtt]
+    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/version' -C 1 -W 2 >/dev/null || exit 1"]
+      interval: 2s
+      timeout: 4s
+      retries: 30

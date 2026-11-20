@@ -1,0 +1,9 @@
+# Local development only: publish the test services on 127.0.0.1.
+# Not used inside the Software Factory (parallel jobs would collide on these ports).
+services:
+  test-postgres:
+    ports: ["127.0.0.1:55432:5432"]
+  test-redis:
+    ports: ["127.0.0.1:56379:6379"]
+  test-weaviate:
+    ports: ["127.0.0.1:58080:8080"]

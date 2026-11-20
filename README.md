@@ -271,7 +271,7 @@ alice/
 │   │                        #   alice-ha-sync, n8n, Weaviate, MQTT, DMS extractors
 │   ├── data/                # PostgreSQL, Redis
 │   └── infra/               # nginx, Prometheus, Grafana
-├── features/                # Feature specs (PROJ-N-*.md) + INDEX.md
+├── features/                # INDEX.md + one folder per feature (spec.md, design.md, qa-report.md); old/ = history up to PROJ-114
 ├── frontend/                # React + TypeScript + Tailwind PWA
 │   └── src/components/
 │       ├── Vision/          # FlipCard, VisionPanel, ThumbnailImage, FlipCardGrid
