@@ -574,7 +574,7 @@ const de = {
 
     listsRoles: {
       heading: "Listen",
-      hint: "Welche Rollen Aufgaben und Listen (Chat/Sprache) nutzen duerfen. Kinder duerfen auf gemeinsamen Listen lesen, eintragen und abhaken; Gaeste haben keinen Zugriff.",
+      hint: "Welche Rollen Aufgaben und Listen (Chat/Sprache) nutzen duerfen. Gaeste mit Listenrecht duerfen gemeinsame Listen nur lesen, eintragen und abhaken.",
       saved: "Listen-Berechtigungen gespeichert",
       saveFailed: "Die Listen-Berechtigungen konnten nicht gespeichert werden.",
       loadFailed: "Die Listen-Berechtigungen konnten nicht geladen werden.",

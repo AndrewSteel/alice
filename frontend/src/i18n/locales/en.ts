@@ -570,7 +570,7 @@ const en = {
 
     listsRoles: {
       heading: "Lists",
-      hint: "Which roles may use tasks and lists (chat/voice). Children may read, add and tick off entries on shared lists; guests have no access.",
+      hint: "Which roles may use tasks and lists (chat/voice). Guests with list access may only read, add and tick off entries on shared lists.",
       saved: "Lists permissions saved",
       saveFailed: "The lists permissions could not be saved.",
       loadFailed: "The lists permissions could not be loaded.",
