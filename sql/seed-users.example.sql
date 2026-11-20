@@ -18,7 +18,7 @@
 
 INSERT INTO alice.users (username, display_name, email, role) VALUES
     ('admin',   'Admin User',  NULL, 'admin'),
-    ('user1',   'User One',    NULL, 'user'),
+    ('user1',   'User One',    NULL, 'haushalt'),
     ('guest',   'Guest',       NULL, 'guest')
 ON CONFLICT (username) DO UPDATE SET
     display_name = EXCLUDED.display_name,
@@ -90,12 +90,6 @@ ON CONFLICT (user_id) DO UPDATE SET
 -- 4. CUSTOM PERMISSION OVERRIDES (optional)
 -- ============================================================
 -- Individuelle Anpassungen, die von den Rollen-Templates abweichen.
-
--- Beispiel: user1 darf Kontoauszüge lesen (in der 'user'-Rolle standardmäßig gesperrt)
--- UPDATE alice.permissions_dms
--- SET can_read = TRUE, can_download = TRUE
--- WHERE user_id = (SELECT id FROM alice.users WHERE username = 'user1')
---   AND doc_type = 'BankStatement';
 
 -- Beispiel: Gast darf zusätzlich im Esszimmer Licht steuern
 -- UPDATE alice.permissions_home_assistant

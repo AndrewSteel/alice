@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS alice.users (
     speaker_embeddings          JSONB DEFAULT '[]',
     speaker_enrollment_complete BOOLEAN DEFAULT FALSE,
 
-    role                        VARCHAR(20) DEFAULT 'user'
-                                    CHECK (role IN ('admin', 'user', 'guest', 'child')),
+    role                        VARCHAR(20) DEFAULT 'haushalt'
+                                    CHECK (role IN ('admin', 'haushalt', 'guest')),
     is_active                   BOOLEAN DEFAULT TRUE,
     created_at                  TIMESTAMPTZ DEFAULT NOW(),
     last_login_at               TIMESTAMPTZ,
@@ -87,31 +87,7 @@ CREATE TABLE IF NOT EXISTS alice.permissions_home_assistant (
 CREATE INDEX IF NOT EXISTS idx_perm_ha_user   ON alice.permissions_home_assistant(user_id);
 CREATE INDEX IF NOT EXISTS idx_perm_ha_domain ON alice.permissions_home_assistant(domain);
 
--- 2.2 DMS
-CREATE TABLE IF NOT EXISTS alice.permissions_dms (
-    id                  SERIAL PRIMARY KEY,
-    user_id             UUID NOT NULL REFERENCES alice.users(id) ON DELETE CASCADE,
-    doc_type            VARCHAR(50) NOT NULL CHECK (doc_type IN (
-                            'Invoice', 'BankStatement', 'BankTransaction',
-                            'SecuritySettlement', 'Document', 'Email', 'Contract', 'Image', '*'
-                        )),
-    can_read            BOOLEAN DEFAULT FALSE,
-    can_create          BOOLEAN DEFAULT FALSE,
-    can_update          BOOLEAN DEFAULT FALSE,
-    can_delete          BOOLEAN DEFAULT FALSE,
-    can_download        BOOLEAN DEFAULT FALSE,
-    filter_own_only     BOOLEAN DEFAULT FALSE,
-    allowed_categories  JSONB DEFAULT NULL,
-    max_amount_visible  DECIMAL(12,2) DEFAULT NULL,
-    created_at          TIMESTAMPTZ DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, doc_type)
-);
-
-CREATE INDEX IF NOT EXISTS idx_perm_dms_user ON alice.permissions_dms(user_id);
-CREATE INDEX IF NOT EXISTS idx_perm_dms_type ON alice.permissions_dms(doc_type);
-
--- 2.3 System
+-- 2.2 System
 CREATE TABLE IF NOT EXISTS alice.permissions_system (
     id                      SERIAL PRIMARY KEY,
     user_id                 UUID NOT NULL REFERENCES alice.users(id) ON DELETE CASCADE,
@@ -130,7 +106,7 @@ CREATE TABLE IF NOT EXISTS alice.permissions_system (
     UNIQUE(user_id)
 );
 
--- 2.4 Assistant
+-- 2.3 Assistant
 CREATE TABLE IF NOT EXISTS alice.permissions_assistant (
     id                          SERIAL PRIMARY KEY,
     user_id                     UUID NOT NULL REFERENCES alice.users(id) ON DELETE CASCADE,
@@ -158,25 +134,23 @@ CREATE TABLE IF NOT EXISTS alice.role_templates (
     role                    VARCHAR(20) PRIMARY KEY,
     description             TEXT,
     ha_permissions          JSONB NOT NULL,
-    dms_permissions         JSONB NOT NULL,
     system_permissions      JSONB NOT NULL,
     assistant_permissions   JSONB NOT NULL
 );
 
 INSERT INTO alice.role_templates
-    (role, description, ha_permissions, dms_permissions, system_permissions, assistant_permissions)
+    (role, description, ha_permissions, system_permissions, assistant_permissions)
 VALUES
 (
     'admin',
     'Vollzugriff auf alle Funktionen',
     '[{"domain": "*", "can_read": true, "can_control": true}]',
-    '[{"doc_type": "*", "can_read": true, "can_create": true, "can_update": true, "can_delete": true, "can_download": true}]',
     '{"can_manage_users": true, "can_manage_devices": true, "can_view_logs": true, "can_manage_workflows": true, "can_access_api_docs": true, "can_manage_memory": true, "can_delete_memory": true, "can_manage_dms_folders": true, "can_view_chat_archive": true, "can_manage_mailboxes": true}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["*"], "can_use_timers": true, "timer_max_active": 20, "timer_max_duration_seconds": 86400, "can_use_calendar": true, "can_use_lists": true}'
 ),
 (
-    'user',
-    'Standard-Benutzer mit eingeschränkten Rechten',
+    'haushalt',
+    'Haushaltsmitglied: alle Dokumente, Mails, Bilder; keine Verwaltung',
     '[
         {"domain": "light",               "can_read": true,  "can_control": true},
         {"domain": "switch",              "can_read": true,  "can_control": true},
@@ -187,17 +161,8 @@ VALUES
         {"domain": "vacuum",              "can_read": true,  "can_control": true},
         {"domain": "alarm_control_panel", "can_read": true,  "can_control": false}
     ]',
-    '[
-        {"doc_type": "Invoice",            "can_read": true,  "can_create": true,  "can_update": false, "can_delete": false, "can_download": true},
-        {"doc_type": "Document",           "can_read": true,  "can_create": true,  "can_update": false, "can_delete": false, "can_download": true},
-        {"doc_type": "Email",              "can_read": true,  "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
-        {"doc_type": "Image",              "can_read": true,  "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
-        {"doc_type": "BankStatement",      "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
-        {"doc_type": "BankTransaction",    "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false},
-        {"doc_type": "SecuritySettlement", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}
-    ]',
     '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": true, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
-    '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant", "search_documents", "search_images", "remember", "recall"], "can_use_timers": true, "timer_max_active": 10, "timer_max_duration_seconds": 86400, "can_use_calendar": true, "can_use_lists": true}'
+    '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant", "search_documents", "get_document_details", "search_images", "search_emails", "get_email_body", "remember", "recall"], "can_use_timers": true, "timer_max_active": 10, "timer_max_duration_seconds": 86400, "can_use_calendar": true, "can_use_lists": true}'
 ),
 (
     'guest',
@@ -208,21 +173,8 @@ VALUES
         {"domain": "sensor",       "can_read": true, "can_control": false},
         {"domain": "media_player", "can_read": true, "can_control": true,  "allowed_areas": ["wohnzimmer"]}
     ]',
-    '[{"doc_type": "*", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}]',
     '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": false, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
     '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant"], "max_messages_per_day": 50, "can_use_timers": false, "timer_max_active": 0, "timer_max_duration_seconds": 0, "can_use_calendar": false, "can_use_lists": false}'
-),
-(
-    'child',
-    'Kindersicherer Zugang mit Zeitbeschränkungen',
-    '[
-        {"domain": "light",        "can_read": true, "can_control": true, "allowed_areas": ["kinderzimmer"], "time_restrictions": {"allowed_hours": {"start": "07:00", "end": "20:00"}}},
-        {"domain": "media_player", "can_read": true, "can_control": true, "allowed_areas": ["kinderzimmer"], "time_restrictions": {"allowed_hours": {"start": "14:00", "end": "19:00"}}},
-        {"domain": "sensor",       "can_read": true, "can_control": false}
-    ]',
-    '[{"doc_type": "*", "can_read": false, "can_create": false, "can_update": false, "can_delete": false, "can_download": false}]',
-    '{"can_manage_users": false, "can_manage_devices": false, "can_view_logs": false, "can_manage_workflows": false, "can_access_api_docs": false, "can_manage_memory": false, "can_delete_memory": false, "can_manage_dms_folders": false, "can_view_chat_archive": false, "can_manage_mailboxes": false}',
-    '{"can_use_chat": true, "can_use_voice": true, "can_use_tools": true, "tools_allowed": ["home_assistant"], "max_messages_per_day": 20, "can_use_timers": true, "timer_max_active": 3, "timer_max_duration_seconds": 7200, "can_use_calendar": false, "can_use_lists": true}'
 )
 ON CONFLICT (role) DO NOTHING;
 
@@ -238,7 +190,6 @@ CREATE OR REPLACE FUNCTION alice.init_user_permissions(
 DECLARE
     v_template alice.role_templates%ROWTYPE;
     v_ha_perm  JSONB;
-    v_dms_perm JSONB;
 BEGIN
     SELECT * INTO v_template FROM alice.role_templates WHERE role = p_role;
     IF NOT FOUND THEN
@@ -269,37 +220,6 @@ BEGIN
             denied_entities   = EXCLUDED.denied_entities,
             time_restrictions = EXCLUDED.time_restrictions,
             updated_at        = NOW();
-    END LOOP;
-
-    -- DMS permissions
-    FOR v_dms_perm IN SELECT * FROM jsonb_array_elements(v_template.dms_permissions)
-    LOOP
-        INSERT INTO alice.permissions_dms (
-            user_id, doc_type,
-            can_read, can_create, can_update, can_delete, can_download,
-            filter_own_only, allowed_categories, max_amount_visible
-        ) VALUES (
-            p_user_id,
-            v_dms_perm->>'doc_type',
-            COALESCE((v_dms_perm->>'can_read')::boolean,     false),
-            COALESCE((v_dms_perm->>'can_create')::boolean,   false),
-            COALESCE((v_dms_perm->>'can_update')::boolean,   false),
-            COALESCE((v_dms_perm->>'can_delete')::boolean,   false),
-            COALESCE((v_dms_perm->>'can_download')::boolean, false),
-            COALESCE((v_dms_perm->>'filter_own_only')::boolean, false),
-            v_dms_perm->'allowed_categories',
-            (v_dms_perm->>'max_amount_visible')::decimal
-        )
-        ON CONFLICT (user_id, doc_type) DO UPDATE SET
-            can_read           = EXCLUDED.can_read,
-            can_create         = EXCLUDED.can_create,
-            can_update         = EXCLUDED.can_update,
-            can_delete         = EXCLUDED.can_delete,
-            can_download       = EXCLUDED.can_download,
-            filter_own_only    = EXCLUDED.filter_own_only,
-            allowed_categories = EXCLUDED.allowed_categories,
-            max_amount_visible = EXCLUDED.max_amount_visible,
-            updated_at         = NOW();
     END LOOP;
 
     -- System permissions
@@ -422,51 +342,6 @@ BEGIN
             IF v_now < v_start OR v_now > v_end THEN RETURN FALSE; END IF;
         EXCEPTION WHEN OTHERS THEN NULL;
         END;
-    END IF;
-
-    RETURN TRUE;
-END;
-$$ LANGUAGE plpgsql;
-
--- Check whether a user may perform a DMS action
-CREATE OR REPLACE FUNCTION alice.check_dms_permission(
-    p_user_id  UUID,
-    p_doc_type VARCHAR(50),
-    p_action   VARCHAR(20),   -- 'read', 'create', 'update', 'delete', 'download'
-    p_category VARCHAR(100)  DEFAULT NULL,
-    p_amount   DECIMAL       DEFAULT NULL
-) RETURNS BOOLEAN AS $$
-DECLARE
-    v_perm          alice.permissions_dms%ROWTYPE;
-    v_wildcard_perm alice.permissions_dms%ROWTYPE;
-BEGIN
-    SELECT * INTO v_perm
-    FROM alice.permissions_dms
-    WHERE user_id = p_user_id AND doc_type = p_doc_type;
-
-    IF NOT FOUND THEN
-        SELECT * INTO v_wildcard_perm
-        FROM alice.permissions_dms
-        WHERE user_id = p_user_id AND doc_type = '*';
-        IF NOT FOUND THEN RETURN FALSE; END IF;
-        v_perm := v_wildcard_perm;
-    END IF;
-
-    CASE p_action
-        WHEN 'read'     THEN IF NOT v_perm.can_read     THEN RETURN FALSE; END IF;
-        WHEN 'create'   THEN IF NOT v_perm.can_create   THEN RETURN FALSE; END IF;
-        WHEN 'update'   THEN IF NOT v_perm.can_update   THEN RETURN FALSE; END IF;
-        WHEN 'delete'   THEN IF NOT v_perm.can_delete   THEN RETURN FALSE; END IF;
-        WHEN 'download' THEN IF NOT v_perm.can_download THEN RETURN FALSE; END IF;
-        ELSE RETURN FALSE;
-    END CASE;
-
-    IF v_perm.allowed_categories IS NOT NULL AND p_category IS NOT NULL THEN
-        IF NOT v_perm.allowed_categories ? p_category THEN RETURN FALSE; END IF;
-    END IF;
-
-    IF p_action = 'read' AND v_perm.max_amount_visible IS NOT NULL AND p_amount IS NOT NULL THEN
-        IF p_amount > v_perm.max_amount_visible THEN RETURN FALSE; END IF;
     END IF;
 
     RETURN TRUE;
@@ -924,7 +799,6 @@ SELECT
     u.role,
     u.is_active,
     (SELECT COUNT(*) FROM alice.permissions_home_assistant WHERE user_id = u.id AND can_control = TRUE) AS ha_control_domains,
-    (SELECT COUNT(*) FROM alice.permissions_dms            WHERE user_id = u.id AND can_read    = TRUE) AS dms_readable_types,
     ps.can_manage_users,
     pa.max_messages_per_day
 FROM alice.users u
@@ -943,20 +817,6 @@ SELECT
 FROM alice.permissions_home_assistant pha
 JOIN alice.users u ON pha.user_id = u.id
 ORDER BY u.username, pha.domain;
-
-CREATE OR REPLACE VIEW alice.v_dms_permissions AS
-SELECT
-    u.username,
-    pdms.doc_type,
-    pdms.can_read,
-    pdms.can_create,
-    pdms.can_update,
-    pdms.can_delete,
-    pdms.can_download,
-    pdms.allowed_categories
-FROM alice.permissions_dms pdms
-JOIN alice.users u ON pdms.user_id = u.id
-ORDER BY u.username, pdms.doc_type;
 
 -- ============================================================
 -- 10. SYSTEM SETTINGS
@@ -980,11 +840,11 @@ CREATE POLICY system_settings_allow_all ON alice.system_settings
     FOR ALL USING (TRUE) WITH CHECK (TRUE);
 
 -- Default role for a voice-set timer when the speaker was not recognised.
--- Shipping value 'user' (per spec); an admin can change it in Settings.
+-- Shipping value 'haushalt'; an admin can change it in Settings.
 INSERT INTO alice.system_settings (key, value, description)
 VALUES (
     'timer_default_role',
-    '"user"'::jsonb,
+    '"haushalt"'::jsonb,
     'Owner role assigned to a Voice-PE timer when the speaker was not identified.'
 )
 ON CONFLICT (key) DO NOTHING;
@@ -999,7 +859,7 @@ CREATE TABLE IF NOT EXISTS alice.timers (
     owner_user_id            UUID REFERENCES alice.users(id) ON DELETE SET NULL,
     -- The ordering key for visibility, limits and "delete all timers".
     owner_role               VARCHAR(20) NOT NULL
-                                 CHECK (owner_role IN ('admin', 'user', 'guest', 'child')),
+                                 CHECK (owner_role IN ('admin', 'haushalt', 'guest')),
     -- Spoken / displayed name ("Kartoffel Timer", "20 Minuten Timer").
     name                     TEXT NOT NULL,
     -- Absolute moment the timer fires. Kept current while running; frozen
@@ -1095,27 +955,9 @@ CREATE INDEX IF NOT EXISTS idx_imap_mailboxes_status    ON alice.imap_mailboxes(
 CREATE OR REPLACE TRIGGER set_updated_at_imap_mailboxes
     BEFORE UPDATE ON alice.imap_mailboxes
     FOR EACH ROW EXECUTE FUNCTION alice.set_updated_at();
--- Per-user mailbox access
-CREATE TABLE IF NOT EXISTS alice.imap_mailbox_access (
-    mailbox_id  UUID NOT NULL REFERENCES alice.imap_mailboxes(id) ON DELETE CASCADE,
-    user_id     UUID NOT NULL REFERENCES alice.users(id) ON DELETE CASCADE,
-    granted_at  TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (mailbox_id, user_id)
-);
 
-ALTER TABLE alice.imap_mailbox_access ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS imap_access_select ON alice.imap_mailbox_access;
-CREATE POLICY imap_access_select ON alice.imap_mailbox_access FOR SELECT USING (TRUE);
-DROP POLICY IF EXISTS imap_access_insert ON alice.imap_mailbox_access;
-CREATE POLICY imap_access_insert ON alice.imap_mailbox_access FOR INSERT WITH CHECK (TRUE);
-DROP POLICY IF EXISTS imap_access_update ON alice.imap_mailbox_access;
-CREATE POLICY imap_access_update ON alice.imap_mailbox_access FOR UPDATE USING (TRUE);
-DROP POLICY IF EXISTS imap_access_delete ON alice.imap_mailbox_access;
-CREATE POLICY imap_access_delete ON alice.imap_mailbox_access FOR DELETE USING (TRUE);
-
-CREATE INDEX IF NOT EXISTS idx_imap_access_mailbox ON alice.imap_mailbox_access(mailbox_id);
-CREATE INDEX IF NOT EXISTS idx_imap_access_user    ON alice.imap_mailbox_access(user_id);
+-- Mailboxes are visible to every 'admin' and 'haushalt' user (PROJ-121);
+-- there is no per-user mailbox access table.
 
 -- ============================================================
 -- 13. GOOGLE CONNECTIONS & CALENDAR SELECTION
