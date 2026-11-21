@@ -121,7 +121,8 @@ def render(fm: dict, content: str) -> str:
     fm = order(fm)
     head = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
     content = normalize_content(content)
-    return f"---\n{head}---\n\n# {fm['title']}\n" + (f"\n{content}" if content else "")
+    heading = " ".join(str(fm["title"]).split())  # one line, even if the title has line breaks
+    return f"---\n{head}---\n\n# {heading}\n" + (f"\n{content}" if content else "")
 
 
 def original_links(locations: list[dict]) -> str:

@@ -207,6 +207,10 @@ class GitRepo:
                 i += 1
         return paths
 
+    def tracked_paths(self) -> list[str]:
+        out = self.git("ls-files", "-z", "--", *KIND_DIRS.values())
+        return [p for p in out.split("\0") if p]
+
     def changed_since(self, rev: str) -> list[str]:
         out = self.git("diff", "--name-only", "-z", "--no-renames", rev, "HEAD", "--", *KIND_DIRS.values())
         return [p for p in out.split("\0") if p]

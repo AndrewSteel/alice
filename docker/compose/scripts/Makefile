@@ -28,6 +28,7 @@ STACKS ?= \
   automations/alice-google-connect \
   automations/alice-calendar \
   automations/alice-lists \
+  automations/alice-source-registry \
   automations/alice-llm-gateway \
   ai/ollama \
   ai/llama-3090 \

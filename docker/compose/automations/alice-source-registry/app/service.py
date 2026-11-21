@@ -398,7 +398,10 @@ class Registry:
         scanned = await self._io(self.repo.get_ref)
         status = set(await self._io(self.repo.status_paths))
         candidates = set(status)
-        if scanned and head and scanned != head:
+        if not scanned and head:
+            # no scan mark yet (first scan or lost ref): compare every tracked file once
+            candidates |= set(await self._io(self.repo.tracked_paths))
+        elif scanned and head and scanned != head:
             try:
                 candidates |= set(await self._io(self.repo.changed_since, scanned))
             except GitError as exc:

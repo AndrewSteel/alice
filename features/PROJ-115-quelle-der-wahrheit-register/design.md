@@ -106,3 +106,10 @@ Deploy-Schritte für den Menschen:
 | Stufen als Tabellenzeilen | Spalten je Stufe | Neue Stufe = neue Zeile, kein Umbau (AK-21) |
 | Exklusive Übernahme in PostgreSQL | Redis-Lock | Register ist die Wahrheit; Redis darf verloren gehen (AK-22) |
 | Keine Auth an der Schnittstelle | Dienst-JWT | Kein Nutzerbezug, keine nginx-Route; Dienst-Token kann bei Bedarf in einem Folge-Feature ergänzt werden |
+
+## Umsetzungsnotizen (Bau, 2026-11-21)
+- Gebaut wie oben beschrieben: Dienst `docker/compose/automations/alice-source-registry/` (Port 8012, keine nginx-Route), Schema in `sql/init-schema.sql` Abschnitt 16 + Migration `sql/migrations/2026-11-20_PROJ-115_source_registry.sql`, Eintrag in `docker/compose/scripts/Makefile`.
+- Der Host-Ordner kommt aus `SOT_NAS_DIR` (in der `.env` des Dienstes, von Compose für den Bind-Mount nach `/data/sot` gelesen). Das Image legt `/data/sot` leer an; ohne Mount (Container-Test) entsteht dort ein frisches Repo.
+- Ergänzung zu C.8: Gibt es noch keine Prüfmarke `refs/alice/scanned` (erster Prüflauf oder verlorene Referenz), vergleicht der erste Prüflauf einmal alle versionierten Quell-Markdowns mit ihrem Fingerabdruck. Sonst würde ein Commit des Menschen vor dem ersten Prüflauf übersehen.
+- Der Container läuft als root (wie die übrigen Dienste ohne `nas-base`); Schreibrechte auf der NAS-Freigabe regeln deren Mount-Optionen.
+- Abweichungen von der Spec: keine.
