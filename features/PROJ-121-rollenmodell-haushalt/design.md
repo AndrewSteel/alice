@@ -112,3 +112,19 @@ Deploy-Schritte für den Menschen:
 - Der Workflow-Endpunkt `GET alice/users` (Nutzerliste, im Frontend ungenutzt) bleibt unverändert; er referenziert keine entfernte Tabelle.
 - `docs/` (Briefing, Planungsnotizen, `dms-pipeline-map.html`) erwähnt die alten Tabellen noch als Historie; nicht geändert.
 - Der E-Mail-Tab bleibt für Gäste sichtbar, zeigt ihnen aber eine leere Liste.
+
+## Deployment
+
+**Datum:** 2026-11-21, von `dev` (Phase 4).
+
+**Schritte:**
+1. Backup und Migration `sql/migrations/2026-11-20_PROJ-121_rollenmodell-haushalt.sql` (durch den Nutzer).
+2. Staging übersprungen (keine Staging-Container angelegt, daher auch kein Abbau).
+3. Compose-Sync, Rebuild von `alice-auth`, `alice-chat-stream`, `alice-calendar`, `alice-lists`, `alice-speech-gateway`; alle healthy, Logs ohne Fehler.
+4. n8n-Import `alice-tool-search`, `alice-mail-tools`, `alice-mail-api`, `alice-mail-sync` (durch den Nutzer).
+5. Frontend gebaut und synchronisiert; nginx-Logs ohne 4xx/5xx (außer 401).
+
+**Live-Test:**
+- AK-16: Haushaltsmitglieder und Admin erhalten Antworten auf Fragen nach Kontoauszug und Mail. Die Treffer sind inhaltlich nicht immer die richtigen; das ist ein bekanntes Problem der bisherigen Datenhaltung und Anlass für den neuen ETL-Prozess (PROJ-115 ff.), nicht für PROJ-121. Rollenprüfung gilt als bestanden.
+- Gast: nur per Sprache testbar (WebApp hat keinen Gast-Login). Gast wurde erkannt, Anfrage mangels Berechtigung abgelehnt.
+- Einstellungen → Nutzer: Rollenauswahl bietet Administrator, Haushalt und Gast.
