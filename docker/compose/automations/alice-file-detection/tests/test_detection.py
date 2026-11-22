@@ -566,3 +566,43 @@ async def test_invalid_utf8_name_is_problem_not_failure(det, registry, add_folde
     os.remove(os.fsencode(folder) + b"/kaputt_\xe4.pdf")
     r = await run(det, "night")
     assert [p["cause"] for p in r["summary"]["problems"]["items"]] == ["Ordnername ist kein gültiges UTF-8"]
+
+
+async def test_file_vanishes_while_hashing(det, registry, add_folder, nas, monkeypatch):  # EC-1
+    folder = await add_folder(nas / "share" / "v")
+    p = write(f"{folder}/flüchtig.pdf", "VANISH")
+    await run(det)
+    real = fsscan.sha256_file
+
+    def vanish(path):
+        if path == p:
+            os.remove(path)
+        return real(path)
+
+    monkeypatch.setattr(fsscan, "sha256_file", vanish)
+    r = await run(det)
+    assert r["state"] == "done" and await source(registry, "VANISH") is None
+    assert (await det.problems())[1] == 0
+
+
+async def test_rename_and_change_at_once(det, registry, add_folder, nas):  # EC-3
+    folder = await add_folder(nas / "share" / "rc")
+    for i in range(9):
+        write(f"{folder}/k{i}.pdf", f"RC{i}")
+    a = write(f"{folder}/alt.pdf", "OLDTEXT")
+    await settle(det)
+    old = await source(registry, "OLDTEXT")
+    os.remove(a)
+    b = write(f"{folder}/neu.pdf", "NEWTEXT")
+    await settle(det)
+    await run(det, "night")
+    new = await source(registry, "NEWTEXT")
+    assert new["id"] != old["id"] and present(new) == [b]
+    assert (await registry.get_source(old["id"]))["deleted"]
+
+
+async def test_broken_pdf_is_registered(det, registry, add_folder, nas):  # EC-7
+    folder = await add_folder(nas / "share" / "b")
+    p = write(f"{folder}/kaputt.pdf", b"\x00\x01 not a pdf")
+    await settle(det)
+    assert present(await source(registry, b"\x00\x01 not a pdf")) == [p]
