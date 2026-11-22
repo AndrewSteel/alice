@@ -126,3 +126,8 @@ Deploy-Schritte für den Menschen:
 - Der Fall „Freigabe fehlt“ pausiert neue Arbeit für `EXTRACT_NAS_RETRY_SECONDS` und prüft dann erneut (statt eines dauerhaften Überwachungsprozesses).
 - Test: Format-Leser und Arbeitsschleife mit Attrappen (OCR, LibreOffice, Register), End-to-End-Tests mit dem echten Register-Code gegen die Wegwerf-Datenbank und ein temporäres Git-Repo, Container-Rauchtest mit echtem LibreOffice und Tesseract (alle 21 Office-Endungen, Makro-Dokument, kaputtes DOCX, gemischtes PDF).
 - Abweichungen von der Spec: keine.
+
+## Nachbesserung nach Abnahme Runde 1 (2026-11-22)
+- **B-1 Zombies durch LibreOffice:** LibreOffice startet bei zip-basierten Formaten `gpg`, `gpgsm` und `gpgconf`. Diese Prozesse landeten bei PID 1 (`uvicorn`), das sie nie abräumte, ebenso `soffice.bin` nach einer Zeitüberschreitung. Nach etwa 200 DOCX war das Prozesslimit erreicht. Abhilfe: `tini` ist jetzt Init-Prozess im Image von `alice-text-extraction` (`ENTRYPOINT ["/usr/bin/tini", "--"]`). Das gilt damit für Compose, `stage.sh` und die Tests gleichermaßen, ohne Änderung an `compose.yml`.
+- **B-2 git-Zombies im Register:** Auch `alice-source-registry` hat jetzt `tini` als PID 1. Außerdem ruft das Register git mit `gc.autoDetach=false` und `maintenance.autoDetach=false` auf: Die automatische Wartung läuft dann im Aufruf selbst und nicht als abgekoppelter Hintergrundprozess.
+- Container-Rauchtests beider Dienste prüfen am Ende, dass PID 1 `tini` ist und keine Zombies übrig sind (`tests/no_zombies.py`). Der Selbsttest der Extraktion enthält zusätzlich eine erzwungene Zeitüberschreitung bei der Umwandlung.

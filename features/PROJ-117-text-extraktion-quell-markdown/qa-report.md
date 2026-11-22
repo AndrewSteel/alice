@@ -73,6 +73,9 @@ Geprüft auf drei Ebenen:
 - **L-1 (Low):** Seiten in nichtlateinischer Schrift (z. B. Kyrillisch, Griechisch) mit sauberer Textebene gelten nach der Qualitätsregel als „unbrauchbar“ und gehen an die OCR (deu+eng). Für den Haushalt (deutsch/englisch) ohne Bedeutung; Schwelle über `EXTRACT_TEXT_MIN_QUALITY` einstellbar.
 - **L-2 (Low, Testgrenze):** Die Gegenprobe für den Makro-Test (gleiches Dokument mit niedriger Makro-Sicherheit führt das Makro aus) ließ sich nicht herstellen: LibreOffice führt beim Umwandeln im Hintergrund auch ohne Sperre keine Lade-Makros aus. Der Test zeigt also, dass nichts ausgeführt wird, beweist aber nicht allein, dass die Profil-Sperre greift. Die Sperre (höchste Makro-Sicherheit, Makros deaktiviert, frisches Profil je Umwandlung) ist trotzdem gesetzt und geprüft.
 
+- **B-1 aus Abnahme Runde 1 (High, behoben):** Jede Office-Umwandlung hinterließ Zombie-Prozesse (je DOCX 1× gpg, 1× gpgsm, 3× gpgconf), nach einer Zeitüberschreitung zusätzlich `soffice.bin`. Fix: `tini` als PID 1. Gegenprobe im gebauten Image ohne tini (Entrypoint `uvicorn`): Nach dem Selbsttest gab es 30× gpg, 30× gpgsm, 90× gpgconf und 1× soffice.bin als Zombies. Mit tini waren es 0 (Prüfung `tests/no_zombies.py` im Container-Rauchtest).
+- **B-2 aus Abnahme Runde 1 (High, schon in PROJ-115, behoben):** Das Register hinterließ git-Zombies aus der abgekoppelten Hintergrundwartung. Fix: `tini` als PID 1, git mit `gc.autoDetach=false` und `maintenance.autoDetach=false`. Der Container-Rauchtest des Registers prüft auf Zombies.
+
 ## Sicherheit
 - Keine Endnutzer-Schnittstelle, keine nginx-Route, nur `/health` und `/status` (keine Inhalte, keine Pfade). Keine Zugangsdaten nötig.
 - Originale werden nur gelesen; LibreOffice bekommt einen neutralen Dateinamen (`input.<endung>`) per Verweis, NAS-Pfade erscheinen nicht in Fehlermeldungen des Registers (`test_permanent_error`).
@@ -88,4 +91,4 @@ Geprüft auf drei Ebenen:
 - `scripts/test-services.sh alice-text-extraction`: 64 bestanden (inkl. 8 End-to-End-Tests mit echtem Register-Code)
 - `scripts/test-services.sh alice-source-registry`: 83 bestanden (davon 6 neu für die Schnittstellen-Erweiterung)
 - `scripts/test-services.sh alice-file-detection`: 66 bestanden (davon 1 neu für AK-14)
-- `scripts/test-containers.sh alice-text-extraction alice-source-registry alice-file-detection`: bestanden (Rauchtest der Extraktion mit 21 Office-Varianten, Makro-Dokument, kaputtem DOCX und OCR)
+- `scripts/test-containers.sh alice-text-extraction alice-source-registry alice-file-detection`: bestanden (Rauchtest der Extraktion mit 21 Office-Varianten, Makro-Dokument, kaputtem DOCX, erzwungener Zeitüberschreitung und OCR; beide Dienste: PID 1 ist tini, keine Zombies)
