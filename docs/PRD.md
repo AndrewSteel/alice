@@ -33,7 +33,7 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | Priority | Feature | Sub-Phase | Status |
 | -------- | ------- | --------- | ------ |
 | P0 | Rollenmodell Haushalt — `admin`/`haushalt`/`guest`, Rechte je Dokumenttyp und Postfach entfallen, `child` gestrichen (PROJ-121) | 4.1 | Deployed |
-| P0 | Quelle-der-Wahrheit-Repo + Quellen-Register — Git-versionierter NAS-Ordner, Markdown-/Frontmatter-Format, Register aller Quellen mit Verarbeitungszustand (PROJ-115) | 4.1 | Planned |
+| P0 | Quelle-der-Wahrheit-Repo + Quellen-Register — Git-versionierter NAS-Ordner, Markdown-/Frontmatter-Format, Register aller Quellen mit Verarbeitungszustand (PROJ-115) | 4.1 | Deployed |
 | P0 | Datei-Erkennung — Scan, Hash/Dedup, Verschieben/Umbenennen/Löschen; ersetzt Scanner, Path-Worker, Lifecycle, Reconcile (PROJ-116) | 4.1 | Roadmap |
 | P0 | Text-Extraktion → Quell-Markdown (PROJ-117) | 4.1 | Roadmap |
 | P0 | Klassifizierung + Feldextraktion ins Frontmatter, deutsche Zusammenfassung (PROJ-118) | 4.1 | Roadmap |

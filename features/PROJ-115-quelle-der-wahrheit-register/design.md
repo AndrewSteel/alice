@@ -113,3 +113,22 @@ Deploy-Schritte für den Menschen:
 - Ergänzung zu C.8: Gibt es noch keine Prüfmarke `refs/alice/scanned` (erster Prüflauf oder verlorene Referenz), vergleicht der erste Prüflauf einmal alle versionierten Quell-Markdowns mit ihrem Fingerabdruck. Sonst würde ein Commit des Menschen vor dem ersten Prüflauf übersehen.
 - Der Container läuft als root (wie die übrigen Dienste ohne `nas-base`); Schreibrechte auf der NAS-Freigabe regeln deren Mount-Optionen.
 - Abweichungen von der Spec: keine.
+
+## Deployment
+
+**Datum:** 2026-11-21/22, von `dev` (Phase 4). Staging entfallen (PR war bereits gemerged).
+
+**Schritte:**
+1. Migration `sql/migrations/2026-11-20_PROJ-115_source_registry.sql` (durch den Nutzer). Die vielen `NOTICE: policy ... does not exist, skipping` stammen von `DROP POLICY IF EXISTS` beim Erstlauf und sind harmlos.
+2. Leerer Ordner `/mnt/nas/ai/source-of-truth` auf der beschreibbaren NAS-Freigabe angelegt.
+3. `.env` des Dienstes (durch den Nutzer), Compose-Sync, Build und Start.
+
+**Korrektur beim Deploy:** Der Bind-Mount `${SOT_NAS_DIR}:/data/sot` scheiterte: Das NAS bildet root per NFS auf ein Konto ohne Rechte ab (root squash), Docker kann daher keinen Unterordner der Freigabe einbinden, und ein als root laufender Dienst könnte dort nicht schreiben. Der Dienst erbt jetzt wie die DMS-Container von `nas-base` (`nas-volumes.yml`, NAS-Konto als Container-Nutzer, `/mnt/nas/ai` beschreibbar) und nutzt `SOT_REPO_PATH=/mnt/nas/ai/source-of-truth`; `SOT_NAS_DIR` entfällt. Der Schutz vor einem neuen Repo im leeren Einhängepunkt bleibt: Fehlt der NAS-Mount, fehlt der Unterordner und der Start bricht ab. Der vorige Hinweis „Container läuft als root“ gilt nicht mehr.
+
+**Live-Test AK-34:** bestanden.
+- Start: Repo angelegt (`README.md`, Art-Ordner, Commit „init“), Health `healthy`, Log ohne Fehler.
+- Testquelle `sot-livetest.pdf` registriert → Datei unter `documents/2026/11/`, Commit `detect`.
+- `title` per Editor über die NAS-Freigabe geändert → nach unter einer Minute Commit „Alice Hand-Korrektur“ (`manual: …`), Datei passend umbenannt, `manual: [title]` im Frontmatter.
+- Testquelle danach über „Fundort verschwunden“ auf `deleted` gesetzt (Register-ID `p1tf92vglmju`, bleibt laut Spec als Eintrag erhalten).
+
+**Hinweis für PROJ-116:** Die Stufen einer `deleted`-Quelle bleiben `pending`, die Übernahme (`claim`) filtert `deleted` nicht. Sobald Stufen-Worker laufen, würde auch die Testquelle übernommen. In PROJ-116 klären, dass gelöschte Quellen nicht verarbeitet werden.
