@@ -6,11 +6,15 @@
 # ETL stages (PROJ-116 ff.) on port 8012, reachable only inside the Docker
 # network: there is deliberately NO nginx route.
 #
-# SOT_REPO_PATH must point to an existing, writable, empty folder on the NAS
-# (first start) or an existing source-of-truth repo. The service never creates it
-# itself, so a missing NAS mount never leads to a fresh repo in the empty mount
-# point. NAS access comes from nas-base (NAS account UID): root is squashed by
-# NFS, so a bind mount of a sub-folder would fail.
+# The source-of-truth repo lives on its OWN NAS share (PROJ-116), mounted as a
+# whole share (no sub-folder: NFS root squash) and only by this service — it is
+# not part of nas-volumes.yml, so the DMS containers and the file detection never
+# see it. The service runs as the NAS account (SOT_UID_GID).
+#
+# SOT_REPO_PATH points to a sub-folder inside that share, e.g.
+# /mnt/nas/sot/source-of-truth. It must exist (empty on first start) or be an
+# existing source-of-truth repo. The service never creates it itself, so a
+# missing NAS mount (empty mount point) never leads to a fresh repo.
 # ---------------------------------------------------------------------------
 services:
   alice-source-registry:
@@ -20,9 +24,9 @@ services:
     container_name: alice-source-registry
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
-    extends:
-      file: ../nas-volumes.yml
-      service: nas-base
+    user: "${SOT_UID_GID:-1000:100}"
+    volumes:
+      - ${SOT_SHARE:-/mnt/nas/sot}:/mnt/nas/sot:rw
     env_file:
       - .env
     healthcheck:

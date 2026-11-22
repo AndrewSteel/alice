@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Container smoke test (scripts/test-containers.sh): the service initialized the
-# empty /data/sot as a git repo, registers a source, writes + commits its
+# empty /mnt/nas/sot/source-of-truth as a git repo, registers a source, writes + commits its
 # markdown and serves the work queue. Calls only from inside the container.
 set -euo pipefail
 docker exec -i "$CT_CONTAINER" python - <<'PY'
@@ -20,7 +20,7 @@ assert health["status"] == "healthy", health
 src = call("POST", "/sources", {"kind": "document", "hash": "sha256:smoketest0001", "title": "scan_0042.pdf",
                                 "location": {"path": "/smoke/scan_0042.pdf"}})
 assert src["path"].startswith("documents/") and src["path"].endswith("-scan-0042-pdf.md"), src
-log = subprocess.run(["git", "-c", "safe.directory=*", "-C", "/data/sot", "log", "--format=%an|%s"],
+log = subprocess.run(["git", "-c", "safe.directory=*", "-C", "/mnt/nas/sot/source-of-truth", "log", "--format=%an|%s"],
                      capture_output=True, text=True, check=True).stdout.splitlines()
 assert log[0] == f"Alice ETL|detect: {src['id']} scan_0042.pdf", log
 assert log[-1] == "Alice ETL|init: source of truth repository", log

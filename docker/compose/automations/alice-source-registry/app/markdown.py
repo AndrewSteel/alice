@@ -14,7 +14,12 @@ KINDS = tuple(KIND_DIRS)
 BASE_FIELDS = ("id", "schema", "kind", "title", "locations", "parents", "hash", "size", "modified",
                "captured", "language", "type", "manual")
 # Fields owned by the register; stages cannot set them through a document write.
-REGISTER_FIELDS = ("id", "schema", "kind", "locations", "parents", "hash", "size", "modified", "captured")
+REGISTER_FIELDS = ("id", "schema", "kind", "locations", "parents", "hash", "size", "modified", "captured", "deleted")
+# Register fields the pipeline always sets, even if a human listed them in `manual`.
+ALWAYS_REGISTER = ("id", "kind", "schema", "deleted")
+# Markdowns of deleted sources live below this folder with the same sub-structure (PROJ-116).
+DELETED_DIR = "deleted"
+WATCH_DIRS = (*KIND_DIRS.values(), DELETED_DIR)
 CONTENT = "content"  # name of the markdown body in `manual`
 SLUG_MAX = 60
 _UMLAUTS = {"ä": "ae", "ö": "oe", "ü": "ue", "Ä": "Ae", "Ö": "Oe", "Ü": "Ue", "ß": "ss"}
@@ -38,6 +43,19 @@ def file_name(source_id: str, title: str) -> str:
 
 def rel_path(kind: str, captured: datetime, source_id: str, title: str) -> str:
     return f"{KIND_DIRS[kind]}/{captured:%Y}/{captured:%m}/{file_name(source_id, title)}"
+
+
+def is_deleted_path(path: str) -> bool:
+    return path.startswith(DELETED_DIR + "/")
+
+
+def regular_path(path: str) -> str:
+    """Path of the markdown outside deleted/."""
+    return path[len(DELETED_DIR) + 1:] if is_deleted_path(path) else path
+
+
+def deleted_path(path: str) -> str:
+    return f"{DELETED_DIR}/{regular_path(path)}"
 
 
 def sibling_path(path: str, source_id: str, title: str) -> str:
@@ -158,6 +176,9 @@ video/<JJJJ>/<MM>/<id>-<slug>.md
   Ändert sich der Titel, wird die Datei umbenannt; der Ordner bleibt gleich.
 - Wird ein Original verschoben oder umbenannt, ändern sich nur die Fundorte (`locations`),
   nicht Ort oder Name der Markdown-Datei.
+- `deleted/<art>/<JJJJ>/<MM>/`: Markdowns gelöschter Quellen (kein Original mehr vorhanden), mit
+  `deleted: <Zeitpunkt>` im Frontmatter. Taucht das Original wieder auf, wandert die Datei zurück.
+  Dateien unter `deleted/` dürfen von Hand gelöscht werden.
 
 ## Frontmatter (Schema 1)
 
@@ -176,6 +197,7 @@ video/<JJJJ>/<MM>/<id>-<slug>.md
 | `language` | Sprache des Inhalts (leer bis zur Extraktion) |
 | `type` | Dokumenttyp (leer bis zur Klassifizierung) |
 | `manual` | von Hand gesetzte Felder; `content` steht für den Inhaltsteil |
+| `deleted` | nur bei gelöschten Quellen: Zeitpunkt, seit dem kein Original mehr vorhanden ist |
 
 Spätere Stufen ergänzen weitere Felder. Verarbeitungszustand, Fehler und Wiederholungen
 stehen nicht hier, sondern im Register (Datenbank).
@@ -193,6 +215,7 @@ stehen nicht hier, sondern im Register (Datenbank).
   Fehler steht im Register.
 - Umbenennen oder Verschieben einer Datei ist keine Korrektur: Sie wird an ihren Ort zurückgelegt.
   Gelöschte Dateien werden aus Git wiederhergestellt (Löschen läuft über das Original).
+  Ausnahme: Dateien unter `deleted/` dürfen gelöscht werden; das wird übernommen.
 
 ## Commits
 

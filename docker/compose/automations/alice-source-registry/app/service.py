@@ -189,7 +189,26 @@ class Registry:
             "parents": await self._parents(con, src["id"]),
             "hash": src["hash"], "size": src["size"], "modified": _iso(src["modified"]),
             "captured": _iso(src["captured"]),
+            "deleted": _iso(src["deleted_at"]) if src["deleted"] else None,
         }
+
+    async def _reset_after(self, con, source_id: str, stage: str) -> list[str]:
+        """All stages after `stage` (by position, not skipped) → pending (PROJ-116: original changed in place)."""
+        rows = await con.fetch(
+            """
+            UPDATE alice.source_stages ss
+               SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
+                   claim_token = NULL, started_at = NULL
+              FROM alice.pipeline_stages ps
+             WHERE ps.name = ss.stage AND ss.source_id = $1 AND ss.state NOT IN ('skipped', 'pending')
+               AND ps.position > (SELECT position FROM alice.pipeline_stages WHERE name = $2)
+            RETURNING ss.stage
+            """, source_id, stage)
+        stages = [r["stage"] for r in rows]
+        now = time.time()
+        for st in stages:
+            await self.queue.push(st, {source_id: now})
+        return stages
 
     # ================================================================ batches (AK-8)
     def _batch_ids(self) -> set[str]:
@@ -244,12 +263,24 @@ class Registry:
         await self._flush_containing(sid, keep_stage=stage if batch else None)
 
         cur = None
+        fresh = False  # markdown had to be created anew (no state left in git)
         if src["blob"]:
             cur = await self._io(self.repo.read, src["path"])
-            if cur is None:  # deleted by hand (EC-5): continue from the last pipeline state
+            if cur is None:
                 cur = await self._io(self.repo.cat_blob, src["blob"])
-                await self._event(con, sid, "error", "file_deleted",
-                                  f"Quell-Markdown {src['path']} fehlte und wurde aus Git wiederhergestellt")
+                if md.is_deleted_path(src["path"]):
+                    # removed by hand below deleted/ (allowed, PROJ-116 AK-15): continue from git history
+                    if cur is None:
+                        fresh = True
+                        await self._event(con, sid, "warning", "markdown_recreated",
+                                          f"Quell-Markdown {src['path']} war nicht mehr in Git vorhanden und "
+                                          "wurde neu angelegt; die Stufen laufen neu")
+                    else:
+                        await self._event(con, sid, "info", "markdown_restored",
+                                          f"Quell-Markdown {src['path']} aus der Git-Historie zurückgeholt")
+                else:  # deleted by hand (EC-5): continue from the last pipeline state
+                    await self._event(con, sid, "error", "file_deleted",
+                                      f"Quell-Markdown {src['path']} fehlte und wurde aus Git wiederhergestellt")
             elif await self._io(self.repo.hash_text, cur) != src["blob"]:
                 # uncommitted hand edit: commit it first, then write on top (AK-27)
                 src = await self._accept_hand_edit(con, src)
@@ -261,8 +292,14 @@ class Registry:
         manual = [m for m in (old_fm.get("manual") or []) if isinstance(m, str)]
         new_fm = dict(old_fm)
         for key, value in (await self._register_fields(con, src)).items():
-            if key in ("id", "kind", "schema") or key not in manual or key not in new_fm:
+            if key in md.ALWAYS_REGISTER or key not in manual or key not in new_fm:
                 new_fm[key] = value
+        if not src["deleted"]:
+            new_fm.pop("deleted", None)
+        if fresh:
+            fields = {"title": src["title"], "language": None, "type": None, **(fields or {})}
+            if content is None:
+                content = md.original_links(new_fm["locations"])
         for key, value in (fields or {}).items():
             if key not in manual or key not in new_fm:
                 new_fm[key] = value
@@ -275,14 +312,18 @@ class Registry:
         new_fm = md.order(new_fm)
 
         title = new_fm["title"]
-        new_path = md.sibling_path(src["path"], sid, title) if src["blob"] else src["path"]
+        base = md.regular_path(src["path"])
+        if src["blob"]:
+            base = md.sibling_path(base, sid, title)
+        # deleted sources live below deleted/ (git rename keeps the history, PROJ-116 AK-11/13)
+        new_path = md.deleted_path(base) if src["deleted"] else base
         text = md.render(new_fm, new_content)
         on_disk = cur is not None and await self._io(self.repo.exists, src["path"])
         if text == cur and new_path == src["path"] and on_disk:
             return {"id": sid, "path": src["path"], "changed": False, "commit": None, "reset": []}
 
-        content_changed = bool(src["blob"]) and (
-            _without(old_fm, ("locations", "manual")) != _without(new_fm, ("locations", "manual"))
+        content_changed = bool(src["blob"]) and not fresh and (
+            _without(old_fm, ("locations", "manual", "deleted")) != _without(new_fm, ("locations", "manual", "deleted"))
             or md.normalize_content(old_content) != md.normalize_content(new_content))
 
         try:
@@ -302,6 +343,8 @@ class Registry:
             if self._add_to_batch(stage or label, sid, {src["path"], new_path}) >= self.s.batch_max_files:
                 await self._flush_stage(stage or label)
         reset = await self._reset_dependents(con, sid, stage) if content_changed else []
+        if fresh:
+            reset = await self._reset_after(con, sid, "detect")
         src.update(path=new_path, title=title, blob=blob)
         return {"id": sid, "path": new_path, "changed": True, "commit": commit, "reset": reset}
 
@@ -343,7 +386,7 @@ class Registry:
         except md.InvalidDocument:
             base_fm, base_content = {}, ""
         changed = sorted(k for k in set(base_fm) | set(fm)
-                         if k not in ("manual", "id", "kind", "schema") and base_fm.get(k) != fm.get(k))
+                         if k not in ("manual", "id", "kind", "schema", "deleted") and base_fm.get(k) != fm.get(k))
         content_changed = md.normalize_content(base_content) != md.normalize_content(content)
         manual = list(fm["manual"])
         for key in changed + ([md.CONTENT] if content_changed else []):
@@ -409,7 +452,7 @@ class Registry:
         batch_paths = self._batch_paths()
         batch_ids = self._batch_ids()
         candidates = {p for p in candidates if p.endswith(".md") and p not in batch_paths}
-        accepted = locked = restored = 0
+        accepted = locked = restored = removed = 0
         recover: set[str] = set()
 
         async with self.pool.acquire() as con:
@@ -444,6 +487,14 @@ class Registry:
                     found_at = None if await self._io(self.repo.exists, path) else found.get(sid)
                     text = await self._io(self.repo.read, found_at or path)
                     if text is None:
+                        if src["deleted"] and md.is_deleted_path(path):
+                            # removing a markdown below deleted/ is allowed (PROJ-116 AK-14)
+                            if await self._io(self.repo.commit, {path}, f"manual: remove {sid} {src['title']}", HAND):
+                                await self._event(con, sid, "info", "markdown_removed",
+                                                  f"Quell-Markdown {path} unter deleted/ von Hand gelöscht")
+                                logger.info("Markdown %s of deleted source %s removed by hand", path, sid)
+                                removed += 1
+                            continue
                         if src["blob"] and await self._restore(con, src):
                             restored += 1
                         continue
@@ -465,9 +516,28 @@ class Registry:
         for i in range(0, len(recover_list), self.s.batch_max_files):
             chunk = recover_list[i:i + self.s.batch_max_files]
             await self._io(self.repo.commit, chunk, f"rebuild: recover {len(chunk)} sources", PIPELINE)
+        moved = await self._move_deleted()
+        head = await self._io(self.repo.head) if moved else head
         if head:
             await self._io(self.repo.set_ref, head)
-        return {"accepted": accepted, "locked": locked, "restored": restored, "recovered": len(recover_list)}
+        return {"accepted": accepted, "moved": moved, "locked": locked, "restored": restored, "removed": removed,
+                "recovered": len(recover_list)}
+
+    async def _move_deleted(self, limit: int = 200) -> int:
+        """Deleted sources whose markdown is still outside deleted/ (deleted before PROJ-116) → move it."""
+        moved = 0
+        async with self.pool.acquire() as con:
+            ids = [r["id"] for r in await con.fetch(
+                "SELECT id FROM alice.sources WHERE deleted AND repo_error IS NULL AND path NOT LIKE $1 "
+                "ORDER BY id LIMIT $2", md.DELETED_DIR + "/%", limit)]
+            for sid in ids:
+                if sid in self._batch_ids():
+                    continue
+                async with con.transaction():
+                    src = await self._source(con, sid, lock=True)
+                    if (await self._write_source(con, src, label="locations"))["changed"]:
+                        moved += 1
+        return moved
 
     async def _restore(self, con, src: dict) -> bool:
         text = await self._io(self.repo.cat_blob, src["blob"])
@@ -486,6 +556,12 @@ class Registry:
             sid = "".join(secrets.choice(ID_ALPHABET) for _ in range(ID_LENGTH))
             if not await con.fetchval("SELECT 1 FROM alice.sources WHERE id = $1", sid):
                 return sid
+
+    async def _reactivate(self, con, src: dict) -> None:
+        """The original is back: same id, finished stages stay finished (PROJ-116 AK-13)."""
+        await con.execute("UPDATE alice.sources SET deleted = FALSE, deleted_at = NULL WHERE id = $1", src["id"])
+        await self._event(con, src["id"], "info", "reactivated", "Original wieder vorhanden: Quelle wieder aktiv")
+        src.update(deleted=False, deleted_at=None)
 
     async def _upsert_location(self, con, source_id: str, loc: dict) -> bool:
         """True if the location is new or came back."""
@@ -514,8 +590,10 @@ class Registry:
 
     async def register(self, *, kind: str, hash: str, title: str, location: dict, size: int | None = None,
                        modified: datetime | None = None, captured: datetime | None = None,
-                       parents: list[str] | None = None, stage: str = "detect", batch: bool = False) -> dict:
-        """Register a source (AK-11–13). A known hash adds the location/parents to the existing source."""
+                       parents: list[str] | None = None, stage: str = "detect", batch: bool = False,
+                       complete: bool = False) -> dict:
+        """Register a source (AK-11–13). A known hash adds the location/parents to the existing source
+        (and reactivates it if it was deleted). `complete` marks `stage` done for a new source (PROJ-116)."""
         self.require_available()
         parents = list(dict.fromkeys(parents or []))
         async with self.lock:
@@ -529,13 +607,13 @@ class Registry:
                     for p in parents:
                         await con.execute("INSERT INTO alice.source_parents (source_id, parent_id) VALUES ($1, $2) "
                                           "ON CONFLICT DO NOTHING", src["id"], p)
-                    if src["deleted"]:
-                        await con.execute("UPDATE alice.sources SET deleted = FALSE, deleted_at = NULL WHERE id = $1",
-                                          src["id"])
+                    reactivated = src["deleted"]
+                    if reactivated:
+                        await self._reactivate(con, src)
                     written = None
                     if not src["repo_error"]:
                         written = await self._write_source(con, src, label="locations", batch=batch, stage=stage)
-                    return {"id": src["id"], "created": False, "path": src["path"],
+                    return {"id": src["id"], "created": False, "path": src["path"], "reactivated": reactivated,
                             "locked": bool(src["repo_error"]), "changed": bool(written and written["changed"])}
 
                 await self._check_parents(con, parents)
@@ -549,8 +627,9 @@ class Registry:
                     "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", sid, kind, hash, size, modified, captured, title, path)
                 await con.execute(
                     "INSERT INTO alice.source_stages (source_id, stage, state) "
-                    "SELECT $1, name, CASE WHEN $2 = ANY(skip_kinds) THEN 'skipped' ELSE 'pending' END "
-                    "FROM alice.pipeline_stages", sid, kind)
+                    "SELECT $1, name, CASE WHEN $2 = ANY(skip_kinds) THEN 'skipped' "
+                    "WHEN $3 AND name = $4 THEN 'done' ELSE 'pending' END "
+                    "FROM alice.pipeline_stages", sid, kind, complete, stage)
                 await self._upsert_location(con, sid, location)
                 for p in parents:
                     await con.execute("INSERT INTO alice.source_parents (source_id, parent_id) VALUES ($1, $2)", sid, p)
@@ -564,7 +643,8 @@ class Registry:
         now = time.time()
         for r in pending:
             await self.queue.push(r["stage"], {sid: now})
-        return {"id": sid, "created": True, "path": written["path"], "locked": False, "changed": True}
+        return {"id": sid, "created": True, "path": written["path"], "reactivated": False, "locked": False,
+                "changed": True}
 
     async def write_document(self, source_id: str, *, stage: str, fields: dict | None = None,
                              content: str | None = None, batch: bool = False) -> dict:
@@ -608,8 +688,7 @@ class Registry:
                 src = await self._source(con, source_id, lock=True)
                 await self._upsert_location(con, source_id, location)
                 if src["deleted"]:
-                    await con.execute("UPDATE alice.sources SET deleted = FALSE, deleted_at = NULL WHERE id = $1",
-                                      source_id)
+                    await self._reactivate(con, src)
                 if src["repo_error"]:
                     return {"id": source_id, "deleted": False, "locked": True, "changed": False}
                 written = await self._write_source(con, src, label="locations")
@@ -630,9 +709,12 @@ class Registry:
                     raise NotFound("Fundort an dieser Quelle nicht (mehr) vorhanden")
                 remaining = await con.fetchval("SELECT count(*) FROM alice.source_locations "
                                                "WHERE source_id = $1 AND present", source_id)
-                if remaining == 0:
-                    await con.execute("UPDATE alice.sources SET deleted = TRUE, deleted_at = NOW() WHERE id = $1",
-                                      source_id)
+                if remaining == 0 and not src["deleted"]:
+                    src["deleted_at"] = await con.fetchval(
+                        "UPDATE alice.sources SET deleted = TRUE, deleted_at = NOW() WHERE id = $1 RETURNING deleted_at",
+                        source_id)
+                    src["deleted"] = True
+                    await self._event(con, source_id, "info", "deleted", "Kein Fundort mehr vorhanden: Quelle gelöscht")
                 changed = False
                 if not src["repo_error"]:
                     changed = (await self._write_source(con, src, label="locations"))["changed"]
@@ -653,10 +735,13 @@ class Registry:
                 await con.execute("UPDATE alice.sources SET hash = $2, size = $3, modified = $4 WHERE id = $1",
                                   source_id, hash, size, modified)
                 src.update(hash=hash, size=size, modified=modified)
+                # new content: every stage after the reporting one has to run again (PROJ-116 AK-16)
+                reset = await self._reset_after(con, source_id, stage)
                 if src["repo_error"]:
-                    return {"id": source_id, "locked": True, "changed": False}
+                    return {"id": source_id, "locked": True, "changed": False, "reset": reset}
                 written = await self._write_source(con, src, label=stage, stage=stage)
-                return {"id": source_id, "locked": False, "changed": written["changed"], "reset": written["reset"]}
+                return {"id": source_id, "locked": False, "changed": written["changed"],
+                        "reset": sorted(set(reset) | set(written["reset"]))}
 
     async def get_source(self, source_id: str) -> dict:
         async with self.pool.acquire() as con:
@@ -711,7 +796,7 @@ class Registry:
 
     _CLAIM_SET = ("state = 'running', claim_token = gen_random_uuid(), started_at = NOW(), "
                   "last_attempt_at = NOW()")
-    _CLAIMABLE = ("s.repo_error IS NULL AND (ss.state = 'pending' "
+    _CLAIMABLE = ("s.repo_error IS NULL AND NOT s.deleted AND (ss.state = 'pending' "
                   "OR (ss.state = 'failed' AND ss.next_retry_at <= NOW()))")
     _CLAIM_RETURN = ("ss.source_id, ss.stage, ss.claim_token::text AS token, ss.attempts, "
                      "s.kind, s.path, s.title, s.hash")

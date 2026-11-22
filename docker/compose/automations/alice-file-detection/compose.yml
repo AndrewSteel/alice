@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# alice-file-detection — file detection for the source register (PROJ-116).
+#
+# Day scan (every few minutes, only new material via folder mtimes) and nightly
+# run (full comparison, removals with safeguards, summary) over the folders in
+# alice.dms_watched_folders. Writes only through alice-source-registry; reads the
+# originals via the shared NAS shares (nas-volumes.yml, NAS account, no root).
+# Never touches Redis, Weaviate or the old n8n DMS workflows.
+#
+# Internal interface on port 8013 (trigger runs, summaries, problems), reachable
+# only inside the Docker network: there is deliberately NO nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-file-detection:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-file-detection
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8013/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      automation:
+        aliases: [alice-file-detection]
+      backend:
+        aliases: [alice-file-detection]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation
