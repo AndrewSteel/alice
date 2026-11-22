@@ -116,6 +116,7 @@ class Detector:
         self.last_night_attempt = float("-inf")
         self.last_tick = time.monotonic()
         self.inventory_done = False  # a nightly run has finished at least once
+        self.bad_seen: set[str] = set()  # problem paths with invalid names seen in the current run
 
     # ================================================================ runs
     def start(self, kind: str, trigger: str = "schedule") -> asyncio.Task:
@@ -132,6 +133,7 @@ class Detector:
 
     async def _run(self, kind: str, trigger: str) -> dict:
         stats = Stats(kind)
+        self.bad_seen = set()
         state, error, summary = "done", None, None
         try:
             async with self.pool.acquire() as con:
@@ -268,6 +270,15 @@ class Detector:
                 "ON CONFLICT (path) DO UPDATE SET cause = EXCLUDED.cause, folder = EXCLUDED.folder, last_seen = NOW()",
                 path, folder, cause[:2000])
         logger.warning("Detection problem %s: %s", path, cause)
+
+    async def _bad_name(self, e: fsscan.Entry, folder: str) -> None:
+        """Names that are not valid UTF-8 cannot be stored: a problem entry instead of a failed run."""
+        if fsscan.skip_dir(e.name, self.s) if e.is_dir else fsscan.skip_file(e.name, self.s):
+            return
+        what = "Ordnername" if e.is_dir else "Dateiname"
+        path = fsscan.printable(e.path)
+        self.bad_seen.add(path)
+        await self._problem(path, folder, f"{what} ist kein gültiges UTF-8")
 
     async def _clear(self, path: str, pending: bool = True) -> None:
         async with self.pool.acquire() as con:
@@ -440,6 +451,9 @@ class Detector:
                     continue
                 stats.dirs_listed += 1
                 for e in entries:
+                    if e.bad_name:
+                        await self._bad_name(e, folder.path)
+                        continue
                     if e.is_dir:
                         if not self._skip_subdir(e, folder.path, folder_paths):
                             queue.append((e.path, d))
@@ -502,6 +516,8 @@ class Detector:
             rows = await con.fetch("SELECT path FROM alice.detect_problems LIMIT 10000")
         for r in rows:
             path = r["path"]
+            if "\ufffd" in path:
+                continue  # invalid name: not checkable by path, cleaned up by the nightly run
             st = await asyncio.to_thread(fsscan.file_stat, path)
             if st is None:
                 if await asyncio.to_thread(fsscan.dir_mtime, path) is None:
@@ -536,7 +552,9 @@ class Detector:
             stats.dirs_scanned += 1
             stats.dirs_listed += 1
             for e in entries:
-                if e.is_dir:
+                if e.bad_name:
+                    await self._bad_name(e, folder)
+                elif e.is_dir:
                     if not self._skip_subdir(e, folder, folder_paths):
                         stack.append(e.path)
                 elif not fsscan.skip_file(e.name, self.s) and e.size > 0:
@@ -603,6 +621,10 @@ class Detector:
         async with self.pool.acquire() as con:  # directory state of folders no longer in the list
             await con.execute("DELETE FROM alice.detect_dirs WHERE NOT (folder = ANY($1::text[]))", sorted(folder_paths))
         await self._retry_known_problems({}, {}, stats)  # only drops entries of vanished paths
+        async with self.pool.acquire() as con:  # invalid names no longer found in a fully listed folder
+            await con.execute("DELETE FROM alice.detect_problems WHERE strpos(path, $1) > 0 "
+                              "AND folder = ANY($2::text[]) AND NOT (path = ANY($3::text[]))",
+                              "\ufffd", sorted(walked), sorted(self.bad_seen))
 
     async def _remove_missing(self, snapshot: dict, seen: set[str], folder_paths: set[str], walked: set[str],
                               protected: list[str], stats: Stats) -> None:

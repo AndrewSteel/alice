@@ -550,3 +550,19 @@ async def test_originals_untouched(det, registry, add_folder, nas):  # AK-31
     for i, p in enumerate(files):
         assert (os.stat(p).st_mtime_ns, os.stat(p).st_size, fsscan.sha256_file(p)) == before[p]
         assert present(await source(registry, f"O{i}")) == [p]
+
+
+async def test_invalid_utf8_name_is_problem_not_failure(det, registry, add_folder, nas):  # EC-5
+    folder = await add_folder(nas / "share" / "enc")
+    ok = write(f"{folder}/gut.pdf", "GOOD")
+    with open(os.fsencode(folder) + b"/kaputt_\xe4.pdf", "wb") as f:
+        f.write(b"latin1")
+    os.makedirs(os.fsencode(folder) + b"/ordner_\xfc")
+    await settle(det)
+    r = await run(det, "night")
+    assert r["state"] == "done" and present(await source(registry, "GOOD")) == [ok]
+    causes = sorted(p["cause"] for p in r["summary"]["problems"]["items"])
+    assert causes == ["Dateiname ist kein gültiges UTF-8", "Ordnername ist kein gültiges UTF-8"]
+    os.remove(os.fsencode(folder) + b"/kaputt_\xe4.pdf")
+    r = await run(det, "night")
+    assert [p["cause"] for p in r["summary"]["problems"]["items"]] == ["Ordnername ist kein gültiges UTF-8"]

@@ -19,6 +19,20 @@ class Entry:
     is_dir: bool
     size: int = 0
     mtime_ns: int = 0
+    bad_name: bool = False  # not valid UTF-8: cannot be stored as a location
+
+
+def valid_utf8(name: str) -> bool:
+    try:
+        name.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def printable(path: str) -> str:
+    """Path with undecodable bytes replaced, safe to store and log."""
+    return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
 def norm(path: str) -> str:
@@ -68,6 +82,10 @@ def list_dir(path: str) -> list[Entry]:
         for e in it:
             try:
                 if e.is_symlink():
+                    continue
+                if not valid_utf8(e.name):
+                    out.append(Entry(e.name, posixpath.join(path, e.name), e.is_dir(follow_symlinks=False),
+                                     bad_name=True))
                     continue
                 if e.is_dir(follow_symlinks=False):
                     out.append(Entry(e.name, posixpath.join(path, e.name), True))
