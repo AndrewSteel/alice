@@ -217,3 +217,19 @@ async def test_two_workers_process_once(env, settings, extractor, nas):  # AK-4
     assert a.stats["done"] + b.stats["done"] == 1
     log = git(env.repo, "log", "--format=%s").splitlines()
     assert sum(1 for line in log if line.startswith(f"extract: {sid}")) == 1
+
+
+async def test_manual_content_extraction_updated(env, settings, extractor, nas):  # AK-28
+    path = make_pdf(nas / "share" / "akte.pdf", [DE, EN])
+    sid = await env.register(path, "akte.pdf")
+    await run(env, env.make_worker(extractor))
+    md_file = env.repo / (await env.reg.get_source(sid))["path"]
+    md_file.write_text(md_file.read_text().replace("Stadtwerke", "Stadtwerke (geprüft)"))
+    await env.reg.scan()  # hand correction accepted: content → manual
+    make_pdf(path, [("scan",), ("scan",)])  # the original is now a scan
+    await env.reg.retry(sid, "extract")
+    await run(env, env.make_worker(extractor))
+    d = await doc(env, sid)
+    assert "Stadtwerke (geprüft)" in d["content"] and "Gescannter Text" not in d["content"]
+    assert d["frontmatter"]["extraction"] == {"method": "ocr", "ocr_pages": [1, 2], "empty": False}
+    assert git(env.repo, "log", "-1", "--format=%s").startswith(f"extract: {sid}")

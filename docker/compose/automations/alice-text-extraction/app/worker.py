@@ -46,9 +46,9 @@ class Worker:
         errors, warnings = [], []
         if self.registry_down_since is not None:
             if time.monotonic() - self.registry_down_since >= self.s.registry_grace_seconds:
-                errors.append(f"Register nicht erreichbar, Extraktion pausiert: {self.registry_reason}")
+                errors.append(f"Extraktion pausiert: {self.registry_reason}")
             else:
-                warnings.append(f"Register nicht erreichbar: {self.registry_reason}")
+                warnings.append(f"Extraktion pausiert: {self.registry_reason}")
         if time.monotonic() - self.last_tick > max(120.0, 3 * self.s.poll_seconds):
             errors.append("Arbeitsschleife läuft nicht")
         if self.repo_paused_reason:

@@ -116,3 +116,13 @@ Deploy-Schritte für den Menschen:
 | Übernahme mit Art-Filter | übernehmen und sofort zurückgeben | Keine Endlosschleife, Bilder/Mails werden nicht angefasst |
 | Freigeben mit Wartezeit bei fehlender Datei | sofort freigeben | Keine Dauerschleife bis zum nächsten Nachtlauf der Datei-Erkennung |
 | Sammel-Commits per Schalter | automatische Erkennung eines Massenlaufs | PROJ-120 bestimmt den Auslöser; Mechanismus ist schon da |
+
+## Umsetzung (Bau, 2026-11-22)
+- Gebaut wie oben beschrieben: Dienst `docker/compose/automations/alice-text-extraction/` (Port 8014, keine nginx-Route, Eintrag im `Makefile`), Register-Erweiterungen in `alice-source-registry` (`fail` mit `permanent`, `heartbeat`, `claim` mit `kinds`, `release` mit `delay_seconds`), erweiterte Endungsliste in `alice-file-detection`. Keine Schema-Änderung, keine Migration.
+- `extraction` im Frontmatter ist ein Objekt `{method, ocr_pages, empty}`; bei Office-, csv- und Textdateien ist `method` immer `text` und `ocr_pages` leer.
+- Seitenmarken nur bei PDFs mit mehr als einer Seite; Folien (`## Folie <n>`) und Blätter (`## Blatt <Name>`) bekommen immer eine Überschrift, csv/txt/md und Textdokumente nie. Notizen stehen unter `### Notizen`.
+- Eine PDF-Seite ohne Bilder und ohne Vektorgrafik geht nie an die OCR (dort könnte die OCR nur lesen, was die Textebene schon hat); kurze lesbare Texte wie Seitenzahlen bleiben so erhalten, leere Seiten erzeugen keine OCR-Aufrufe. `ocr_pages` nennt die Seiten, deren Text aus der OCR stammt.
+- Die Spracherkennung zählt Buchstaben (Mindestanzahl `EXTRACT_LANGUAGE_MIN_CHARS`, Standard 100) und verlangt eine Wahrscheinlichkeit von mindestens 0,90.
+- Der Fall „Freigabe fehlt“ pausiert neue Arbeit für `EXTRACT_NAS_RETRY_SECONDS` und prüft dann erneut (statt eines dauerhaften Überwachungsprozesses).
+- Test: Format-Leser und Arbeitsschleife mit Attrappen (OCR, LibreOffice, Register), End-to-End-Tests mit dem echten Register-Code gegen die Wegwerf-Datenbank und ein temporäres Git-Repo, Container-Rauchtest mit echtem LibreOffice und Tesseract (alle 21 Office-Endungen, Makro-Dokument, kaputtes DOCX, gemischtes PDF).
+- Abweichungen von der Spec: keine.
