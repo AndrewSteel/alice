@@ -29,6 +29,7 @@ STACKS ?= \
   automations/alice-calendar \
   automations/alice-lists \
   automations/alice-source-registry \
+  automations/alice-file-detection \
   automations/alice-llm-gateway \
   ai/ollama \
   ai/llama-3090 \
