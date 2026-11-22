@@ -30,6 +30,7 @@ STACKS ?= \
   automations/alice-lists \
   automations/alice-source-registry \
   automations/alice-file-detection \
+  automations/alice-text-extraction \
   automations/alice-llm-gateway \
   ai/ollama \
   ai/llama-3090 \
