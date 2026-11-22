@@ -130,3 +130,25 @@ Deploy-Schritte für den Menschen:
   - Ein Unterordner, der nicht gelistet werden kann, wird als Erkennungsproblem geführt; unter ihm wird nichts entfernt.
   - Nach einer Änderung wird ein Ordner im nächsten Tagesscan noch einmal gelistet (Bestätigung). Im Dauerzustand ohne Änderung wird kein Ordner gelistet und keine Datei gelesen (AK-4).
 - Abweichungen von der Spec: keine. Folge der Spec-Regel „plötzlich leerer Ordner = Mount fehlt" (AK-22): Wird ein überwachter Ordner vollständig geleert (z. B. ein Eingangsordner, aus dem alles wegsortiert wurde), bleiben seine Fundorte stehen, bis wieder eine Datei darin liegt.
+
+## Deployment
+
+**Datum:** 2026-11-22, von `dev` (Phase 4, PR #7).
+
+**Schritte:**
+1. Migration `sql/migrations/2026-11-22_PROJ-116_file_detection.sql` (durch den Nutzer).
+2. Eigene NAS-Freigabe für die Quelle der Wahrheit, auf dem Server unter `/mnt/nas/sot` eingehängt (eigener fstab-Eintrag, nicht in `nas-volumes.yml`).
+3. Repo umgezogen nach `/mnt/nas/sot/source-of-truth`. Stolpersteine: Das Kopieren setzte den Besitzer auf das Server-Konto (`git` meldete „dubious ownership“); Besitzer auf der Synology rekursiv auf das NAS-Konto zurückgesetzt (vom Server aus wegen NFS root squash nicht möglich). Die Daten lagen zunächst direkt in der Freigabe-Wurzel und wurden in den Unterordner `source-of-truth` zurückverschoben (Schutz: fehlt der Mount, fehlt der Unterordner, es entsteht kein neues Repo). Prüfung ohne Server-Konto für die UID: `docker run --rm --user <uid>:<gid> -e HOME=/tmp -v /mnt/nas/sot:/mnt/nas/sot alpine/git -C /mnt/nas/sot/source-of-truth status`.
+4. `.env` beider Dienste (durch den Nutzer). `SOT_UID_GID` muss das NAS-Konto sein, nicht der Beispielwert aus `.env.example` (sonst „Repo-Ordner nicht erreichbar“).
+5. Staging beider Dienste (`scripts/stage.sh <dienst> 7`): `alice-file-detection-staging` mit `REGISTRY_URL` auf `alice-source-registry-staging`, beide `healthy`. Workaround: `stage.sh` kopiert nur das Dienstverzeichnis, das `extends: ../nas-volumes.yml` der Erkennung fand die Datei nicht; Kopie von `nas-volumes.yml` nach `~/alice-staging/` gelegt (danach entfernt).
+6. Compose-Sync, Rebuild `alice-source-registry` und `alice-file-detection`, beide `healthy`; Staging-Container entfernt. Hinweis: Vor dem Sync lief die Registry mit der alten `compose.yml` (ohne Mount der neuen Freigabe) und war unhealthy; das ist erwartet.
+
+**Erster Nachtlauf (AK-32), manuell ausgelöst:** fertig ohne Fehler in 2 h 10 min.
+- 93.031 Dateien gefunden, 91.835 gehasht, 2.017 Ordner
+- 55.412 neue Quellen, 36.423 zusätzliche Fundorte (Kopien gleichen Inhalts)
+- 0 Erkennungsprobleme, 0 gelöscht, keine blockierten oder übersprungenen Ordner
+- Sammel-Commits im Repo mit je höchstens 500 Quellen (`rebuild: detect 500 sources`, letzter mit 43)
+- Tagesscans starten danach automatisch alle 5 Minuten
+- Nicht registrierte Endungen u. a. `dng` (545), `mpg` (55), `gif` (15), `bmp` (5) → bei Bedarf über `DETECT_EXT_IMAGE`/`DETECT_EXT_VIDEO` aufnehmen; `pptx`/`odp` kommen mit PROJ-117; CAD-, Archiv-, Log- und Kamera-Begleitdateien bleiben bewusst draußen.
+
+**Noch offen:** Testdatei in einem überwachten Ordner ablegen (≤ 10 min im Register), verschieben (gleiche `id`) und löschen (nach dem nächsten Nachtlauf unter `deleted/`). Eine Testdatei im nicht überwachten Ordner `Documents/Notizen` wurde wie erwartet nicht erkannt.
