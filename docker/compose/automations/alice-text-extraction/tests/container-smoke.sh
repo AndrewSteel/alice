@@ -29,3 +29,6 @@ assert status == 200 and body["active"] == [] and body["concurrency"] == 2, body
 print("smoke ok: health", health["status"])
 PY
 docker exec -i -u 1000:100 "$CT_CONTAINER" python - <"$(dirname "$0")/container_selftest.py"
+# 3. no zombies after the conversions above (B-1: LibreOffice spawns gpg/gpgsm/gpgconf that get
+#    reparented to PID 1; tini as PID 1 must reap them, uvicorn would not)
+docker exec -i "$CT_CONTAINER" python - <"$(dirname "$0")/no_zombies.py"

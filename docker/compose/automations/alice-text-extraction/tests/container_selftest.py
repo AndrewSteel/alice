@@ -12,7 +12,7 @@ import zipfile
 sys.path.insert(0, "/app")
 
 from app.config import Settings  # noqa: E402
-from app.errors import PermanentError  # noqa: E402
+from app.errors import PermanentError, TransientError  # noqa: E402
 from app.extractor import Extractor  # noqa: E402
 from app.text import detect_language  # noqa: E402
 
@@ -189,6 +189,14 @@ def main():
         check("broken docx: permanent error", False, "no error")
     except PermanentError as exc:
         check("broken docx: permanent error", "beschädigt" in str(exc), str(exc))
+
+    # ---- conversion timeout (AK-23): transient error, the killed LibreOffice leaves no zombie
+    #      (checked afterwards by no_zombies.py in container-smoke.sh)
+    try:
+        Extractor(Settings(file_timeout_seconds=0.5, ocr_page_timeout_seconds=120)).extract(docs["docx"])
+        check("conversion timeout: transient error", False, "no error")
+    except TransientError as exc:
+        check("conversion timeout: transient error", "Zeitüberschreitung" in str(exc), str(exc))
 
     # ---- OCR of a scanned page with real Tesseract (AK-7, AK-8)
     import pymupdf

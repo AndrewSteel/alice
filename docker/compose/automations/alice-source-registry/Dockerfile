@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+RUN apt-get update && apt-get install -y --no-install-recommends git tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -19,4 +19,7 @@ RUN mkdir -p /mnt/nas/sot/source-of-truth && chmod 0777 /mnt/nas/sot/source-of-t
 # git needs a writable HOME when running as an account without passwd entry
 ENV HOME=/tmp
 
+# tini as PID 1 reaps orphaned children (detached git background processes would
+# otherwise stay as zombies under uvicorn).
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8012"]

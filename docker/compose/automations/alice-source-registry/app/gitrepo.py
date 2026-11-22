@@ -64,7 +64,9 @@ class GitRepo:
             env.update(GIT_AUTHOR_NAME=author.name, GIT_AUTHOR_EMAIL=author.email,
                        GIT_COMMITTER_NAME=author.name, GIT_COMMITTER_EMAIL=author.email)
         cmd = ["git", "-c", "safe.directory=*", "-c", "core.quotePath=false", "-c", "core.hooksPath=/dev/null",
-               "-c", "core.fileMode=false", "-c", "core.autocrlf=false", "-C", self.path, *args]
+               "-c", "core.fileMode=false", "-c", "core.autocrlf=false",
+               # no detached background gc/maintenance: it would outlive the call as an orphan
+               "-c", "gc.autoDetach=false", "-c", "maintenance.autoDetach=false", "-C", self.path, *args]
         try:
             return subprocess.run(cmd, input=stdin, capture_output=True, env=env, timeout=GIT_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as exc:

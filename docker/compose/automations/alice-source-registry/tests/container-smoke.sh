@@ -28,3 +28,5 @@ items = call("POST", "/stages/extract/claim", {"limit": 1})["items"]
 assert items and items[0]["source_id"] == src["id"], items
 print("smoke ok:", src["id"])
 PY
+# no zombies after the commits above: tini as PID 1 reaps orphaned children
+docker exec -i "$CT_CONTAINER" python - <"$(dirname "$0")/no_zombies.py"
