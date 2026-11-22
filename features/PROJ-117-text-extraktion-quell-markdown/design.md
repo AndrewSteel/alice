@@ -71,7 +71,7 @@ Ein neuer Dienst statt Erweiterung der alten Extraktoren: Die alten Container h�
 - **Kodierung von txt/md/csv:** UTF-8 (mit/ohne BOM), sonst Windows-1252 (Obermenge von ISO-8859-1 für druckbare Zeichen, u. a. €), notfalls ISO-8859-1. Enthält die Datei Null-Bytes, ist es keine Textdatei → endgültiger Fehler statt Binärmüll im Markdown (EC-6).
 - **Schnittstellen-Erweiterungen in PROJ-115 statt Umgehungen:** endgültiger Abschluss (Spec), Lebenszeichen (AK-33; ohne würde jede Übernahme nach 30 min pauschal zurückgesetzt), Übernahme nach Art (sonst müsste der Dienst Bilder/Mails übernehmen und sofort wieder zurückgeben, Endlosschleife), Freigeben mit Wartezeit (sonst würde eine fehlende Datei sekündlich neu vergeben). Alle sind optional; bestehende Aufrufer und Regeln bleiben unverändert. Das Lebenszeichen setzt den Übernahmezeitpunkt neu (kein Schema-Umbau nötig).
 - **Kein Postgres, kein Redis, kein MQTT im Dienst:** Arbeit kommt nur aus dem Register (EC-11, AK-37).
-- **Healthcheck mit Schonfrist:** Kurze Register-Neustarts (Deploy) machen den Dienst nicht sofort „unhealthy“. Im Container-Test läuft kein Register, dort ist die Schonfrist hoch gesetzt und der Rauchtest prüft den gemeldeten Grund.
+- **Healthcheck mit Schonfrist:** Kurze Register-Neustarts (Deploy) machen den Dienst nicht sofort „unhealthy“. Im Container-Test läuft kein Register: Die erste Docker-Prüfung (nach 30 s) liegt innerhalb der Schonfrist von 60 s, der Rauchtest prüft den gemeldeten Grund („Register nicht erreichbar“).
 
 ## E) Abhängigkeiten
 - Pakete: `fastapi`, `uvicorn`, `httpx`, `pymupdf`, `openpyxl`, `python-pptx`, `langdetect`; im Container `libreoffice-writer`, `libreoffice-calc`, `libreoffice-impress`, `tesseract-ocr` (+ `deu`, `eng`).
