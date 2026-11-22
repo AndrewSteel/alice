@@ -32,6 +32,7 @@ from .registry import RegistryClient, RegistryError, RegistryUnavailable
 logger = logging.getLogger("alice-file-detection")
 
 PROGRESS_EVERY = 100
+DAY_BATCH_THRESHOLD = 20  # more new files in one day scan → batch commits (e.g. a big folder was added)
 PROBLEM_LIST_LIMIT = 1000
 
 
@@ -114,6 +115,7 @@ class Detector:
         self.last_day_start = float("-inf")
         self.last_night_attempt = float("-inf")
         self.last_tick = time.monotonic()
+        self.inventory_done = False  # a nightly run has finished at least once
 
     # ================================================================ runs
     def start(self, kind: str, trigger: str = "schedule") -> asyncio.Task:
@@ -160,6 +162,8 @@ class Detector:
                 if kind == "night":
                     await con.execute("DELETE FROM alice.detect_runs WHERE started_at < NOW() - make_interval(days => $1)",
                                       self.s.retention_days)
+            if kind == "night" and state == "done":
+                self.inventory_done = True
             if kind == "night":
                 logger.info("Nightly run %s %s, summary: %s", run_id, state, json.dumps(summary, default=str))
             else:
@@ -206,8 +210,20 @@ class Detector:
         reason = await self.nightly_due()
         if reason and time.monotonic() - self.last_night_attempt >= min(interval, 600):
             self.start("night", reason)
-        elif time.monotonic() - self.last_day_start >= interval:
+        elif time.monotonic() - self.last_day_start >= interval and await self._inventory_done():
             self.start("day", "schedule")
+
+    async def _inventory_done(self) -> bool:
+        """Scheduled day scans start after the first finished nightly run: the inventory is
+        registered by the nightly run with batch commits (AK-28), not file by file."""
+        if not self.inventory_done:
+            async with self.pool.acquire() as con:
+                self.inventory_done = bool(await con.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM alice.detect_runs WHERE kind = 'night' AND state = 'done')"))
+            if not self.inventory_done and self.last_day_start == float("-inf"):
+                logger.info("Waiting for the first nightly run before scheduled day scans start")
+                self.last_day_start = time.monotonic()  # log once per interval only
+        return self.inventory_done
 
     # ================================================================ folders
     async def folders(self) -> list[Folder]:
@@ -385,6 +401,7 @@ class Detector:
             pending = {r["path"]: dict(r) for r in await con.fetch(
                 "SELECT path, folder, size, mtime_ns FROM alice.detect_pending")}
         handled: set[str] = set()
+        stable: list[tuple[str, str, int, int]] = []  # (path, folder, size, mtime_ns)
         dir_updates: list[tuple] = []
         dir_deletes: list[str] = []
 
@@ -435,7 +452,7 @@ class Detector:
                     handled.add(e.path)
                     p = pending.get(e.path)
                     if p and (p["size"], p["mtime_ns"]) == (e.size, e.mtime_ns):
-                        await self.take_new(e.path, folder.path, e.size, e.mtime_ns, stats)
+                        stable.append((e.path, folder.path, e.size, e.mtime_ns))
                     else:
                         await self._set_pending(e.path, folder.path, e.size, e.mtime_ns)
                 # a change is confirmed by the next scan seeing the same mtime (files added in the
@@ -459,9 +476,15 @@ class Detector:
             elif path in known:
                 await self._clear(path)
             elif st == (p["size"], p["mtime_ns"]):
-                await self.take_new(path, f.path, *st, stats)
+                stable.append((path, f.path, *st))
             else:
                 await self._set_pending(path, f.path, *st)
+
+        batch = len(stable) > DAY_BATCH_THRESHOLD
+        for path, folder_path, size, mtime_ns in stable:
+            await self.take_new(path, folder_path, size, mtime_ns, stats, batch=batch)
+        if stats.registered_batch:
+            await self.registry.flush()
 
         await self._retry_known_problems(known, by_path, stats)
 
@@ -577,6 +600,8 @@ class Detector:
         if new_count:
             logger.info("Nightly run: %d new files registered", new_count)
         await self._remove_missing(snapshot, seen, folder_paths, walked, protected, stats)
+        async with self.pool.acquire() as con:  # directory state of folders no longer in the list
+            await con.execute("DELETE FROM alice.detect_dirs WHERE NOT (folder = ANY($1::text[]))", sorted(folder_paths))
         await self._retry_known_problems({}, {}, stats)  # only drops entries of vanished paths
 
     async def _remove_missing(self, snapshot: dict, seen: set[str], folder_paths: set[str], walked: set[str],

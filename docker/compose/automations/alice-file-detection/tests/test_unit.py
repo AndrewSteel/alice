@@ -204,3 +204,41 @@ async def test_health_unhealthy_when_scheduler_stalls(make_detector, pool):
     assert r.status_code == 503 and r.json()["status"] == "unhealthy"
 
 
+
+
+async def test_scheduled_day_scans_wait_for_first_nightly_run(make_detector, pool, nas, add_folder):  # AK-28
+    await add_folder(nas / "share" / "x")
+    det = make_detector(FakeRegistry(pool), nightly_time="02:00", catchup_hours=0)
+    await det.tick()
+    assert det.task is None  # no nightly due, inventory not yet registered: no day scan either
+    await det.start("night", "manual")
+    det.last_day_start = float("-inf")
+    await det.tick()
+    assert det.task is not None and det.running == "day"
+    assert (await det.task)["state"] == "done"
+
+
+async def test_many_new_files_in_day_scan_use_batch(make_detector, pool, nas, add_folder):
+    folder = await add_folder(nas / "share" / "many")
+    reg = FakeRegistry(pool)
+    batches = []
+    orig = reg.register
+
+    async def register(**kw):
+        batches.append(kw["batch"])
+        return await orig(**kw)
+
+    flushed = []
+
+    async def flush():
+        flushed.append(True)
+
+    reg.register, reg.flush = register, flush
+    det = make_detector(reg)
+    await run(det)
+    for i in range(25):
+        with open(f"{folder}/f{i}.pdf", "w") as f:
+            f.write(str(i))
+    await run(det)
+    await run(det)
+    assert len(batches) == 25 and all(batches) and flushed

@@ -119,3 +119,14 @@ Deploy-Schritte für den Menschen:
 | Stabilität im Nachtlauf innerhalb des Laufs | auch nachts zwei Läufe | Bestand muss im ersten Lauf vollständig sein (AK-28) |
 | Freigabe = erster Pfadteil unter `/mnt/nas` | Freigabe = überwachter Ordner | wie das alte Reconcile; Ausfall einer Freigabe trifft alle ihre Ordner |
 | Zusammenfassung als JSON in `detect_runs` | eigene Tabellen je Kennzahl | Inhalt wächst mit PROJ-122, eine Zeile je Lauf genügt |
+
+## Umsetzung (Bau, 2026-11-22)
+- Neuer Dienst `docker/compose/automations/alice-file-detection/` (Port 8013, keine nginx-Route, Eintrag im `Makefile`), Schema in `sql/init-schema.sql` Abschnitt 17 + Migration `sql/migrations/2026-11-22_PROJ-116_file_detection.sql`.
+- Register-Dienst: `deleted`-Feld und `deleted/`-Ablage beim Schreiben, `claim` ohne gelöschte Quellen, `complete` bei der Registrierung (Stufe `detect` erledigt), `update_original` setzt alle Stufen nach `detect` auf `pending`, Hand-Löschen unter `deleted/` wird als Commit „manual: remove …" übernommen. Quellen, die schon vor PROJ-116 gelöscht waren (z. B. die Testquelle aus dem PROJ-115-Live-Test), wandern beim nächsten Prüflauf nach `deleted/`.
+- Register-Compose: eigene Freigabe `${SOT_SHARE}` als ganze Freigabe nach `/mnt/nas/sot`, Nutzer `${SOT_UID_GID}`, kein `nas-volumes.yml` mehr. Image: `/data/sot` beschreibbar für das NAS-Konto, `HOME=/tmp` für git.
+- Ergänzungen zur Architektur:
+  - **Tagesscans starten automatisch erst nach dem ersten fertigen Nachtlauf.** Sonst hätte der erste Tagesscan nach dem Deploy den ganzen Bestand Datei für Datei mit Einzel-Commits registriert, statt im ersten Nachtlauf mit Sammel-Commits (AK-28, AK-32). Manuell auslösen geht immer.
+  - Findet ein Tagesscan mehr als 20 stabile neue Dateien (z. B. ein neu hinzugefügter Ordner), meldet er sie mit Sammel-Commit an.
+  - Ein Unterordner, der nicht gelistet werden kann, wird als Erkennungsproblem geführt; unter ihm wird nichts entfernt.
+  - Nach einer Änderung wird ein Ordner im nächsten Tagesscan noch einmal gelistet (Bestätigung). Im Dauerzustand ohne Änderung wird kein Ordner gelistet und keine Datei gelesen (AK-4).
+- Abweichungen von der Spec: keine. Folge der Spec-Regel „plötzlich leerer Ordner = Mount fehlt" (AK-22): Wird ein überwachter Ordner vollständig geleert (z. B. ein Eingangsordner, aus dem alles wegsortiert wurde), bleiben seine Fundorte stehen, bis wieder eine Datei darin liegt.
