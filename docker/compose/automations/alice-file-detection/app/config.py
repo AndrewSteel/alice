@@ -7,7 +7,9 @@ from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 DEFAULT_EXTENSIONS = {
-    "document": "pdf,txt,md,docx,doc,xlsx,xls,odt,ods",
+    # Office formats extended by PROJ-117 (text extraction handles all of them)
+    "document": ("pdf,txt,md,docx,doc,xlsx,xls,odt,ods,"
+                 "docm,dotx,ott,rtf,xlsm,ots,csv,pptx,pptm,ppt,ppsx,pps,odp,otp"),
     "image": "jpg,jpeg,png,webp,heic,tif,tiff",
     "audio": "mp3,m4a,wav,flac,ogg,aac",
     "video": "mp4,mov,mkv,avi,m4v,webm",
