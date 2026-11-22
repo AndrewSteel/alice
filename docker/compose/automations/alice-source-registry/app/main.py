@@ -162,6 +162,7 @@ class RegisterIn(BaseModel):
     parents: list[str] = Field(default_factory=list, max_length=100)
     stage: str = Field("detect", pattern=STAGE_PATTERN)
     batch: bool = False
+    complete: bool = False  # mark `stage` done for a new source (detection, PROJ-116)
 
     @field_validator("kind")
     @classmethod
@@ -249,7 +250,8 @@ async def health(request: Request):
 async def register(body: RegisterIn, request: Request):
     return await _reg(request).register(
         kind=body.kind, hash=body.hash, title=body.title, location=body.location.as_dict(), size=body.size,
-        modified=body.modified, captured=body.captured, parents=body.parents, stage=body.stage, batch=body.batch)
+        modified=body.modified, captured=body.captured, parents=body.parents, stage=body.stage, batch=body.batch,
+        complete=body.complete)
 
 
 @app.get("/sources")

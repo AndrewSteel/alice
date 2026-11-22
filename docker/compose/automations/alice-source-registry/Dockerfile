@@ -10,7 +10,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 
-# Mount point of the source-of-truth folder (NAS). Must exist and be empty or a repo.
-RUN mkdir -p /data/sot
+# Default repo folder (container test without NAS). Writable for the non-root NAS
+# account the service runs as; in production SOT_REPO_PATH points into the own share.
+RUN mkdir -p /data/sot && chmod 0777 /data/sot
+
+# git needs a writable HOME when running as an account without passwd entry
+ENV HOME=/tmp
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8012"]

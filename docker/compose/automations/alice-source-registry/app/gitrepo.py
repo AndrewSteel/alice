@@ -12,7 +12,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-from .markdown import KIND_DIRS, README
+from .markdown import KIND_DIRS, README, WATCH_DIRS
 
 logger = logging.getLogger("alice-source-registry.git")
 
@@ -192,8 +192,8 @@ class GitRepo:
 
     # ---------------------------------------------------------------- status
     def status_paths(self) -> list[str]:
-        """Uncommitted (modified, deleted, untracked, renamed) paths below the kind folders."""
-        out = self.git("status", "--porcelain=v1", "-z", "-uall", "--", *KIND_DIRS.values())
+        """Uncommitted (modified, deleted, untracked, renamed) paths below the kind folders and deleted/."""
+        out = self.git("status", "--porcelain=v1", "-z", "-uall", "--", *WATCH_DIRS)
         parts = out.split("\0")
         paths, i = [], 0
         while i < len(parts):
@@ -208,11 +208,11 @@ class GitRepo:
         return paths
 
     def tracked_paths(self) -> list[str]:
-        out = self.git("ls-files", "-z", "--", *KIND_DIRS.values())
+        out = self.git("ls-files", "-z", "--", *WATCH_DIRS)
         return [p for p in out.split("\0") if p]
 
     def changed_since(self, rev: str) -> list[str]:
-        out = self.git("diff", "--name-only", "-z", "--no-renames", rev, "HEAD", "--", *KIND_DIRS.values())
+        out = self.git("diff", "--name-only", "-z", "--no-renames", rev, "HEAD", "--", *WATCH_DIRS)
         return [p for p in out.split("\0") if p]
 
     # ---------------------------------------------------------------- commit
