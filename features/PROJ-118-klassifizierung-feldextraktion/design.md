@@ -117,3 +117,18 @@ Deploy-Schritte für den Menschen:
 | Schreiben mit Übernahme-Token | Prüfung nur beim Abschluss | Kein veraltetes Ergebnis landet im Repo (EC-9, EC-15) |
 | Saldenkennzeichen in `fields` | oberste Ebene | Verschwinden von selbst, wenn der Auszug später aufgeht |
 | Präfix in Ortszeit | UTC | Entspricht der Anzeige im Dateimanager |
+
+## Umsetzung (Bau, 2026-11-23)
+- Gebaut wie oben beschrieben: Dienst `docker/compose/automations/alice-document-classify/` (Port 8015, keine nginx-Route, Eintrag im `Makefile`, nur im Netz `backend`, kein NAS-Mount), Register-Erweiterungen in `alice-source-registry`, Spalte `resets_on_fields` in `sql/init-schema.sql` und Migration `sql/migrations/2026-11-23_PROJ-118_classify_resets.sql`, Eintrag `document-classify background <key>` in `alice-llm-gateway/clients.example`.
+- Register-Schnittstelle (alles optional, bisherige Aufrufer unverändert):
+  - `POST /stages/{stage}/claim` mit `requires` (Liste von Stufen, die `done` oder `skipped` sein müssen); solche Übernahmen laufen wie bei `kinds` direkt über das Register.
+  - `PUT /sources/{id}/document` mit `token`: Antwort `discarded: true`, wenn die Stufe nicht mehr mit diesem Token läuft oder die Quelle gelöscht ist. Wird beim Schreiben zuerst eine Hand-Änderung committet und setzt diese die Stufe zurück, wird das Ergebnis ebenfalls verworfen (die Hand-Korrektur bleibt committet).
+  - `GET/POST /stages` kennt `resets_on_fields`.
+  - Zurücksetzen: Stufen mit `resets_on_content_change` wie bisher bei jeder Änderung außer `locations`/`manual`/`deleted`; zusätzlich Stufen, deren `resets_on_fields` ein geändertes Feld der obersten Ebene oder `content` nennen. Gilt beim Schreiben einer anderen Stufe und bei Hand-Korrekturen.
+  - `manual`: Ändert ein Mensch ein Feld innerhalb eines Objekts (z. B. `fields.amount_gross`, `classification.uncertain`), steht genau dieser Pfad in `manual`; beim Schreiben bleibt dieser innere Wert erhalten, die übrigen inneren Felder werden ersetzt. Der Eintrag des ganzen Blocks (`fields`) schützt weiterhin den ganzen Block. README im Repo (nur bei neuen Repos) ergänzt.
+- LLM-Aufrufe: System-Prompt beginnt mit `TASK: classify|extract|transactions`; Antwortformat JSON (`response_format: json_object`), Denkblöcke und Codezäune werden entfernt. Der Feld-Prompt enthält nur die Felder des Typs.
+- Frontmatter-Felder der Stufe: `type`, `classification` (`confidence` auf 3 Stellen gerundet, `uncertain`), `title`, `summary`, `summary_language_uncertain` (immer gesetzt, true/false), `fields`. Bei Hand-Typ werden `type` und `classification` nicht geschrieben. Leeres Dokument: `classification.confidence` = `null`.
+- Saldenkennzeichen `balance_mismatch`/`balance_difference` stehen nur bei Abweichung in `fields` (Entscheidung oben).
+- Buchungsabschnitte: Seiten werden bis `CLASSIFY_CHUNK_CHARS` zusammengefasst; eine größere Seite wird an Zeilengrenzen geteilt („Seite 3, Teil 2“). Dubletten werden nur zwischen letzter Buchung eines Abschnitts und erster des nächsten zusammengeführt.
+- Hinweis zur Git-Umbenennung: Git erkennt Umbenennungen über die Ähnlichkeit des Inhalts. Bei sehr kurzen Dokumenten wächst das Frontmatter durch die Klassifizierung so stark, dass `git log --follow` die Datei vor der Umbenennung nicht mehr findet; bei üblichen Dokumentlängen bleibt die Historie verbunden (im E2E-Test geprüft).
+- Abweichungen von der Spec: AK-37 zweiter Halbsatz entfällt (Entscheidung A im Issue: geändertes Original setzt `classify` immer zurück). Sonst keine.
