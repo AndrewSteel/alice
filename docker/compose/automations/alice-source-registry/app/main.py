@@ -16,7 +16,8 @@ Endpoints:
   PUT  /sources/{id}/original                     original changed in place (hash, size, modified)
   GET  /stages, POST /stages                      list / add pipeline stages
   POST /stages/{stage}/claim                      take over due work exclusively
-  POST /sources/{id}/stages/{stage}/done|fail|release|retry
+  POST /sources/{id}/stages/{stage}/done|fail|release|retry|heartbeat
+       (fail with "permanent": true, release with "delay_seconds", claim with "kinds": PROJ-117)
   POST /maintenance/scan|flush|resync-queue       run background jobs now
 """
 from __future__ import annotations
@@ -218,6 +219,14 @@ class StageIn(BaseModel):
 
 class ClaimIn(BaseModel):
     limit: int = Field(1, ge=1, le=100)
+    kinds: list[str] | None = Field(None, min_length=1, max_length=len(md.KINDS))
+
+    @field_validator("kinds")
+    @classmethod
+    def _kinds(cls, v):
+        if v is not None and any(k not in md.KINDS for k in v):
+            raise ValueError(f"kinds nur aus {', '.join(md.KINDS)}")
+        return v
 
 
 class TokenIn(BaseModel):
@@ -226,6 +235,11 @@ class TokenIn(BaseModel):
 
 class FailIn(TokenIn):
     error: str = Field(..., min_length=1, max_length=20000)
+    permanent: bool = False  # failed_permanent at once (PROJ-117)
+
+
+class ReleaseIn(TokenIn):
+    delay_seconds: int = Field(0, ge=0, le=86400)  # hand out again only after this time (PROJ-117)
 
 
 # ---------------------------------------------------------------- routes
@@ -304,7 +318,8 @@ async def add_stage(body: StageIn, request: Request):
 
 @app.post("/stages/{stage}/claim")
 async def claim(stage: str, request: Request, body: ClaimIn | None = None):
-    return await _reg(request).claim(stage, (body or ClaimIn()).limit)
+    body = body or ClaimIn()
+    return await _reg(request).claim(stage, body.limit, body.kinds)
 
 
 @app.post("/sources/{source_id}/stages/{stage}/done")
@@ -314,12 +329,17 @@ async def done(source_id: str, stage: str, body: TokenIn, request: Request):
 
 @app.post("/sources/{source_id}/stages/{stage}/fail")
 async def fail(source_id: str, stage: str, body: FailIn, request: Request):
-    return await _reg(request).fail(source_id, stage, str(body.token), body.error)
+    return await _reg(request).fail(source_id, stage, str(body.token), body.error, body.permanent)
 
 
 @app.post("/sources/{source_id}/stages/{stage}/release")
-async def release(source_id: str, stage: str, body: TokenIn, request: Request):
-    return await _reg(request).release(source_id, stage, str(body.token))
+async def release(source_id: str, stage: str, body: ReleaseIn, request: Request):
+    return await _reg(request).release(source_id, stage, str(body.token), body.delay_seconds)
+
+
+@app.post("/sources/{source_id}/stages/{stage}/heartbeat")
+async def heartbeat(source_id: str, stage: str, body: TokenIn, request: Request):
+    return await _reg(request).heartbeat(source_id, stage, str(body.token))
 
 
 @app.post("/sources/{source_id}/stages/{stage}/retry")

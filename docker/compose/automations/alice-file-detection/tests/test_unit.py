@@ -29,6 +29,10 @@ def test_defaults():
     assert s.scan_interval_seconds == 300 and s.nightly_time == "02:00" and s.catchup_hours == 6
     assert s.delete_limit_percent == 20
     assert extension_map({"video": ".MP4"}) == {"mp4": "video"}
+    # PROJ-117 AK-14: all formats the text extraction handles are registered as documents
+    for ext in ("pdf", "txt", "md", "docx", "docm", "doc", "dotx", "odt", "ott", "rtf", "xlsx", "xlsm", "xls",
+                "ods", "ots", "csv", "pptx", "pptm", "ppt", "ppsx", "pps", "odp", "otp"):
+        assert s.extensions[ext] == "document", ext
 
 
 @pytest.mark.parametrize("name,kind", [("a.PDF", "document"), ("b.xlsx", "document"), ("c.Jpeg", "image"),

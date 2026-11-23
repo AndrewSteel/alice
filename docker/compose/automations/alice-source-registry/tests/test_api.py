@@ -76,3 +76,21 @@ def test_unhealthy_without_repo(client, repo_dir):  # AK-30
                                       "location": {"path": "/x"}})
     assert w.status_code == 503 and w.json()["error"] == "repo_unavailable"
     assert client.post("/stages/extract/claim").json()["paused"] is True
+
+
+def test_http_extract_interface(client):  # PROJ-117: kinds, permanent, heartbeat, delayed release
+    r = client.post("/sources", json={"kind": "document", "hash": "sha256:" + "h" * 16, "title": "a.pdf",
+                                      "location": {"path": "/nas/a.pdf"}})
+    sid = r.json()["id"]
+    assert client.post("/stages/extract/claim", json={"kinds": ["spreadsheet"]}).status_code == 422
+    item = client.post("/stages/extract/claim", json={"limit": 5, "kinds": ["document"]}).json()["items"][0]
+    assert item["source_id"] == sid and item["kind"] == "document"
+    hb = client.post(f"/sources/{sid}/stages/extract/heartbeat", json={"token": item["token"]})
+    assert hb.status_code == 200 and hb.json()["state"] == "running"
+    rel = client.post(f"/sources/{sid}/stages/extract/release", json={"token": item["token"], "delay_seconds": 60})
+    assert rel.status_code == 200 and rel.json()["next_retry_at"]
+    client.post(f"/sources/{sid}/stages/extract/retry")
+    item = client.post("/stages/extract/claim", json={"kinds": ["document"]}).json()["items"][0]
+    f = client.post(f"/sources/{sid}/stages/extract/fail",
+                    json={"token": item["token"], "error": "PDF ist passwortgeschützt", "permanent": True})
+    assert f.json()["state"] == "failed_permanent"

@@ -796,19 +796,23 @@ class Registry:
 
     _CLAIM_SET = ("state = 'running', claim_token = gen_random_uuid(), started_at = NOW(), "
                   "last_attempt_at = NOW()")
-    _CLAIMABLE = ("s.repo_error IS NULL AND NOT s.deleted AND (ss.state = 'pending' "
+    # a pending stage with next_retry_at in the future was released with a delay (PROJ-117)
+    _CLAIMABLE = ("s.repo_error IS NULL AND NOT s.deleted AND ((ss.state = 'pending' "
+                  "AND (ss.next_retry_at IS NULL OR ss.next_retry_at <= NOW())) "
                   "OR (ss.state = 'failed' AND ss.next_retry_at <= NOW()))")
     _CLAIM_RETURN = ("ss.source_id, ss.stage, ss.claim_token::text AS token, ss.attempts, "
                      "s.kind, s.path, s.title, s.hash")
 
-    async def claim(self, stage: str, limit: int = 1) -> dict:
-        """Take over due work exclusively (AK-15). Paused while the repo is unavailable (AK-30)."""
+    async def claim(self, stage: str, limit: int = 1, kinds: list[str] | None = None) -> dict:
+        """Take over due work exclusively (AK-15). Paused while the repo is unavailable (AK-30).
+        `kinds` restricts the work to these source kinds (PROJ-117); such claims are served from the
+        register, so the Redis queue is never drained of sources of other kinds."""
         async with self.pool.acquire() as con:
             await self._require_stage(con, stage)
             if not self.available:
                 return {"paused": True, "reason": self.unavailable_reason, "items": []}
             items = []
-            ids = await self.queue.due(stage, limit * 5)
+            ids = await self.queue.due(stage, limit * 5) if not kinds else None
             if ids is not None:
                 for sid in ids:
                     row = await con.fetchrow(
@@ -826,6 +830,7 @@ class Registry:
                     WITH picked AS (
                         SELECT ss.source_id FROM alice.source_stages ss JOIN alice.sources s ON s.id = ss.source_id
                          WHERE ss.stage = $1 AND {self._CLAIMABLE}
+                           AND ($3::text[] IS NULL OR s.kind = ANY($3::text[]))
                          ORDER BY COALESCE(ss.next_retry_at, ss.updated_at)
                          LIMIT $2 FOR UPDATE OF ss SKIP LOCKED)
                     UPDATE alice.source_stages ss SET {self._CLAIM_SET}
@@ -833,7 +838,7 @@ class Registry:
                      WHERE ss.stage = $1 AND ss.source_id = picked.source_id AND s.id = ss.source_id
                        AND {self._CLAIMABLE}
                     RETURNING {self._CLAIM_RETURN}
-                    """, stage, limit)
+                    """, stage, limit, kinds or None)
                 items = [dict(r) for r in rows]
         return {"paused": False, "reason": None, "items": items}
 
@@ -854,31 +859,44 @@ class Registry:
             "claim_token = NULL, started_at = NULL WHERE source_id = $1 AND stage = $2 AND state = 'running' "
             "AND claim_token = $3::uuid RETURNING state, attempts", source_id, stage, token)
 
-    async def fail(self, source_id: str, stage: str, token: str, error: str) -> dict:
-        """Failure → attempts +1 and next retry by backoff; the 5th failure is permanent (AK-16/17)."""
+    async def fail(self, source_id: str, stage: str, token: str, error: str, permanent: bool = False) -> dict:
+        """Failure → attempts +1 and next retry by backoff; the 5th failure is permanent (AK-16/17).
+        `permanent` (PROJ-117): the error cannot go away by retrying (password, broken file) →
+        failed_permanent at once, without waiting for the remaining attempts."""
         row = await self._finish(
             f"""
             UPDATE alice.source_stages
                SET attempts = attempts + 1, last_error = $4, last_attempt_at = NOW(),
                    claim_token = NULL, started_at = NULL,
-                   state = CASE WHEN attempts + 1 >= {MAX_ATTEMPTS} THEN 'failed_permanent' ELSE 'failed' END,
-                   next_retry_at = CASE WHEN attempts + 1 >= {MAX_ATTEMPTS} THEN NULL
+                   state = CASE WHEN $6 OR attempts + 1 >= {MAX_ATTEMPTS} THEN 'failed_permanent' ELSE 'failed' END,
+                   next_retry_at = CASE WHEN $6 OR attempts + 1 >= {MAX_ATTEMPTS} THEN NULL
                                    ELSE NOW() + make_interval(secs => ($5::int[])[attempts + 1]) END
              WHERE source_id = $1 AND stage = $2 AND state = 'running' AND claim_token = $3::uuid
             RETURNING state, attempts, last_error, last_attempt_at, next_retry_at
-            """, source_id, stage, token, error[:4000], BACKOFF_SECONDS)
+            """, source_id, stage, token, error[:4000], BACKOFF_SECONDS, permanent)
         if row["next_retry_at"]:
             await self.queue.push(stage, {source_id: row["next_retry_at"].timestamp()})
         return row
 
-    async def release(self, source_id: str, stage: str, token: str) -> dict:
-        """Give work back without counting an attempt (e.g. repo unavailable, AK-30)."""
+    async def release(self, source_id: str, stage: str, token: str, delay_seconds: int = 0) -> dict:
+        """Give work back without counting an attempt (e.g. repo unavailable, AK-30).
+        `delay_seconds` (PROJ-117): hand the work out again only after this time (e.g. original missing)."""
         row = await self._finish(
-            "UPDATE alice.source_stages SET state = 'pending', claim_token = NULL, started_at = NULL "
+            "UPDATE alice.source_stages SET state = 'pending', claim_token = NULL, started_at = NULL, "
+            "next_retry_at = CASE WHEN $4 > 0 THEN NOW() + make_interval(secs => $4::int) ELSE NULL END "
             "WHERE source_id = $1 AND stage = $2 AND state = 'running' AND claim_token = $3::uuid "
-            "RETURNING state, attempts", source_id, stage, token)
-        await self.queue.push(stage, {source_id: time.time()})
+            "RETURNING state, attempts, next_retry_at", source_id, stage, token, delay_seconds)
+        due = row["next_retry_at"].timestamp() if row["next_retry_at"] else time.time()
+        await self.queue.push(stage, {source_id: due})
         return row
+
+    async def heartbeat(self, source_id: str, stage: str, token: str) -> dict:
+        """Sign of life of the worker (PROJ-117, AK-33): the stage counts as running from now on,
+        so a long extraction is not taken for a hanging one (reset_stale)."""
+        return await self._finish(
+            "UPDATE alice.source_stages SET started_at = NOW() "
+            "WHERE source_id = $1 AND stage = $2 AND state = 'running' AND claim_token = $3::uuid "
+            "RETURNING state, attempts, started_at", source_id, stage, token)
 
     async def retry(self, source_id: str, stage: str) -> dict:
         """Manual retry (AK-18): pending with attempt counter 0."""

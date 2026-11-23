@@ -89,6 +89,19 @@ async def test_kinds_by_extension(det, registry, add_folder, nas):  # AK-5
     assert audio["stages"]["extract"]["state"] == "skipped"
 
 
+async def test_office_extensions_registered(det, registry, add_folder, nas):  # PROJ-117 AK-14
+    folder = await add_folder(nas / "share" / "office")
+    exts = ("pptx", "docm", "dotx", "ott", "rtf", "xlsm", "ots", "csv", "pptm", "ppt", "ppsx", "pps", "odp", "otp")
+    names = ["vortrag.pptx"] + [f"datei-{e}.{e}" for e in exts[1:]]
+    for name in names:
+        write(f"{folder}/{name}", f"content-{name}")
+    await settle(det)
+    for name in names:
+        src = await source(registry, f"content-{name}")
+        assert src and src["kind"] == "document", name
+        assert src["stages"]["extract"]["state"] == "pending", name
+
+
 async def test_skip_rules(det, registry, add_folder, nas, pool):  # AK-6
     folder = await add_folder(nas / "share" / "skip")
     for rel in ("@eaDir/x.jpg", "#recycle/y.pdf", ".hidden.pdf", ".git/z.pdf", "~$lock.docx", "a.tmp", "b.part",
