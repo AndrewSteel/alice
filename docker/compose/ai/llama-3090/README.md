@@ -33,7 +33,6 @@ strings in the `model` field (`$env.OLLAMA_MODEL` / `OLLAMA_MODEL_DMS` /
 | Model ID (`model` field) | Actual model | Role |
 | --- | --- | --- |
 | `qwen3.8-27b` | **Qwen3.8-27B** (dense 27 B, hybrid thinking), Q4_K_M + F16 mmproj (bartowski) | chat/agent + vision |
-| `qwen3-vl-30b` | **Qwen3-VL-30B-A3B-Instruct** (MoE, ~30 B total / ~3 B active), Q4_K_M + F16 mmproj | fallback only — **non-thinking**, no PROJ-37 reasoning stream |
 | `mistral-small-3.2-24b` | **Mistral-Small-3.2-24B-Instruct-2506** (dense 24 B), Q4_K_M, text only | DMS text extraction |
 
 ### VRAM budget (the 3090's 24 GB is shared)
@@ -42,7 +41,6 @@ Measured on 2026-09-02 with qwen loaded and `parallel = 1`:
 
 | Process | VRAM | Note |
 | --- | --- | --- |
-| `llama-server` (qwen3-vl-30b, ctx 16384, mmproj, image-min-tokens 1024, parallel 1) | **~20.9 GB** | one model resident |
 | `llama-server` (qwen3.8-27b, ctx 32768, mmproj, parallel 1) — measured 2026-10-23 | ~19.5 GB | total ~22.0 / 24 GB incl. Weaviate, ~2.5 GB free |
 | `weaviate-transformers` (MiniLM) | ~0.8 GB | was ~3.3 GB → `PYTORCH_CUDA_ALLOC_CONF` cap on the container brought it down |
 | `weaviate-multi2vec` (CLIP) | ~1.4 GB | unchanged — vision encoder, kept on GPU |
@@ -64,19 +62,12 @@ Two settings keep qwen inside the shared budget:
   `weaviate/compose.yml`) — caps the CUDA caching allocator; MiniLM is ~470 MB,
   the 3.3 GB was mostly reserve, now ~0.8 GB.
 
-`image-min-tokens = 1024` (also in the qwen preset) is a quality setting, not a
-VRAM one: Qwen3-VL needs ≥1024 image tokens for reliable grounding, otherwise it
-down-samples the (already ≤1024 px) DMS images too far and the descriptions get
-vague.
-
 **Headroom is thin (~1.5 GB).** If qwen OOMs under load:
 `ctx-size 16384 → 12288` in the preset, or run `t2v-transformers` on CPU
 (`ENABLE_CUDA=0` + drop its `deploy.resources` block; costs ~50–150 ms per text
 embedding, acceptable — the chat path is LLM-generation-bound). `multi2vec-clip`
 must stay on the GPU (CPU image encoding ≈ 300–800 ms/image, too slow for the
-DMS image pipeline). Both LLMs at once do **not** fit → `--models-max 1`. The
-Qwen MoE loads/unloads faster than a dense model of similar size, which softens
-the model-switch gap.
+DMS image pipeline). Both LLMs at once do **not** fit → `--models-max 1`.
 
 ### Daily model timeline (all UTC — n8n cron runs UTC)
 
@@ -145,14 +136,7 @@ pipx install "huggingface_hub[cli]"        # or: pip install -U "huggingface_hub
 
 cd /srv/hot/models/llama-cpp
 
-# --- chat / vision model: Qwen3-VL-30B-A3B-Instruct (weights + vision projector) ---
-hf download Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF \
-  Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf \
-  mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf \
-  --local-dir .
-
-# --- chat model: Qwen3.8-27B (hybrid thinking; needs llama.cpp >= b10896) ---
-# Qwen3-VL-30B-A3B-*Instruct* above never thinks — PROJ-99 bugfix.
+# --- chat / vision model: Qwen3.8-27B (hybrid thinking; needs llama.cpp >= b10896) ---
 hf download bartowski/Qwen3.8-27B-GGUF \
   Qwen3.8-27B-Q4_K_M.gguf \
   mmproj-Qwen3.8-27B-f16.gguf \
@@ -187,13 +171,6 @@ top-p = 0.95
 top-k = 20
 min-p = 0.0
 
-[qwen3-vl-30b]
-model  = /models/Qwen3VL-30B-A3B-Instruct-Q4_K_M.gguf
-mmproj = /models/mmproj-Qwen3VL-30B-A3B-Instruct-F16.gguf
-image-min-tokens = 1024   ; Qwen3-VL grounding quality
-parallel         = 1      ; one KV slot — VRAM (see VRAM budget above)
-reasoning-format = deepseek
-
 [mistral-small-3.2-24b]
 model = /models/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
 ```
@@ -201,7 +178,7 @@ model = /models/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf
 Check the file names first: `docker exec llama-3090 ls -la /models/`.
 Verify sizes: Qwen Q4_K_M ≈ 18.6 GB, mmproj-F16 ≈ 1.1 GB, Mistral Q4_K_M ≈ 14 GB.
 After (re)start, `GET /v1/models` (with the bearer token) must list exactly
-`qwen3.8-27b`, `qwen3-vl-30b` and `mistral-small-3.2-24b`.
+`qwen3.8-27b` and `mistral-small-3.2-24b`.
 
 ### Alternative — let llama.cpp pull from HF on first request
 
@@ -209,9 +186,9 @@ Instead of downloading, reference the repo directly; the router fetches into
 `cache/` on the first request for that model:
 
 ```ini
-[qwen3-vl-30b]
-model  = hf:Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF:Q4_K_M
-mmproj = hf:Qwen/Qwen3-VL-30B-A3B-Instruct-GGUF:mmproj-F16
+[<model-id>]
+model  = hf:<hf-repo>:<quant>          ; e.g. Q4_K_M
+mmproj = hf:<hf-repo>:<mmproj-quant>   ; vision models only
 ```
 
 Trade-offs: the container then needs outbound internet (and an `HF_TOKEN` env
