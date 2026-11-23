@@ -1224,6 +1224,12 @@ INSERT INTO alice.pipeline_stages (name, position, skip_kinds, resets_on_content
     ('thumbnail', 70, '{audio,video}',   FALSE)
 ON CONFLICT (name) DO NOTHING;
 
+-- PROJ-118: a stage can also go back to pending when certain frontmatter fields or the
+-- content part (`content`) change, by another stage or by hand. classify: content and type.
+ALTER TABLE alice.pipeline_stages ADD COLUMN IF NOT EXISTS resets_on_fields TEXT[] NOT NULL DEFAULT '{}';
+UPDATE alice.pipeline_stages SET resets_on_fields = '{content,type}'
+ WHERE name = 'classify' AND resets_on_fields = '{}';
+
 -- 16.2 Sources: one row per unique content
 CREATE TABLE IF NOT EXISTS alice.sources (
     id          VARCHAR(12)  PRIMARY KEY CHECK (id ~ '^[a-z0-9]{12}$'),

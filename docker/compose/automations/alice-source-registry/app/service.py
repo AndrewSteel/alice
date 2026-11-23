@@ -62,8 +62,8 @@ def _loc_fm(row) -> dict:
     return {"mailbox": row["mailbox"], "message_id": row["message_id"]}
 
 
-def _without(fm: dict, keys) -> dict:
-    return {k: v for k, v in fm.items() if k not in keys}
+def _discarded(src: dict) -> dict:
+    return {"id": src["id"], "path": src["path"], "changed": False, "commit": None, "reset": [], "discarded": True}
 
 
 class Registry:
@@ -163,19 +163,23 @@ class Registry:
         if not await con.fetchval("SELECT 1 FROM alice.pipeline_stages WHERE name = $1", stage):
             raise NotFound(f"Stufe {stage} unbekannt")
 
-    async def _reset_dependents(self, con, source_id: str, exclude: str | None) -> list[str]:
-        """Content of the markdown changed: stages flagged resets_on_content_change → pending (AK-20)."""
+    async def _reset_dependents(self, con, source_id: str, exclude: str | None, changed) -> list[str]:
+        """The markdown changed: stages flagged resets_on_content_change (any change, AK-20) and stages
+        whose resets_on_fields name a changed field or `content` (PROJ-118) → pending."""
+        changed = sorted({str(c) for c in changed})
+        if not changed:
+            return []
         rows = await con.fetch(
             """
             UPDATE alice.source_stages ss
                SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
                    claim_token = NULL, started_at = NULL
               FROM alice.pipeline_stages ps
-             WHERE ps.name = ss.stage AND ps.resets_on_content_change
+             WHERE ps.name = ss.stage AND (ps.resets_on_content_change OR ps.resets_on_fields && $3::text[])
                AND ss.source_id = $1 AND ss.state NOT IN ('skipped', 'pending')
                AND ss.stage IS DISTINCT FROM $2
             RETURNING ss.stage
-            """, source_id, exclude)
+            """, source_id, exclude, changed)
         stages = [r["stage"] for r in rows]
         now = time.time()
         for stage in stages:
@@ -253,10 +257,21 @@ class Registry:
         return flushed
 
     # ================================================================ writing markdown
+    async def _claim_valid(self, con, src: dict, stage: str, token: str) -> bool:
+        """The writing stage still holds its claim and the source is not deleted (PROJ-118, EC-15)."""
+        if src["deleted"]:
+            return False
+        return bool(await con.fetchval(
+            "SELECT 1 FROM alice.source_stages WHERE source_id = $1 AND stage = $2 AND state = 'running' "
+            "AND claim_token = $3::uuid", src["id"], stage, token))
+
     async def _write_source(self, con, src: dict, *, label: str, stage: str | None = None,
-                            fields: dict | None = None, content: str | None = None, batch: bool = False) -> dict:
+                            fields: dict | None = None, content: str | None = None, batch: bool = False,
+                            token: str | None = None) -> dict:
         """Write the source markdown from register + stage values, respecting `manual`.
-        Caller holds self.lock and a transaction with the source row locked."""
+        Caller holds self.lock and a transaction with the source row locked.
+        With `token` the result is discarded (nothing written) if the claim of `stage` was taken back
+        meanwhile, e.g. by a hand correction committed first (PROJ-118)."""
         sid = src["id"]
         if src["repo_error"]:
             raise Locked(f"Quell-Markdown gesperrt: {src['repo_error']}")
@@ -286,6 +301,8 @@ class Registry:
                 src = await self._accept_hand_edit(con, src)
                 if src["repo_error"]:
                     raise Locked(f"Quell-Markdown gesperrt: {src['repo_error']}")
+                if token and not await self._claim_valid(con, src, stage, token):
+                    return _discarded(src)
                 cur = await self._io(self.repo.read, src["path"])
 
         old_fm, old_content = md.parse(cur) if cur else ({}, "")
@@ -302,7 +319,7 @@ class Registry:
                 content = md.original_links(new_fm["locations"])
         for key, value in (fields or {}).items():
             if key not in manual or key not in new_fm:
-                new_fm[key] = value
+                new_fm[key] = md.keep_manual_parts(key, value, new_fm.get(key), manual)
         for key in md.BASE_FIELDS:
             new_fm.setdefault(key, None)
         new_fm["manual"] = manual
@@ -322,9 +339,12 @@ class Registry:
         if text == cur and new_path == src["path"] and on_disk:
             return {"id": sid, "path": src["path"], "changed": False, "commit": None, "reset": []}
 
-        content_changed = bool(src["blob"]) and not fresh and (
-            _without(old_fm, ("locations", "manual", "deleted")) != _without(new_fm, ("locations", "manual", "deleted"))
-            or md.normalize_content(old_content) != md.normalize_content(new_content))
+        changed: set[str] = set()
+        if src["blob"] and not fresh:
+            changed = {k for k in set(old_fm) | set(new_fm)
+                       if k not in ("locations", "manual", "deleted") and old_fm.get(k) != new_fm.get(k)}
+            if md.normalize_content(old_content) != md.normalize_content(new_content):
+                changed.add(md.CONTENT)
 
         try:
             await self._io(self.repo.write, new_path, text)
@@ -342,7 +362,7 @@ class Registry:
         if batch:
             if self._add_to_batch(stage or label, sid, {src["path"], new_path}) >= self.s.batch_max_files:
                 await self._flush_stage(stage or label)
-        reset = await self._reset_dependents(con, sid, stage) if content_changed else []
+        reset = await self._reset_dependents(con, sid, stage, changed)
         if fresh:
             reset = await self._reset_after(con, sid, "detect")
         src.update(path=new_path, title=title, blob=blob)
@@ -385,8 +405,10 @@ class Registry:
             base_fm, base_content = md.parse(base_text) if base_text else ({}, "")
         except md.InvalidDocument:
             base_fm, base_content = {}, ""
-        changed = sorted(k for k in set(base_fm) | set(fm)
-                         if k not in ("manual", "id", "kind", "schema", "deleted") and base_fm.get(k) != fm.get(k))
+        top = sorted(k for k in set(base_fm) | set(fm)
+                     if k not in ("manual", "id", "kind", "schema", "deleted") and base_fm.get(k) != fm.get(k))
+        # fields inside a block (e.g. `fields.amount_gross`) are protected one by one (PROJ-118)
+        changed = [p for k in top for p in md.changed_parts(k, base_fm.get(k), fm.get(k))]
         content_changed = md.normalize_content(base_content) != md.normalize_content(content)
         manual = list(fm["manual"])
         for key in changed + ([md.CONTENT] if content_changed else []):
@@ -416,7 +438,7 @@ class Registry:
         if src["repo_error"]:
             await self._event(con, sid, "info", "unlocked", "Frontmatter repariert, Sperre aufgehoben")
         if changed or content_changed:
-            await self._reset_dependents(con, sid, None)
+            await self._reset_dependents(con, sid, None, set(top) | ({md.CONTENT} if content_changed else set()))
         if edited:
             parts = changed + ([md.CONTENT] if content_changed else [])
             await self._event(con, sid, "info", "hand_correction",
@@ -647,8 +669,10 @@ class Registry:
                 "changed": True}
 
     async def write_document(self, source_id: str, *, stage: str, fields: dict | None = None,
-                             content: str | None = None, batch: bool = False) -> dict:
-        """A stage writes fields and/or the content part (AK-5, AK-7, AK-25–27)."""
+                             content: str | None = None, batch: bool = False, token: str | None = None) -> dict:
+        """A stage writes fields and/or the content part (AK-5, AK-7, AK-25–27).
+        With `token` (PROJ-118) the write only happens while `stage` is still running under this claim
+        and the source is not deleted; otherwise the result is discarded (`discarded: true`)."""
         fields = fields or {}
         bad = [k for k in fields if not isinstance(k, str) or not FIELD_NAME.match(k)]
         if bad:
@@ -663,8 +687,10 @@ class Registry:
             async with self.pool.acquire() as con, con.transaction():
                 await self._require_stage(con, stage)
                 src = await self._source(con, source_id, lock=True)
+                if token and not await self._claim_valid(con, src, stage, token):
+                    return _discarded(src)
                 return await self._write_source(con, src, label=stage, stage=stage, fields=fields,
-                                                content=content, batch=batch)
+                                                content=content, batch=batch, token=token)
 
     async def read_document(self, source_id: str) -> dict:
         self.require_available()
@@ -773,18 +799,18 @@ class Registry:
     # ================================================================ stages
     async def list_stages(self) -> list[dict]:
         async with self.pool.acquire() as con:
-            rows = await con.fetch("SELECT name, position, skip_kinds, resets_on_content_change "
+            rows = await con.fetch("SELECT name, position, skip_kinds, resets_on_content_change, resets_on_fields "
                                    "FROM alice.pipeline_stages ORDER BY position, name")
         return [dict(r) for r in rows]
 
     async def add_stage(self, *, name: str, position: int, skip_kinds: list[str],
-                        resets_on_content_change: bool) -> dict:
+                        resets_on_content_change: bool, resets_on_fields: list[str] | None = None) -> dict:
         """New stage from a follow-up feature (AK-21): existing sources get a state, no migration."""
         async with self.pool.acquire() as con, con.transaction():
             created = await con.fetchval(
-                "INSERT INTO alice.pipeline_stages (name, position, skip_kinds, resets_on_content_change) "
-                "VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING RETURNING name",
-                name, position, skip_kinds, resets_on_content_change)
+                "INSERT INTO alice.pipeline_stages (name, position, skip_kinds, resets_on_content_change, "
+                "resets_on_fields) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (name) DO NOTHING RETURNING name",
+                name, position, skip_kinds, resets_on_content_change, resets_on_fields or [])
             if not created:
                 raise Conflict(f"Stufe {name} existiert bereits")
             n = await con.execute(
@@ -803,16 +829,21 @@ class Registry:
     _CLAIM_RETURN = ("ss.source_id, ss.stage, ss.claim_token::text AS token, ss.attempts, "
                      "s.kind, s.path, s.title, s.hash")
 
-    async def claim(self, stage: str, limit: int = 1, kinds: list[str] | None = None) -> dict:
+    async def claim(self, stage: str, limit: int = 1, kinds: list[str] | None = None,
+                    requires: list[str] | None = None) -> dict:
         """Take over due work exclusively (AK-15). Paused while the repo is unavailable (AK-30).
         `kinds` restricts the work to these source kinds (PROJ-117); such claims are served from the
-        register, so the Redis queue is never drained of sources of other kinds."""
+        register, so the Redis queue is never drained of sources of other kinds.
+        `requires` (PROJ-118): only sources whose listed stages are done (or skipped), e.g. classify
+        after extract; such claims are served from the register as well."""
         async with self.pool.acquire() as con:
             await self._require_stage(con, stage)
             if not self.available:
                 return {"paused": True, "reason": self.unavailable_reason, "items": []}
             items = []
-            ids = await self.queue.due(stage, limit * 5) if not kinds else None
+            for name in requires or []:
+                await self._require_stage(con, name)
+            ids = await self.queue.due(stage, limit * 5) if not kinds and not requires else None
             if ids is not None:
                 for sid in ids:
                     row = await con.fetchrow(
@@ -831,6 +862,9 @@ class Registry:
                         SELECT ss.source_id FROM alice.source_stages ss JOIN alice.sources s ON s.id = ss.source_id
                          WHERE ss.stage = $1 AND {self._CLAIMABLE}
                            AND ($3::text[] IS NULL OR s.kind = ANY($3::text[]))
+                           AND ($4::text[] IS NULL OR NOT EXISTS (
+                                SELECT 1 FROM alice.source_stages r WHERE r.source_id = ss.source_id
+                                   AND r.stage = ANY($4::text[]) AND r.state NOT IN ('done', 'skipped')))
                          ORDER BY COALESCE(ss.next_retry_at, ss.updated_at)
                          LIMIT $2 FOR UPDATE OF ss SKIP LOCKED)
                     UPDATE alice.source_stages ss SET {self._CLAIM_SET}
@@ -838,7 +872,7 @@ class Registry:
                      WHERE ss.stage = $1 AND ss.source_id = picked.source_id AND s.id = ss.source_id
                        AND {self._CLAIMABLE}
                     RETURNING {self._CLAIM_RETURN}
-                    """, stage, limit, kinds or None)
+                    """, stage, limit, kinds or None, requires or None)
                 items = [dict(r) for r in rows]
         return {"paused": False, "reason": None, "items": items}
 

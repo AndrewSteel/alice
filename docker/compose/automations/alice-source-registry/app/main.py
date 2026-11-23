@@ -18,6 +18,7 @@ Endpoints:
   POST /stages/{stage}/claim                      take over due work exclusively
   POST /sources/{id}/stages/{stage}/done|fail|release|retry|heartbeat
        (fail with "permanent": true, release with "delay_seconds", claim with "kinds": PROJ-117)
+       (claim with "requires", document write with "token", stages with "resets_on_fields": PROJ-118)
   POST /maintenance/scan|flush|resync-queue       run background jobs now
 """
 from __future__ import annotations
@@ -194,6 +195,8 @@ class DocumentIn(BaseModel):
     fields: dict = Field(default_factory=dict)
     content: str | None = Field(None, max_length=5_000_000)
     batch: bool = False
+    # PROJ-118: write only while this claim of `stage` is still valid, otherwise discard the result
+    token: uuid.UUID | None = None
 
 
 class OriginalIn(BaseModel):
@@ -208,6 +211,8 @@ class StageIn(BaseModel):
     position: int = Field(100, ge=0, le=100000)
     skip_kinds: list[str] = Field(default_factory=list)
     resets_on_content_change: bool = False
+    # PROJ-118: back to pending when one of these fields (or `content`) changes
+    resets_on_fields: list[str] = Field(default_factory=list, max_length=50)
 
     @field_validator("skip_kinds")
     @classmethod
@@ -220,6 +225,17 @@ class StageIn(BaseModel):
 class ClaimIn(BaseModel):
     limit: int = Field(1, ge=1, le=100)
     kinds: list[str] | None = Field(None, min_length=1, max_length=len(md.KINDS))
+    # PROJ-118: only sources whose listed stages are done (or skipped)
+    requires: list[str] | None = Field(None, min_length=1, max_length=20)
+
+    @field_validator("requires")
+    @classmethod
+    def _requires(cls, v):
+        import re
+
+        if v is not None and any(not re.match(STAGE_PATTERN, s) for s in v):
+            raise ValueError("requires enthält ungültige Stufennamen")
+        return v
 
     @field_validator("kinds")
     @classmethod
@@ -286,7 +302,8 @@ async def read_document(source_id: str, request: Request):
 @app.put("/sources/{source_id}/document")
 async def write_document(source_id: str, body: DocumentIn, request: Request):
     return await _reg(request).write_document(source_id, stage=body.stage, fields=body.fields,
-                                              content=body.content, batch=body.batch)
+                                              content=body.content, batch=body.batch,
+                                              token=str(body.token) if body.token else None)
 
 
 @app.post("/sources/{source_id}/locations")
@@ -313,13 +330,14 @@ async def list_stages(request: Request):
 @app.post("/stages")
 async def add_stage(body: StageIn, request: Request):
     return await _reg(request).add_stage(name=body.name, position=body.position, skip_kinds=body.skip_kinds,
-                                         resets_on_content_change=body.resets_on_content_change)
+                                         resets_on_content_change=body.resets_on_content_change,
+                                         resets_on_fields=body.resets_on_fields)
 
 
 @app.post("/stages/{stage}/claim")
 async def claim(stage: str, request: Request, body: ClaimIn | None = None):
     body = body or ClaimIn()
-    return await _reg(request).claim(stage, body.limit, body.kinds)
+    return await _reg(request).claim(stage, body.limit, body.kinds, body.requires)
 
 
 @app.post("/sources/{source_id}/stages/{stage}/done")
