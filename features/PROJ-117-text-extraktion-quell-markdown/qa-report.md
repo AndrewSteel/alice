@@ -1,7 +1,7 @@
 # QA-Bericht: PROJ-117 Text-Extraktion → Quell-Markdown (#6)
 
 **Spec:** [spec.md](spec.md) · **Design:** [design.md](design.md)
-**Getestet am:** 2026-11-22 · **Branch:** `factory/6`
+**Getestet am:** 2026-11-22, Nachtrag 2026-11-23 (Office-Gruppe aus dem Inhalt) · **Branch:** `factory/6`
 
 ## Ergebnis
 **Produktionsreif:** Ja
@@ -75,6 +75,7 @@ Geprüft auf drei Ebenen:
 
 - **B-1 aus Abnahme Runde 1 (High, behoben):** Jede Office-Umwandlung hinterließ Zombie-Prozesse (je DOCX 1× gpg, 1× gpgsm, 3× gpgconf), nach einer Zeitüberschreitung zusätzlich `soffice.bin`. Fix: `tini` als PID 1. Gegenprobe im gebauten Image ohne tini (Entrypoint `uvicorn`): Nach dem Selbsttest gab es 30× gpg, 30× gpgsm, 90× gpgconf und 1× soffice.bin als Zombies. Mit tini waren es 0 (Prüfung `tests/no_zombies.py` im Container-Rauchtest).
 - **B-2 aus Abnahme Runde 1 (High, schon in PROJ-115, behoben):** Das Register hinterließ git-Zombies aus der abgekoppelten Hintergrundwartung. Fix: `tini` als PID 1, git mit `gc.autoDetach=false` und `maintenance.autoDetach=false`. Der Container-Rauchtest des Registers prüft auf Zombies.
+- **Staging-Befund vom 2026-11-23 (High, behoben):** Eine Tabelle mit der Endung `.odt` endete in `failed_permanent`, weil die Gruppe nur aus der Endung kam (Writer-Filter für ein Calc-Dokument). Fix: Die Gruppe wird jetzt aus dem Inhalt bestimmt (ODF-`mimetype`, OOXML-Hauptteil, OLE-Hauptstrom). Unit-Tests: `test_content_group_markers`, `test_group_from_content_wins` (ods→`.odt`, xlsx→`.docx`, xls→`.doc`, pptx→`.xlsx`, Word→`.ppt`), `test_group_matching_extension_unchanged`, `test_precheck_unchanged_for_wrong_family`, im Worker `test_content_group_logged_with_source_id`. Im Container-Selbsttest mit echtem LibreOffice wurden echte, von LibreOffice erzeugte Dateien umbenannt: ODS als `.odt`, XLSX als `.docx` und XLS als `.doc` ergeben je `## Blatt Einnahmen` und `## Blatt Ausgaben` mit dem Formelwert. PPTX als `.xlsx`, PPT als `.doc` und ODP als `.ods` ergeben 3 Folien. DOC als `.xls` ergibt Text mit Tabelle. Alle 21 Varianten mit passender Endung sind weiter grün.
 
 ## Sicherheit
 - Keine Endnutzer-Schnittstelle, keine nginx-Route, nur `/health` und `/status` (keine Inhalte, keine Pfade). Keine Zugangsdaten nötig.
@@ -88,7 +89,7 @@ Geprüft auf drei Ebenen:
 - **OCR-Qualität echter Scans:** im Test erzeugte Bild-PDFs; Live-Test mit einem echten Scan.
 
 ## Automatisierte Tests
-- `scripts/test-services.sh alice-text-extraction`: 64 bestanden (inkl. 8 End-to-End-Tests mit echtem Register-Code)
+- `scripts/test-services.sh alice-text-extraction`: 73 bestanden (inkl. 8 End-to-End-Tests mit echtem Register-Code)
 - `scripts/test-services.sh alice-source-registry`: 83 bestanden (davon 6 neu für die Schnittstellen-Erweiterung)
 - `scripts/test-services.sh alice-file-detection`: 66 bestanden (davon 1 neu für AK-14)
-- `scripts/test-containers.sh alice-text-extraction alice-source-registry alice-file-detection`: bestanden (Rauchtest der Extraktion mit 21 Office-Varianten, Makro-Dokument, kaputtem DOCX, erzwungener Zeitüberschreitung und OCR; beide Dienste: PID 1 ist tini, keine Zombies)
+- `scripts/test-containers.sh alice-text-extraction alice-source-registry alice-file-detection`: bestanden (Rauchtest der Extraktion mit 21 Office-Varianten, 7 umbenannten Dateien mit abweichender Endung, Makro-Dokument, kaputtem DOCX, erzwungener Zeitüberschreitung und OCR; beide Dienste: PID 1 ist tini, keine Zombies)
