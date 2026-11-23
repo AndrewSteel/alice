@@ -71,6 +71,20 @@ async def test_permanent_error(settings, registry, extractor, nas):  # AK-21, AK
     assert str(nas) not in fail[0][2]
 
 
+async def test_content_group_logged_with_source_id(settings, registry, ocr, nas, caplog):
+    from .test_formats import fake_converter, make_ods_zip, make_xlsx
+
+    factory, calls = fake_converter({"xlsx": make_xlsx(nas / "conv.xlsx")})
+    path = make_ods_zip(nas / "share" / "terrasse.odt", "application/vnd.oasis.opendocument.spreadsheet")
+    registry.add("src000000007", [path])
+    await drain(worker(settings, registry, Extractor(settings, ocr=ocr, converter_factory=factory)))
+    assert registry.state["src000000007"] == "done" and calls[0][1] == "xlsx"
+    assert "## Blatt Umsätze" in registry.written["src000000007"]["content"]
+    assert ("Source src000000007: content is a sheet document although the extension is .odt; "
+            "extracting as sheet") in caplog.text
+    assert str(nas) not in caplog.text
+
+
 async def test_transient_error(settings, registry, nas):  # AK-23
     path = make_pdf(nas / "share" / "scan.pdf", [("scan",)])
     registry.add("src000000001", [path])

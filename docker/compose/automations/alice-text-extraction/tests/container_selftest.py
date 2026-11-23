@@ -173,6 +173,25 @@ def main():
               and "Ziele und Zeitplan" in md and "| Hardware | 5000 |" in md
               and "### Notizen\n\nAuf die Risiken eingehen" in md[md.index("## Folie 3"):], md)
 
+    # ---- group from the content, not the extension: a spreadsheet saved as .odt / .docx / .doc
+    #      and a presentation saved as .xlsx (Writer's export filter cannot write a Calc document)
+    import shutil
+
+    renamed = os.path.join(WORK, "renamed")
+    os.makedirs(renamed)
+    for src, name in ((sheets["ods"], "terrasse.odt"), (sheets["xlsx"], "tabelle.docx"), (sheets["xls"], "tabelle.doc")):
+        path = shutil.copy(src, os.path.join(renamed, name))
+        r = ex.extract(path)
+        md = r.markdown()
+        check(f"{name}: spreadsheet content wins over the extension",
+              [s.heading for s in r.sections] == ["Blatt Einnahmen", "Blatt Ausgaben"] and "| Summe | 350 |" in md, md)
+    for src, name in ((slides["pptx"], "vortrag.xlsx"), (slides["ppt"], "vortrag.doc"), (slides["odp"], "vortrag.ods")):
+        r = ex.extract(shutil.copy(src, os.path.join(renamed, name)))
+        check(f"{name}: presentation content wins over the extension",
+              [s.heading for s in r.sections] == ["Folie 1", "Folie 2", "Folie 3"], r.markdown())
+    md = ex.extract(shutil.copy(docs["doc"], os.path.join(renamed, "brief.xls"))).markdown()
+    check("brief.xls: text content wins over the extension", "| Kaltmiete | 800 € |" in md, md)
+
     # ---- macros are not executed (AK-12)
     md = ex.extract(macro_odt(os.path.join(WORK, "makro.odt"))).markdown()
     check("macro document: content read, macro not run",

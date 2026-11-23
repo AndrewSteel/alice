@@ -326,6 +326,122 @@ def test_office_precheck(tmp_path, extractor):  # AK-21, AK-22
         extractor.extract(write(tmp_path / "x.doc", b"not an ole file"))
 
 
+# ---------------------------------------------------------------- group from the content (not the extension)
+def make_ole(path, root_streams, storage=None):
+    """Minimal OLE compound file (512-byte sectors): the given empty streams below the root,
+    optionally one sub-storage (embedded object) with its own streams."""
+    import struct
+
+    free, eoc, fatsect, nostream = 0xFFFFFFFF, 0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFF
+
+    def entry(name, kind, right=nostream, child=nostream):
+        raw = name.encode("utf-16-le") + b"\0\0"
+        return (raw.ljust(64, b"\0") + struct.pack("<HBB", len(raw), kind, 1)
+                + struct.pack("<III", nostream, right, child) + b"\0" * 36 + struct.pack("<IQ", eoc, 0))
+
+    names = list(root_streams) + ([storage[0]] if storage else [])
+    entries = [entry("Root Entry", 5, child=1)]
+    sub_first = len(names) + 1
+    for i, name in enumerate(names, start=1):  # siblings as a chain of right links
+        right = i + 1 if i < len(names) else nostream
+        if storage and name == storage[0]:
+            entries.append(entry(name, 1, right, sub_first))
+        else:
+            entries.append(entry(name, 2, right))
+    for j, name in enumerate(storage[1] if storage else []):
+        last = j == len(storage[1]) - 1
+        entries.append(entry(name, 2, nostream if last else sub_first + j + 1))
+    dir_bytes = b"".join(entries)
+    dir_sectors = (len(dir_bytes) + 511) // 512
+    dir_bytes = dir_bytes.ljust(dir_sectors * 512, b"\0")
+    fat = [fatsect] + [i + 1 for i in range(1, dir_sectors)] + [eoc]  # directory chain from sector 1
+    fat = struct.pack("<128I", *(fat + [free] * (128 - len(fat))))
+    header = (office.OLE_MAGIC + b"\0" * 16 + struct.pack("<HHHHH", 0x3E, 3, 0xFFFE, 9, 6) + b"\0" * 10
+              + struct.pack("<IIII", 1, 1, 0, 4096) + struct.pack("<IIII", eoc, 0, eoc, 0)
+              + struct.pack("<109I", 0, *([free] * 108)))
+    assert len(header) == 512
+    write(path, header + fat + dir_bytes)
+    return str(path)
+
+
+def make_ods_zip(path, mimetype):
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", mimetype)
+        z.writestr("content.xml", "<office:document-content/>")
+    return str(path)
+
+
+def test_content_group_markers(tmp_path):
+    ods = "application/vnd.oasis.opendocument.spreadsheet"
+    assert office.content_group(make_ods_zip(tmp_path / "a.odt", ods)) == "sheet"
+    assert office.content_group(make_ods_zip(tmp_path / "b.ods", ods + "-template")) == "sheet"
+    assert office.content_group(make_ods_zip(tmp_path / "c.odt", "application/vnd.oasis.opendocument.text")) == "text"
+    assert office.content_group(make_ods_zip(tmp_path / "d.odp",
+                                             "application/vnd.oasis.opendocument.presentation")) == "slide"
+    assert office.content_group(make_xlsx(tmp_path / "e.docx")) == "sheet"
+    assert office.content_group(make_pptx(tmp_path / "f.docx")) == "slide"
+    assert office.content_group(make_ole(tmp_path / "g.doc", ["Workbook", "SummaryInformation"])) == "sheet"
+    assert office.content_group(make_ole(tmp_path / "h.xls", ["Book"])) == "sheet"
+    assert office.content_group(make_ole(tmp_path / "i.doc", ["1Table", "WordDocument"])) == "text"
+    assert office.content_group(make_ole(tmp_path / "j.ppt", ["Current User", "PowerPoint Document"])) == "slide"
+    # a Word document with an embedded spreadsheet: only streams below the root count
+    assert office.content_group(make_ole(tmp_path / "k.doc", ["WordDocument", "1Table"],
+                                         ("ObjectPool", ["Workbook"]))) == "text"
+    # no readable marker: None, the extension decides
+    assert office.content_group(make_docx_zip(tmp_path / "l.docx")) is None
+    assert office.content_group(write(tmp_path / "m.doc", office.OLE_MAGIC + b"\x00" * 100)) is None
+    assert office.content_group(make_ole(tmp_path / "n.doc", ["Other"])) is None
+    assert office.content_group(write(tmp_path / "o.docx", b"PK\x03\x04garbage")) is None
+    assert office.content_group(write(tmp_path / "p.rtf", b"{\\rtf1 x}")) is None
+
+
+@pytest.mark.parametrize("name,make,target", [
+    ("terrasse.odt", lambda p: make_ods_zip(p, "application/vnd.oasis.opendocument.spreadsheet"), "xlsx"),
+    ("tabelle.docx", make_xlsx, "xlsx"),
+    ("tabelle.doc", lambda p: make_ole(p, ["Workbook"]), "xlsx"),
+    ("vortrag.xlsx", make_pptx, "pptx"),
+    ("brief.ppt", lambda p: make_ole(p, ["WordDocument"]), "html"),
+])
+def test_group_from_content_wins(tmp_path, settings, ocr, caplog, name, make, target):
+    files = {"xlsx": make_xlsx(tmp_path / "conv.xlsx"), "pptx": make_pptx(tmp_path / "conv.pptx"),
+             "html": write(tmp_path / "out.html", HTML)}
+    factory, calls = fake_converter(files)
+    src = make(tmp_path / "nas" / name)
+    token = office.source_id.set("src-42")
+    try:
+        r = Extractor(settings, ocr=ocr, converter_factory=factory).extract(src)
+    finally:
+        office.source_id.reset(token)
+    assert [c[1] for c in calls] == [target]
+    if target == "xlsx":
+        assert [s.heading for s in r.sections] == ["Blatt Umsätze", "Blatt Geheim"]
+    warning = next(rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING")
+    ext = name.rsplit(".", 1)[1]
+    group = {"xlsx": "sheet", "pptx": "slide", "html": "text"}[target]
+    assert warning == (f"Source src-42: content is a {group} document although the extension is .{ext}; "
+                       f"extracting as {group}")
+    assert str(tmp_path) not in caplog.text  # no NAS path in the log
+
+
+def test_group_matching_extension_unchanged(tmp_path, settings, ocr, caplog):
+    files = {"xlsx": make_xlsx(tmp_path / "conv.xlsx"), "pptx": make_pptx(tmp_path / "conv.pptx"),
+             "html": write(tmp_path / "out.html", HTML)}
+    factory, calls = fake_converter(files)
+    for name, make in (("a.ods", lambda p: make_ods_zip(p, "application/vnd.oasis.opendocument.spreadsheet")),
+                       ("b.xlsx", make_xlsx), ("c.pptx", make_pptx), ("d.doc", lambda p: make_ole(p, ["WordDocument"])),
+                       ("e.xls", lambda p: make_ole(p, ["Workbook"])), ("f.pps", lambda p: make_ole(p, ["PowerPoint Document"])),
+                       ("g.ott", lambda p: make_ods_zip(p, "application/vnd.oasis.opendocument.text-template"))):
+        Extractor(settings, ocr=ocr, converter_factory=factory).extract(make(tmp_path / name))
+    assert [c[1] for c in calls] == ["xlsx", "xlsx", "pptx", "html", "xlsx", "pptx", "html"]
+    assert not [rec for rec in caplog.records if rec.levelname == "WARNING"]
+
+
+def test_precheck_unchanged_for_wrong_family(tmp_path, extractor):
+    # a zip file named .doc is still rejected by the precheck, content detection does not bypass it
+    with pytest.raises(PermanentError, match="keine gültige .doc-Datei"):
+        extractor.extract(make_xlsx(tmp_path / "x.doc"))
+
+
 # ---------------------------------------------------------------- LibreOffice process handling
 @pytest.fixture
 def fake_soffice(tmp_path, monkeypatch):

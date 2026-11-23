@@ -3,14 +3,17 @@ format (text documents → HTML, spreadsheets → xlsx, presentations → pptx);
 that into Markdown. Macros are never executed."""
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import logging
 import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from html.parser import HTMLParser
 from typing import Callable
@@ -28,6 +31,23 @@ OLE_EXTS = {"doc", "xls", "ppt", "pps"}
 OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 # the encrypted OOXML package is an OLE file with this stream name (UTF-16)
 ENCRYPTED_PACKAGE = "EncryptedPackage".encode("utf-16-le")
+
+# source id of the current extraction, for log messages (set by the worker; no NAS path in the log)
+source_id: contextvars.ContextVar[str] = contextvars.ContextVar("source_id", default="?")
+
+# content markers for the group (text / sheet / slide): they win over the extension
+ODF_MIMETYPES = {
+    "application/vnd.oasis.opendocument.text": "text",
+    "application/vnd.oasis.opendocument.text-template": "text",
+    "application/vnd.oasis.opendocument.spreadsheet": "sheet",
+    "application/vnd.oasis.opendocument.spreadsheet-template": "sheet",
+    "application/vnd.oasis.opendocument.presentation": "slide",
+    "application/vnd.oasis.opendocument.presentation-template": "slide",
+}
+OOXML_MAIN_PARTS = {"/word/document.xml": "text", "/xl/workbook.xml": "sheet", "/ppt/presentation.xml": "slide"}
+# checked in this order; "Book" is the stream of Excel 5/95 files
+OLE_MAIN_STREAMS = {"WordDocument": "text", "Workbook": "sheet", "Book": "sheet", "PowerPoint Document": "slide"}
+END_OF_CHAIN = 0xFFFFFFFA  # sector numbers from here on are markers (end of chain, free, FAT, DIFAT)
 
 TARGETS = {
     "html": 'html:HTML (StarWriter):UTF8',
@@ -57,6 +77,96 @@ def group(ext: str) -> str | None:
         return "sheet"
     if ext in SLIDE_EXTS:
         return "slide"
+    return None
+
+
+# ---------------------------------------------------------------- group from the content
+def _zip_group(z: zipfile.ZipFile) -> str | None:
+    names = set(z.namelist())
+    if "mimetype" in names:  # OpenDocument
+        return ODF_MIMETYPES.get(z.read("mimetype")[:200].decode("ascii", "replace").strip())
+    if "[Content_Types].xml" in names:  # OOXML: the override of the main part
+        for el in ET.fromstring(z.read("[Content_Types].xml")):
+            if el.tag.rsplit("}", 1)[-1] == "Override":
+                kind = OOXML_MAIN_PARTS.get(el.get("PartName", "").lower())
+                if kind:
+                    return kind
+    return None
+
+
+def _ole_group(path: str) -> str | None:
+    """Main stream among the direct children of the root storage of an OLE compound file
+    (streams of embedded objects live in sub-storages and do not count)."""
+    with open(path, "rb") as f:
+        header = f.read(512)
+        ssize = 1 << struct.unpack_from("<H", header, 30)[0]
+        if ssize not in (512, 4096):
+            return None
+        size = os.fstat(f.fileno()).st_size
+        per = ssize // 4
+
+        def sector(n: int) -> bytes:
+            if n >= END_OF_CHAIN or (n + 1) * ssize >= size:
+                raise ValueError("sector out of range")
+            f.seek((n + 1) * ssize)
+            return f.read(ssize).ljust(ssize, b"\0")
+
+        difat = list(struct.unpack_from("<109I", header, 76))
+        nxt = struct.unpack_from("<I", header, 68)[0]
+        for _ in range(10000):  # DIFAT chain of large files
+            if nxt >= END_OF_CHAIN:
+                break
+            data = struct.unpack(f"<{per}I", sector(nxt))
+            difat += data[:-1]
+            nxt = data[-1]
+        fat_sectors = [x for x in difat if x < END_OF_CHAIN]
+        fat: dict[int, tuple] = {}
+
+        def next_sector(n: int) -> int:
+            i = n // per
+            if i not in fat:
+                fat[i] = struct.unpack(f"<{per}I", sector(fat_sectors[i]))
+            return fat[i][n % per]
+
+        entries = []  # (name, type, left, right, child)
+        n = struct.unpack_from("<I", header, 48)[0]
+        for _ in range(10000):
+            if n >= END_OF_CHAIN:
+                break
+            data = sector(n)
+            for off in range(0, ssize, 128):
+                length = min(struct.unpack_from("<H", data, off + 64)[0], 64)
+                name = data[off:off + max(0, length - 2)].decode("utf-16-le", "replace")
+                entries.append((name, data[off + 66], *struct.unpack_from("<III", data, off + 68)))
+            n = next_sector(n)
+    if not entries or entries[0][1] != 5:  # entry 0 is the root storage
+        return None
+    found, stack, visited = set(), [entries[0][4]], set()
+    while stack:  # the children of a storage form a tree over the left/right links
+        i = stack.pop()
+        if i >= len(entries) or i in visited:
+            continue
+        visited.add(i)
+        name, kind, left, right, _ = entries[i]
+        if kind == 2:
+            found.add(name)
+        stack += [left, right]
+    return next((g for name, g in OLE_MAIN_STREAMS.items() if name in found), None)
+
+
+def content_group(path: str) -> str | None:
+    """Text / sheet / slide from the content (ODF mimetype, OOXML main part, OLE main stream);
+    None if no marker is readable (then the extension decides)."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+        if head == OLE_MAGIC:
+            return _ole_group(path)
+        if head.startswith(b"PK"):
+            with zipfile.ZipFile(path) as z:
+                return _zip_group(z)
+    except Exception:  # any unreadable marker: keep the group of the extension
+        return None
     return None
 
 
@@ -346,6 +456,12 @@ def slides_to_result(pptx_path: str) -> Result:
 def extract_office(path: str, ext: str, *, convert: Converter, timeout: float) -> Result:
     precheck(path, ext)
     kind = group(ext)
+    found = content_group(path)
+    if found and found != kind:
+        # e.g. a spreadsheet saved as .odt: the Writer export filter cannot write it
+        logger.warning("Source %s: content is a %s document although the extension is .%s; extracting as %s",
+                       source_id.get(), found, ext, found)
+        kind = found
     if kind == "text":
         html = _read_html(convert(path, "html", timeout))
         return Result(sections=[Section(None, html_to_markdown(strip_control(html)))])

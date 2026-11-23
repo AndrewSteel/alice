@@ -15,6 +15,7 @@ import time
 from .config import Settings
 from .errors import PermanentError, TransientError
 from .extractor import Extractor
+from .formats import office
 from .registry import RegistryClient, RegistryConflict, RegistryError, RegistryUnavailable
 from .text import Result, detect_language
 
@@ -205,6 +206,7 @@ class Worker:
         def progress(text: str) -> None:
             entry["progress"] = text
 
+        office.source_id.set(sid)  # for log messages of the readers (copied into the worker thread)
         try:
             result: Result = await asyncio.to_thread(self.extractor.extract, path, progress)
         except PermanentError as exc:
