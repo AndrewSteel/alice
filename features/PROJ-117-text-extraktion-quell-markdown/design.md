@@ -140,3 +140,21 @@ Deploy-Schritte für den Menschen:
   - Altformate (OLE): Ein kleiner Leser für das Verzeichnis der Compound-Datei (FAT- und DIFAT-Kette) sucht `WordDocument`, `Workbook`/`Book` bzw. `PowerPoint Document` nur unter den direkten Einträgen der Wurzel. So zählen eingebettete Objekte (z. B. eine Excel-Tabelle in `ObjectPool` eines Word-Dokuments) nicht.
 - Weicht die erkannte Gruppe von der Endung ab, gilt der Inhalt, und es gibt eine Warnung im Log mit Quell-ID, Endung und erkannter Gruppe, aber ohne NAS-Pfad. Die Quell-ID kommt über eine `ContextVar`, die der Worker vor dem Wechsel in den Arbeits-Thread setzt.
 - Ist kein Merkmal lesbar (fehlt, kaputt, unbekannt), bleibt die Gruppe aus der Endung. `precheck()` ist unverändert und läuft vorher. Eine ZIP-Datei mit Endung `.doc` wird also weiterhin als „keine gültige .doc-Datei“ abgelehnt.
+
+## Deployment
+
+**Datum:** 2026-11-23, von `dev` (Phase 4, PR #8).
+
+**Schritte:**
+1. Staging (`scripts/stage.sh alice-text-extraction 8`) vor dem Merge, mit dem Register aus PR #8: Das Produktions-Register wurde dafür vorab mit dem PR-Stand neu gebaut (die Schnittstellen-Erweiterungen sind abwärtskompatibel). Workaround wie bei PROJ-116: `extends: ../nas-volumes.yml` findet im Staging-Verzeichnis nichts; Link `~/alice-staging/nas-volumes.yml` → `/srv/compose/automations/nas-volumes.yml` (bleibt für künftige Stagings liegen).
+2. `.env` für `alice-text-extraction` (durch den Nutzer). Stolperstein: `.env`-Dateien liegen lokal unter `docker/compose/…` und werden mitsynchronisiert (`sync-compose.sh` mit `--delete`). Eine nur auf dem Server angelegte `.env` löscht der nächste Sync; die `.env` muss lokal angelegt werden.
+3. Compose-Sync, Rebuild `alice-source-registry` und `alice-file-detection`, Start `alice-text-extraction`; alle drei `healthy`. Staging-Container entfernt.
+4. Hinweis: `make up s=…` ignoriert `s=` und startet alle Stacks (`up` hat keinen Stack-Filter). Für einen einzelnen neuen Dienst `make rebuild s=automations/<dienst>` verwenden.
+
+**Live-Test (AK-38, im Staging auf Produktionsdaten):**
+- Über 530 Dokumente ohne Fehlversuch: Text-PDFs mit `## Seite <n>` und `extraction.method: text`, gescannte Dokumente mit `ocr` und gemischte mit `mixed`; je Quelle ein Commit `extract: <id> <title>`; `language: de` gesetzt.
+- AK-35 live: Kompletter NAS-Ausfall (Quelle der Wahrheit liegt auf dem NAS, Register `503 repo_unavailable` bzw. ReadTimeout) → Arbeit ohne Fehlversuch zurückgegeben, Pause, danach selbstständig weiter; kein halber Commit.
+- AK-25 live: Original einer Quelle fehlt bei erreichbarer Freigabe → zurückgegeben ohne Fehlversuch.
+- AK-27 live: „erneut versuchen“ für `terrassenberechnung.odt` (Tabelle mit Endung `.odt`) nach dem Änderungswunsch → `done` mit `## Blatt Tabelle1`.
+- AK-24 (eine einzelne Freigabe fehlt, Quelle der Wahrheit erreichbar) nicht live geprüft, nur im Factory-Test mit Testordner.
+- Nach dem Deploy war keine `extract`-Arbeit mehr fällig (das Staging hatte den Bestand abgearbeitet). Neue Office-Endungen (pptx, rtf, csv …) kommen mit den nächsten Läufen der Datei-Erkennung.
