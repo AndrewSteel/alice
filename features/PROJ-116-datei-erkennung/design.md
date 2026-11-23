@@ -151,4 +151,10 @@ Deploy-Schritte für den Menschen:
 - Tagesscans starten danach automatisch alle 5 Minuten
 - Nicht registrierte Endungen u. a. `dng` (545), `mpg` (55), `gif` (15), `bmp` (5) → bei Bedarf über `DETECT_EXT_IMAGE`/`DETECT_EXT_VIDEO` aufnehmen; `pptx`/`odp` kommen mit PROJ-117; CAD-, Archiv-, Log- und Kamera-Begleitdateien bleiben bewusst draußen.
 
-**Noch offen:** Testdatei in einem überwachten Ordner ablegen (≤ 10 min im Register), verschieben (gleiche `id`) und löschen (nach dem nächsten Nachtlauf unter `deleted/`). Eine Testdatei im nicht überwachten Ordner `Documents/Notizen` wurde wie erwartet nicht erkannt.
+**Live-Test mit einer Testdatei (`.md`):**
+- Abgelegt im nicht überwachten Ordner `Documents/Notizen`: wie erwartet nicht erkannt.
+- In den überwachten Ordner `Documents/Haus` kopiert: beim nächsten stabilen Tagesscan registriert (Commit „detect: …“), Quell-Markdown unter `documents/2026/11/<id>-<slug>.md`.
+- Nach `Documents/Haus/Test` verschoben: Der Tagesscan meldet den neuen Fundort mit gleicher `id` (Commit „locations: …“). Der Nachtlauf vom 2026-11-23 (12 s, 93.032 Dateien, nichts gehasht, 0 Probleme) entfernt den alten Fundort (`removed_locations: 1`, Commit „locations: …“). Ort und Name der Markdown bleiben gleich.
+- Beobachtung: Der Link „Original“ im Text der Quell-Markdown zeigt weiter auf den ersten Fundort und ist nach dem Verschieben tot. Das deckt PROJ-115 AK-6 (beim Verschieben ändert sich nur `locations`), ist aber für Leser irreführend. Kandidat für `/refine` (Link aus `locations` erzeugen oder beim Schreiben des Inhalts durch PROJ-117 erneuern).
+
+**Noch offen:** Testdatei löschen; nach dem nächsten Nachtlauf ist die Quelle `deleted` und ihre Markdown liegt unter `deleted/`.
