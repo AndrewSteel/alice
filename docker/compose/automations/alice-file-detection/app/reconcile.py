@@ -195,8 +195,10 @@ async def rehash(det: Detector, *, full: bool = False, cycle_days: float = 30, m
                  "JOIN alice.sources s ON s.id = f.source_id WHERE f.folder = ANY($1::text[]) "
                  "AND (f.rehashed_at IS NULL OR f.rehashed_at < $2) ORDER BY f.rehashed_at NULLS FIRST, f.path")
         rows = await con.fetch(query, ok, started)
-        if not rows and not full and now - started >= timedelta(days=cycle_days):
-            started = await _new_cycle(con, now)  # cycle done and due again: next one
+        if not full and now - started >= timedelta(days=cycle_days):
+            # cycle due again: next one. Files the old cycle could not hash (unreadable, vanished: AK-43)
+            # do not hold it open; they have the oldest rehashed_at and come first in the new one.
+            started = await _new_cycle(con, now)
             rows = await con.fetch(query, ok, started)
         total_bytes = await con.fetchval("SELECT COALESCE(sum(size), 0) FROM alice.detect_files "
                                          "WHERE folder = ANY($1::text[])", ok)

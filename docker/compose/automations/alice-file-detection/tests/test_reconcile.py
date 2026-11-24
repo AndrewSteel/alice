@@ -142,6 +142,30 @@ async def test_unreadable_file_reported_and_retried(det, registry, add_folder, n
     assert out["hashed"] == 1 and out["cycle"]["done"] == 1
 
 
+async def test_unreadable_file_does_not_hold_cycle_open(det, registry, add_folder, nas, monkeypatch):  # AK-36, AK-43
+    folder = await add_folder(nas / "share" / "u")
+    bad = write(f"{folder}/a-locked.pdf", "LOCKED")
+    for i in range(4):
+        write(f"{folder}/{i}.pdf", f"ok-{i}" * 10)
+    await night(det)
+    real = reconcile.fsscan.sha256_file
+
+    def denied(path):
+        if path == bad:
+            raise PermissionError(13, "Permission denied")
+        return real(path)
+
+    monkeypatch.setattr(reconcile.fsscan, "sha256_file", denied)
+    out = await reconcile.rehash(det, cycle_days=3, max_bytes=10**9)
+    assert out["cycle"]["done"] == 4 and out["cycle"]["total"] == 5
+    async with det.pool.acquire() as con:  # cycle overdue, one file never hashable
+        await con.execute("UPDATE alice.detect_hash_cycle SET started_at = NOW() - interval '4 days'")
+    out = await reconcile.rehash(det, cycle_days=3)
+    # a new cycle started anyway; the unreadable file is reported again, the others are hashed again
+    assert [u["path"] for u in out["unreadable"]] == [bad]
+    assert out["hashed"] > 0 and out["cycle"]["done"] == out["hashed"]
+
+
 async def test_large_file_hashed_whole(det, registry, add_folder, nas):  # EC-10
     folder = await add_folder(nas / "share" / "big")
     write(f"{folder}/big.pdf", b"x" * (3 * 1024 * 1024))
