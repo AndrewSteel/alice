@@ -38,7 +38,7 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | P0 | Text-Extraktion → Quell-Markdown — Text mit Seitenmarken ohne Kürzung, OCR je Seite, alle Office-Formate (PROJ-117) | 4.1 | Planned |
 | P0 | Klassifizierung + Feldextraktion ins Frontmatter, deutsche Zusammenfassung (PROJ-118) | 4.1 | Planned |
 | P0 | Strukturierte Dokumentdaten in PostgreSQL, abgeleitet aus der Quell-Markdown (PROJ-119) | 4.1 | Planned |
-| P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Roadmap |
+| P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Planned |
 | P0 | Spike Agent-Framework — DeepSeek Harness und Alternativen, Go/No-Go, DMS-Testkatalog (PROJ-133) | 4.4 | Roadmap |
 | P1 | ETL-Status-Ansicht (Admin, WebApp) (PROJ-122) | 4.1 | Roadmap |
 | P1 | Mail-Import in den ETL — `.eml` ohne Anhänge + Links, Mail-Markdown, Kategorie (PROJ-123) | 4.2 | Roadmap |
