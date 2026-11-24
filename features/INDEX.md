@@ -41,7 +41,7 @@ Status: `Roadmap` → `Planned` (Spec fertig) → `Architected` → `In Progress
 | PROJ-130 | 4.3 | Wiki-Lint nächtlich — Widersprüche, verwaiste Seiten, fehlende/kaputte Links finden und beheben | Roadmap | |
 | PROJ-131 | 4.3 | Wiki-Ansicht in der WebApp — nur lesen, Navigation über Links, Suche, Sprung zur Quell-Markdown bzw. zum Original; für `haushalt`/`admin` | Roadmap | |
 | PROJ-132 | 4.3 | Wiki-Tool für den Agenten — Wiki-Seiten lesen, suchen und Links folgen, zusätzlich zum RAG | Roadmap | |
-| PROJ-133 | 4.4 | Spike Agent-Framework — DeepSeek Harness (Favorit) vs. Alternativen (z. B. Pydantic AI, LangGraph, OpenAI Agents SDK, smolagents), Prototyp, DMS-Testkatalog (~30 Fragen) mit Mess-Skript, Go/No-Go; Ausgangs- und Vergleichsmessung gegen das produktive LLM macht der Mensch | Roadmap | |
+| PROJ-133 | 4.4 | Spike Agent-Framework — DeepSeek Harness (Favorit) vs. Alternativen (z. B. Pydantic AI, LangGraph, OpenAI Agents SDK, smolagents), Prototyp, DMS-Testkatalog (~30 Fragen) mit Mess-Skript, Go/No-Go; Ausgangs- und Vergleichsmessung gegen das produktive LLM macht der Mensch; Spec-Entwurf, startet erst nach PROJ-128/PROJ-132 (Prototypen mit den produktiven Tools) | Roadmap | features/PROJ-133-spike-agent-framework/ |
 | PROJ-134 | 4.4 | Agent-Kern auf neuem Framework — ersetzt die Tool-Schleife in `alice-chat-stream`: mehrschrittige Planung, SSE, Sessions, Gedächtnis; HA-Schnellpfad, Kalender, Listen, Timer und Memory angebunden; HA-Tool ohne n8n-Webhook | Roadmap | |
 | PROJ-135 | 4.4 | Agent-Schritte im Chat sichtbar — Plan, Tool-Aufrufe und Kennzeichnung bei Cloud-Nutzung | Roadmap | |
 | PROJ-136 | 4.4 | Cloud-Recherche — Recherche-Sub-Agent mit Websuche über austauschbaren Cloud-Provider, Start mit `claude -p` nur für Admin-Anfragen; Datenschutzgrenze mit Freigabe pro Anfrage, Protokoll aller Cloud-Aufrufe; per Sprache Kurzantwort mit Hinweis auf die WebApp; ersetzt PROJ-90 | Roadmap | |
@@ -54,8 +54,8 @@ Status: `Roadmap` → `Planned` (Spec fertig) → `Architected` → `In Progress
 
 ## Bau-Reihenfolge Phase 4
 
-- **P0:** PROJ-121 → PROJ-115 → PROJ-116 → PROJ-117 → PROJ-118 → PROJ-119 → PROJ-120 · parallel: PROJ-133 (einziges Parallel-Feature, Factory `maxParallel` ≤ 2)
-- **P1:** PROJ-122 (braucht PROJ-120) · PROJ-123 → PROJ-124 (braucht PROJ-117) · PROJ-125, PROJ-126 (brauchen PROJ-116) · PROJ-127 → PROJ-128 (brauchen PROJ-119) · PROJ-129 → PROJ-130, PROJ-131, PROJ-132 · PROJ-134 (braucht PROJ-133, PROJ-128) → PROJ-135, PROJ-136
+- **P0:** PROJ-121 → PROJ-115 → PROJ-116 → PROJ-117 → PROJ-118 → PROJ-119 → PROJ-120
+- **P1:** PROJ-122 (braucht PROJ-120) · PROJ-123 → PROJ-124 (braucht PROJ-117) · PROJ-125, PROJ-126 (brauchen PROJ-116) · PROJ-127 → PROJ-128 (brauchen PROJ-119) · PROJ-129 → PROJ-130, PROJ-131, PROJ-132 · PROJ-133 (braucht PROJ-128, PROJ-132) → PROJ-134 (braucht PROJ-133, PROJ-128) → PROJ-135, PROJ-136
 - **P2:** PROJ-137 (braucht PROJ-136) · PROJ-138, PROJ-139, PROJ-140, PROJ-141 · PROJ-142 (braucht alle übrigen Phase-4-Features)
 
 Phase-3-Einträge oben (PROJ-81 bis PROJ-114) sind für Phase 4 zurückgestellt (`docs/PRD.md`, Non-Goals).

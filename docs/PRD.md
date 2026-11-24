@@ -39,7 +39,6 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | P0 | Klassifizierung + Feldextraktion ins Frontmatter, deutsche Zusammenfassung (PROJ-118) | 4.1 | Approved |
 | P0 | Strukturierte Dokumentdaten in PostgreSQL, abgeleitet aus der Quell-Markdown (PROJ-119) | 4.1 | Deployed |
 | P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Planned |
-| P0 | Spike Agent-Framework — DeepSeek Harness und Alternativen, Go/No-Go, DMS-Testkatalog (PROJ-133) | 4.4 | Roadmap |
 | P1 | ETL-Status-Ansicht (Admin, WebApp) (PROJ-122) | 4.1 | Roadmap |
 | P1 | Mail-Import in den ETL — `.eml` ohne Anhänge + Links, Mail-Markdown, Kategorie (PROJ-123) | 4.2 | Roadmap |
 | P1 | Mail-Anhänge als Quelldokumente (PROJ-124) | 4.2 | Roadmap |
@@ -51,6 +50,7 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | P1 | Wiki-Lint nächtlich (PROJ-130) | 4.3 | Roadmap |
 | P1 | Wiki-Ansicht in der WebApp (PROJ-131) | 4.3 | Roadmap |
 | P1 | Wiki-Tool für den Agenten (PROJ-132) | 4.3 | Roadmap |
+| P1 | Spike Agent-Framework — DeepSeek Harness und Alternativen, Go/No-Go, DMS-Testkatalog (PROJ-133) | 4.4 | Roadmap |
 | P1 | Agent-Kern auf neuem Framework — ersetzt die Tool-Schleife in `alice-chat-stream` (PROJ-134) | 4.4 | Roadmap |
 | P1 | Agent-Schritte im Chat sichtbar (PROJ-135) | 4.4 | Roadmap |
 | P1 | Cloud-Recherche — Recherche-Sub-Agent, austauschbarer Provider, Start mit `claude -p` (PROJ-136) | 4.4 | Roadmap |
@@ -94,7 +94,7 @@ Unterphasen: **4.1** ETL-Kern · **4.2** Mail und Bilder · **4.3** RAG und Wiki
 - **Hardware:** Ryzen 9 + RTX 3090 (`llama-3090`, ein Slot, teilt VRAM mit den Weaviate-Vektorisierern) + TITAN X (Speech). Chat und ETL konkurrieren um den Slot → `alice-llm-gateway` mit Prioritäten bleibt; Neuaufbau und Wiki-Pflege laufen als Hintergrundlast.
 - **Neustart:** keine Migration der alten Weaviate-/Redis-Bestände nötig (Ausnahme: Übernahme der Bildbeschreibungen). Das alte System läuft parallel, bis der Neuaufbau steht; Abschaltung in PROJ-142.
 - **Stack:** Python/FastAPI-Services, PostgreSQL, Redis, Weaviate, MQTT, Next.js (statischer Export), nginx bleiben. Neu: Git im Ordner der Quelle der Wahrheit; Claude Code CLI als Cloud-Zugang; ggf. Node/TypeScript-Runtime, falls der Spike das DeepSeek Harness wählt. n8n entfällt am Ende von 4.5. Keine neue Queue-/Event-Infrastruktur. Details: `docs/stack.md`.
-- **Software Factory:** testet ohne GPU und ohne Produktivsysteme — lokales LLM, Cloud-LLM (`claude`-CLI und API) und Vision-Modell werden gemockt. Messungen gegen das produktive LLM (Ausgangswert und Vergleich im Spike PROJ-133, DMS-Testkatalog) führt der Mensch aus. Factory-Parallelität: höchstens zwei Läufe; nur PROJ-133 läuft parallel zur ETL-Kette.
+- **Software Factory:** testet ohne GPU und ohne Produktivsysteme — lokales LLM, Cloud-LLM (`claude`-CLI und API) und Vision-Modell werden gemockt. Messungen gegen das produktive LLM (Ausgangswert und Vergleich im Spike PROJ-133, DMS-Testkatalog) führt der Mensch aus. Factory-Parallelität: höchstens zwei Läufe. PROJ-133 startet erst nach PROJ-128 und PROJ-132 (Prototypen mit den produktiven Tools, Entscheidung 2026-11-24).
 - **Zugang:** nur über VPN.
 - **Sprache:** primär Deutsch; LLM-Ausgaben in der Nutzersprache; Docs Deutsch, Code/Commits Englisch.
 - **Team:** Solo-Projekt, Hobbyzeit (3–4 h/Tag).
