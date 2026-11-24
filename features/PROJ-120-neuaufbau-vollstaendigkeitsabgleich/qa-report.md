@@ -1,7 +1,7 @@
 # QA-Bericht: PROJ-120 Neuaufbau + Vollständigkeitsabgleich (#12)
 
 **Spec:** [spec.md](spec.md) · **Design:** [design.md](design.md)
-**Getestet am:** 2026-11-24 · **Branch:** `factory/12`
+**Getestet am:** 2026-11-24 (Nachtest nach Abnahme Runde 1) · **Branch:** `factory/12`
 
 ## Ergebnis
 **Produktionsreif:** Ja (mit Live-Tests AK-47–49 nach dem Deploy)
@@ -11,7 +11,7 @@
 ## Akzeptanzkriterien
 | AK | Ergebnis | Nachweis |
 |---|---|---|
-| AK-1 Neuaufbau ab `classify` | ✅ | `alice-etl-rebuild/tests/test_rebuild.py::test_rebuild_from_classify`; manuell im Container-Verbund (12 Quellen, `abgeschlossen`) |
+| AK-1 Neuaufbau ab `classify` | ✅ | `alice-etl-rebuild/tests/test_rebuild.py::test_rebuild_from_classify`, `test_failed_before_start_stage_does_not_block` (B-1); manuell im Container-Verbund (12 Quellen, `abgeschlossen`) |
 | AK-2 Art-Filter | ✅ | `test_kind_filter` |
 | AK-3 neue Stufe gehört dazu (sobald bedient) | ✅ | `test_new_served_stage_joins_scope` (Option A der Rückfrage) |
 | AK-4 `failed_permanent` → `pending`, Zähler 0 | ✅ | `test_failed_permanent_restarts_at_zero`, Register `test_release_flags_and_resets_attempts` |
@@ -25,7 +25,7 @@
 | AK-12 LLM als Hintergrundlast | ✅ | statisch: `alice-document-classify` ruft das Gateway mit eigenem Hintergrund-Schlüssel (PROJ-118, AK-40 dort getestet); der Neuaufbau ändert daran nichts |
 | AK-13 Pausieren | ✅ | `test_pause_resume`; manuell (freigegeben 8 vor/nach der Pause) |
 | AK-14 Fortsetzen ohne Doppelverarbeitung | ✅ | `test_pause_resume` |
-| AK-15 Abbrechen ohne Zurückrollen | ✅ | `test_cancel` (10 von 50 freigegeben, 40 unverändert, kein Abgleich); manuell |
+| AK-15 Abbrechen ohne Zurückrollen | ✅ | `test_cancel` (10 von 50 freigegeben, 40 unverändert, kein Abgleich), `test_failed_before_start_stage_does_not_block` (abgebrochener Lauf mit blockierter Quelle endet); manuell |
 | AK-16 Neustart (laufend/pausiert) | ✅ | `test_restart[False/True]` |
 | AK-17 Abgleich „nach Neuaufbau“ | ✅ | `test_reconcile.py::test_after_rebuild`; manuell (Ergebnis 1 `after_rebuild` an Lauf 1) |
 | AK-18 Fortschrittsfelder | ✅ | `test_progress_fields_and_errors` (100 Quellen, 3 ausgenommen, Summe je Stufe = 97) |
@@ -37,7 +37,7 @@
 | AK-24 Datei fehlt → nur melden | ✅ | dieselben Tests |
 | AK-25 gleiche Größe/Zeit, anderer Inhalt | ✅ | `test_rehash_changed_content`, Erkennung `test_same_size_and_mtime_changed_content` |
 | AK-26 Markdown fehlt (Historie / neu anlegen) | ✅ | Register `test_missing_markdown_restored_from_history`, `test_missing_markdown_without_history_recreated`; E2E `test_level2_and_events` |
-| AK-27 Markdown ohne Registereintrag / falsches `kind` | ✅ | Register `test_orphan_and_kind_mismatch_reported`, E2E `test_level2_orphan_reported` |
+| AK-27 Markdown ohne Registereintrag / falsches `kind` | ✅ | Register `test_orphan_and_kind_mismatch_reported`, `test_kind_changed_by_hand_reported_after_lock` (B-3), E2E `test_level2_orphan_reported` |
 | AK-28 falscher Ort, Git-Umbenennung | ✅ | Register `test_wrong_place_moved_with_history` (`git log --follow`) |
 | AK-29 Ebene 3 ohne Quellen eines aktiven Laufs | ✅ | `test_level3_pending_too_long` |
 | AK-30 `database` done ohne Zeile → `pending` | ✅ | `test_level4` |
@@ -46,7 +46,7 @@
 | AK-33 Sicherung 5 % | ✅ | `test_mass_repair_guard` (100 Quellen, 6 fehlende Markdowns); manuell gegriffen (3 Reparaturen bei 13 Quellen) |
 | AK-34 Ereignis je Reparatur | ✅ | `test_level1_register_and_missing`, `test_level2_and_events`, `test_level4`, `test_rehash_changed_content` |
 | AK-35 nie gleichzeitig mit dem Nachtlauf | ✅ | `test_waits_for_nightly_run`, Erkennung `test_lease_blocks_nightly_and_vice_versa` |
-| AK-36 rollierendes Neu-Hashen | ✅ | `test_nightly_rolling_hash`, Erkennung `test_rolling_rehash_thirds` |
+| AK-36 rollierendes Neu-Hashen | ✅ | `test_nightly_rolling_hash`, Erkennung `test_rolling_rehash_thirds`, `test_unreadable_file_does_not_hold_cycle_open` (B-2) |
 | AK-37 Fortsetzen nach Unterbrechung | ✅ | Erkennung `test_rehash_continues_after_interruption` |
 | AK-38 auf Abruf | ✅ | `test_on_demand_and_second_rejected`, `test_rehash_changed_content` (vollständiges Neu-Hashen), `test_http_flow` |
 | AK-39 Ergebnisse ≥ 30 Tage, Log | ✅ | `test_results_kept_and_logged` |
@@ -81,6 +81,11 @@ Während der QA gefunden und behoben:
 
 - (High) Fortschritts-Abfrage hing in einem `factory-verify`-Lauf bei 50.000 Quellen (Abfrageplan mit verschachtelten Schleifen wegen veralteter Statistik; die Lauf-Schleife blockierte). Behoben: erzwungene Hash-Joins + Zeitlimit 60 s + `ANALYZE` nach der Momentaufnahme; AK-20-Test danach mehrfach grün (~0,25 s je Neuberechnung, Abruf aus dem Speicher < 5 ms).
 
+Aus der Abnahme Runde 1 (behoben, je mit neuem Test; der B-1-Test war mit dem alten Code rot):
+- (High) B-1: Neuaufbau ab `classify`/`database` endete nie, wenn eine Stufe vor der Startstufe `failed_permanent` war; solche Quellen belegten die Drosselungsplätze.
+- (Medium) B-2: Rollierendes Neu-Hashen startete keinen neuen Zyklus, solange eine Datei des Zyklus nicht hashbar war.
+- (Medium) B-3: `kind`-Abweichung wurde im Abgleich nicht gemeldet, sobald PROJ-115 die Quelle gesperrt hatte.
+
 Offen: keine.
 
 ## Sicherheit
@@ -98,5 +103,6 @@ Offen: keine.
 
 ## Automatisierte Tests
 - `scripts/test-services.sh alice-source-registry alice-file-detection alice-etl-rebuild alice-document-database alice-document-classify alice-text-extraction`: 111 / 76 / 41 / 44 / 93 / 73 bestanden
+- Nachtest nach Abnahme Runde 1: `scripts/test-services.sh alice-source-registry alice-file-detection alice-etl-rebuild`: 112 / 77 / 42 bestanden
 - `scripts/test-containers.sh alice-source-registry alice-file-detection alice-etl-rebuild`: alle gesund, Rauchtests bestanden
 - Schema: frische DB und Migration (2×) auf dem `dev`-Stand fehlerfrei
