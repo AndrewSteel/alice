@@ -9,6 +9,8 @@ infra/certs/**
 
 # Server-generated secrets (keep server-side)
 automations/mqtt/config/passwordfile
+# LLM gateway caller keys: local reference only, the server copy lives in /srv/warm/llm-gateway/clients
+automations/alice-llm-gateway/clients
 
 # Local test environments (PROJ-87: alice-calendar/.venv must not be synced)
 **/.venv/

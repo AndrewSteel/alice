@@ -125,3 +125,6 @@ Thumbs.db
 # Claude Code: local-only files (features/, docs/ and .claude/ are tracked again
 # because the Software Factory reads specs, docs and project rules from GitHub)
 .claude/scheduled_tasks.lock
+
+# LLM gateway caller keys (local reference only; template: clients.example)
+docker/compose/automations/alice-llm-gateway/clients
