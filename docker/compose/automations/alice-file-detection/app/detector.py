@@ -117,6 +117,7 @@ class Detector:
         self.last_tick = time.monotonic()
         self.inventory_done = False  # a nightly run has finished at least once
         self.bad_seen: set[str] = set()  # problem paths with invalid names seen in the current run
+        self.lease: tuple[str, float] | None = None  # (token, monotonic expiry) of a reconciliation (PROJ-120)
 
     # ================================================================ runs
     def start(self, kind: str, trigger: str = "schedule") -> asyncio.Task:
@@ -210,6 +211,8 @@ class Detector:
             return
         interval = self.s.scan_interval_seconds
         reason = await self.nightly_due()
+        if reason and self.lease and self.lease[1] > time.monotonic():
+            reason = None  # a reconciliation is running: the nightly run waits for it (PROJ-120, AK-35)
         if reason and time.monotonic() - self.last_night_attempt >= min(interval, 600):
             self.start("night", reason)
         elif time.monotonic() - self.last_day_start >= interval and await self._inventory_done():

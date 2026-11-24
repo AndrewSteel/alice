@@ -55,7 +55,7 @@ async def pool():
         await con.execute("TRUNCATE alice.sources CASCADE")
         await con.execute("DELETE FROM alice.pipeline_stages WHERE NOT (name = ANY($1::text[]))", list(DEFAULT_STAGES))
         await con.execute("TRUNCATE alice.detect_files, alice.detect_dirs, alice.detect_pending, "
-                          "alice.detect_problems, alice.detect_runs, alice.dms_watched_folders")
+                          "alice.detect_problems, alice.detect_runs, alice.dms_watched_folders, alice.detect_hash_cycle")
     yield p
     await p.close()
 
