@@ -34,6 +34,7 @@ STACKS ?= \
   automations/alice-llm-gateway \
   automations/alice-document-classify \
   automations/alice-document-database \
+  automations/alice-etl-rebuild \
   ai/ollama \
   ai/llama-3090 \
   ai/openwebui \
