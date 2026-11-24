@@ -105,6 +105,17 @@ UPDATE alice.rebuild_items SET finished_at = NOW()
      HAVING bool_and(state IN ('done', 'skipped', 'failed_permanent') OR blocked))
 """
 
+BULK_TIMEOUT = "60s"
+
+
+async def bulk(con):
+    """Settings for the queries over all sources of a run (inside a transaction): hash joins instead of
+    nested loops, so a stale planner estimate (e.g. right after a large snapshot or registration) can
+    never turn them into a full scan per source; and a time limit, so the run loop never hangs."""
+    await con.execute("SET LOCAL enable_nestloop = off")
+    await con.execute(f"SET LOCAL statement_timeout = '{BULK_TIMEOUT}'")
+
+
 RUN_COLS = ("id, start_stage, kind, scope, state, reason, started_by, started_at, finished_at, total, "
             "final_counts, reconcile_id")
 
@@ -168,6 +179,8 @@ class Rebuilds:
                      WHERE ($4::text IS NULL OR s.kind = $4)
                     """, run_id, with_stages, all_skipped, kind)).split()[-1])
                 await con.execute("UPDATE alice.rebuild_runs SET total = $2 WHERE id = $1", run_id, total)
+            async with self.pool.acquire() as con:
+                await con.execute("ANALYZE alice.rebuild_items")  # fresh estimates for the progress queries
             logger.info("Rebuild run %d started by %s: from stage %s, kind %s, %d sources; scope %s",
                         run_id, started_by, start_stage, kind or "all", total,
                         {k: v["stages"] for k, v in scope.items() if v["stages"]})
@@ -232,7 +245,8 @@ class Rebuilds:
                     await self._set_state(rid, "running", None)
                     logger.info("Rebuild run %d continues (%s resolved)", rid, run["reason"])
                     run["state"] = "running"
-        async with self.pool.acquire() as con:
+        async with self.pool.acquire() as con, con.transaction():
+            await bulk(con)
             # sources deleted or locked meanwhile are not (any more) part of the run (EC-1)
             await con.execute(
                 "UPDATE alice.rebuild_items i SET excluded = CASE WHEN s.deleted THEN 'deleted' ELSE 'locked' END "
@@ -332,7 +346,9 @@ class Rebuilds:
                     raise NotFound(f"Lauf {rid} unbekannt")
                 run = self._plain(row)
             kinds, stages = _pairs(run["scope"])
-            per_stage = {r["stage"]: dict(r) for r in await con.fetch(STATS_SQL, rid, kinds, stages)}
+            async with con.transaction():
+                await bulk(con)
+                per_stage = {r["stage"]: dict(r) for r in await con.fetch(STATS_SQL, rid, kinds, stages)}
             counts = await con.fetchrow(
                 "SELECT count(*) AS total, count(*) FILTER (WHERE excluded IS NULL) AS in_run, "
                 "count(*) FILTER (WHERE excluded IS NULL AND released_at IS NOT NULL) AS released, "
@@ -410,10 +426,12 @@ class Rebuilds:
                 JOIN alice.pipeline_stages ps ON ps.name = ss.stage
                WHERE i.run_id = $1 AND i.excluded IS NULL AND i.released_at IS NOT NULL
                  AND ss.state IN ('failed', 'failed_permanent')"""
-            total = await con.fetchval("SELECT count(*) " + base, rid, kinds, stages)
-            rows = await con.fetch("SELECT s.id, s.title, ss.stage, ss.state, ss.attempts, ss.last_error AS error, "
-                                   "ss.last_attempt_at " + base + " ORDER BY ss.last_attempt_at DESC NULLS LAST, s.id, "
-                                   "ps.position LIMIT $4 OFFSET $5", rid, kinds, stages, limit, offset)
+            async with con.transaction():
+                await bulk(con)
+                total = await con.fetchval("SELECT count(*) " + base, rid, kinds, stages)
+                rows = await con.fetch("SELECT s.id, s.title, ss.stage, ss.state, ss.attempts, ss.last_error AS error, "
+                                       "ss.last_attempt_at " + base + " ORDER BY ss.last_attempt_at DESC NULLS LAST, "
+                                       "s.id, ps.position LIMIT $4 OFFSET $5", rid, kinds, stages, limit, offset)
         return {"total": total, "items": [{k: _iso(v) for k, v in dict(r).items()} for r in rows]}
 
     # ================================================================ log

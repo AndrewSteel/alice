@@ -79,6 +79,8 @@ Während der QA gefunden und behoben:
 - (Low) Startversuch mit ungültiger Startstufe lieferte während eines aktiven Laufs 409 statt 422 → Eingabe wird jetzt zuerst geprüft.
 - (Low) Das Log enthielt alle 2 s eine httpx-Zeile für den Register-Health-Check → httpx-Logger auf WARNING.
 
+- (High) Fortschritts-Abfrage hing in einem `factory-verify`-Lauf bei 50.000 Quellen (Abfrageplan mit verschachtelten Schleifen wegen veralteter Statistik; die Lauf-Schleife blockierte). Behoben: erzwungene Hash-Joins + Zeitlimit 60 s + `ANALYZE` nach der Momentaufnahme; AK-20-Test danach mehrfach grün (~0,25 s je Neuberechnung, Abruf aus dem Speicher < 5 ms).
+
 Offen: keine.
 
 ## Sicherheit

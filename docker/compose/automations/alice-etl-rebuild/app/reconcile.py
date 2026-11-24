@@ -280,7 +280,8 @@ class Reconciler:
 
     async def _level3(self) -> list[dict]:
         try:
-            async with self.pool.acquire() as con:
+            async with self.pool.acquire() as con, con.transaction():
+                await con.execute("SET LOCAL enable_nestloop = off")  # robust against stale estimates
                 rows = await con.fetch(LEVEL3_SQL, self.s.pending_limit_hours * 3600, list(ACTIVE_RUN))
         except (OSError, asyncio.TimeoutError) as exc:
             raise Abort(f"PostgreSQL nicht erreichbar: {exc}") from exc
