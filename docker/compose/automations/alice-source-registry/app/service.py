@@ -163,11 +163,15 @@ class Registry:
         if not await con.fetchval("SELECT 1 FROM alice.pipeline_stages WHERE name = $1", stage):
             raise NotFound(f"Stufe {stage} unbekannt")
 
-    async def _reset_dependents(self, con, source_id: str, exclude: str | None, changed) -> list[str]:
+    async def _reset_dependents(self, con, source_id: str, exclude: str | None, changed,
+                                meta=()) -> list[str]:
         """The markdown changed: stages flagged resets_on_content_change (any change, AK-20) and stages
-        whose resets_on_fields name a changed field or `content` (PROJ-118) → pending."""
+        whose resets_on_fields name a changed field or `content` (PROJ-118) → pending.
+        `meta` (PROJ-119): changed register fields (`locations`, `deleted`) that only reset stages
+        naming them in resets_on_fields, not every resets_on_content_change stage."""
         changed = sorted({str(c) for c in changed})
-        if not changed:
+        meta = sorted({str(c) for c in meta})
+        if not changed and not meta:
             return []
         rows = await con.fetch(
             """
@@ -175,11 +179,13 @@ class Registry:
                SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
                    claim_token = NULL, started_at = NULL
               FROM alice.pipeline_stages ps
-             WHERE ps.name = ss.stage AND (ps.resets_on_content_change OR ps.resets_on_fields && $3::text[])
+             WHERE ps.name = ss.stage
+               AND ((ps.resets_on_content_change AND cardinality($3::text[]) > 0)
+                    OR ps.resets_on_fields && ($3::text[] || $4::text[]))
                AND ss.source_id = $1 AND ss.state NOT IN ('skipped', 'pending')
                AND ss.stage IS DISTINCT FROM $2
             RETURNING ss.stage
-            """, source_id, exclude, changed)
+            """, source_id, exclude, changed, meta)
         stages = [r["stage"] for r in rows]
         now = time.time()
         for stage in stages:
@@ -340,9 +346,11 @@ class Registry:
             return {"id": sid, "path": src["path"], "changed": False, "commit": None, "reset": []}
 
         changed: set[str] = set()
+        meta: set[str] = set()
         if src["blob"] and not fresh:
             changed = {k for k in set(old_fm) | set(new_fm)
                        if k not in ("locations", "manual", "deleted") and old_fm.get(k) != new_fm.get(k)}
+            meta = {k for k in md.META_FIELDS if old_fm.get(k) != new_fm.get(k)}
             if md.normalize_content(old_content) != md.normalize_content(new_content):
                 changed.add(md.CONTENT)
 
@@ -362,7 +370,7 @@ class Registry:
         if batch:
             if self._add_to_batch(stage or label, sid, {src["path"], new_path}) >= self.s.batch_max_files:
                 await self._flush_stage(stage or label)
-        reset = await self._reset_dependents(con, sid, stage, changed)
+        reset = await self._reset_dependents(con, sid, stage, changed, meta)
         if fresh:
             reset = await self._reset_after(con, sid, "detect")
         src.update(path=new_path, title=title, blob=blob)
@@ -635,6 +643,8 @@ class Registry:
                     written = None
                     if not src["repo_error"]:
                         written = await self._write_source(con, src, label="locations", batch=batch, stage=stage)
+                    elif reactivated:  # locked markdown is not rewritten (PROJ-119)
+                        await self._reset_dependents(con, src["id"], None, (), ("deleted",))
                     return {"id": src["id"], "created": False, "path": src["path"], "reactivated": reactivated,
                             "locked": bool(src["repo_error"]), "changed": bool(written and written["changed"])}
 
@@ -713,9 +723,12 @@ class Registry:
             async with self.pool.acquire() as con, con.transaction():
                 src = await self._source(con, source_id, lock=True)
                 await self._upsert_location(con, source_id, location)
-                if src["deleted"]:
+                reactivated = src["deleted"]
+                if reactivated:
                     await self._reactivate(con, src)
                 if src["repo_error"]:
+                    if reactivated:  # locked markdown is not rewritten (PROJ-119)
+                        await self._reset_dependents(con, source_id, None, (), ("deleted",))
                     return {"id": source_id, "deleted": False, "locked": True, "changed": False}
                 written = await self._write_source(con, src, label="locations")
                 return {"id": source_id, "deleted": False, "locked": False, "changed": written["changed"]}
@@ -744,6 +757,8 @@ class Registry:
                 changed = False
                 if not src["repo_error"]:
                     changed = (await self._write_source(con, src, label="locations"))["changed"]
+                elif remaining == 0:  # locked markdown is not rewritten: reset the deletion stages here
+                    await self._reset_dependents(con, source_id, None, (), ("deleted",))
                 return {"id": source_id, "deleted": remaining == 0, "locked": bool(src["repo_error"]),
                         "changed": changed}
 
@@ -826,16 +841,23 @@ class Registry:
     _CLAIMABLE = ("s.repo_error IS NULL AND NOT s.deleted AND ((ss.state = 'pending' "
                   "AND (ss.next_retry_at IS NULL OR ss.next_retry_at <= NOW())) "
                   "OR (ss.state = 'failed' AND ss.next_retry_at <= NOW()))")
+    # PROJ-119: a stage that removes derived data also gets deleted sources (even locked ones, it does
+    # not read their markdown), regardless of `requires`
+    _CLAIMABLE_DELETED = ("(s.deleted OR s.repo_error IS NULL) AND ((ss.state = 'pending' "
+                          "AND (ss.next_retry_at IS NULL OR ss.next_retry_at <= NOW())) "
+                          "OR (ss.state = 'failed' AND ss.next_retry_at <= NOW()))")
     _CLAIM_RETURN = ("ss.source_id, ss.stage, ss.claim_token::text AS token, ss.attempts, "
-                     "s.kind, s.path, s.title, s.hash")
+                     "s.kind, s.path, s.title, s.hash, s.deleted")
 
     async def claim(self, stage: str, limit: int = 1, kinds: list[str] | None = None,
-                    requires: list[str] | None = None) -> dict:
+                    requires: list[str] | None = None, include_deleted: bool = False) -> dict:
         """Take over due work exclusively (AK-15). Paused while the repo is unavailable (AK-30).
         `kinds` restricts the work to these source kinds (PROJ-117); such claims are served from the
         register, so the Redis queue is never drained of sources of other kinds.
         `requires` (PROJ-118): only sources whose listed stages are done (or skipped), e.g. classify
-        after extract; such claims are served from the register as well."""
+        after extract; such claims are served from the register as well.
+        `include_deleted` (PROJ-119): deleted sources are handed out as well (`deleted: true`), without
+        the `requires` check, so a stage can remove what it derived from them."""
         async with self.pool.acquire() as con:
             await self._require_stage(con, stage)
             if not self.available:
@@ -843,7 +865,8 @@ class Registry:
             items = []
             for name in requires or []:
                 await self._require_stage(con, name)
-            ids = await self.queue.due(stage, limit * 5) if not kinds and not requires else None
+            plain = not kinds and not requires and not include_deleted
+            ids = await self.queue.due(stage, limit * 5) if plain else None
             if ids is not None:
                 for sid in ids:
                     row = await con.fetchrow(
@@ -856,13 +879,14 @@ class Registry:
                         if len(items) >= limit:
                             break
             else:
+                claimable = self._CLAIMABLE_DELETED if include_deleted else self._CLAIMABLE
                 rows = await con.fetch(
                     f"""
                     WITH picked AS (
                         SELECT ss.source_id FROM alice.source_stages ss JOIN alice.sources s ON s.id = ss.source_id
-                         WHERE ss.stage = $1 AND {self._CLAIMABLE}
+                         WHERE ss.stage = $1 AND {claimable}
                            AND ($3::text[] IS NULL OR s.kind = ANY($3::text[]))
-                           AND ($4::text[] IS NULL OR NOT EXISTS (
+                           AND ($4::text[] IS NULL OR s.deleted OR NOT EXISTS (
                                 SELECT 1 FROM alice.source_stages r WHERE r.source_id = ss.source_id
                                    AND r.stage = ANY($4::text[]) AND r.state NOT IN ('done', 'skipped')))
                          ORDER BY COALESCE(ss.next_retry_at, ss.updated_at)
@@ -870,7 +894,7 @@ class Registry:
                     UPDATE alice.source_stages ss SET {self._CLAIM_SET}
                       FROM picked, alice.sources s
                      WHERE ss.stage = $1 AND ss.source_id = picked.source_id AND s.id = ss.source_id
-                       AND {self._CLAIMABLE}
+                       AND {claimable}
                     RETURNING {self._CLAIM_RETURN}
                     """, stage, limit, kinds or None, requires or None)
                 items = [dict(r) for r in rows]

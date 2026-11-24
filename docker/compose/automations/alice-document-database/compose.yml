@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# alice-document-database — stage `database` of the new ETL (PROJ-119).
+#
+# Takes due work of kind `document` (after `classify`) from the source register,
+# reads the frontmatter of the source markdown ONLY through alice-source-registry
+# and replaces the rows of the document in the tables alice.doc_* (document,
+# detail per type, bookings, invoice line items) in one transaction. Deleted
+# sources are removed. Marks possible duplicate bookings across bank statements
+# of the same IBAN. No LLM, no NAS mount, no Redis, no Weaviate, no MQTT.
+#
+# Internal interface on port 8016 (health, status), reachable only inside the
+# Docker network: there is deliberately NO nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-document-database:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-document-database
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8016/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      # alice-source-registry, postgres
+      backend:
+        aliases: [alice-document-database]
+
+networks:
+  backend:
+    external: true
+    name: backend
