@@ -8,3 +8,4 @@ openwebui    interactive  <key>
 external     interactive  <key>
 n8n          background   <key>
 dms-extractor-image background <key>
+document-classify background <key>

@@ -99,6 +99,27 @@ def normalize_content(content: str | None) -> str:
     return content + "\n" if content else ""
 
 
+def changed_parts(key: str, old, new) -> list[str]:
+    """`manual` entries for a changed frontmatter field. In a block (both values are objects, e.g.
+    `fields`) each changed inner field counts on its own: `fields.amount_gross` (PROJ-118)."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        return [f"{key}.{k}" for k in sorted(set(old) | set(new), key=str)
+                if k not in old or k not in new or old[k] != new[k]]
+    return [key]
+
+
+def keep_manual_parts(key: str, value, old, manual: list[str]):
+    """Value a stage writes for `key`, keeping inner fields listed in `manual` as `<key>.<field>`."""
+    parts = [m[len(key) + 1:] for m in manual if m.startswith(key + ".")]
+    if not parts or not isinstance(value, dict) or not isinstance(old, dict):
+        return value
+    value = dict(value)
+    for part in parts:
+        if part in old:
+            value[part] = old[part]
+    return value
+
+
 def frontmatter_id(text: str) -> str | None:
     try:
         fm, _ = parse(text)
@@ -209,6 +230,8 @@ stehen nicht hier, sondern im Register (Datenbank).
   als Hand-Korrektur committet (Autor „Alice Hand-Korrektur" bzw. der eigene Commit bleibt erhalten).
 - Geänderte Felder und ein geänderter Inhaltsteil (`content`) werden in `manual` eingetragen.
   Die Pipeline überschreibt diese Felder danach nie wieder, auch nicht bei einem Neuaufbau.
+- In Blöcken wie `fields` zählt jedes Feld einzeln (`fields.amount_gross`); nur dieses Feld ist dann
+  geschützt. Ein Eintrag `fields` schützt den ganzen Block.
 - Wer einen Eintrag aus `manual` entfernt, gibt das Feld wieder für die Pipeline frei.
 - Ungültiges Frontmatter (kein gültiges YAML, fehlendes Pflichtfeld, geänderte `id` oder `kind`)
   wird nicht übernommen. Die Datei wird dann nicht überschrieben, bis sie repariert ist; der

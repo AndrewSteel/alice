@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# alice-document-classify — stage `classify` of the new ETL (PROJ-118).
+#
+# Takes due work of kind `document` (after `extract`) from the source register,
+# lets the local LLM determine the document type, extract the fields of the type
+# (all bookings of bank statements), a German title and a German summary, and writes
+# them ONLY through alice-source-registry into the frontmatter.
+# LLM calls only through alice-llm-gateway with an own background key.
+# No NAS mount, no Redis, no Weaviate, no MQTT.
+#
+# Internal interface on port 8015 (health, status), reachable only inside the
+# Docker network: there is deliberately NO nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-document-classify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-document-classify
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8015/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      # alice-source-registry, alice-llm-gateway
+      backend:
+        aliases: [alice-document-classify]
+
+networks:
+  backend:
+    external: true
+    name: backend

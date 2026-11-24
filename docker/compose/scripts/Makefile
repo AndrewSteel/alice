@@ -32,6 +32,7 @@ STACKS ?= \
   automations/alice-file-detection \
   automations/alice-text-extraction \
   automations/alice-llm-gateway \
+  automations/alice-document-classify \
   ai/ollama \
   ai/llama-3090 \
   ai/openwebui \
