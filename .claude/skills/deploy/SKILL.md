@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Guide the human through deploying a feature the Software Factory built (PR reviewed, staged, merged) — schema migrations, container rebuilds, n8n workflow imports, frontend, nginx. Pass the feature ID (e.g. /deploy PROJ-115).
+description: Guide the human through deploying a feature the Software Factory built (PR reviewed, merged) — schema migrations, container rebuilds, n8n workflow imports, frontend, nginx. Pass the feature ID (e.g. /deploy PROJ-115).
 argument-hint: "PROJ-X"
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
@@ -17,12 +17,13 @@ You are an experienced DevOps engineer. You deploy together with the user: you p
 2. Find the factory PR: `gh pr list --state all --search "PROJ-X" --json number,title,state,url`. Read its description: acceptance criteria results, assumptions, **Deploy-Schritte**, Einschätzung. The Deploy-Schritte are your plan.
 3. Check readiness, and stop with a clear message if something is missing:
    - QA result in `qa-report.md` is READY (no Critical/High bugs), the factory acceptance passed (PR comment / issue status "Review")
-   - Changed services were staged on the server: `scripts/stage.sh <service> <PR>` and the user checked what the PR lists for staging. If not: offer to run it now (it needs the user's confirmation, it uses the production `.env`).
    - The PR is merged. If not: "Bitte den PR prüfen und mergen, dann geht es weiter." Never merge yourself.
-4. `git checkout main && git pull` — deploy only from the merged main.
+4. `git checkout <branch> && git pull` — deploy only from the branch the PR was merged into, the repo's default branch (`gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`; Phase 4: `dev`).
 
 ## Deploy Steps
-Follow the order from the PR. Typical steps, each one shown to the user before it runs:
+Follow the order from the PR. Typical steps, each one shown to the user before it runs.
+
+**No staging** (decided 2026-11-24): skip any `scripts/stage.sh` steps the PR lists; the checks it names for staging run in production after step 4 (see "After Deploying"). If a service starts working on real data right away (ETL stages, background workers), say so before step 4 and keep the stop command ready (`ssh ki.lan docker stop <container>`).
 
 1. **New variables / secret files:** names from the PR (never their values). The user adds them to `/srv/compose/<stack>/.env` on the server. Never read, print or write `.env` files.
 2. **Database migration** (if `sql/migrations/<datum>_PROJ-X_*.sql` was added): show the file, then
@@ -33,7 +34,6 @@ Follow the order from the PR. Typical steps, each one shown to the user before i
 5. **n8n workflows:** for each changed JSON in `workflows/`, import it in the n8n UI (Workflows → Import from File), keep it active if it was active, check credentials and webhook paths.
 6. **Frontend** (if `frontend/` changed): `./scripts/deploy-frontend.sh` (builds into the nginx html directory), then `./scripts/sync-compose.sh`.
 7. **nginx** (if `docker/compose/infra/nginx/` changed): after the sync `ssh ki.lan docker exec nginx nginx -t && ssh ki.lan docker exec nginx nginx -s reload`.
-8. **Remove staging containers:** `scripts/stage.sh <service> --down` for every staged service.
 
 ## After Deploying: Verify
 - Service health and logs: `ssh ki.lan docker logs --tail 50 <container>`

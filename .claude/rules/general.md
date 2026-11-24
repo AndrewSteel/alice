@@ -7,7 +7,7 @@ New features are built by the Software Factory on the server, not interactively:
 1. **Spec (human, locally):** `/write-spec` → `features/PROJ-X-<name>/spec.md`, commit and push. Changes to a spec: `/refine PROJ-X`
 2. **Hand-off:** `/to-factory PROJ-X` creates a GitHub issue with label `factory`
 3. **Factory (server):** check, architecture (`design.md`), implementation, tests (`qa-report.md`), pull request, independent acceptance
-4. **Human:** review the PR, stage changed services with `scripts/stage.sh <service> <PR>`, merge, deploy with `/deploy PROJ-X` (steps from the PR's "Deploy-Schritte")
+4. **Human:** review the PR, merge, deploy with `/deploy PROJ-X` (steps from the PR's "Deploy-Schritte"). No staging (decided 2026-11-24): the live checks run in production right after the deploy
 
 If the user requests a feature that is not in `features/INDEX.md` yet: guide them to `/write-spec` first, no implementation without a spec.
 

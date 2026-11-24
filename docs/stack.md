@@ -40,7 +40,7 @@ Beschlossen in der Phasenplanung 2026-11-20 (`docs/PRD.md`). Was noch nicht geba
 
 - Dienste: `scripts/test-services.sh` (pytest pro Dienst; Integrationstests gegen Wegwerf-Postgres/Redis aus `docker/test/compose.test.yml`)
 - Container: `scripts/test-containers.sh` (baut jeden geänderten Dienst aus seinem `Dockerfile`, startet ihn mit den Wegwerf-Datenbanken, wartet auf den Healthcheck; Testwerte in `tests/container.env`, `tests/container-secrets/`, Rauchtest `tests/container-smoke.sh`)
-- Staging vor dem Deploy (nur der Mensch): `scripts/stage.sh <dienst> <PR>` startet `<dienst>-staging` neben der Produktion mit echter `.env`, ohne nginx-Route und ohne den DNS-Namen des Produktivdienstes
+- Kein Staging (entschieden 2026-11-24): nach dem Merge wird direkt deployt, Live-Tests laufen in Produktion. In den „Deploy-Schritte“ des PRs keine `scripts/stage.sh`-Schritte aufführen; was live zu prüfen ist, steht unter den Live-Tests
 - n8n: `scripts/check-workflows.sh` (Struktur, Verbindungen, kein `console.log`)
 - Frontend: `npx tsc --noEmit`, `npm run build`
 
