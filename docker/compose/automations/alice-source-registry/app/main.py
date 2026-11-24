@@ -21,6 +21,11 @@ Endpoints:
        (claim with "requires", document write with "token", stages with "resets_on_fields": PROJ-118)
        (claim with "include_deleted", resets_on_fields "locations"/"deleted": PROJ-119)
   POST /maintenance/scan|flush|resync-queue       run background jobs now
+  PROJ-120 (rebuild + reconciliation, alice-etl-rebuild):
+  POST /rebuild/release                           release a portion of a rebuild run (stages → pending, flagged)
+  POST /sources/{id}/events                       add an event (repairs of the reconciliation)
+  GET  /maintenance/repo-check                    level 2: register <-> repo, read only
+  POST /maintenance/repo-repair                   level 2 repairs (restore, move)
 """
 from __future__ import annotations
 
@@ -261,6 +266,41 @@ class ReleaseIn(TokenIn):
     delay_seconds: int = Field(0, ge=0, le=86400)  # hand out again only after this time (PROJ-117)
 
 
+class ReleaseItem(BaseModel):
+    id: str = Field(..., pattern=ID_PATTERN)
+    stages: list[str] = Field(..., min_length=1, max_length=50)
+
+    @field_validator("stages")
+    @classmethod
+    def _stages(cls, v):
+        import re
+
+        if any(not re.match(STAGE_PATTERN, s) for s in v):
+            raise ValueError("stages enthält ungültige Stufennamen")
+        return v
+
+
+class RebuildReleaseIn(BaseModel):
+    run: int = Field(..., ge=1)
+    items: list[ReleaseItem] = Field(..., min_length=1, max_length=1000)
+
+
+class EventIn(BaseModel):
+    level: str = Field("info", pattern=r"^(info|warning|error)$")
+    event: str = Field(..., pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
+class RepairItem(BaseModel):
+    id: str = Field(..., pattern=ID_PATTERN)
+    action: str = Field(..., pattern=r"^(restore|move)$")
+    found_at: str | None = Field(None, max_length=4096)
+
+
+class RepairIn(BaseModel):
+    items: list[RepairItem] = Field(..., min_length=1, max_length=10000)
+
+
 # ---------------------------------------------------------------- routes
 @app.get("/health")
 async def health(request: Request):
@@ -383,3 +423,24 @@ async def flush(request: Request):
 @app.post("/maintenance/resync-queue")
 async def resync(request: Request):
     return {"rebuilt": await _reg(request).resync_queue()}
+
+
+# ---------------------------------------------------------------- PROJ-120
+@app.post("/rebuild/release")
+async def rebuild_release(body: RebuildReleaseIn, request: Request):
+    return await _reg(request).release_rebuild(body.run, [i.model_dump() for i in body.items])
+
+
+@app.post("/sources/{source_id}/events")
+async def add_event(source_id: str, body: EventIn, request: Request):
+    return await _reg(request).add_event(source_id, body.level, body.event, body.message)
+
+
+@app.get("/maintenance/repo-check")
+async def repo_check(request: Request):
+    return await _reg(request).repo_check()
+
+
+@app.post("/maintenance/repo-repair")
+async def repo_repair(body: RepairIn, request: Request):
+    return await _reg(request).repo_repair([i.model_dump() for i in body.items])

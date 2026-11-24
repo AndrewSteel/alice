@@ -78,6 +78,7 @@ class Registry:
         self.unavailable_reason = "Repo-Ordner noch nicht geprüft"
         self.batches: dict[str, dict] = {}  # stage -> {"ids": {source_id: {paths}}, "since": monotonic}
         self.warned: set[str] = set()
+        self.served: set[tuple[str, str]] = set()  # (stage, kind) known as served (PROJ-120)
         self.force_scan = True
         self.last_scan = 0.0
         self.last_resync = 0.0
@@ -177,7 +178,7 @@ class Registry:
             """
             UPDATE alice.source_stages ss
                SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
-                   claim_token = NULL, started_at = NULL
+                   claim_token = NULL, started_at = NULL, rebuild_run = NULL
               FROM alice.pipeline_stages ps
              WHERE ps.name = ss.stage
                AND ((ps.resets_on_content_change AND cardinality($3::text[]) > 0)
@@ -208,7 +209,7 @@ class Registry:
             """
             UPDATE alice.source_stages ss
                SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
-                   claim_token = NULL, started_at = NULL
+                   claim_token = NULL, started_at = NULL, rebuild_run = NULL
               FROM alice.pipeline_stages ps
              WHERE ps.name = ss.stage AND ss.source_id = $1 AND ss.state NOT IN ('skipped', 'pending')
                AND ps.position > (SELECT position FROM alice.pipeline_stages WHERE name = $2)
@@ -665,6 +666,8 @@ class Registry:
                 await self._upsert_location(con, sid, location)
                 for p in parents:
                     await con.execute("INSERT INTO alice.source_parents (source_id, parent_id) VALUES ($1, $2)", sid, p)
+                if complete:
+                    await self._mark_served(con, stage, {kind})
                 src = await self._source(con, sid)
                 written = await self._write_source(
                     con, src, label=stage, stage=stage, batch=batch,
@@ -699,6 +702,10 @@ class Registry:
                 src = await self._source(con, source_id, lock=True)
                 if token and not await self._claim_valid(con, src, stage, token):
                     return _discarded(src)
+                if not batch:  # work of a rebuild run is committed in batch commits (PROJ-120, AK-9)
+                    batch = bool(await con.fetchval(
+                        "SELECT rebuild_run IS NOT NULL FROM alice.source_stages WHERE source_id = $1 AND stage = $2",
+                        source_id, stage))
                 return await self._write_source(con, src, label=stage, stage=stage, fields=fields,
                                                 content=content, batch=batch, token=token)
 
@@ -847,7 +854,7 @@ class Registry:
                           "AND (ss.next_retry_at IS NULL OR ss.next_retry_at <= NOW())) "
                           "OR (ss.state = 'failed' AND ss.next_retry_at <= NOW()))")
     _CLAIM_RETURN = ("ss.source_id, ss.stage, ss.claim_token::text AS token, ss.attempts, "
-                     "s.kind, s.path, s.title, s.hash, s.deleted")
+                     "s.kind, s.path, s.title, s.hash, s.deleted, ss.rebuild_run IS NOT NULL AS rebuild")
 
     async def claim(self, stage: str, limit: int = 1, kinds: list[str] | None = None,
                     requires: list[str] | None = None, include_deleted: bool = False) -> dict:
@@ -878,7 +885,8 @@ class Registry:
                         items.append(dict(row))
                         if len(items) >= limit:
                             break
-            else:
+            if ids is None or (len(items) < limit and not await self.queue.due(stage, 1)):
+                # register: normal work first, rebuild work (PROJ-120, never in the Redis queue) after it
                 claimable = self._CLAIMABLE_DELETED if include_deleted else self._CLAIMABLE
                 rows = await con.fetch(
                     f"""
@@ -889,16 +897,25 @@ class Registry:
                            AND ($4::text[] IS NULL OR s.deleted OR NOT EXISTS (
                                 SELECT 1 FROM alice.source_stages r WHERE r.source_id = ss.source_id
                                    AND r.stage = ANY($4::text[]) AND r.state NOT IN ('done', 'skipped')))
-                         ORDER BY COALESCE(ss.next_retry_at, ss.updated_at)
+                           AND ($5::bool OR ss.rebuild_run IS NOT NULL)
+                         ORDER BY ss.rebuild_run IS NOT NULL, COALESCE(ss.next_retry_at, ss.updated_at)
                          LIMIT $2 FOR UPDATE OF ss SKIP LOCKED)
                     UPDATE alice.source_stages ss SET {self._CLAIM_SET}
                       FROM picked, alice.sources s
                      WHERE ss.stage = $1 AND ss.source_id = picked.source_id AND s.id = ss.source_id
                        AND {claimable}
                     RETURNING {self._CLAIM_RETURN}
-                    """, stage, limit, kinds or None, requires or None)
-                items = [dict(r) for r in rows]
+                    """, stage, limit - len(items), kinds or None, requires or None, ids is None)
+                items.extend(sorted((dict(r) for r in rows), key=lambda r: r["rebuild"]))
+            await self._mark_served(con, stage, {it["kind"] for it in items})
         return {"paused": False, "reason": None, "items": items}
+
+    async def _mark_served(self, con, stage: str, kinds) -> None:
+        """PROJ-120: remember that a stage service serves `stage` for these kinds (option A of #12)."""
+        for kind in sorted(set(kinds) - {k for st, k in self.served if st == stage}):
+            await con.execute("INSERT INTO alice.pipeline_stage_served (stage, kind) VALUES ($1, $2) "
+                              "ON CONFLICT DO NOTHING", stage, kind)
+            self.served.add((stage, kind))
 
     async def _finish(self, sql: str, source_id: str, stage: str, *args):
         async with self.pool.acquire() as con:
@@ -961,7 +978,7 @@ class Registry:
         async with self.pool.acquire() as con:
             row = await con.fetchrow(
                 "UPDATE alice.source_stages SET state = 'pending', attempts = 0, last_error = NULL, "
-                "next_retry_at = NULL WHERE source_id = $1 AND stage = $2 "
+                "next_retry_at = NULL, rebuild_run = NULL WHERE source_id = $1 AND stage = $2 "
                 "AND state IN ('pending', 'failed', 'failed_permanent', 'done') RETURNING state, attempts",
                 source_id, stage)
             if not row:
@@ -992,9 +1009,174 @@ class Registry:
             stages = await self._stage_names(con)
             rows = await con.fetch(
                 "SELECT stage, source_id, EXTRACT(EPOCH FROM COALESCE(next_retry_at, updated_at))::float8 AS due "
-                "FROM alice.source_stages WHERE state IN ('pending', 'failed')")
+                "FROM alice.source_stages WHERE state IN ('pending', 'failed') AND rebuild_run IS NULL")
         self.last_resync = time.monotonic()
         return await self.queue.rebuild(stages, [(r["stage"], r["source_id"], r["due"]) for r in rows])
+
+    # ================================================================ rebuild + reconciliation (PROJ-120)
+    async def release_rebuild(self, run_id: int, items: list[dict]) -> dict:
+        """A rebuild run releases a portion: the listed stages → pending, attempts 0, flagged with the run.
+        Running stages stay untouched; a stage already flagged with this run is not reset again (no double
+        release after a crash). Deleted and locked sources are not released and reported back."""
+        ids = [it["id"] for it in items]
+        pairs = [(it["id"], st) for it in items for st in it["stages"]]
+        async with self.pool.acquire() as con, con.transaction():
+            rows = await con.fetch("SELECT id, deleted, repo_error IS NOT NULL AS locked FROM alice.sources "
+                                   "WHERE id = ANY($1::text[])", ids)
+            state = {r["id"]: r for r in rows}
+            await con.execute(
+                """
+                UPDATE alice.source_stages ss
+                   SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
+                       claim_token = NULL, started_at = NULL, rebuild_run = $1
+                  FROM alice.sources s, unnest($2::text[], $3::text[]) AS r(source_id, stage)
+                 WHERE ss.source_id = r.source_id AND ss.stage = r.stage AND s.id = ss.source_id
+                   AND NOT s.deleted AND s.repo_error IS NULL
+                   AND ss.state NOT IN ('skipped', 'running') AND ss.rebuild_run IS DISTINCT FROM $1
+                """, run_id, [p[0] for p in pairs], [p[1] for p in pairs])
+        out = {"released": [], "deleted": [], "locked": [], "unknown": []}
+        for sid in ids:
+            r = state.get(sid)
+            key = "unknown" if r is None else "deleted" if r["deleted"] else "locked" if r["locked"] else "released"
+            out[key].append(sid)
+        return out
+
+    async def add_event(self, source_id: str, level: str, event: str, message: str) -> dict:
+        async with self.pool.acquire() as con:
+            await self._source(con, source_id)
+            await self._event(con, source_id, level, event, message)
+        return {"id": source_id, "event": event}
+
+    async def repo_check(self) -> dict:
+        """Level 2 of the reconciliation (register <-> repo), read only: sources without markdown,
+        markdowns in the wrong place (deleted <-> deleted/), markdowns without register entry and
+        markdowns whose `id`/`kind` do not match the register. Files whose git blob matches the
+        blob the pipeline wrote are not read."""
+        self.require_available()
+        async with self.lock:
+            blobs = await self._io(self.repo.index_blobs)
+            untracked = set(await self._io(self.repo.untracked_paths))
+            gone = set(await self._io(self.repo.deleted_paths))
+        present = {p for p in (set(blobs) - gone) | untracked if p.endswith(".md")}
+        async with self.pool.acquire() as con:
+            rows = await con.fetch("SELECT id, kind, path, blob, deleted, repo_error, title FROM alice.sources")
+        by_id = {r["id"]: r for r in rows}
+        paths = {r["path"] for r in rows}
+        missing: dict[str, dict] = {}
+        findings: list[dict] = []
+        for r in rows:
+            path = r["path"]
+            if path not in present:
+                missing[r["id"]] = {"gap": "markdown_missing", "id": r["id"], "path": path, "action": "restore"}
+                continue
+            if bool(r["deleted"]) != md.is_deleted_path(path):
+                findings.append({"gap": "wrong_place", "id": r["id"], "path": path, "action": "move",
+                                 "detail": "gelöschte Quelle außerhalb von deleted/" if r["deleted"]
+                                 else "aktive Quelle unter deleted/"})
+                continue
+            if r["repo_error"] or (path not in untracked and blobs.get(path) == r["blob"]):
+                continue  # locked (visible error) or exactly what the pipeline wrote
+            text = await self._io(self.repo.read, path)
+            fm_id, fm_kind = self._fm_id_kind(text)
+            if fm_id is not None and (fm_id != r["id"] or fm_kind != r["kind"]):
+                findings.append({"gap": "frontmatter_mismatch", "id": r["id"], "path": path, "action": None,
+                                 "detail": f"Frontmatter id={fm_id} kind={fm_kind}, Register id={r['id']} "
+                                           f"kind={r['kind']}"})
+        for path in sorted(present - paths):
+            text = await self._io(self.repo.read, path)
+            fm_id, fm_kind = self._fm_id_kind(text)
+            src = by_id.get(fm_id) if fm_id else None
+            if src is not None and fm_id in missing and fm_kind == src["kind"] and "found_at" not in missing[fm_id]:
+                missing[fm_id]["found_at"] = path  # moved by hand: put it back
+                continue
+            if src is None:
+                detail = "Markdown ohne Registereintrag" + (f" (id {fm_id})" if fm_id else "")
+            elif fm_kind != src["kind"]:
+                detail = f"kind {fm_kind} passt nicht zum Register ({src['kind']}) der Quelle {fm_id}"
+            else:
+                detail = f"weitere Markdown zur Quelle {fm_id} (registriert unter {src['path']})"
+            findings.append({"gap": "markdown_orphan", "id": None, "path": path, "action": None, "detail": detail})
+        for f in missing.values():
+            if "found_at" in f:
+                f["detail"] = f"Markdown liegt unter {f['found_at']}"
+            elif by_id[f["id"]]["blob"] is None:
+                f["detail"] = "noch nie geschrieben"
+        return {"sources": len(rows), "files": len(present), "findings": list(missing.values()) + findings}
+
+    @staticmethod
+    def _fm_id_kind(text: str | None) -> tuple[str | None, str | None]:
+        if text is None:
+            return None, None
+        try:
+            fm, _ = md.parse(text)
+        except md.InvalidDocument:
+            return md.frontmatter_id(text), None
+        return (str(fm["id"]) if fm.get("id") is not None else None,
+                str(fm["kind"]) if fm.get("kind") is not None else None)
+
+    async def repo_repair(self, items: list[dict]) -> dict:
+        """Repairs of level 2: `restore` (moved file back, last state from git, else a new base markdown
+        with the stages from extract on pending) and `move` (git rename to the right place).
+        Every repair gets an event at the source."""
+        self.require_available()
+        results = []
+        async with self.lock:
+            async with self.pool.acquire() as con:
+                for it in items:
+                    try:
+                        async with con.transaction():
+                            src = await self._source(con, it["id"], lock=True)
+                            done = await (self._repair_restore(con, src, it.get("found_at"))
+                                          if it["action"] == "restore" else self._repair_move(con, src))
+                        results.append({"id": it["id"], **done})
+                    except RepoUnavailable:
+                        raise
+                    except (NotFound, Conflict, GitError, md.InvalidDocument) as exc:
+                        results.append({"id": it["id"], "repaired": False, "detail": str(exc)})
+        return {"results": results}
+
+    async def _repair_restore(self, con, src: dict, found_at: str | None) -> dict:
+        sid, path = src["id"], src["path"]
+        if await self._io(self.repo.exists, path):
+            return {"repaired": False, "detail": "Markdown ist wieder vorhanden"}
+        if src["repo_error"]:
+            raise Locked(f"Quell-Markdown gesperrt: {src['repo_error']}")
+        if found_at and await self._io(self.repo.exists, found_at):
+            src = await self._accept_hand_edit(con, src, found_at)
+            if src["repo_error"]:
+                return {"repaired": False, "detail": src["repo_error"]}
+            message = f"Abgleich: Quell-Markdown von {found_at} nach {src['path']} zurückgelegt"
+            await self._event(con, sid, "info", "reconcile_moved", message)
+            return {"repaired": True, "how": "moved_back", "path": src["path"]}
+        text = await self._io(self.repo.cat_blob, src["blob"]) if src["blob"] else None
+        if text is None:
+            text = await self._io(self.repo.last_version, path)
+        if text is not None:
+            await self._io(self.repo.write, path, text)
+            blob = await self._io(self.repo.hash_text, text, True)
+            await self._io(self.repo.commit, {path}, f"restore: {sid} {src['title']}", PIPELINE)
+            await con.execute("UPDATE alice.sources SET blob = $2 WHERE id = $1", sid, blob)
+            await self._event(con, sid, "warning", "reconcile_restored",
+                              f"Abgleich: fehlende Quell-Markdown {path} aus der Git-Historie wiederhergestellt")
+            return {"repaired": True, "how": "restored", "path": path}
+        src["blob"] = None  # nothing left in git: new base markdown, every stage runs again
+        written = await self._write_source(
+            con, src, label="restore", fields={"title": src["title"], "language": None, "type": None},
+            content=md.original_links(await self._present_locations(con, sid)))
+        reset = await self._reset_after(con, sid, "detect")
+        await self._event(con, sid, "warning", "reconcile_recreated",
+                          "Abgleich: Quell-Markdown fehlte auch in der Git-Historie, Basis-Markdown neu angelegt; "
+                          "die Stufen laufen neu")
+        return {"repaired": True, "how": "recreated", "path": written["path"], "reset": reset}
+
+    async def _repair_move(self, con, src: dict) -> dict:
+        if bool(src["deleted"]) == md.is_deleted_path(src["path"]):
+            return {"repaired": False, "detail": "Markdown liegt bereits am richtigen Ort"}
+        old = src["path"]
+        written = await self._write_source(con, src, label="locations")
+        await self._event(con, src["id"], "info", "reconcile_moved",
+                          f"Abgleich: Quell-Markdown von {old} nach {written['path']} verschoben")
+        return {"repaired": True, "how": "moved", "path": written["path"]}
 
     # ================================================================ background
     async def tick(self) -> None:
