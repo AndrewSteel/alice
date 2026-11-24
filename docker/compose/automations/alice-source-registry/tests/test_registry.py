@@ -278,9 +278,12 @@ async def test_content_change_resets_dependents(reg):  # AK-20
 
 async def test_location_change_does_not_reset(reg):
     sid = (await register(reg))["id"]
-    await _done(reg, sid, "database")
+    await _done(reg, sid, "database", "rag")
     await reg.add_location(sid, {"path": "/nas/other.pdf"})
-    assert (await stages(reg, sid))["database"]["state"] == "done"
+    st = await stages(reg, sid)
+    assert st["rag"]["state"] == "done"
+    # PROJ-119: `database` names `locations` in resets_on_fields (the locations are stored in the DB)
+    assert st["database"]["state"] == "pending"
 
 
 async def test_new_stage_for_existing_sources(reg):  # AK-21

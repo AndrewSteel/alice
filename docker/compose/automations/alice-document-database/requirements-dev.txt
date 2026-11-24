@@ -1,0 +1,7 @@
+# Test dependencies. Install in a venv:  pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0,<9.0
+pytest-asyncio>=0.23,<0.25
+# end-to-end tests load the real register code (../alice-source-registry) in-process
+PyYAML>=6.0,<7.0
+tzdata

@@ -127,3 +127,16 @@ Deploy-Schritte für den Menschen:
 | Fundorte als JSON-Liste | eigene Tabelle | Fundorte sind Teil der Quelle (Register hat die Tabelle schon); 1:1 wie Frontmatter |
 | Strikte Prüfung (Punkt-Dezimal, ISO-Datum) | deutsche Zahlformate akzeptieren | Eindeutig, keine stillen Fehlinterpretationen; Fehlermeldung nennt Feld und Wert |
 | Dubletten-Neuberechnung je IBAN in derselben Transaktion | nachgelagerter Hintergrundlauf | Immer korrekt sofort nach dem Lauf, kein halber Zustand |
+
+## Umsetzung (2026-11-24)
+
+**Gebaut**
+- Neuer Dienst `docker/compose/automations/alice-document-database` (Port 8016, nur intern, keine nginx-Route): `convert.py` (strikte Umwandlung Frontmatter → Zeilen, Meldung mit Feld und Wert), `store.py` (Ersetzen/Entfernen je Dokument in einer Transaktion, Sperren je Dokument und IBAN, Dubletten-Neuberechnung je IBAN in einem SQL-Durchgang), `worker.py` (Arbeitsschleife wie PROJ-118: Claim, Heartbeat, Release/Fail, Pause bei DB-Ausfall), `main.py` (`/health`, `/status`). Eintrag im Makefile.
+- Schema-Abschnitt 18 in `sql/init-schema.sql` + Migration `sql/migrations/2026-11-24_PROJ-119_document_data.sql`: sieben Tabellen `alice.doc_*` mit RLS, Policies, Indizes; Stufe `database` bekommt `resets_on_fields = {locations,deleted}`.
+- Register (`alice-source-registry`): Felder `locations`/`deleted` lösen nur Stufen aus, die sie in `resets_on_fields` nennen (nicht alle `resets_on_content_change`-Stufen – `rag`/`wiki` bleiben unberührt); Claim-Option `include_deleted` liefert gelöschte Quellen mit (`deleted: true`, ohne `requires`-Prüfung, auch gesperrte, da die Markdown nicht gelesen wird); bei gesperrter Markdown setzen Löschen/Wiederkehr die Stufe direkt zurück. Rückgabe des Claims enthält jetzt immer `deleted`.
+
+**Abweichungen / Präzisierungen**
+- Zahlen in der Markdown: YAML-Zahl oder Text mit Punkt als Dezimaltrenner (`"12.50"`). `"12,50"` gilt als ungültig (Fehlermeldung nennt Feld und Wert), damit nichts still falsch gelesen wird. Daten nur `JJJJ-MM-TT`.
+- IBAN-Abgleich für Dubletten ohne Leerzeichen und ohne Groß-/Kleinschreibung; gespeichert wird die IBAN 1:1 wie im Frontmatter.
+- Der PROJ-115-Test „Fundort-Änderung setzt nichts zurück“ wurde angepasst: `rag` bleibt `done`, `database` geht (gewollt) auf `pending`.
+- Doppelte Übernahme derselben Quelle (Claim vom Register zurückgenommen, z. B. beim Löschen während der Verarbeitung) wird im Dienst nacheinander abgearbeitet; das Ergebnis des zweiten Laufs zählt (EC-5).
