@@ -1074,11 +1074,15 @@ class Registry:
                                  "detail": "gelöschte Quelle außerhalb von deleted/" if r["deleted"]
                                  else "aktive Quelle unter deleted/"})
                 continue
-            if r["repo_error"] or (path not in untracked and blobs.get(path) == r["blob"]):
-                continue  # locked (visible error) or exactly what the pipeline wrote
+            if not r["repo_error"] and path not in untracked and blobs.get(path) == r["blob"]:
+                continue  # exactly what the pipeline wrote
+            # locked sources are read as well: a `kind` changed by hand locks the source at the next
+            # scan, the reconciliation still has to report it (AK-27). Unparsable YAML (kind None) of a
+            # locked source is its visible lock error, not a mismatch.
             text = await self._io(self.repo.read, path)
             fm_id, fm_kind = self._fm_id_kind(text)
-            if fm_id is not None and (fm_id != r["id"] or fm_kind != r["kind"]):
+            kind_differs = fm_kind != r["kind"] and (fm_kind is not None or not r["repo_error"])
+            if fm_id is not None and (fm_id != r["id"] or kind_differs):
                 findings.append({"gap": "frontmatter_mismatch", "id": r["id"], "path": path, "action": None,
                                  "detail": f"Frontmatter id={fm_id} kind={fm_kind}, Register id={r['id']} "
                                            f"kind={r['kind']}"})

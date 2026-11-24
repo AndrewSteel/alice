@@ -195,6 +195,24 @@ async def test_orphan_and_kind_mismatch_reported(reg, repo_dir):  # AK-27
     assert {p: (repo_dir / p).read_text() for p in before} == before
 
 
+async def test_kind_changed_by_hand_reported_after_lock(reg, repo_dir):  # AK-27 (Abnahme B-3)
+    sid = (await register(reg))["id"]
+    other = (await register(reg, h="sha256:" + "b" * 16, path="/nas/scanner/other.pdf"))["id"]
+    rel, rel2 = (await reg.get_source(sid))["path"], (await reg.get_source(other))["path"]
+    (repo_dir / rel).write_text((repo_dir / rel).read_text().replace("kind: document", "kind: image"))
+    (repo_dir / rel2).write_text((repo_dir / rel2).read_text().replace("kind: document", "kind: [broken"))
+    git(repo_dir, "add", "-A")
+    git(repo_dir, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-q", "-m", "by hand")
+    await reg.scan()  # the register locks both sources
+    assert (await reg.get_source(sid))["repo_error"] and (await reg.get_source(other))["repo_error"]
+    before = (repo_dir / rel).read_text()
+    findings = (await reg.repo_check())["findings"]
+    # the kind mismatch is reported; broken YAML is the visible lock error, not a mismatch
+    assert [(f["gap"], f["id"], f["action"]) for f in findings] == [("frontmatter_mismatch", sid, None)]
+    assert "kind=image" in findings[0]["detail"]
+    assert (repo_dir / rel).read_text() == before
+
+
 async def test_wrong_place_moved_with_history(reg, repo_dir, pool):  # AK-28
     sid = (await register(reg))["id"]
     rel = (await reg.get_source(sid))["path"]
