@@ -126,12 +126,6 @@ class Rebuilds:
         async with self.lock:
             async with self.pool.acquire() as con, con.transaction():
                 await con.execute("SELECT pg_advisory_xact_lock(hashtext('alice-etl-rebuild'))")
-                row = await con.fetchrow(f"SELECT {RUN_COLS} FROM alice.rebuild_runs WHERE state = ANY($1::text[]) "
-                                         "ORDER BY id LIMIT 1", list(ACTIVE))
-                if row:
-                    run = self._plain(row)
-                    raise Rejected(f"Neuaufbau-Lauf {run['id']} ist bereits aktiv ({STATUS_DE[run['state']]}); "
-                                   "erst nach dessen Ende kann ein neuer Lauf starten", run)
                 stages = await con.fetch("SELECT name, position, skip_kinds FROM alice.pipeline_stages "
                                          "ORDER BY position, name")
                 names = [r["name"] for r in stages]
@@ -139,6 +133,12 @@ class Rebuilds:
                     raise Invalid(f"Stufe {start_stage} unbekannt")
                 if names.index(start_stage) == 0 or start_stage == "detect":
                     raise Invalid(f"{start_stage} ist keine wählbare Startstufe")
+                row = await con.fetchrow(f"SELECT {RUN_COLS} FROM alice.rebuild_runs WHERE state = ANY($1::text[]) "
+                                         "ORDER BY id LIMIT 1", list(ACTIVE))
+                if row:
+                    run = self._plain(row)
+                    raise Rejected(f"Neuaufbau-Lauf {run['id']} ist bereits aktiv ({STATUS_DE[run['state']]}); "
+                                   "erst nach dessen Ende kann ein neuer Lauf starten", run)
                 following = stages[names.index(start_stage):]
                 served = {(r["stage"], r["kind"]) for r in await con.fetch(
                     "SELECT stage, kind FROM alice.pipeline_stage_served")}

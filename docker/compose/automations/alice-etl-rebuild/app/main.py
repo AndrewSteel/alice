@@ -38,6 +38,7 @@ from .reconcile import Busy409, Reconciler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("alice-etl-rebuild")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # the run loop asks the register every 2 s
 
 TICK_STALE_SECONDS = 120
 STAGE_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"
