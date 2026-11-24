@@ -156,3 +156,21 @@ Deploy-Schritte für den Menschen:
 | Lease bei der Erkennung | Abgleich-Zeit fest nach dem Nachtlauf | garantiert „nie gleichzeitig“ auch bei langen oder nachgeholten Nachtläufen |
 | Fortschritt im Speicher, 2 s Takt | Abfrage je Abruf | < 200 ms bei 50.000 Quellen und vielen Abrufern |
 | Hash-Zyklus je Pfad in `detect_files` | eigener Cursor | Fortschritt je Datei gespeichert, Neustart-fest, keine Doppel-Hashes im Zyklus |
+
+## Umsetzung (Bau, 2026-11-24)
+
+**Gebaut**
+- Neuer Dienst `docker/compose/automations/alice-etl-rebuild` (Port 8017, nur Docker-Netz `backend`, keine nginx-Route, Eintrag im Makefile): `rebuild.py` (Läufe, Freigabe, Fortschritt im Speicher), `reconcile.py` (Abgleich, Sicherung, Reparaturen, Ergebnisse), `clients.py` (Register, Erkennung), `main.py` (Schnittstelle, Hintergrund-Schleife alle 2 s, `/health`).
+- Register (`alice-source-registry`): `POST /rebuild/release`, `POST /sources/{id}/events`, `GET /maintenance/repo-check`, `POST /maintenance/repo-repair`; Kennzeichen `rebuild_run` (Vorrang bei der Übernahme, automatischer Sammel-Commit beim Schreiben, gelöscht bei Inhaltsänderung/Hand-Korrektur/„erneut versuchen“/in-place-Änderung, nie in der Redis-Queue); `pipeline_stage_served` wird bei Übernahme und Registrierung mit `complete` gepflegt. Antwort der Übernahme enthält zusätzlich `rebuild` (abwärtskompatibel).
+- Erkennung (`alice-file-detection`): `app/reconcile.py` mit `POST /reconcile/lease|check|register|rehash|apply` und `DELETE /reconcile/lease/{token}`; der Zeitplaner startet keinen Nachtlauf, solange die Sperre besteht.
+- Schema-Abschnitt 19 in `sql/init-schema.sql` + Migration `sql/migrations/2026-11-24_PROJ-120_rebuild_reconcile.sql` (füllt `pipeline_stage_served` aus dem Bestand).
+
+**Präzisierungen**
+- Stufen, die wegen eines endgültigen Fehlers (`failed_permanent`) einer früheren Stufe derselben Quelle nie laufen können (z. B. `classify`, wenn `extract` endgültig fehlschlug), zählen im Fortschritt als „fehlgeschlagen“ und gelten für das Ende des Laufs als durch. Sonst würde ein solcher Lauf nie fertig. In der Fehlerliste steht nur die Stufe mit dem eigentlichen Fehler.
+- Ebene 3 meldet keine Stufen gesperrter Quellen (die Sperre ist ein sichtbarer Fehler) und keine Folgestufen eines sichtbaren Fehlers. Ein echter Rückstau (z. B. noch nicht klassifizierte Dokumente) erscheint nach 24 h dagegen als Lücke auf Ebene 3; das ist so gewollt (nichts bleibt still) und im Ergebnis je Lücke erklärt.
+- Je Ergebnis und Ebene werden höchstens 10.000 Lücken einzeln gespeichert; die Zahlen im Ergebnis sind immer vollständig (`gap_list_truncated` nennt den Rest). Schutz gegen Millionen Zeilen bei einem großen Rückstau.
+- Eine Quelle, deren Stufe bei der Freigabe gerade `running` ist (Normalbetrieb), wird nicht zurückgesetzt; sie läuft ohnehin mit dem aktuellen Stand und zählt im Lauf, sobald sie durch ist.
+- Ist die Datei-Erkennung nicht erreichbar, läuft der Abgleich ohne Ebene 1 weiter und endet `unvollständig` mit Grund. Nur ein Ausfall von Register/Repo (oder PostgreSQL) bricht ab (AK-41).
+- Die Prüfung von Ebene 2 liest nur Markdowns, deren Git-Fingerabdruck nicht dem Pipeline-Stand entspricht, und erkennt verschobene Markdowns (gleiche `id` an anderem Ort): Reparatur = zurücklegen.
+- Entfernt der Abgleich eine verwaiste Kontoauszugs-Zeile, werden die Dubletten-Merker anderer Auszüge desselben Kontos erst bei deren nächster Übernahme neu bestimmt (der Verweis auf die entfernte Buchung wird von der DB sofort geleert).
+- Abweichungen von der Spec: keine.
