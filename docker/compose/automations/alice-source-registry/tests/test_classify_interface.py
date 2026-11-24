@@ -36,7 +36,7 @@ async def test_claim_requires_done_stage(reg):  # AK-2
 async def test_stage_reset_rules_listed(reg):
     st = {s["name"]: s for s in await reg.list_stages()}
     assert st["classify"]["resets_on_fields"] == ["content", "type"]
-    assert st["database"]["resets_on_fields"] == []
+    assert st["database"]["resets_on_fields"] == ["locations", "deleted"]  # PROJ-119
 
 
 async def test_new_content_from_extract_resets_classify(reg):  # AK-37 (first half), spec "Erneute Klassifizierung" 1

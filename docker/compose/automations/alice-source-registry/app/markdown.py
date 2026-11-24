@@ -17,6 +17,8 @@ BASE_FIELDS = ("id", "schema", "kind", "title", "locations", "parents", "hash", 
 REGISTER_FIELDS = ("id", "schema", "kind", "locations", "parents", "hash", "size", "modified", "captured", "deleted")
 # Register fields the pipeline always sets, even if a human listed them in `manual`.
 ALWAYS_REGISTER = ("id", "kind", "schema", "deleted")
+# Register fields that reset only stages naming them in resets_on_fields (PROJ-119).
+META_FIELDS = ("locations", "deleted")
 # Markdowns of deleted sources live below this folder with the same sub-structure (PROJ-116).
 DELETED_DIR = "deleted"
 WATCH_DIRS = (*KIND_DIRS.values(), DELETED_DIR)

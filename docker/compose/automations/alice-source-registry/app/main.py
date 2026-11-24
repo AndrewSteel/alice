@@ -19,6 +19,7 @@ Endpoints:
   POST /sources/{id}/stages/{stage}/done|fail|release|retry|heartbeat
        (fail with "permanent": true, release with "delay_seconds", claim with "kinds": PROJ-117)
        (claim with "requires", document write with "token", stages with "resets_on_fields": PROJ-118)
+       (claim with "include_deleted", resets_on_fields "locations"/"deleted": PROJ-119)
   POST /maintenance/scan|flush|resync-queue       run background jobs now
 """
 from __future__ import annotations
@@ -227,6 +228,8 @@ class ClaimIn(BaseModel):
     kinds: list[str] | None = Field(None, min_length=1, max_length=len(md.KINDS))
     # PROJ-118: only sources whose listed stages are done (or skipped)
     requires: list[str] | None = Field(None, min_length=1, max_length=20)
+    # PROJ-119: hand out deleted sources too (stage removes derived data)
+    include_deleted: bool = False
 
     @field_validator("requires")
     @classmethod
@@ -337,7 +340,7 @@ async def add_stage(body: StageIn, request: Request):
 @app.post("/stages/{stage}/claim")
 async def claim(stage: str, request: Request, body: ClaimIn | None = None):
     body = body or ClaimIn()
-    return await _reg(request).claim(stage, body.limit, body.kinds, body.requires)
+    return await _reg(request).claim(stage, body.limit, body.kinds, body.requires, body.include_deleted)
 
 
 @app.post("/sources/{source_id}/stages/{stage}/done")
