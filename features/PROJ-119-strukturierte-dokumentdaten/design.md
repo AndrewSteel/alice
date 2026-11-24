@@ -140,3 +140,24 @@ Deploy-Schritte für den Menschen:
 - IBAN-Abgleich für Dubletten ohne Leerzeichen und ohne Groß-/Kleinschreibung; gespeichert wird die IBAN 1:1 wie im Frontmatter.
 - Der PROJ-115-Test „Fundort-Änderung setzt nichts zurück“ wurde angepasst: `rag` bleibt `done`, `database` geht (gewollt) auf `pending`.
 - Doppelte Übernahme derselben Quelle (Claim vom Register zurückgenommen, z. B. beim Löschen während der Verarbeitung) wird im Dienst nacheinander abgearbeitet; das Ergebnis des zweiten Laufs zählt (EC-5).
+
+## Deployment (2026-11-24)
+
+**Schritte**
+1. Migration `sql/migrations/2026-11-24_PROJ-119_document_data.sql` (durch den Nutzer) und `.env` für `alice-document-database` (lokal angelegt, mitsynchronisiert).
+2. `sync-compose.sh`: rsync meldete Code 23, nur wegen der nicht setzbaren Änderungszeit von `automations/mqtt/config` (Operation not permitted); keine Löschungen, alle Dateien übertragen.
+3. Rebuild `alice-source-registry` (Erweiterung), danach Start `alice-document-database`; beide `healthy`. Die `jq`-Meldungen des Health-Skripts sind kosmetisch, `docker inspect` und `/health` bestätigen den Zustand.
+4. Kein Staging (Entscheidung 2026-11-24): Live-Prüfung in Produktion.
+
+**Live-Test AK-34 (Stichprobe per SQL, nur lesen)**
+- Der Dienst zog den klassifizierten Bestand ohne Anstoß nach: 361 Quellen `database` = `done`, `failed` = 0, `released` = 0, keine Warnungen/Fehler im Log.
+- Eingetragen: 356+ Dokumente (157 `Document`, 134 `SecuritySettlement`, 66 `BankStatement`, 2 `Contract`), 2819+ Buchungen; keine Rechnung, weil PROJ-118 bisher keine `Invoice` klassifiziert hat (klassifiziert: 359 von rund 52.700 Quellen, `classify` ist der Engpass, nicht `database`).
+- Salden: 63 Auszüge gehen auf (Anfangssaldo + Summe der Buchungen = Endsaldo, Toleranz 0,01), die 2 Abweichungen sind genau die 2 von PROJ-118 mit `balance_mismatch` markierten, 1 Auszug ohne Saldo (Prüfung entfällt).
+- Dubletten: 0 markiert; unabhängige Abfrage (gleiche IBAN, Datum, Betrag, Zweck in mehreren Auszügen) findet ebenfalls 0 Gruppen.
+- Zwei gelöschte Quellen (`deleted`, darunter die PROJ-116-Testquelle) stehen auf `database` = `done` ohne Eintrag in der DB (Aufräumen nach AK-20).
+- Der Feldvergleich DB ↔ Frontmatter je Typ (zweiter Teil von AK-34) wurde noch nicht gemacht; geprüft sind nur Zähler, Salden und Dubletten. `doc_invoices` ist leer, bis PROJ-118 Rechnungen klassifiziert hat.
+
+**Offen**
+- AK-35 (Betrag in einer Quell-Markdown von Hand ändern, nach ≤ 15 min in der DB prüfen): vom Nutzer auszuführen.
+- Feldvergleich DB ↔ Frontmatter je Typ (AK-34, Rest): vom Nutzer auszuführen.
+- Dubletten- und Rechnungspfad live erst prüfbar, wenn überlappende Auszüge bzw. Rechnungen klassifiziert sind.
