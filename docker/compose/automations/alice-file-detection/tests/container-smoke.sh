@@ -9,8 +9,10 @@ import json, time, urllib.error, urllib.request
 
 BASE = "http://localhost:8013"
 
-def call(method, path):
-    req = urllib.request.Request(BASE + path, method=method)
+def call(method, path, body=None):
+    req = urllib.request.Request(BASE + path, method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, json.loads(r.read())
@@ -36,5 +38,12 @@ for kind in ("day", "night"):
 night = call("GET", "/runs?kind=night&limit=1")[1]["runs"][0]
 assert night["summary"]["files_scanned"] == 0 and night["summary"]["problems"]["count"] == 0, night
 assert call("GET", "/problems")[1] == {"count": 0, "items": []}
+# PROJ-120: reconciliation lease and level 1 check (no watched folders: nothing to report)
+status, lease = call("POST", "/reconcile/lease", {"seconds": 60})
+assert status == 200, lease
+assert call("POST", "/reconcile/lease", {"seconds": 60})[0] == 409
+status, check = call("POST", "/reconcile/check")
+assert status == 200 and check["unregistered"] == [] and check["missing"] == [], check
+assert call("DELETE", f"/reconcile/lease/{lease['token']}")[1] == {"released": True}
 print("smoke ok: runs", night["id"])
 PY

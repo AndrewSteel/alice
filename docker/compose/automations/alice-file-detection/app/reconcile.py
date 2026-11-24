@@ -200,7 +200,7 @@ async def rehash(det: Detector, *, full: bool = False, cycle_days: float = 30, m
             rows = await con.fetch(query, ok, started)
         total_bytes = await con.fetchval("SELECT COALESCE(sum(size), 0) FROM alice.detect_files "
                                          "WHERE folder = ANY($1::text[])", ok)
-    budget = None if full else (max_bytes or math.ceil(total_bytes / max(cycle_days, 1e-9)))
+    budget = None if full else (max_bytes or math.ceil(int(total_bytes) / max(float(cycle_days), 1e-9)))
     t0 = time.monotonic()
     hashed = hashed_bytes = 0
     mismatches, unreadable, vanished = [], [], []
