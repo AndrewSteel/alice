@@ -69,6 +69,29 @@ async def test_failed_permanent_restarts_at_zero(env):  # AK-4
     assert (await env.drive(p["id"]))["status"] == "done"
 
 
+async def test_failed_before_start_stage_does_not_block(env):  # AK-1, AK-10, AK-15 (Abnahme B-1)
+    env.settings.stage_limit = 2
+    ids = await env.add(6)
+    broken = ids[:3]  # more than N: they must not occupy the throttle slots
+    for sid in broken:
+        await env.execute("UPDATE alice.source_stages SET state = 'failed_permanent', attempts = 5, "
+                          "last_error = 'kaputt' WHERE source_id = $1 AND stage = 'extract'", sid)
+        await env.execute("UPDATE alice.source_stages SET state = 'pending' WHERE source_id = $1 "
+                          "AND stage IN ('classify', 'database')", sid)
+    p = await _start(env, "database", "document")
+    q = await env.drive(p["id"])
+    assert q["status"] == "done" and q["finished"] == 6
+    assert q["stages"]["database"]["failed"] == 3 and q["stages"]["database"]["done"] == 3
+    errs = await env.rebuilds.errors(p["id"], 100, 0)
+    assert {(e["id"], e["stage"]) for e in errs["items"]} == {(sid, "extract") for sid in broken}
+    # a cancelled run with such sources gets its end as well
+    c = await _start(env, "database", "document")
+    await env.rebuilds.tick()
+    await env.rebuilds.control(c["id"], "cancel")
+    c = await env.drive(c["id"])
+    assert c["status"] == "cancelled" and c["finished_at"]
+
+
 async def test_exclusions_counted(env, tmp_path):  # AK-5
     ok = await env.add(2)
     gone = (await env.add(1))[0]

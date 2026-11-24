@@ -63,14 +63,19 @@ def _pairs(scope: dict) -> tuple[list[str], list[str]]:
 
 
 # Per stage of the scope: done (done/skipped), failed (failed, failed_permanent, or blocked because an
-# earlier stage of the source failed permanently: it can never run), running, open (pending or not
+# earlier stage of the source failed permanently — in the scope or before the start stage: it can never run), running, open (pending or not
 # released yet); `active` = released and pending/running (the throttle counts these).
 STATS_SQL = """
-WITH r AS (
+WITH fp AS (  -- permanently failed stages of the run's sources, in or before the scope
+    SELECT ss.source_id, p.position, p.name
+      FROM alice.source_stages ss
+      JOIN alice.pipeline_stages p ON p.name = ss.stage
+      JOIN alice.rebuild_items fi ON fi.run_id = $1 AND fi.source_id = ss.source_id
+     WHERE ss.state = 'failed_permanent'),
+r AS (
     SELECT i.source_id, i.released_at IS NOT NULL AS rel, sc.stage, ss.state,
-           COALESCE(bool_or(ss.state = 'failed_permanent') OVER (
-               PARTITION BY i.source_id ORDER BY ps.position, ps.name
-               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), FALSE) AS blocked
+           EXISTS (SELECT 1 FROM fp WHERE fp.source_id = i.source_id
+                           AND (fp.position, fp.name) < (ps.position, ps.name)) AS blocked
       FROM alice.rebuild_items i
       JOIN unnest($2::text[], $3::text[]) AS sc(kind, stage) ON sc.kind = i.kind
       JOIN alice.pipeline_stages ps ON ps.name = sc.stage
@@ -89,11 +94,16 @@ SELECT stage,
 
 # Released sources whose stages are all through (done, skipped, failed_permanent or blocked).
 FINISH_SQL = """
-WITH r AS (
+WITH fp AS (  -- permanently failed stages of the run's sources, in or before the scope
+    SELECT ss.source_id, p.position, p.name
+      FROM alice.source_stages ss
+      JOIN alice.pipeline_stages p ON p.name = ss.stage
+      JOIN alice.rebuild_items fi ON fi.run_id = $1 AND fi.source_id = ss.source_id
+     WHERE ss.state = 'failed_permanent'),
+r AS (
     SELECT i.source_id, ss.state,
-           COALESCE(bool_or(ss.state = 'failed_permanent') OVER (
-               PARTITION BY i.source_id ORDER BY ps.position, ps.name
-               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), FALSE) AS blocked
+           EXISTS (SELECT 1 FROM fp WHERE fp.source_id = i.source_id
+                           AND (fp.position, fp.name) < (ps.position, ps.name)) AS blocked
       FROM alice.rebuild_items i
       JOIN unnest($2::text[], $3::text[]) AS sc(kind, stage) ON sc.kind = i.kind
       JOIN alice.pipeline_stages ps ON ps.name = sc.stage
@@ -411,7 +421,8 @@ class Rebuilds:
         return {"total": total, "items": [await self.progress(i) for i in ids]}
 
     async def errors(self, rid: int, limit: int, offset: int) -> dict:
-        """Failed stages of the run's released sources: id, title, stage, message (AK-19)."""
+        """Failed stages of the run's released sources: id, title, stage, message (AK-19). Includes a stage
+        before the start stage that failed permanently: it blocks the source's scope."""
         async with self.pool.acquire() as con:
             row = await con.fetchrow("SELECT scope FROM alice.rebuild_runs WHERE id = $1", rid)
             if row is None:
@@ -420,12 +431,13 @@ class Rebuilds:
             kinds, stages = _pairs(scope)
             base = """
                 FROM alice.rebuild_items i
-                JOIN unnest($2::text[], $3::text[]) AS sc(kind, stage) ON sc.kind = i.kind
-                JOIN alice.source_stages ss ON ss.source_id = i.source_id AND ss.stage = sc.stage
+                JOIN alice.source_stages ss ON ss.source_id = i.source_id
+                LEFT JOIN unnest($2::text[], $3::text[]) AS sc(kind, stage)
+                       ON sc.kind = i.kind AND sc.stage = ss.stage
                 JOIN alice.sources s ON s.id = i.source_id
                 JOIN alice.pipeline_stages ps ON ps.name = ss.stage
                WHERE i.run_id = $1 AND i.excluded IS NULL AND i.released_at IS NOT NULL
-                 AND ss.state IN ('failed', 'failed_permanent')"""
+                 AND (ss.state = 'failed_permanent' OR (ss.state = 'failed' AND sc.stage IS NOT NULL))"""
             async with con.transaction():
                 await bulk(con)
                 total = await con.fetchval("SELECT count(*) " + base, rid, kinds, stages)
