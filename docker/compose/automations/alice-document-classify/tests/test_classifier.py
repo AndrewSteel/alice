@@ -255,3 +255,19 @@ def test_sections_large_page():
     parts = sections(text, 1000)
     assert parts[0].where == "Seite 1" and parts[1].where.startswith("Seite 2, Teil 1")
     assert "".join(p.text for p in parts) == text
+
+
+async def test_thinking_disabled_by_default(classifier, gateway):  # AK-50: no thinking phase blocking the slot
+    await classifier.run(frontmatter(), "Text")
+    assert gateway.requests
+    for call in gateway.requests:
+        assert call["template_kwargs"] == {"enable_thinking": False}
+
+
+async def test_thinking_can_be_enabled(settings, gateway):
+    from app.classifier import Classifier
+    from app.llm import LlmClient
+    llm = LlmClient(settings.gateway_url, settings.gateway_key, settings.model, 5, 1000,
+                    client=gateway.client(), think=True)
+    await Classifier(settings, llm).run(frontmatter(), "Text")
+    assert gateway.requests and all(c["template_kwargs"] is None for c in gateway.requests)

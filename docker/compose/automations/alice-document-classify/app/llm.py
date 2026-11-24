@@ -52,9 +52,10 @@ def parse_json(text: str) -> dict:
 
 class LlmClient:
     def __init__(self, base_url: str, key: str, model: str, timeout: float, max_tokens: int,
-                 client: httpx.AsyncClient | None = None):
+                 client: httpx.AsyncClient | None = None, think: bool = False):
         self.model = model
         self.max_tokens = max_tokens
+        self.think = think
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         self.http = client or httpx.AsyncClient(base_url=base_url, timeout=timeout)
         self.headers = headers
@@ -69,6 +70,10 @@ class LlmClient:
                 "response_format": {"type": "json_object"}}
         if self.model:
             body["model"] = self.model
+        if not self.think:
+            # Hybrid-thinking models (qwen3) think by default; that blocks the single
+            # GPU slot for minutes per call and makes chat wait behind it.
+            body["chat_template_kwargs"] = {"enable_thinking": False}
         self.calls += 1
         try:
             r = await self.http.post("/v1/chat/completions", json=body, headers=self.headers)

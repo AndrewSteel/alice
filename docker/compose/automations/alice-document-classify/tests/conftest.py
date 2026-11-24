@@ -54,7 +54,8 @@ class FakeGateway:
         task = system.split("\n", 1)[0].removeprefix("TASK: ").strip()
         self.requests.append({"task": task, "temperature": body.get("temperature"), "system": system,
                               "user": body["messages"][1]["content"], "auth": request.headers.get("authorization"),
-                              "url": str(request.url), "model": body.get("model")})
+                              "url": str(request.url), "model": body.get("model"),
+                              "template_kwargs": body.get("chat_template_kwargs")})
         if self.status != 200:
             return httpx.Response(self.status, json={"error": "x"})
         q = self.queues[task]

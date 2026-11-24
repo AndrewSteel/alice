@@ -22,6 +22,7 @@ class Settings:
     llm_timeout_seconds: float = 900
     llm_retry_seconds: float = 60
     max_tokens: int = 8192
+    think: bool = False
     confidence_threshold: float = 0.7
     retry_temperature: float = 0.7
     head_chars: int = 20000
@@ -51,6 +52,7 @@ class Settings:
             llm_timeout_seconds=num("CLASSIFY_LLM_TIMEOUT_SECONDS", d.llm_timeout_seconds),
             llm_retry_seconds=num("CLASSIFY_LLM_RETRY_SECONDS", d.llm_retry_seconds),
             max_tokens=num("CLASSIFY_MAX_TOKENS", d.max_tokens, int),
+            think=_bool(env.get("CLASSIFY_THINK")),
             confidence_threshold=num("CLASSIFY_CONFIDENCE_THRESHOLD", d.confidence_threshold),
             retry_temperature=num("CLASSIFY_RETRY_TEMPERATURE", d.retry_temperature),
             head_chars=max(1000, num("CLASSIFY_HEAD_CHARS", d.head_chars, int)),

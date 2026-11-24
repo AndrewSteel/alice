@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     settings = Settings.from_env()
     registry = RegistryClient(settings.registry_url, settings.registry_timeout_seconds)
     llm = LlmClient(settings.gateway_url, settings.gateway_key, settings.model, settings.llm_timeout_seconds,
-                    settings.max_tokens)
+                    settings.max_tokens, think=settings.think)
     worker = Worker(settings, registry, Classifier(settings, llm))
     app.state.worker = worker
     if not settings.gateway_key:
