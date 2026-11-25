@@ -58,3 +58,35 @@ export function formatDateTimeFull(value: string | number | Date): string {
     return String(value);
   }
 }
+
+/** Relative time ("vor 3 Minuten" / "3 minutes ago", "in 5 minutes") in the active locale (PROJ-122). */
+export function formatRelative(value: string | number | Date | null | undefined, now: number = Date.now()): string {
+  if (value === null || value === undefined || value === "") return "--";
+  const t = new Date(value).getTime();
+  if (Number.isNaN(t)) return String(value);
+  const diff = Math.round((t - now) / 1000);
+  const abs = Math.abs(diff);
+  const rtf = new Intl.RelativeTimeFormat(intlLocale(i18n.language), { numeric: "auto" });
+  if (abs < 60) return rtf.format(diff, "second");
+  if (abs < 3600) return rtf.format(Math.round(diff / 60), "minute");
+  if (abs < 86400) return rtf.format(Math.round(diff / 3600), "hour");
+  return rtf.format(Math.round(diff / 86400), "day");
+}
+
+/** Duration in seconds as "2 h 5 min" / "45 s" with locale-aware units (PROJ-122). */
+export function formatDuration(seconds: number): string {
+  const loc = intlLocale(i18n.language);
+  const unit = (n: number, u: "hour" | "minute" | "second") =>
+    new Intl.NumberFormat(loc, { style: "unit", unit: u, unitDisplay: "narrow" }).format(n);
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return unit(s, "second");
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${unit(h, "hour")} ${unit(m, "minute")}` : unit(m, "minute");
+}
+
+/** Integer with locale-aware grouping (60.000 / 60,000). */
+export function formatNumber(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "--";
+  return new Intl.NumberFormat(intlLocale(i18n.language)).format(n);
+}

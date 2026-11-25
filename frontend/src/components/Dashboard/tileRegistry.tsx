@@ -5,6 +5,7 @@ import { N8nFailedTile } from "./N8nFailedTile";
 import { ServicesTile } from "./ServicesTile";
 import { DmsCoverageTile } from "./DmsCoverageTile";
 import { DmsQualityWarningsTile } from "./DmsQualityWarningsTile";
+import { EtlTile } from "./EtlTile";
 
 /**
  * Central tile registry (PROJ-77 AC-H4/H5). Adding a tile means: create its
@@ -37,4 +38,5 @@ export const DASHBOARD_TILES: { id: string; element: React.ReactNode }[] = [
   { id: "services", element: <ServicesTile /> },
   { id: "dms-coverage", element: <DmsCoverageTile /> },
   { id: "dms-quality-warnings", element: <DmsQualityWarningsTile /> },
+  { id: "etl", element: <EtlTile /> }, // PROJ-122
 ];
