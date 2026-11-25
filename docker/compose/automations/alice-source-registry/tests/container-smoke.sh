@@ -26,6 +26,10 @@ assert log[0] == f"Alice ETL|detect: {src['id']} scan_0042.pdf", log
 assert log[-1] == "Alice ETL|init: source of truth repository", log
 items = call("POST", "/stages/extract/claim", {"limit": 1})["items"]
 assert items and items[0]["source_id"] == src["id"], items
+# PROJ-120: level 2 check and release of a rebuild portion
+assert call("GET", "/maintenance/repo-check")["findings"] == []
+out = call("POST", "/rebuild/release", {"run": 1, "items": [{"id": src["id"], "stages": ["classify"]}]})
+assert out["released"] == [src["id"]], out
 print("smoke ok:", src["id"])
 PY
 # no zombies after the commits above: tini as PID 1 reaps orphaned children

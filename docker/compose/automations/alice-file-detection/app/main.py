@@ -12,6 +12,13 @@ Endpoints:
   GET  /runs?kind=night&limit=   recent runs incl. the nightly summaries
   GET  /runs/{id}                one run
   GET  /problems?limit=          open detection problems
+  PROJ-120 (level 1 of the reconciliation, called by alice-etl-rebuild):
+  POST /reconcile/lease          take / renew the reconciliation lease (no nightly run meanwhile)
+  DELETE /reconcile/lease/{token}
+  POST /reconcile/check          NAS <-> register, read only
+  POST /reconcile/register       register unregistered files
+  POST /reconcile/rehash         rolling re-hash (portion) or full re-hash, read only
+  POST /reconcile/apply          apply differing hashes (original changed in place)
 """
 from __future__ import annotations
 
@@ -26,9 +33,12 @@ import asyncpg
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
+from pydantic import BaseModel, Field
+
+from . import reconcile
 from .config import Settings
 from .detector import Busy, Detector
-from .registry import RegistryClient
+from .registry import RegistryClient, RegistryUnavailable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("alice-file-detection")
@@ -70,6 +80,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="alice-file-detection", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(RegistryUnavailable)
+async def _registry_down(_, exc):
+    return JSONResponse(status_code=503, content={"error": "registry_unavailable", "detail": str(exc)})
 
 
 def _det(request: Request) -> Detector:
@@ -142,3 +157,78 @@ async def get_run(run_id: int, request: Request):
 async def problems(request: Request, limit: int = Query(500, ge=1, le=10000)):
     items, count = await _det(request).problems(limit)
     return {"count": count, "items": items}
+
+
+# ---------------------------------------------------------------- PROJ-120
+class LeaseIn(BaseModel):
+    token: str | None = Field(None, pattern=r"^[0-9a-f]{32}$")
+    seconds: int = Field(300, ge=10, le=3600)
+
+
+class FileIn(BaseModel):
+    path: str = Field(..., min_length=1, max_length=4096)
+
+
+class RegisterIn(BaseModel):
+    items: list[FileIn] = Field(..., min_length=1, max_length=100000)
+
+
+class RehashIn(BaseModel):
+    full: bool = False
+    cycle_days: float = Field(30, gt=0, le=3650)
+    max_seconds: float | None = Field(None, gt=0)
+    max_bytes: int | None = Field(None, gt=0)
+
+
+class ApplyIn(BaseModel):
+    paths: list[str] = Field(..., min_length=1, max_length=100000)
+
+
+def _busy(exc) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"error": "busy", "detail": f"Lauf aktiv: {exc}", "running": str(exc)})
+
+
+@app.post("/reconcile/lease")
+async def lease(body: LeaseIn, request: Request):
+    try:
+        token = reconcile.acquire_lease(_det(request), body.token, body.seconds)
+    except Busy as exc:
+        return _busy(exc)
+    except reconcile.LeaseHeld as exc:
+        return JSONResponse(status_code=409, content={"error": "lease_held", "detail": str(exc)})
+    return {"token": token, "seconds": body.seconds}
+
+
+@app.delete("/reconcile/lease/{token}")
+async def unlease(token: str, request: Request):
+    return {"released": reconcile.release_lease(_det(request), token)}
+
+
+@app.post("/reconcile/check")
+async def rc_check(request: Request):
+    try:
+        return await reconcile.check(_det(request))
+    except Busy as exc:
+        return _busy(exc)
+
+
+@app.post("/reconcile/register")
+async def rc_register(body: RegisterIn, request: Request):
+    try:
+        return await reconcile.register(_det(request), [i.model_dump() for i in body.items])
+    except Busy as exc:
+        return _busy(exc)
+
+
+@app.post("/reconcile/rehash")
+async def rc_rehash(body: RehashIn, request: Request):
+    return await reconcile.rehash(_det(request), full=body.full, cycle_days=body.cycle_days,
+                                  max_seconds=body.max_seconds, max_bytes=body.max_bytes)
+
+
+@app.post("/reconcile/apply")
+async def rc_apply(body: ApplyIn, request: Request):
+    try:
+        return await reconcile.apply(_det(request), body.paths)
+    except Busy as exc:
+        return _busy(exc)

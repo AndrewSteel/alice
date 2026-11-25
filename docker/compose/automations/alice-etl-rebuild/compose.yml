@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# alice-etl-rebuild — rebuild runs + completeness reconciliation of the new ETL (PROJ-120).
+#
+# Rebuild: sets the stages from a chosen start stage on back to pending in throttled
+# portions (through alice-source-registry); the existing stage services work them off,
+# normal work first. Progress, pause/resume/cancel, survives restarts.
+# Reconciliation (nightly after the detection's nightly run, on demand, after a rebuild):
+# NAS <-> register (via alice-file-detection), register <-> repo (via alice-source-registry),
+# stages and register <-> DB; repairs unambiguous gaps, reports the rest.
+# No NAS mount, no repo, no Redis, no Weaviate, no MQTT, no LLM.
+#
+# Internal interface on port 8017 (for PROJ-122), reachable only inside the Docker
+# network: there is deliberately NO nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-etl-rebuild:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-etl-rebuild
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8017/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      # alice-source-registry, alice-file-detection, postgres
+      backend:
+        aliases: [alice-etl-rebuild]
+
+networks:
+  backend:
+    external: true
+    name: backend

@@ -213,6 +213,37 @@ class GitRepo:
         out = self.git("ls-files", "-z", "--", *WATCH_DIRS)
         return [p for p in out.split("\0") if p]
 
+    def index_blobs(self) -> dict[str, str]:
+        """{path: blob id} of the tracked files below the kind folders and deleted/ (PROJ-120)."""
+        out = self.git("ls-files", "-s", "-z", "--", *WATCH_DIRS)
+        blobs = {}
+        for entry in out.split("\0"):
+            if entry:
+                meta, path = entry.split("\t", 1)
+                blobs[path] = meta.split()[1]
+        return blobs
+
+    def untracked_paths(self) -> list[str]:
+        out = self.git("ls-files", "-o", "--exclude-standard", "-z", "--", *WATCH_DIRS)
+        return [p for p in out.split("\0") if p]
+
+    def deleted_paths(self) -> list[str]:
+        """Tracked, but missing in the working tree."""
+        out = self.git("ls-files", "-d", "-z", "--", *WATCH_DIRS)
+        return [p for p in out.split("\0") if p]
+
+    def last_version(self, rel: str) -> str | None:
+        """Last committed content of a path that may have been deleted since (PROJ-120)."""
+        res = self._run("rev-list", "-n", "1", "HEAD", "--", rel)
+        commit = res.stdout.decode().strip() if res.returncode == 0 else ""
+        if not commit:
+            return None
+        for rev in (commit, commit + "^"):
+            out = self._run("show", f"{rev}:{rel}")
+            if out.returncode == 0:
+                return out.stdout.decode("utf-8", errors="replace")
+        return None
+
     def changed_since(self, rev: str) -> list[str]:
         out = self.git("diff", "--name-only", "-z", "--no-renames", rev, "HEAD", "--", *WATCH_DIRS)
         return [p for p in out.split("\0") if p]
