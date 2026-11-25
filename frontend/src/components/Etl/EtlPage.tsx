@@ -12,8 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserCard } from "@/components/Sidebar/UserCard";
 import { useAuth } from "@/hooks/useAuth";
 import { formatRelative } from "@/i18n/format";
-import { EtlError, EtlStateResponse, etlApi } from "@/services/etlApi";
-import { EtlContext, EtlContextValue, FilterSelect } from "./EtlCommon";
+import { EtlError, etlApi } from "@/services/etlApi";
+import { EtlContext, EtlContextValue, EtlPageState, FilterSelect } from "./EtlCommon";
 import { EtlSummary } from "./EtlSummary";
 import { EtlOverview } from "./EtlOverview";
 import { EtlErrors } from "./EtlErrors";
@@ -52,7 +52,7 @@ function EtlPageContent() {
   const [refresh, setRefresh] = useState<string>("5");
   const [tick, setTick] = useState(0);
   const [tab, setTab] = useState<Tab>("overview");
-  const [state, setState] = useState<EtlStateResponse | null>(null);
+  const [state, setState] = useState<EtlPageState | null>(null);
   const [stateFailed, setStateFailed] = useState(false);
   const [sectionDown, setSectionDown] = useState({ register: false, rebuild: false });
   const [kind, setKind] = useState("");
@@ -89,8 +89,25 @@ function EtlPageContent() {
       .state(kind || undefined, includeDeleted)
       .then((s) => {
         if (cancelled) return;
-        setState(s);
+        // AK-41: when the rebuild/reconcile service is down the response carries null for its parts;
+        // keep the last loaded values (marked outdated, with their own timestamp) instead of "--".
+        setState((prev) => {
+          if (s.services.rebuild || !prev) return { ...s, rebuild_as_of: s.services.rebuild ? s.as_of : null };
+          return {
+            ...s,
+            rebuild: s.rebuild ?? prev.rebuild,
+            reconcile: s.reconcile ?? prev.reconcile,
+            rebuild_as_of: prev.rebuild_as_of ?? null,
+          };
+        });
         setStateFailed(false);
+        // AK-41: the state call is the source of truth for service health, independent of the open tab;
+        // a section that is mounted reports again on its own load in the same refresh cycle.
+        setSectionDown((d) =>
+          (d.register || d.rebuild) && (s.services.register || s.services.rebuild)
+            ? { register: d.register && !s.services.register, rebuild: d.rebuild && !s.services.rebuild }
+            : d
+        );
       })
       .catch((e) => {
         if (cancelled) return;

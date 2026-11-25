@@ -88,6 +88,12 @@ Keine offenen. Während des Tests behoben (Low): englische Zähler „1 errors�
 - React rendert alle Texte escaped; kein `dangerouslySetInnerHTML`.
 - Keine Secrets im Code, Testschlüssel werden je Lauf erzeugt.
 
+## Nachtest nach Abnahme Runde 1 (2026-11-25)
+Browser (Playwright, `next dev`, Schnittstelle per Routen-Attrappe mit umschaltbarem PROJ-120-Ausfall), 9/9 bestanden:
+- ✅ Befund 1: Dienst fällt aus → „Letzter Abgleich“ (4 Lücken · 2 repariert · 2 gemeldet) und „Neuaufbau“ (läuft · 40 %) bleiben stehen, beide mit „Stand vor … · veraltet“; Ergebnisliste im Tab Abgleich bleibt stehen
+- ✅ Befund 2: Ausfall bei offenem Tab Abgleich, Wechsel auf Fehler, Dienst zurück → Banner und „veraltet“ verschwinden innerhalb eines Refresh-Zyklus
+- ✅ Rückkehr bei offenem Tab Abgleich: Banner verschwindet; keine Seitenfehler
+
 ## Nicht live geprüft
 - Echter Bestand, echter PROJ-120-Dienst mit laufendem Neuaufbau/Abgleich, nginx-Route → Live-Tests AK-48–50 nach Deploy. Prüfen: `/etl` öffnen, Zahlen gegen `SELECT stage, state, count(*) FROM alice.source_stages GROUP BY 1,2` vergleichen; eine Testquelle mit `failed_permanent` erneut versuchen; kleinen Neuaufbau starten/pausieren/fortsetzen.
 

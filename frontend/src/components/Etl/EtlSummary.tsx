@@ -24,8 +24,17 @@ export function levelTotals(r: ReconcileResult | null | undefined) {
 /** Top of the page: last reconciliation (highlighted when incomplete/old), active rebuild, errors (spec 1). */
 export function EtlSummary() {
   const { t } = useTranslation();
-  const { state, goTo } = useEtl();
+  const { state, goTo, rebuildDown } = useEtl();
   if (!state) return null;
+  // AK-41: while the rebuild/reconcile service is down these cards keep the last data; say from when
+  const staleAt = rebuildDown ? state.rebuild_as_of ?? null : null;
+  const staleNote = staleAt ? (
+    <p className="text-xs text-muted-foreground" data-testid="etl-summary-stale">
+      <span title={formatDateTimeShort(staleAt)}>{t("etl.asOf", { time: formatRelative(staleAt) })}</span>
+      {" · "}
+      {t("etl.stale")}
+    </p>
+  ) : null;
   const rec = state.reconcile;
   const last = rec?.last ?? null;
   const tot = levelTotals(last);
@@ -68,6 +77,7 @@ export function EtlSummary() {
               )}
             </>
           )}
+          {rec !== null && staleNote}
         </CardContent>
       </Card>
 
@@ -86,6 +96,7 @@ export function EtlSummary() {
           ) : (
             <p className="text-muted-foreground">{t("etl.summary.noActiveRebuild")}</p>
           )}
+          {state.rebuild !== null && staleNote}
         </CardContent>
       </Card>
 

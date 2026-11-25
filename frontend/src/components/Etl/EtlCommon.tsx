@@ -30,9 +30,12 @@ export const ALL = "__all__";
 export const PAGE_SIZE = 50;
 
 /** Shared state of the ETL page (PROJ-122): refresh tick, service availability, navigation. */
+/** State plus the time its rebuild/reconcile parts were last loaded successfully (AK-41). */
+export type EtlPageState = EtlStateResponse & { rebuild_as_of?: string | null };
+
 export interface EtlContextValue {
   tick: number;
-  state: EtlStateResponse | null;
+  state: EtlPageState | null;
   registerDown: boolean;
   rebuildDown: boolean;
   /** Report the outcome of a background load: drives the banners, never a toast (AK-41). */

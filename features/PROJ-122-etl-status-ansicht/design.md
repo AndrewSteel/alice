@@ -130,3 +130,7 @@ Deploy-Schritte für den Menschen:
   - Bei Dienstausfall (5xx/Netz) zeigt die Seite das Banner; ein 403 leitet zum Chat, ein 401 zur Anmeldung (zentral über `fetchWithAuth`).
   - Ereignis-Text des Retrys auf Deutsch wie die übrigen Register-Ereignisse („Stufe classify erneut versucht von <Admin> (vorher failed_permanent, 5 Versuche)“).
 - Abweichungen von der Spec: keine.
+
+## Nachbesserung nach Abnahme Runde 1 (2026-11-25)
+- **Letzte Daten bei Ausfall von PROJ-120 (AK-41):** liefert `/etl/state` `rebuild`/`reconcile` als `null` (Dienst nicht erreichbar), behält die Seite die zuletzt geladenen Werte statt `--`. Die Karten „Letzter Abgleich“ und „Neuaufbau“ zeigen dann „Stand <Zeit> · veraltet“ mit dem Zeitpunkt des letzten erfolgreichen Abrufs.
+- **Banner nach Rückkehr unabhängig vom Tab (AK-41):** der Ausfallzustand einzelner Bereiche wird zusätzlich durch jeden erfolgreichen `/etl/state`-Abruf zurückgesetzt, sobald dieser den Dienst wieder als erreichbar meldet. Vorher setzten ihn nur die Bereiche zurück, die gerade sichtbar waren.
