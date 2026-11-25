@@ -853,8 +853,8 @@ const de = {
       noActiveRebuild: "kein aktiver Lauf",
       rebuildShort: "{{status}} · {{percent}} %",
       errors: "Fehler",
-      errorsShort: "{{serious}} Fehler · {{failed}} mit geplantem Retry",
-      sources: "{{n}} Quellen",
+      errorsShort: "Fehler: {{serious}} · mit geplantem Retry: {{failed}}",
+      sources: "Quellen: {{n}}",
     },
     matrix: {
       title: "Stufen × Zustände",
@@ -880,7 +880,7 @@ const de = {
         nextRetry: "Nächster Retry",
         errorAt: "Zeitpunkt",
       },
-      total: "{{n}} Treffer",
+      total: "Treffer: {{n}}",
       deletedBadge: "gelöscht",
       lockedBadge: "gesperrt",
     },
@@ -935,7 +935,7 @@ const de = {
     },
     rebuild: {
       start: "Neuaufbau starten",
-      startDisabled: "Lauf {{id}} ist {{status}}: ein neuer Lauf startet erst nach dessen Ende.",
+      startDisabled: "Lauf {{id}} ({{status}}) ist aktiv: ein neuer Lauf startet erst nach dessen Ende.",
       startTitle: "Neuaufbau starten",
       startStage: "Startstufe",
       kind: "Art (optional)",

@@ -57,6 +57,7 @@ export function EtlOverview({ kind, onKind, includeDeleted, onIncludeDeleted }: 
       ) : (
         <ScrollBox>
           <Table data-testid="etl-matrix">
+            <caption className="sr-only">{t("etl.matrix.title")}</caption>
             <TableHeader>
               <TableRow>
                 <TableHead className="sticky left-0 bg-card">{t("etl.matrix.stage")}</TableHead>

@@ -846,8 +846,8 @@ const en = {
       noActiveRebuild: "no active run",
       rebuildShort: "{{status}} · {{percent}} %",
       errors: "Errors",
-      errorsShort: "{{serious}} errors · {{failed}} with retry planned",
-      sources: "{{n}} sources",
+      errorsShort: "Errors: {{serious}} · retry planned: {{failed}}",
+      sources: "Sources: {{n}}",
     },
     matrix: {
       title: "Stages × states",
@@ -873,7 +873,7 @@ const en = {
         nextRetry: "Next retry",
         errorAt: "Time",
       },
-      total: "{{n}} results",
+      total: "Results: {{n}}",
       deletedBadge: "deleted",
       lockedBadge: "locked",
     },
@@ -928,7 +928,7 @@ const en = {
     },
     rebuild: {
       start: "Start rebuild",
-      startDisabled: "Run {{id}} is {{status}}: a new run can only start after it has ended.",
+      startDisabled: "Run {{id}} ({{status}}) is active: a new run can only start after it has ended.",
       startTitle: "Start rebuild",
       startStage: "Start stage",
       kind: "Kind (optional)",
