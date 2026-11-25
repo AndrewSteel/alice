@@ -36,7 +36,7 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | P0 | Quelle-der-Wahrheit-Repo + Quellen-Register — Git-versionierter NAS-Ordner, Markdown-/Frontmatter-Format, Register aller Quellen mit Verarbeitungszustand (PROJ-115) | 4.1 | Deployed |
 | P0 | Datei-Erkennung — Scan, Hash/Dedup, Verschieben/Umbenennen/Löschen; ersetzt Scanner, Path-Worker, Lifecycle, Reconcile (PROJ-116) | 4.1 | Deployed |
 | P0 | Text-Extraktion → Quell-Markdown — Text mit Seitenmarken ohne Kürzung, OCR je Seite, alle Office-Formate (PROJ-117) | 4.1 | Deployed |
-| P0 | Klassifizierung + Feldextraktion ins Frontmatter, deutsche Zusammenfassung (PROJ-118) | 4.1 | Approved |
+| P0 | Klassifizierung + Feldextraktion ins Frontmatter, deutsche Zusammenfassung (PROJ-118) | 4.1 | Deployed |
 | P0 | Strukturierte Dokumentdaten in PostgreSQL, abgeleitet aus der Quell-Markdown (PROJ-119) | 4.1 | Deployed |
 | P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Planned |
 | P1 | ETL-Status-Ansicht (Admin, WebApp) (PROJ-122) | 4.1 | Planned |
