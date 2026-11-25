@@ -67,7 +67,7 @@ alice-source-registry, alice-etl-rebuild: keine Änderung (deren interne Schnitt
 - **Neuer kleiner Dienst statt Erweiterung von `alice-etl-rebuild` oder `alice-chat-stream`**, weil die Spec verlangt, dass die internen Schnittstellen von PROJ-115/120 ohne nginx-Route bleiben, und EC-9 verlangt, dass die Register-Ansichten auch bei Ausfall des PROJ-120-Dienstes funktionieren. Der Chat-Dienst soll keine ETL-Logik tragen.
 - **Lesen per SQL, Schreiben über die Dienste**: Matrix und Listen über 60.000 Quellen brauchen eine gebündelte Abfrage (< 1 s, AK-46); alle Änderungen laufen über die Schnittstellen, die die Regeln kennen (Queue, Kennzeichen, Commits).
 - **Rolle aus der Datenbank je Anfrage**: Tokens leben länger als eine Rollenänderung; nur so greift EC-8 „spätestens die nächste Anfrage“.
-- **Retry-Prüfung im neuen Dienst**: Die Register-Route erlaubt auch `pending`/`done`; die Spec erlaubt nur `failed`/`failed_permanent` nicht gesperrter, nicht gelöschter Quellen. Zwischen Prüfung und Register-Aufruf liegen Millisekunden; ein dadurch theoretisch möglicher Doppel-Retry setzt höchstens eine gerade wartende Stufe erneut auf `pending` (harmlos).
+- **Retry-Prüfung im neuen Dienst**: Die Register-Route erlaubt auch `pending`/`done`; die Spec erlaubt nur `failed`/`failed_permanent` nicht gesperrter, nicht gelöschter Quellen. Zwischen Prüfung und Register-Aufruf liegen Millisekunden; im ungünstigsten Fall wird eine Stufe, die genau in diesem Moment fertig wurde, ein weiteres Mal verarbeitet (kein Datenverlust).
 - **Grenze zählt Quellen**, nicht Stufen (Spec: „Auswahl mit mehr als … Quellen“). Im Fehlerbereich ohne Stufenfilter werden alle fehlgeschlagenen Stufen der gewählten Quellen wiederholt.
 - **Fehlerbereich ohne gelöschte Quellen**: Für gelöschte Quellen gibt es keinen Retry und keine Verarbeitung mehr; sie würden den Bereich nur füllen. In der Quellenliste lassen sie sich über den Filter einblenden.
 - **Vorschau als Näherung**: nicht gelöschte, nicht gesperrte Quellen der Art; die genaue Aufteilung (ausgenommen je Grund) zeigt danach der Lauf.
@@ -115,7 +115,7 @@ Deploy-Schritte für den Menschen:
 | Neuer Dienst `alice-etl-status` | Admin-Routen in `alice-etl-rebuild` bzw. `alice-chat-stream` | Interne Schnittstellen bleiben ohne Route; Register-Ansichten unabhängig vom PROJ-120-Dienst (EC-9); ein Container mehr |
 | Lesen per SQL | alles über Register/PROJ-120 | Register hat keine Listen-/Matrix-Routen; < 1 s bei 60.000 Quellen |
 | Rolle je Anfrage aus der DB | nur Token-Claim | EC-8 verlangt sofortige Wirkung |
-| Retry-Prüfung im neuen Dienst | Register-Route ändern | Register bleibt unverändert; Restrisiko eines Doppel-Retrys harmlos |
+| Retry-Prüfung im neuen Dienst | Register-Route ändern | Register bleibt unverändert; Restrisiko: eine gerade fertig gewordene Stufe läuft ein weiteres Mal |
 | Grenze zählt Quellen | Stufen zählen | Wortlaut der Spec |
 | Detail als Seitenleiste | eigene Route `/etl/source?id=` | statischer Export, ein Baustein für alle Sprünge |
 
