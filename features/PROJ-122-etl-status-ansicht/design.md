@@ -118,3 +118,15 @@ Deploy-Schritte für den Menschen:
 | Retry-Prüfung im neuen Dienst | Register-Route ändern | Register bleibt unverändert; Restrisiko eines Doppel-Retrys harmlos |
 | Grenze zählt Quellen | Stufen zählen | Wortlaut der Spec |
 | Detail als Seitenleiste | eigene Route `/etl/source?id=` | statischer Export, ein Baustein für alle Sprünge |
+
+## Umsetzung (Bau, 2026-11-25)
+- Neuer Dienst `docker/compose/automations/alice-etl-status` (Port 8018, Netze `backend` + `frontend`, Eintrag im Makefile): `auth.py` (JWT + Rolle aus der DB), `queries.py` (Matrix, Zahlen, Liste, Fehler, Detail, Vorschau), `retry.py` (Einzel-/Sammel-Retry mit Ereignis `manual_retry`), `upstream.py` (Register, PROJ-120), `main.py` (Routen). nginx: `/api/etl/` mit Zone `etl_limit` (240/min, Burst 40).
+- Frontend: `app/(main)/etl/page.tsx`, `components/Etl/*`, `components/Dashboard/EtlTile.tsx` (+ ein Eintrag in der Kachel-Registry), UserCard-Eintrag „ETL-Status“, `services/etlApi.ts`, Hilfen `formatRelative`/`formatDuration`/`formatNumber` in `i18n/format.ts`, Texte in `de.ts`/`en.ts`.
+- **Präzisierungen:**
+  - Typ im Detail = `type` aus `alice.doc_documents` (PROJ-119); ohne Dokument-Zeile „--“.
+  - Kachel-Prozent = durchgelaufene Quellen / Quellen im Lauf; „Fehler gesamt“ zählt Quellen (nicht Stufen) ohne gelöschte.
+  - „Letzter Abgleich“ = jüngstes beendete Ergebnis; Alter ab Ende (sonst Start). Gemeldete Lücken = `reported` + `repair_failed`.
+  - Verlauf zeigt aus der Lauf-Liste von PROJ-120 die Läufe `abgeschlossen`/`abgebrochen`; ein Klick auf die Lauf-Nummer zeigt dessen Fehlerliste.
+  - Bei Dienstausfall (5xx/Netz) zeigt die Seite das Banner; ein 403 leitet zum Chat, ein 401 zur Anmeldung (zentral über `fetchWithAuth`).
+  - Ereignis-Text des Retrys auf Deutsch wie die übrigen Register-Ereignisse („Stufe classify erneut versucht von <Admin> (vorher failed_permanent, 5 Versuche)“).
+- Abweichungen von der Spec: keine.
