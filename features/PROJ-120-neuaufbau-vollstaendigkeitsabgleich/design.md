@@ -182,3 +182,22 @@ Deploy-Schritte für den Menschen:
 - **B-3:** Ebene 2 liest auch die Markdown gesperrter Quellen und meldet eine `id`/`kind`-Abweichung als `frontmatter_mismatch` (AK-27), auch nachdem PROJ-115 die Quelle beim Scan gesperrt hat. Unlesbares YAML einer gesperrten Quelle ist deren sichtbarer Sperrgrund und wird nicht zusätzlich als Abweichung gemeldet.
 - Hinweis aus der Abnahme (zwei Ereignisse beim Verschieben: `file_moved` vom Register und `reconcile_moved`) unverändert gelassen: `file_moved` entsteht in der bestehenden Git-Logik von PROJ-115, `reconcile_moved` nennt den Abgleich als Auslöser; kein Verlust, kein Widerspruch zu AK-34.
 
+
+## Deployment
+
+**Datum:** 2026-11-25, von `dev` (Phase 4). Kein Staging.
+
+**Schritte:**
+1. Migration `sql/migrations/2026-11-24_PROJ-120_rebuild_reconcile.sql` (durch den Nutzer).
+2. `.env` für `alice-etl-rebuild` (durch den Nutzer).
+3. `./scripts/sync-compose.sh` (rsync-Code 23 nur wegen der Zeitstempel von `mqtt/config`, harmlos), Rebuild `alice-source-registry`, `alice-file-detection`, `alice-etl-rebuild` (durch den Nutzer). Alle drei `healthy`, Logs ohne Fehler.
+
+**Mechanik-Test (statt AK-48/AK-49, Entscheidung des Nutzers):** Neuaufbau-Lauf 1 ab `database`, Art `document`.
+- 850 Quellen, 2 ausgenommen (gelöscht), 848 im Lauf; nie mehr als 50 gleichzeitig freigegeben (Drosselung).
+- Pausieren: keine neuen Freigaben, freigegebene liefen zu Ende (aktiv → 0); Fortsetzen: nahtlos weiter.
+- Ende nach ~14 min: `abgeschlossen`, 848/848 erledigt, 0 fehlgeschlagen; automatischer Abgleich `after_rebuild` (Ergebnis 1): `vollständig`, 55.417 Quellen, 0 Lücken auf allen vier Ebenen, Sicherung nicht ausgelöst, Dauer 9,2 s.
+- AK-48 (neue Datei ≤ 15 min während des Laufs) und AK-49 (Chat parallel zu einem `classify`-Lauf) nicht eigens geprüft: Neuaufbau-Läufe laufen in der Praxis ohne parallele Ablage; der Chat-Vorrang nutzt den Hintergrund-Schlüssel aus PROJ-118 (dort live geprüft). Bekannte Einschränkung aus PROJ-118: lange Buchungs-Extraktionen (56–133 s) können einen Chat-Aufruf im Gateway warten lassen; bei einem großen `classify`-Lauf beobachten.
+
+**Nebenbefund (PROJ-119):** `alice-document-database` schreibt Kontoauszüge im Takt von ~5 s je Stück, andere Typen in Millisekunden. Für Läufe über den ganzen Bestand beobachten.
+
+**Offen:** AK-47 — Ergebnis des ersten nächtlichen Abgleichs (03:00, 2026-11-26) prüfen.
