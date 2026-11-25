@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# alice-etl-status — admin interface of the WebApp to the new ETL (PROJ-122).
+#
+# Reads the register tables (overview matrix, source list, errors, source detail)
+# and passes retries to alice-source-registry and rebuild/reconciliation control to
+# alice-etl-rebuild. Only active users with the role admin (JWT + role from the DB).
+# No NAS mount, no repo, no Redis, no Weaviate.
+#
+# Reached by nginx under /api/etl/ (port 8018); the internal interfaces of the
+# register and of alice-etl-rebuild keep having no nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-etl-status:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-etl-status
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    env_file:
+      - .env
+    volumes:
+      - /srv/warm/alice/keys/jwt_public.pem:/run/secrets/jwt_public.pem:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8018/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      # postgres, alice-source-registry, alice-etl-rebuild
+      backend:
+        aliases: [alice-etl-status]
+      # nginx
+      frontend:
+        aliases: [alice-etl-status]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  frontend:
+    external: true
+    name: frontend
