@@ -147,7 +147,7 @@ Deploy-Schritte für den Menschen:
 
 **Live-Tests:**
 - AK-48 ✅ Matrix stimmt mit dem Register überein (u. a. `detect` 55.425 `done`, `extract` 858 `done` / 51.837 `pending` / 2.730 `skipped`, `classify` 2 `failed_permanent`). Letzter Abgleich (Nr. 1, `after_rebuild`) sichtbar; ein nächtlicher Abgleich lag beim Deploy noch nicht vor.
-- AK-49 ✅ „Erneut versuchen“ an einer `classify`-Quelle mit `failed_permanent`: Stufe `pending` mit 0 Versuchen, Ereignis `manual_retry`, Stufe lief erneut. Die Klassifizierung scheiterte wieder (Stufe jetzt `failed` mit Backoff) — Ursache liegt in PROJ-118, nicht in der Ansicht: das LLM antwortet bei diesem Dokument mit dem Schlüssel `" type"` (führendes Leerzeichen), den `read_classification` nicht erkennt.
+- AK-49 ✅ „Erneut versuchen“ an einer `classify`-Quelle mit `failed_permanent`: Stufe `pending` mit 0 Versuchen, Ereignis `manual_retry`, Stufe lief erneut. Die Klassifizierung scheiterte wieder (Stufe jetzt `failed` mit Backoff) — Ursache liegt in PROJ-118, nicht in der Ansicht: das LLM antwortet bei diesem Dokument mit dem Schlüssel `" type"` (führendes Leerzeichen), den `read_classification` nicht erkennt. Behoben in PROJ-118 (aa0dccb); nach Rebuild und erneutem „erneut versuchen“ stehen beide Quellen in `classify` und `database` auf `done`.
 - AK-50 ✅ kleiner Neuaufbau über die Seite gestartet, pausiert, fortgesetzt, abgeschlossen; Abgleich „nach Neuaufbau“ im Verlauf.
 
 **Offen:** nächtlichen Abgleich in Zusammenfassung und Kachel nach dem ersten Nachtlauf (2026-11-26) ansehen.
