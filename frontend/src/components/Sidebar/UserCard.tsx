@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, LogOut, MessageSquare, Settings } from "lucide-react";
+import { Activity, LayoutDashboard, LogOut, MessageSquare, Settings } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -82,6 +82,16 @@ export function UserCard({ variant = "sidebar" }: UserCardProps) {
           >
             <viewToggle.icon className="h-4 w-4" aria-hidden />
             {viewToggle.label}
+          </DropdownMenuItem>
+        )}
+        {isAdmin && pathname !== "/etl" && (
+          // PROJ-122: ETL status page, admins only
+          <DropdownMenuItem
+            onClick={() => router.push("/etl")}
+            className="gap-2 text-foreground focus:text-foreground focus:bg-accent cursor-pointer"
+          >
+            <Activity className="h-4 w-4" aria-hidden />
+            {t("sidebar.userCard.etl")}
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator className="bg-muted" />
