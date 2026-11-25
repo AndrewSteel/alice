@@ -235,6 +235,20 @@ async def test_think_block_and_fence(classifier, gateway):
     assert out["type"] == "Contract" and out["classification"]["confidence"] == 0.9
 
 
+async def test_keys_with_surrounding_spaces(classifier, gateway):
+    # Real qwen3.8 answer (Angebotsmappe, 2026-11-25): key " type" with a leading space,
+    # identical at temperature 0, so the stage failed on every attempt.
+    raw = '{\n" type": "Document",\n"confidence": 0.95\n}'
+    gateway.push("classify", raw, raw)
+    gateway.push("extract", {" title ": "Angebot Klimaanlage", "summary": "Angebot.",
+                             "fields": {" sender": "Beispiel GmbH", "document_date ": "2026-07-08"}})
+    out = await classifier.run(frontmatter(), "Angebot …")
+    assert out["type"] == "Document" and out["classification"]["confidence"] == 0.95
+    assert len(gateway.calls("classify")) == 1
+    assert out["fields"]["sender"] == "Beispiel GmbH" and out["fields"]["document_date"] == "2026-07-08"
+    assert out["title"].endswith("Angebot Klimaanlage")
+
+
 @pytest.mark.parametrize("status", [503, 504, 429, 401])
 async def test_gateway_unavailable(classifier, gateway, status):  # AK-42
     gateway.status = status

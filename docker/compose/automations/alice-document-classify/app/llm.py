@@ -31,8 +31,17 @@ _THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.I)
 
 
+def _strip_keys(value):
+    """Keys without surrounding whitespace, at every level: qwen3 sometimes writes `" type"`."""
+    if isinstance(value, dict):
+        return {k.strip() if isinstance(k, str) else k: _strip_keys(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_keys(v) for v in value]
+    return value
+
+
 def parse_json(text: str) -> dict:
-    """JSON object from an LLM answer; thinking blocks and code fences are ignored."""
+    """JSON object from an LLM answer; thinking blocks and code fences are ignored, keys are trimmed."""
     text = _THINK.sub("", text or "").strip()
     text = _FENCE.sub("", text).strip()
     try:
@@ -47,7 +56,7 @@ def parse_json(text: str) -> dict:
             raise InvalidAnswer("kein gültiges JSON") from None
     if not isinstance(value, dict):
         raise InvalidAnswer("Antwort ist kein JSON-Objekt")
-    return value
+    return _strip_keys(value)
 
 
 class LlmClient:
