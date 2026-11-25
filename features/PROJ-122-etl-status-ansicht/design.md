@@ -134,3 +134,20 @@ Deploy-Schritte für den Menschen:
 ## Nachbesserung nach Abnahme Runde 1 (2026-11-25)
 - **Letzte Daten bei Ausfall von PROJ-120 (AK-41):** liefert `/etl/state` `rebuild`/`reconcile` als `null` (Dienst nicht erreichbar), behält die Seite die zuletzt geladenen Werte statt `--`. Die Karten „Letzter Abgleich“ und „Neuaufbau“ zeigen dann „Stand <Zeit> · veraltet“ mit dem Zeitpunkt des letzten erfolgreichen Abrufs.
 - **Banner nach Rückkehr unabhängig vom Tab (AK-41):** der Ausfallzustand einzelner Bereiche wird zusätzlich durch jeden erfolgreichen `/etl/state`-Abruf zurückgesetzt, sobald dieser den Dienst wieder als erreichbar meldet. Vorher setzten ihn nur die Bereiche zurück, die gerade sichtbar waren.
+
+## Deployment
+
+**Datum:** 2026-11-25, von `dev` (Phase 4). Kein Staging, keine Migration, keine n8n-Änderung.
+
+**Schritte:**
+1. `.env` für `alice-etl-status` (durch den Nutzer).
+2. `./scripts/sync-compose.sh`, dann `make up s=automations/alice-etl-status`. **Achtung:** das Make-Ziel `up` ignoriert `s=` und fährt alle Stacks hoch; dadurch wurden zusätzlich `postgres`, `nginx`, `ollama-titan`, `llama-3090` und `openwebui` neu erstellt (Konfigurationsdrift). Alle danach `healthy`, Postgres sauber neu gestartet, abhängige Dienste ohne Fehler. Für einzelne Dienste künftig `make rebuild s=…` bzw. `make app-up s=…`.
+3. nginx: durch das Neuerstellen bereits mit neuer Konfiguration gestartet, `nginx -t` ok; `/api/etl/state` ohne Anmeldung → 401.
+4. `./scripts/deploy-frontend.sh` + Sync (nur `infra/nginx/html/`; rsync-Code 23 wegen `mqtt/config`, harmlos). `/` und `/etl/` → 200.
+
+**Live-Tests:**
+- AK-48 ✅ Matrix stimmt mit dem Register überein (u. a. `detect` 55.425 `done`, `extract` 858 `done` / 51.837 `pending` / 2.730 `skipped`, `classify` 2 `failed_permanent`). Letzter Abgleich (Nr. 1, `after_rebuild`) sichtbar; ein nächtlicher Abgleich lag beim Deploy noch nicht vor.
+- AK-49 ✅ „Erneut versuchen“ an einer `classify`-Quelle mit `failed_permanent`: Stufe `pending` mit 0 Versuchen, Ereignis `manual_retry`, Stufe lief erneut. Die Klassifizierung scheiterte wieder (Stufe jetzt `failed` mit Backoff) — Ursache liegt in PROJ-118, nicht in der Ansicht: das LLM antwortet bei diesem Dokument mit dem Schlüssel `" type"` (führendes Leerzeichen), den `read_classification` nicht erkennt.
+- AK-50 ✅ kleiner Neuaufbau über die Seite gestartet, pausiert, fortgesetzt, abgeschlossen; Abgleich „nach Neuaufbau“ im Verlauf.
+
+**Offen:** nächtlichen Abgleich in Zusammenfassung und Kachel nach dem ersten Nachtlauf (2026-11-26) ansehen.
