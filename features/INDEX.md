@@ -1,6 +1,6 @@
 # Features
 
-Nächste freie ID: PROJ-143
+Nächste freie ID: PROJ-144
 
 Ablage wie im Starter Kit der Software Factory: pro Feature ein Ordner `features/PROJ-X-<name>/` mit `spec.md` (WAS, vom Menschen), `design.md` (WIE, Factory) und `qa-report.md` (Testbericht, Factory).
 
@@ -31,7 +31,7 @@ Status: `Roadmap` → `Planned` (Spec fertig) → `Architected` → `In Progress
 | PROJ-120 | 4.1 | Neuaufbau + Vollständigkeitsabgleich — kompletter Neuaufbau (Quell-Markdown, DB, später RAG/Wiki) aus den Originalen als Hintergrundlast mit Fortschritt; Abgleich Quellen ↔ Quelle der Wahrheit ohne stille Lücken | Deployed | features/PROJ-120-neuaufbau-vollstaendigkeitsabgleich/ |
 | PROJ-121 | 4.1 | Rollenmodell Haushalt — Rollen `admin`/`haushalt`/`guest`: `haushalt` sieht alle Dokumente, Postfächer und das Wiki, `admin` zusätzlich Verwaltung, `guest` wie bisher ohne DMS/Mail/Wiki; Rechte je Dokumenttyp und Postfach entfallen, Rolle `child` gestrichen | Deployed | features/PROJ-121-rollenmodell-haushalt/ |
 | PROJ-122 | 4.1 | ETL-Status-Ansicht (Admin, WebApp) — Verarbeitungsstand je Quelle und Stufe, Fehler, erneut versuchen, Neuaufbau-Fortschritt | Deployed | features/PROJ-122-etl-status-ansicht/ |
-| PROJ-123 | 4.2 | Mail-Import in den ETL — IMAP-Postfächer → `*.eml` ohne Anhänge (mit Links auf die Anhangsdateien) + Mail-Markdown + Kategorie (Wichtig/Werbung/Social/Spam); ersetzt `alice-mail-sync`, `-attachment-processor`, `-attachment-backfill`, `-reconcile` | Roadmap | |
+| PROJ-123 | 4.2 | Mail-Import in den ETL — IMAP-Postfächer → `*.eml` ohne Anhänge (mit Links auf die Anhangsdateien) + Mail-Markdown + Kategorie (Wichtig/Werbung/Social/Spam); ersetzt `alice-mail-sync`, `-attachment-processor`, `-attachment-backfill`, `-reconcile` | Planned | features/PROJ-123-mail-import-etl/ |
 | PROJ-124 | 4.2 | Mail-Anhänge als Quelldokumente — separat gespeicherte Anhänge laufen ohne Umweg über `/mnt/nas/ai` durch die Pipeline, mit Verweis auf die Mail | Roadmap | |
 | PROJ-125 | 4.2 | Bilder in der Quelle der Wahrheit — Bild-Markdown mit Beschreibung, EXIF, Ort (Reverse-Geocoding) und Link aufs Original; Neuaufbau übernimmt vorhandene Beschreibungen aus Weaviate, nur neue Bilder gehen ans Vision-Modell | Roadmap | |
 | PROJ-126 | 4.2 | Vorschaubilder aus dem neuen ETL — Thumbnails für Dokumente, Mails und Bilder, begrenzte Parallelität; ersetzt `alice-dms-thumbnailer`-Workflow und -Backfill | Roadmap | |
@@ -51,11 +51,12 @@ Status: `Roadmap` → `Planned` (Spec fertig) → `Architected` → `In Progress
 | PROJ-140 | 4.5 | Postfach-API als Service — ersetzt `alice-mail-api` | Roadmap | |
 | PROJ-141 | 4.5 | Modell-Warmup im LLM-Gateway — ersetzt `alice-llm-model-warmup` | Roadmap | |
 | PROJ-142 | 4.5 | n8n-Abschaltung + Altbestand aufräumen — alte Workflows, Weaviate-Collections und Redis-Keys entfernen, n8n-Container und Stack-Pack `n8n` raus, Doku angleichen | Roadmap | |
+| PROJ-143 | 4.2 | Proaktive Mail-Benachrichtigungen — Chat-Benachrichtigung an `haushalt`/`admin` bei neuen als „Wichtig“ eingestuften Mails (früher in `alice-mail-sync`, entfällt mit PROJ-123); Abhängigkeit von PROJ-123; ausgegliedert beim PROJ-123-Spec-Interview 2026-11-26 | Roadmap | |
 
 ## Bau-Reihenfolge Phase 4
 
 - **P0:** PROJ-121 → PROJ-115 → PROJ-116 → PROJ-117 → PROJ-118 → PROJ-119 → PROJ-120
 - **P1:** PROJ-122 (braucht PROJ-120) · PROJ-123 → PROJ-124 (braucht PROJ-117) · PROJ-125, PROJ-126 (brauchen PROJ-116) · PROJ-127 → PROJ-128 (brauchen PROJ-119) · PROJ-129 → PROJ-130, PROJ-131, PROJ-132 · PROJ-133 (braucht PROJ-128, PROJ-132) → PROJ-134 (braucht PROJ-133, PROJ-128) → PROJ-135, PROJ-136
-- **P2:** PROJ-137 (braucht PROJ-136) · PROJ-138, PROJ-139, PROJ-140, PROJ-141 · PROJ-142 (braucht alle übrigen Phase-4-Features)
+- **P2:** PROJ-137 (braucht PROJ-136) · PROJ-138, PROJ-139, PROJ-140, PROJ-141 · PROJ-143 (braucht PROJ-123) · PROJ-142 (braucht alle übrigen Phase-4-Features)
 
 Phase-3-Einträge oben (PROJ-81 bis PROJ-114) sind für Phase 4 zurückgestellt (`docs/PRD.md`, Non-Goals).

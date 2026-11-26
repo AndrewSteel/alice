@@ -40,7 +40,7 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | P0 | Strukturierte Dokumentdaten in PostgreSQL, abgeleitet aus der Quell-Markdown (PROJ-119) | 4.1 | Deployed |
 | P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Deployed |
 | P1 | ETL-Status-Ansicht (Admin, WebApp) (PROJ-122) | 4.1 | Deployed |
-| P1 | Mail-Import in den ETL — `.eml` ohne Anhänge + Links, Mail-Markdown, Kategorie (PROJ-123) | 4.2 | Roadmap |
+| P1 | Mail-Import in den ETL — `.eml` ohne Anhänge + Links, Mail-Markdown, Kategorie (PROJ-123) | 4.2 | Planned |
 | P1 | Mail-Anhänge als Quelldokumente (PROJ-124) | 4.2 | Roadmap |
 | P1 | Bilder in der Quelle der Wahrheit — Übernahme bestehender Beschreibungen (PROJ-125) | 4.2 | Roadmap |
 | P1 | Vorschaubilder aus dem neuen ETL (PROJ-126) | 4.2 | Roadmap |
