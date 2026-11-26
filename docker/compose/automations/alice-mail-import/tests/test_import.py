@@ -98,6 +98,36 @@ async def test_new_mail_in_next_tick_and_idempotent(env):  # AK-5, AK-6
     assert row["next_sync_at"] - datetime.now(timezone.utc) > timedelta(minutes=14)  # interval 15 min
 
 
+async def test_same_message_id_twice_in_one_folder(env):  # AK-6 (direct + via mailing list)
+    env.imap.add("INBOX", mails.make("Doppelt", msgid="<dup@example.invalid>"), NOV1)
+    env.imap.add("INBOX", mails.make("Doppelt", msgid="<dup@example.invalid>", extra_headers={"X-List": "yes"}), NOV1)
+    env.imap.add("INBOX", _mail(1), NOV1)
+    mb = await env.add_mailbox()
+    await env.sync(mb)
+    await env.extract_all()
+    await env.sync(mb)  # the second copy may be seen once more and is remembered
+    await env.reg.flush_due(force=True)
+    commits, files = env.commits(), env.files()
+    fetches = env.imap.commands.count("UID FETCH")
+    locs = await env.locations()
+    for _ in range(3):
+        out = await env.sync(mb)
+        assert out["imported"] == 0 and out["linked"] == 0
+    await env.reg.flush_due(force=True)
+    assert env.commits() == commits and env.files() == files
+    assert env.imap.commands.count("UID FETCH") == fetches  # nothing fetched again
+    assert await env.locations() == locs and len(await env.sources()) == 2
+    # nightly: the copy of the location goes, the other copy stays: still one present location, no deletion
+    dup = next(l for l in locs if l["message_id"] == "<dup@example.invalid>")
+    env.imap.remove("INBOX", dup["uid"])
+    await env.sync(mb, nightly=True)
+    now = [l for l in await env.locations(dup["source_id"]) if l["present"]]
+    assert len(now) == 1 and now[0]["uid"] != dup["uid"]
+    assert not any(s["deleted"] for s in await env.sources())
+    out = await env.sync(mb)
+    assert out["imported"] == 0 and out["linked"] == 0
+
+
 async def test_same_mail_in_two_folders_and_two_mailboxes(env):  # AK-7, EC-1, EC-13
     raw = mails.with_pdfs(msgid="<self@example.invalid>")
     env.imap.add("INBOX", raw, NOV1)

@@ -236,6 +236,46 @@ async def test_restart_leftovers(env):  # AK-45
     assert git(env.repo, "status", "--porcelain").strip() == ""
 
 
+class HardStop(BaseException):
+    pass
+
+
+async def test_hard_stop_between_register_and_archive(env, monkeypatch):  # AK-44, AK-45
+    for i in range(6):
+        env.imap.add("INBOX", _mail(i) if i % 2 else mails.with_pdfs(msgid=f"<pdf-{i}@example.invalid>"), NOV1)
+    mb = await env.add_mailbox()
+    real = env.importer.archive.write_new
+    calls = {"n": 0}
+
+    def crash(rel, data):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise HardStop  # not handled by the import, like a killed process
+        return real(rel, data)
+
+    monkeypatch.setattr(env.importer.archive, "write_new", crash)
+    try:
+        await env.sync(mb)
+    except HardStop:
+        pass
+    monkeypatch.setattr(env.importer.archive, "write_new", real)
+    unarchived = "SELECT count(*) FROM alice.sources s LEFT JOIN alice.mail_archive a ON a.source_id = s.id " \
+                 "WHERE s.kind = 'email' AND a.source_id IS NULL"
+    async with env.pool.acquire() as con:
+        assert await con.fetchval(unarchived) == 1
+    from app.importer import Importer
+    restarted = Importer(env.settings, env.pool, env.client)
+    out = await env.sync(mb, importer=restarted)
+    assert out["archived"] == 1
+    async with env.pool.acquire() as con:
+        assert await con.fetchval(unarchived) == 0
+    assert len(await env.sources()) == 6
+    assert len([f for f in env.files() if f.endswith(".eml")]) == 6
+    await env.extract_all()
+    for s in await env.sources():
+        assert (await env.stages(s["id"]))["extract"] == "done"
+
+
 async def test_reconcile_levels(env):  # AK-51, AK-52
     mb, uids = await _setup(env, 3)
     gone_sid = (await _by_title(env))["Mail 2"]["id"]

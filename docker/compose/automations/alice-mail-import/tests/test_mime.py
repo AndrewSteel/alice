@@ -74,6 +74,7 @@ def test_forwarded_mail_is_an_attachment():  # AK-13
     orig = message_from_bytes(inner, policy=default)
     assert parsed["Message-ID"] == "<inner@example.invalid>" and parsed["Subject"] == orig["Subject"]
     assert parsed.get_content().strip() == orig.get_content().strip()
+    assert att.data == inner  # byte for byte, CRLF line ends kept
 
 
 def test_same_names_and_encoded_umlaut():  # AK-14
