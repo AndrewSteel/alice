@@ -1,0 +1,56 @@
+# ---------------------------------------------------------------------------
+# alice-mail-import — mail import into the ETL (PROJ-123).
+#
+# Reads the IMAP mailboxes of alice.imap_mailboxes (INBOX + sent folder, read
+# only, passwords decrypted with the key of alice-mail-reader), stores every mail
+# as `.eml` with its attachments as separate files in the mail archive
+# (/mnt/nas/ai/mail via nas-volumes.yml, NAS account), registers it as source
+# `kind: email` and runs the stages extract (mail markdown) and classify
+# (category + German summary through alice-llm-gateway as background load).
+# Markdowns are written ONLY through alice-source-registry. Nightly
+# reconciliation with the mail servers; levels 5/6 for alice-etl-rebuild.
+#
+# Replaces the n8n workflows alice-mail-sync, -attachment-processor,
+# -attachment-backfill and -reconcile (deactivated with the deploy).
+#
+# Internal interface on port 8019 (health, status, reconcile), reachable only
+# inside the Docker network: there is deliberately NO nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-mail-import:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-mail-import
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8019/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      # postgres, alice-source-registry, alice-llm-gateway, mail servers (internet)
+      backend:
+        aliases: [alice-mail-import]
+      automation:
+        aliases: [alice-mail-import]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation
