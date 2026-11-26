@@ -173,7 +173,8 @@ def original_links(locations: list[dict]) -> str:
         if loc.get("path"):
             lines.append(f"- Original: [{posixpath.basename(loc['path'])}](<{loc['path']}>)")
         elif loc.get("mailbox"):
-            lines.append(f"- Original: Postfach {loc['mailbox']}, Message-ID {loc['message_id']}")
+            folder = f", Ordner {loc['folder']}" if loc.get("folder") else ""
+            lines.append(f"- Original: Postfach {loc['mailbox']}{folder}, Message-ID {loc['message_id']}")
     return normalize_content("\n".join(lines))
 
 
@@ -211,7 +212,7 @@ video/<JJJJ>/<MM>/<id>-<slug>.md
 | `schema` | Versionsnummer des Frontmatter-Formats |
 | `kind` | `document` / `image` / `email` / `audio` / `video` (nicht ändern) |
 | `title` | lesbarer Titel, steht auch als Überschrift im Markdown |
-| `locations` | Fundorte des Originals (Pfad bzw. Postfach + Message-ID) |
+| `locations` | Fundorte des Originals (Pfad bzw. Postfach + Ordner + UID + Message-ID) |
 | `parents` | IDs der Mails, an denen die Quelle als Anhang hängt |
 | `hash` | Hash des Originals |
 | `size` | Größe des Originals in Bytes |

@@ -148,11 +148,16 @@ class Location(BaseModel):
     path: str | None = Field(None, min_length=1, max_length=4096)
     mailbox: str | None = Field(None, min_length=1, max_length=255)
     message_id: str | None = Field(None, min_length=1, max_length=998)
+    # PROJ-123: IMAP folder + UID of a mail location (the UID changes with UIDVALIDITY)
+    folder: str | None = Field(None, min_length=1, max_length=1000)
+    uid: int | None = Field(None, ge=1)
 
     @model_validator(mode="after")
     def _one_kind(self):
         if bool(self.path) == bool(self.mailbox and self.message_id) or (self.mailbox is None) != (self.message_id is None):
             raise ValueError("Fundort ist entweder 'path' oder 'mailbox' + 'message_id'")
+        if self.path and (self.folder is not None or self.uid is not None):
+            raise ValueError("'folder' und 'uid' gibt es nur bei Mail-Fundorten")
         return self
 
     def as_dict(self) -> dict:
