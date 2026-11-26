@@ -129,3 +129,13 @@ Deploy-Schritte für den Menschen:
 | Anhänge zuerst temporär, Registrierung, dann Umbenennen | Registrierung zuerst | Archiv-Ausfall vor der Registrierung ändert das Register nicht (AK-44) |
 | `message/external-body` als Verweis in der `.eml` | Text-Platzhalter | Standard-MIME, Mailprogramme zeigen den Verweis als Anhang-Eintrag |
 | Ebenen 5/6 über Schnittstelle des Mail-Imports | IMAP-Zugriff in `alice-etl-rebuild` | Nur ein Dienst kennt Passwörter und IMAP |
+
+## Umsetzung (Bau, 2026-11-26)
+- Gebaut wie oben: neuer Dienst `docker/compose/automations/alice-mail-import/` (Port 8019, keine nginx-Route, `nas-base` für `/mnt/nas/ai`), Schema Abschnitt 20 in `sql/init-schema.sql` + Migration `sql/migrations/2026-11-26_PROJ-123_mail_import.sql`, Makefile-Eintrag.
+- `alice-source-registry`: Mail-Fundort nimmt `folder` und `uid` an; Eindeutigkeit jetzt inkl. Ordner (Index `idx_source_locations_key_folder` ersetzt `idx_source_locations_key`), eine neue UID im selben Ordner aktualisiert den Fundort statt einen neuen anzulegen. Ältere Mail-Fundorte ohne Ordner bleiben gültig.
+- `alice-etl-rebuild`: neue Variable `MAIL_IMPORT_URL`; Ebene 5 (`mail_unregistered`, Reparatur „nachholen“) und Ebene 6 (`eml_missing`/`attachment_missing`, Reparatur „neu ablegen“ nur, wenn ein Fundort noch vorhanden ist). Ebenen 5/6 erscheinen nur, wenn der Mail-Import konfiguriert ist; ist er bzw. ein Postfach nicht erreichbar, ist das Ergebnis „unvollständig“ mit Grund.
+- Sammel-Commits: Ein Paket mit mehr als `MAIL_BATCH_THRESHOLD` (20) Mails wird als Sammel-Commit registriert, kleinere Takte (z. B. eine neue Mail) einzeln. `extract` schreibt als Sammel-Commit, wenn es mehrere Mails auf einmal übernimmt.
+- Zeitraum „ab Startdatum“ richtet sich nach dem Empfangsdatum auf dem Server (IMAP `SINCE`), nicht nach dem `Date`-Header.
+- Ordnernamen werden so gespeichert, wie der Server sie meldet (bei Nicht-ASCII-Namen in modifiziertem UTF-7).
+- Bei Mails ohne Message-ID steht im Fundort `message_id: fp:<Fingerabdruck>`, das Feld `message_id` im Frontmatter bleibt leer.
+- Abweichungen von der Spec: keine.
