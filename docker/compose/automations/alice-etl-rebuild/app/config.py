@@ -24,6 +24,7 @@ class Settings:
     postgres_dsn: str = ""
     registry_url: str = "http://alice-source-registry:8012"
     detection_url: str = "http://alice-file-detection:8013"
+    mail_import_url: str = "http://alice-mail-import:8019"  # PROJ-123, empty = levels 5/6 off
     stage_limit: int = 50
     stage_limits: dict[str, int] = field(default_factory=dict)
     log_interval_seconds: float = 900
@@ -63,6 +64,7 @@ class Settings:
             postgres_dsn=env.get("POSTGRES_DSN", ""),
             registry_url=(env.get("REGISTRY_URL") or "http://alice-source-registry:8012").rstrip("/"),
             detection_url=(env.get("DETECTION_URL") or "http://alice-file-detection:8013").rstrip("/"),
+            mail_import_url=(env.get("MAIL_IMPORT_URL", "http://alice-mail-import:8019") or "").rstrip("/"),
             stage_limit=max(1, int(env.get("REBUILD_STAGE_LIMIT") or 50)),
             stage_limits=parse_limits(env.get("REBUILD_STAGE_LIMITS") or ""),
             log_interval_seconds=float(env.get("REBUILD_LOG_INTERVAL_SECONDS") or 900),

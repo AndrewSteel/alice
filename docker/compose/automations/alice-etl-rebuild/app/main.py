@@ -31,7 +31,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .clients import DetectionClient, RegistryClient
+from .clients import DetectionClient, MailImportClient, RegistryClient
 from .config import Settings
 from .rebuild import KINDS, Invalid, NotFound, Rebuilds, Rejected
 from .reconcile import Busy409, Reconciler
@@ -45,13 +45,14 @@ STAGE_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"
 
 
 class Service:
-    def __init__(self, settings: Settings, pool, registry: RegistryClient, detection: DetectionClient):
+    def __init__(self, settings: Settings, pool, registry: RegistryClient, detection: DetectionClient,
+                 mail: MailImportClient | None = None):
         self.s = settings
         self.pool = pool
         self.registry = registry
         self.detection = detection
         self.rebuilds = Rebuilds(settings, pool, registry)
-        self.reconciler = Reconciler(settings, pool, registry, detection)
+        self.reconciler = Reconciler(settings, pool, registry, detection, mail)
         self.rebuilds.on_done = self._after_rebuild
         self.last_tick = time.monotonic()
 
@@ -85,7 +86,8 @@ async def lifespan(app: FastAPI):
     pool = await asyncpg.create_pool(dsn=settings.postgres_dsn, min_size=1, max_size=10)
     registry = RegistryClient(settings.registry_url, settings.http_timeout_seconds)
     detection = DetectionClient(settings.detection_url, settings.http_timeout_seconds)
-    svc = Service(settings, pool, registry, detection)
+    mail = MailImportClient(settings.mail_import_url, settings.http_timeout_seconds) if settings.mail_import_url else None
+    svc = Service(settings, pool, registry, detection, mail)
     n = await svc.reconciler.mark_interrupted()
     if n:
         logger.warning("%d interrupted reconciliation(s) marked as incomplete", n)
@@ -99,6 +101,8 @@ async def lifespan(app: FastAPI):
             svc.reconciler.task.cancel()
         await registry.close()
         await detection.close()
+        if mail is not None:
+            await mail.close()
         await pool.close()
 
 

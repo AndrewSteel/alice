@@ -4,7 +4,8 @@ Completeness reconciliation (PROJ-120): NAS <-> register <-> repo <-> stages <->
 1. Take the lease of alice-file-detection (no nightly run meanwhile, AK-35).
 2. Check every level without changing anything:
    level 1 NAS <-> register (detection), re-hash portion / full re-hash (detection),
-   level 2 register <-> repo (register), level 3 stages and level 4 register <-> DB (own queries).
+   level 2 register <-> repo (register), level 3 stages and level 4 register <-> DB (own queries),
+   PROJ-123: level 5 IMAP <-> register and level 6 register <-> mail archive (mail import).
 3. Safeguard: more planned repairs than the limit (default 5 % of the sources) → repair nothing.
 4. Repair the unambiguous gaps (through the detection / the register; orphaned document rows
    directly), one event per repair at the source.
@@ -19,7 +20,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from .clients import Busy, CallError, DetectionClient, RegistryClient, Unavailable
+from .clients import Busy, CallError, DetectionClient, MailImportClient, RegistryClient, Unavailable
 from .config import Settings
 
 logger = logging.getLogger("alice-etl-rebuild.reconcile")
@@ -82,11 +83,13 @@ def _gap(level: int, gap: str, *, source_id=None, path=None, detail=None, repair
 
 
 class Reconciler:
-    def __init__(self, settings: Settings, pool, registry: RegistryClient, detection: DetectionClient):
+    def __init__(self, settings: Settings, pool, registry: RegistryClient, detection: DetectionClient,
+                 mail: MailImportClient | None = None):
         self.s = settings
         self.pool = pool
         self.registry = registry
         self.detection = detection
+        self.mail = mail  # PROJ-123: levels 5/6; None = no mail import configured
         self.task: asyncio.Task | None = None
         self.current: int | None = None
         self.last_nightly_attempt = float("-inf")
@@ -168,10 +171,14 @@ class Reconciler:
                 except DetectionFailed as exc:
                     detection_error = str(exc)
                     summary["notes"].append(detection_error)
+            mail_error = None
             if mode == "levels":
                 gaps += await self._level2()
                 gaps += await self._level3()
                 gaps += await self._level4()
+                if self.mail is not None:
+                    mail_gaps, mail_error = await self._level5_6(summary)
+                    gaps += mail_gaps
             # ---- safeguard (AK-33)
             planned = [g for g in gaps if g["repair"]]
             async with self.pool.acquire() as con:
@@ -192,6 +199,8 @@ class Reconciler:
                 state, reason = "incomplete", "Datei-Erkennung nicht erreichbar: Ebene 1 nicht geprüft"
             elif detection_error:
                 state, reason = "incomplete", detection_error
+            elif mail_error:
+                state, reason = "incomplete", mail_error
         except Abort as exc:
             state, reason = "incomplete", str(exc)
             logger.warning("Reconciliation %d aborted: %s", rid, exc)
@@ -206,7 +215,7 @@ class Reconciler:
                     await self.detection.unlease(lease)
                 except Exception:
                     pass  # expires by itself
-        summary["levels"] = self._level_summary(gaps)
+        summary["levels"] = self._level_summary(gaps, mail=self.mail is not None and mode == "levels")
         summary["duration_seconds"] = round(time.monotonic() - t0, 1)
         await self._save(rid, state, reason, guard, summary, gaps)
         logger.info("Reconciliation %d (%s, %s) %s in %.1f s%s: %s", rid, kind, mode, state,
@@ -301,6 +310,34 @@ class Reconciler:
                       "Dokument-Zeile zu gelöschter Quelle", repair="db_delete") for r in orphans]
         return gaps
 
+    async def _level5_6(self, summary: dict) -> tuple[list[dict], str | None]:
+        """PROJ-123: level 5 IMAP <-> register (mails on the server without a source), level 6
+        register <-> mail archive (`.eml` or attachment file missing). Unreachable mail import or
+        mailbox → result incomplete with the reason, the other levels stay valid."""
+        try:
+            out = await self.mail.check(self.s.long_timeout_seconds)
+        except (Unavailable, Busy, CallError) as exc:
+            msg = f"Mail-Import: Ebenen 5/6 nicht geprüft ({exc})"
+            summary["notes"].append(msg)
+            return [], msg
+        gaps = []
+        for m in out["imap"]["missing"]:
+            g = _gap(5, "mail_unregistered", path=f"{m['mailbox']}/{m['folder']}/{m['uid']}",
+                     detail=f"Postfach {m['mailbox']}, Ordner {m['folder']}, UID {m['uid']}: Mail ohne Quelle",
+                     repair="mail_import")
+            g["mail"] = {"mailbox": m["mailbox"], "folder": m["folder"], "uid": m["uid"]}
+            gaps.append(g)
+        for m in out["archive"]["missing"]:
+            what = ".eml" if m["gap"] == "eml_missing" else "Anhangsdatei"
+            detail = f"{m.get('title') or ''}: {what} fehlt im Mail-Archiv"
+            if not m["on_server"]:
+                detail += " (Mail nicht mehr auf dem Server)"
+            gaps.append(_gap(6, m["gap"], source_id=m["source_id"], path=m.get("path"), detail=detail,
+                             repair="mail_rearchive" if m["on_server"] else None))
+        notes = out["imap"].get("notes") or []
+        summary["notes"].extend(notes)
+        return gaps, ("; ".join(notes) if notes else None)
+
     # ================================================================ repairs
     async def _repair(self, planned: list[dict]) -> None:
         """Every repair goes through the owning service; each gets an event at its source (AK-34)."""
@@ -315,6 +352,8 @@ class Reconciler:
             level2 = by.get("restore", []) + by.get("move", [])
             if level2:
                 await self._repair_level2(level2)
+            if by.get("mail_import") or by.get("mail_rearchive"):
+                await self._repair_mail(by.get("mail_import", []), by.get("mail_rearchive", []))
             for g in by.get("db_retry", []):
                 await self.registry.retry(g["source_id"], "database")
                 await self._event(g, "reconcile_db_retry",
@@ -374,6 +413,34 @@ class Reconciler:
             else:
                 g.update(action="repair_failed", detail=f"{g['detail']}; {r.get('detail', 'nicht angewendet')}")
 
+    async def _repair_mail(self, imports: list[dict], rearchive: list[dict]) -> None:
+        """Levels 5/6 through the mail import: fetch missing mails, store missing archive files again."""
+        items = [{"type": "mail_import", **g["mail"]} for g in imports]
+        items += [{"type": "mail_rearchive", "source_id": sid}
+                  for sid in dict.fromkeys(g["source_id"] for g in rearchive)]
+        try:
+            out = await self.mail.repair(items, self.s.long_timeout_seconds)
+        except (Unavailable, Busy, CallError) as exc:
+            for g in imports + rearchive:
+                g.update(action="repair_failed", detail=f"{g['detail']}; {exc}")
+            return
+        by_mail = {(r.get("mailbox"), r.get("folder"), r.get("uid")): r for r in out["results"]
+                   if r.get("type") == "mail_import"}
+        by_source = {r.get("source_id"): r for r in out["results"] if r.get("type") == "mail_rearchive"}
+        for g in imports:
+            r = by_mail.get((g["mail"]["mailbox"], g["mail"]["folder"], g["mail"]["uid"]), {})
+            if r.get("repaired"):
+                g.update(action="repaired", detail=f"{g['detail']} → {r.get('detail')}")
+            else:
+                g.update(action="repair_failed", detail=f"{g['detail']}; {r.get('detail', 'nicht nachgeholt')}")
+        for g in rearchive:
+            r = by_source.get(g["source_id"], {})
+            if r.get("repaired"):
+                await self._event(g, "reconcile_mail_archive",
+                                  f"Abgleich: fehlende Datei im Mail-Archiv neu abgelegt ({g['path']})")
+            else:
+                g.update(action="repair_failed", detail=f"{g['detail']}; {r.get('detail', 'nicht abgelegt')}")
+
     async def _repair_level2(self, gaps: list[dict]) -> None:
         items = [{"id": g["source_id"], "action": g["repair"],
                   **({"found_at": g["found_at"]} if g.get("found_at") else {})} for g in gaps]
@@ -394,8 +461,9 @@ class Reconciler:
 
     # ================================================================ result
     @staticmethod
-    def _level_summary(gaps: list[dict]) -> dict:
-        out = {str(lv): {"gaps": 0, "repaired": 0, "reported": 0, "repair_failed": 0, "by_gap": {}} for lv in (1, 2, 3, 4)}
+    def _level_summary(gaps: list[dict], mail: bool = False) -> dict:
+        levels = (1, 2, 3, 4, 5, 6) if mail else (1, 2, 3, 4)
+        out = {str(lv): {"gaps": 0, "repaired": 0, "reported": 0, "repair_failed": 0, "by_gap": {}} for lv in levels}
         for g in gaps:
             if g["gap"] == "folder_skipped":
                 continue  # listed separately, not a gap of a source
