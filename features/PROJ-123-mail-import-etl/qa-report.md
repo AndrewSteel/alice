@@ -1,7 +1,7 @@
 # QA-Bericht: PROJ-123 Mail-Import in den ETL (#17)
 
 **Spec:** [spec.md](spec.md) · **Design:** [design.md](design.md)
-**Getestet am:** 2026-11-26 · **Branch:** `factory/17`
+**Getestet am:** 2026-11-26 (Runde 2 nach Abnahme-Rückgabe) · **Branch:** `factory/17`
 
 ## Ergebnis
 **Produktionsreif:** Ja (mit Live-Tests AK-57/58 nach dem Deploy)
@@ -9,7 +9,7 @@
 - Bugs: Critical 0 · High 0 · Medium 0 · Low 0 (ein während der Entwicklung gefundener Fehler behoben: Abruf von UIDs im zuletzt geöffneten statt im richtigen Ordner)
 
 ## Automatische Prüfungen
-- `alice-mail-import`: 61 Tests (Unit + Integration). Echter Register-Code in-process, Wegwerf-Postgres, temporäres Git-Repo, temporärer Ordner als Mail-Archiv, Fake-IMAP-Server (echtes IMAP-Protokoll über TCP, `tests/fakeimap.py`) und Gateway-Attrappe
+- `alice-mail-import`: 63 Tests (Unit + Integration). Echter Register-Code in-process, Wegwerf-Postgres, temporäres Git-Repo, temporärer Ordner als Mail-Archiv, Fake-IMAP-Server (echtes IMAP-Protokoll über TCP, `tests/fakeimap.py`) und Gateway-Attrappe
 - `alice-source-registry`: 113 Tests (neu: Mail-Fundort mit Ordner + UID)
 - `alice-etl-rebuild`: 47 Tests (neu: `tests/test_reconcile_mail.py`, Ebenen 5/6)
 - Container-Tests `alice-mail-import`, `alice-source-registry`, `alice-etl-rebuild`: gesund, Rauchtests bestanden
@@ -24,14 +24,14 @@
 | AK-3 Gesendet über `\Sent`, sonst Ordnername | ✅ | `test_inbox_and_sent_only_read_only` („Gesendet“ mit `\Sent`), `test_sent_folder_fallback_name` |
 | AK-4 nur lesend | ✅ | Flags vorher/nachher gleich, Befehlsliste nur CAPABILITY/LOGIN/LIST/EXAMINE/UID SEARCH/UID FETCH/LOGOUT, keine Verstöße; manuell |
 | AK-5 neue Mail im nächsten Takt | ✅ | `test_new_mail_in_next_tick_and_idempotent` (nächster Takt nach Sync-Intervall) |
-| AK-6 Wiederholung ohne Änderungen | ✅ | gleicher Test: keine Quelle, kein Commit, keine Archivdatei |
+| AK-6 Wiederholung ohne Änderungen | ✅ | gleicher Test: keine Quelle, kein Commit, keine Archivdatei; `test_same_message_id_twice_in_one_folder` (zwei Kopien mit gleicher Message-ID in INBOX: 3 weitere Takte ohne Abruf und ohne Commit, Nachtlauf mit gelöschter Kopie ohne `deleted`) |
 | AK-7 eine Quelle, mehrere Fundorte | ✅ | `test_same_mail_in_two_folders_and_two_mailboxes` (INBOX + Gesendet + zweites Postfach, eine `.eml`) |
 | AK-8 Mails ohne Message-ID | ✅ | `test_mails_without_message_id`, `test_mime.py::test_identity_without_message_id` |
 | AK-9 zwei Instanzen | ✅ | `test_two_instances_one_connection`, `test_two_instances_ticking` (Advisory-Lock je Postfach) |
 | AK-10 Archivstruktur, byte-gleich | ✅ | `test_archive_markdown.py::test_archive_layout_and_markdown`, `test_mime.py::test_pdfs_are_moved_out_byte_identical` |
 | AK-11 `.eml` mit Parser lesbar, Verweise statt PDFs | ✅ | gleiche Tests (`message/external-body`, Name = `<id>.attachments/<datei>`) |
 | AK-12 `cid:`-Bilder bleiben | ✅ | `test_cid_images_stay_embedded`, `test_cid_and_forward_through_import` |
-| AK-13 weitergeleitete Mail als `.eml` | ✅ | `test_forwarded_mail_is_an_attachment`, `test_cid_and_forward_through_import` |
+| AK-13 weitergeleitete Mail als `.eml` | ✅ | `test_forwarded_mail_is_an_attachment` (byte-gleich inkl. CRLF), `test_cid_and_forward_through_import` |
 | AK-14 gleiche Namen, Umlaut-Name | ✅ | `test_same_names_and_encoded_umlaut`, `test_markdown_special_cases` |
 | AK-15 Anhang > 100 MB | ✅ | `test_big_attachment` (101 MB über IMAP, byte-gleich) |
 | AK-16 nie überschrieben | ✅ | `test_archive_is_never_overwritten` (erneuter Import + neues extract) |
@@ -63,7 +63,7 @@
 | AK-42 kaputter MIME-Aufbau | ✅ | `test_broken_mime` (Rohmail byte-gleich, `failed_permanent`, übrige laufen); manuell |
 | AK-43 Verbindungsabbruch | ✅ | `test_connection_drop` (keine Duplikate, keine halben Dateien) |
 | AK-44 Archiv nicht erreichbar | ✅ | `test_archive_unavailable` (Pause mit Warnung, kein Register-Eintrag, setzt fort), `test_archive_not_writable_during_import` |
-| AK-45 Neustart mitten im Import | ✅ | `test_restart_leftovers` (temporäre Reste aufgeräumt, fehlende `.eml` über Ebene 6 neu abgelegt); Schreiben nur über temporären Namen + Umbenennen, Fortschritt aus dem Register |
+| AK-45 Neustart mitten im Import | ✅ | `test_hard_stop_between_register_and_archive` (harter Abbruch nach der Registrierung, Neustart legt die fehlende `.eml` im nächsten Takt selbst ab, `extract` danach done), `test_restart_leftovers` (temporäre Reste aufgeräumt, Ebene 6 als Absicherung); Schreiben nur über temporären Namen + Umbenennen |
 | AK-46 2.000 Mails in Paketen | ✅ | `test_mass_import_batch_commits` (4 Pakete à 500, Commits ≤ 500 Dateien) |
 | AK-47 neue Mail während Erstimport | ✅ | `test_history_in_packages_new_mail_first` |
 | AK-48 eine Verbindung je Postfach | ✅ | `test_two_instances_one_connection` (`max_active == 1`); manuell |
@@ -107,3 +107,4 @@
 
 ## Hinweise
 - Sammel-Commits des Registers heißen wie bisher `rebuild: <stufe> <n> sources` (PROJ-115), auch beim Erstimport.
+- Runde 2: Abnahme-Befunde behoben. B-1 (gleiche Message-ID zweimal im Ordner → Abruf und Commit je Takt, High), B-2 (Quelle ohne `.eml` nach hartem Abbruch, Medium), B-3 (weitergeleitete Mail mit LF statt CRLF, Low). Je ein neuer Test bzw. eine verschärfte Prüfung.
