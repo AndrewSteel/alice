@@ -48,6 +48,7 @@ class Paused(Exception):
 class SyncResult:
     imported: int = 0
     linked: int = 0
+    archived: int = 0
     failed: int = 0
     more: bool = False
     folders: list[str] = field(default_factory=list)
@@ -218,10 +219,16 @@ class Importer:
         return out
 
     async def _known(self, key: str, folder: str) -> dict[int, dict]:
+        """UIDs of this folder that are in the register: the UID of each location plus the further UIDs
+        of mails that lie more than once in the folder (AK-6)."""
         async with self.pool.acquire() as con:
             rows = await con.fetch("SELECT source_id, uid, message_id FROM alice.source_locations "
                                    "WHERE mailbox = $1 AND folder = $2 AND present AND uid IS NOT NULL", key, folder)
-        return {r["uid"]: dict(r) for r in rows}
+            extra = await con.fetch("SELECT source_id, uid FROM alice.mail_import_extra_uids "
+                                    "WHERE archive_key = $1 AND folder = $2", key, folder)
+        known = {r["uid"]: {**dict(r), "message_id": None} for r in extra}
+        known.update({r["uid"]: dict(r) for r in rows})
+        return known
 
     # ================================================================ one mailbox
     async def sync_mailbox(self, mb: dict, *, nightly: bool = False) -> dict:
@@ -245,7 +252,8 @@ class Importer:
             return {"error": str(exc)}
         try:
             result = await self._sync_session(mb, key, session)
-            out = {"imported": result.imported, "linked": result.linked, "failed": result.failed,
+            out = {"imported": result.imported, "linked": result.linked, "archived": result.archived,
+                   "failed": result.failed,
                    "more": result.more, "folders": result.folders}
             if nightly:
                 out["removal"] = await self._remove_gone(mb, key, session, result.folders)
@@ -287,19 +295,61 @@ class Importer:
             top = max(known) if known else None
             new = [u for u in unknown if top is not None and u > top]
             history = sorted((u for u in unknown if top is None or u <= top), reverse=True)  # newest first
-            plans.append((folder, new, history))
+            plans.append((folder, new, history, set(scope)))
+        # sources of this mailbox without archive entry (hard stop between register and archive, AK-44/45)
+        for folder, _, _, _ in plans:
+            budget = await self._archive_missing(session, key, folder, result, budget)
         # new mails of every folder before any history (AK-47)
-        for folder, new, _ in plans:
-            take, budget = new[:budget], budget - len(new[:budget])
+        for folder, new, _, scope in plans:
+            take, budget = new[:max(budget, 0)], max(budget, 0) - len(new[:max(budget, 0)])
             if len(take) < len(new):
                 result.more = True
-            await self._import_uids(session, key, folder, take, result, batch=len(take) > self.s.batch_threshold)
-        for folder, _, history in plans:
+            await self._import_uids(session, key, folder, take, result, batch=len(take) > self.s.batch_threshold,
+                                    on_server=scope)
+        for folder, _, history, scope in plans:
             take, budget = history[:max(budget, 0)], max(budget, 0) - len(history[:max(budget, 0)])
             if len(take) < len(history):
                 result.more = True
-            await self._import_uids(session, key, folder, take, result, batch=len(take) > self.s.batch_threshold)
+            await self._import_uids(session, key, folder, take, result, batch=len(take) > self.s.batch_threshold,
+                                    on_server=scope)
         return result
+
+    async def _archive_missing(self, session: ImapSession, key: str, folder: str, result: SyncResult,
+                               budget: int) -> int:
+        """AK-45: a source registered from this folder whose archive entry is missing (the import stopped
+        between registration and archive) gets its `.eml` and attachments now. Returns the rest budget."""
+        if budget <= 0:
+            return budget
+        async with self.pool.acquire() as con:
+            rows = await con.fetch(
+                """
+                SELECT DISTINCT ON (l.source_id) l.source_id, l.uid
+                  FROM alice.source_locations l
+                  JOIN alice.sources s ON s.id = l.source_id
+                  LEFT JOIN alice.mail_archive a ON a.source_id = l.source_id
+                 WHERE l.mailbox = $1 AND l.folder = $2 AND l.present AND l.uid IS NOT NULL
+                   AND a.source_id IS NULL AND NOT s.deleted
+                 ORDER BY l.source_id, l.uid LIMIT $3
+                """, key, folder, budget)
+        if not rows:
+            return budget
+        await asyncio.to_thread(session.examine, folder)
+        for r in rows:
+            budget -= 1
+            fetched = await asyncio.to_thread(session.fetch, r["uid"])
+            if fetched is None:
+                continue  # gone meanwhile; level 6 of PROJ-120 reports it
+            raw, received = fetched
+            try:
+                written = await self._ensure_archived(r["source_id"], key, mime.prepare(raw), raw, received)
+            except (RegistryUnavailable, ArchiveUnavailable) as exc:
+                raise Paused(str(exc)) from exc
+            except OSError as exc:
+                raise Paused(f"Mail-Archiv nicht beschreibbar: {exc.strerror or exc}") from exc
+            if written:
+                result.archived += 1
+                logger.info("Source %s: archive files stored after an interrupted import", r["source_id"])
+        return budget
 
     async def _folder_state(self, mb: dict, folder: str, role: str, uidvalidity: int, uidnext: int | None) -> dict:
         async with self.pool.acquire() as con:
@@ -327,6 +377,9 @@ class Importer:
     async def _remap(self, session: ImapSession, key: str, folder: str) -> None:
         """EC-4: new UIDs for the known locations of this folder, matched by Message-ID; no mass deletion,
         no duplicates. Mails without Message-ID are matched by their fingerprint when they are imported."""
+        async with self.pool.acquire() as con:
+            await con.execute("DELETE FROM alice.mail_import_extra_uids WHERE archive_key = $1 AND folder = $2",
+                              key, folder)
         uids = await asyncio.to_thread(session.all_uids)
         ids = await asyncio.to_thread(session.message_ids, uids) if uids else {}
         async with self.pool.acquire() as con:
@@ -340,7 +393,7 @@ class Importer:
                                                                     "message_id": mid})
 
     async def _import_uids(self, session: ImapSession, key: str, folder: str, uids: list[int], result: SyncResult,
-                           batch: bool) -> None:
+                           batch: bool, on_server: set[int] | None = None) -> None:
         if not uids:
             return
         await asyncio.to_thread(session.examine, folder)  # the plan was made while other folders were open
@@ -354,7 +407,7 @@ class Importer:
                 continue  # gone meanwhile
             raw, received = fetched
             try:
-                created = await self.import_raw(key, folder, uid, raw, received, batch=batch)
+                created = await self.import_raw(key, folder, uid, raw, received, batch=batch, on_server=on_server)
             except (Paused, RegistryUnavailable, ArchiveUnavailable) as exc:
                 raise Paused(str(exc)) from exc
             except Exception as exc:
@@ -379,13 +432,16 @@ class Importer:
         return received or now
 
     async def import_raw(self, key: str, folder: str, uid: int, raw: bytes, received: datetime | None, *,
-                         batch: bool = False) -> bool:
-        """Archive + register one mail. True if a new source was created."""
+                         batch: bool = False, on_server: set[int] | None = None) -> bool:
+        """Archive + register one mail. True if a new source was created.
+        `on_server`: UIDs currently in the folder; a second copy of a mail whose location UID is still
+        among them is remembered as further UID instead of moving the location (AK-6)."""
         prep = mime.prepare(raw)
         loc = {"mailbox": key, "folder": folder, "uid": uid, "message_id": prep.location_key}
         existing = await self.registry.find_by_hash(prep.hash)
         if existing:
-            await self.registry.add_location(existing["id"], loc)
+            if not await self._extra_copy(existing["id"], loc, on_server):
+                await self.registry.add_location(existing["id"], loc)
             await self._check_same(existing["id"], prep, raw)
             await self._ensure_archived(existing["id"], key, prep, raw, received, existing)
             return False
@@ -408,6 +464,22 @@ class Importer:
             await asyncio.to_thread(self.archive.discard, tmp)
             return False
         await self._finish_archive(sid, key, folder_rel, prep, raw, tmp)
+        return True
+
+    async def _extra_copy(self, sid: str, loc: dict, on_server: set[int] | None) -> bool:
+        """True (and the UID remembered) if the location of this mail in the folder still has another UID
+        that is on the server: the mail lies twice in the folder."""
+        if on_server is None:
+            return False
+        async with self.pool.acquire() as con:
+            uid = await con.fetchval("SELECT uid FROM alice.source_locations WHERE source_id = $1 AND mailbox = $2 "
+                                     "AND folder = $3 AND message_id = $4 AND present", sid, loc["mailbox"],
+                                     loc["folder"], loc["message_id"])
+            if uid is None or uid == loc["uid"] or uid not in on_server:
+                return False
+            await con.execute("INSERT INTO alice.mail_import_extra_uids (archive_key, folder, uid, source_id) "
+                              "VALUES ($1, $2, $3, $4) ON CONFLICT (archive_key, folder, uid) DO UPDATE "
+                              "SET source_id = EXCLUDED.source_id", loc["mailbox"], loc["folder"], loc["uid"], sid)
         return True
 
     async def _finish_archive(self, sid: str, key: str, folder_rel: str, prep: mime.Prepared, raw: bytes,
@@ -553,6 +625,7 @@ class Importer:
                 await con.execute("UPDATE alice.mail_import_mailboxes SET removed_at = NOW() WHERE mailbox_id = $1",
                                   row["mailbox_id"])
                 await con.execute("DELETE FROM alice.mail_import_folders WHERE mailbox_id = $1", row["mailbox_id"])
+                await con.execute("DELETE FROM alice.mail_import_extra_uids WHERE archive_key = $1", row["archive_key"])
             if locs:
                 logger.info("Mailbox %s was deleted: %d locations removed, %d mails deleted", row["archive_key"],
                             removed, deleted)
@@ -585,7 +658,30 @@ class Importer:
         async with self.pool.acquire() as con:
             rows = await con.fetch("SELECT source_id, folder, uid, message_id FROM alice.source_locations "
                                    "WHERE mailbox = $1 AND present", key)
-        gone = [dict(r) for r in rows if r["folder"] not in on_server or r["uid"] not in on_server[r["folder"]]]
+            extra = await con.fetch("SELECT folder, uid, source_id FROM alice.mail_import_extra_uids "
+                                    "WHERE archive_key = $1 ORDER BY uid", key)
+        alive: dict[tuple[str, str], int] = {}
+        for e in extra:
+            if e["uid"] in on_server.get(e["folder"], ()):
+                alive.setdefault((e["source_id"], e["folder"]), e["uid"])
+            else:
+                async with self.pool.acquire() as con:
+                    await con.execute("DELETE FROM alice.mail_import_extra_uids WHERE archive_key = $1 AND folder = $2 "
+                                      "AND uid = $3", key, e["folder"], e["uid"])
+        gone = []
+        for r in rows:
+            if r["folder"] in on_server and r["uid"] in on_server[r["folder"]]:
+                continue
+            uid = alive.pop((r["source_id"], r["folder"]), None)
+            if uid is None:
+                gone.append(dict(r))
+                continue
+            # the copy of the location is gone, another copy of the same mail is still in the folder
+            await self.registry.add_location(r["source_id"], {"mailbox": key, "folder": r["folder"], "uid": uid,
+                                                              "message_id": r["message_id"]})
+            async with self.pool.acquire() as con:
+                await con.execute("DELETE FROM alice.mail_import_extra_uids WHERE archive_key = $1 AND folder = $2 "
+                                  "AND uid = $3", key, r["folder"], uid)
         known = len(rows)
         if gone and known and len(gone) * 100.0 / known > self.s.delete_limit_percent:
             logger.warning("Mailbox %s: %d of %d locations missing on the server (> %s %%), nothing removed",

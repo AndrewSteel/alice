@@ -267,12 +267,12 @@ def _generated_name(mime_type: str, n: int) -> str:
     return f"anhang-{n}{ext}"
 
 
-def _attachment_bytes(part: Message) -> bytes:
+def _attachment_bytes(part: Message, crlf: bool) -> bytes:
     if part.get_content_type() == "message/rfc822":
         payload = part.get_payload()
         inner = payload[0] if isinstance(payload, list) and payload else None
         if isinstance(inner, Message):
-            return as_bytes(inner, crlf=False)  # the forwarded mail as it was attached (AK-13)
+            return as_bytes(inner, crlf=crlf)  # the forwarded mail as it was attached, same line ends (AK-13)
         return part.get_payload(decode=True) or b""
     data = part.get_payload(decode=True)
     if data is None:
@@ -281,7 +281,7 @@ def _attachment_bytes(part: Message) -> bytes:
     return data
 
 
-def find_attachments(msg: Message) -> list[Attachment]:
+def find_attachments(msg: Message, crlf: bool = True) -> list[Attachment]:
     """Real attachments (AK-12/13, EC-7, EC-9): every part with a file name that is not embedded in
     the HTML text via `cid:`, attached messages (`message/rfc822`) and calendar invitations."""
     cids = html_cids(msg)
@@ -308,7 +308,7 @@ def find_attachments(msg: Message) -> list[Attachment]:
         if ctype == "message/rfc822" and not clean.lower().endswith(".eml"):
             clean += ".eml"
         found.append(Attachment(part=part, filename=_unique(clean, used), mime_type=ctype,
-                                data=_attachment_bytes(part)))
+                                data=_attachment_bytes(part, crlf)))
     return found
 
 
@@ -375,7 +375,7 @@ def prepare(raw: bytes) -> Prepared:
     date = mail_date(msg)
     try:
         check_structure(msg)
-        atts = find_attachments(msg)
+        atts = find_attachments(msg, crlf=b"\r\n" in raw[:4096])
         broken = None
     except BrokenMail as exc:
         atts, broken = [], str(exc)

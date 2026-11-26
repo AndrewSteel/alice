@@ -49,6 +49,20 @@ CREATE TABLE IF NOT EXISTS alice.mail_import_folders (
     PRIMARY KEY (mailbox_id, folder)
 );
 
+-- 20.4a Further UIDs of a mail that lies more than once in the same folder (same Message-ID,
+-- e.g. direct + via a mailing list). The location keeps one UID; the others are known here so a
+-- tick neither fetches them again nor moves the location back and forth (AK-6).
+CREATE TABLE IF NOT EXISTS alice.mail_import_extra_uids (
+    archive_key   TEXT         NOT NULL REFERENCES alice.mail_import_mailboxes(archive_key) ON DELETE CASCADE,
+    folder        TEXT         NOT NULL,
+    uid           BIGINT       NOT NULL,
+    source_id     VARCHAR(12)  NOT NULL REFERENCES alice.sources(id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (archive_key, folder, uid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mail_import_extra_uids_source ON alice.mail_import_extra_uids(source_id);
+
 -- 20.5 Archive entry per mail source
 CREATE TABLE IF NOT EXISTS alice.mail_archive (
     source_id     VARCHAR(12)  PRIMARY KEY REFERENCES alice.sources(id) ON DELETE CASCADE,
@@ -77,6 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_mail_import_runs_started ON alice.mail_import_run
 -- 20.7 RLS: only the service database user writes these tables
 ALTER TABLE alice.mail_import_mailboxes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alice.mail_import_folders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alice.mail_import_extra_uids ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alice.mail_archive ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alice.mail_import_runs ENABLE ROW LEVEL SECURITY;
 
@@ -84,7 +99,8 @@ DO $$
 DECLARE
     t TEXT;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['mail_import_mailboxes', 'mail_import_folders', 'mail_archive', 'mail_import_runs'] LOOP
+    FOREACH t IN ARRAY ARRAY['mail_import_mailboxes', 'mail_import_folders', 'mail_import_extra_uids', 'mail_archive',
+                             'mail_import_runs'] LOOP
         EXECUTE format('DROP POLICY IF EXISTS %I_select ON alice.%I', t, t);
         EXECUTE format('DROP POLICY IF EXISTS %I_insert ON alice.%I', t, t);
         EXECUTE format('DROP POLICY IF EXISTS %I_update ON alice.%I', t, t);
