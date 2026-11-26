@@ -56,7 +56,8 @@ def _uidset(spec: str, maxuid: int) -> set[int]:
 
 
 class FakeImapServer:
-    def __init__(self, username: str = "user@example.invalid", password: str = "secret"):
+    def __init__(self, username: str = "user@example.invalid", password: str = "secret", host: str = "127.0.0.1",
+                 port: int = 0):
         self.username, self.password = username, password
         self.folders: dict[str, Folder] = {}
         self.lock = threading.RLock()
@@ -82,7 +83,7 @@ class FakeImapServer:
             daemon_threads = True
             allow_reuse_address = True
 
-        self.tcp = TCP(("127.0.0.1", 0), Handler)
+        self.tcp = TCP((host, port), Handler)
         self.port = self.tcp.server_address[1]
         self.thread = threading.Thread(target=self.tcp.serve_forever, daemon=True)
         self.thread.start()
