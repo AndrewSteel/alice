@@ -87,3 +87,34 @@ async def test_mailbox_not_checked_is_visible(env):
 async def test_without_mail_import_only_four_levels(env):
     r = await reconcile(env)
     assert sorted(r["summary"]["levels"]) == ["1", "2", "3", "4"]
+
+
+async def test_level7_attachment_sources(env):  # PROJ-124 AK-32, AK-38
+    await nas_sources(env, 100)
+    sid = await _mail_source(env)
+    mail = FakeMail()
+    env.reconciler.mail = mail
+    mail.result["attachments"] = {"checked": 3, "notes": [], "missing": [
+        {"gap": "attachment_unregistered", "mail_id": sid, "source_id": None, "title": "Rechnung per Mail",
+         "path": "/mnt/nas/ai/mail/privat-0001/2026/11/x.attachments/a.pdf", "filename": "a.pdf",
+         "repair": "attachment_register"},
+        {"gap": "attachment_file_missing", "mail_id": sid, "source_id": None, "title": "Rechnung per Mail",
+         "path": "/mnt/nas/ai/mail/privat-0001/2026/11/x.attachments/b.pdf", "filename": "b.pdf", "repair": None}]}
+    r = await reconcile(env)
+    assert r["state"] == "complete"
+    lv = r["summary"]["levels"]["7"]
+    assert (lv["gaps"], lv["repaired"], lv["reported"]) == (2, 1, 1)
+    assert lv["by_gap"] == {"attachment_unregistered": 1, "attachment_file_missing": 1}
+    assert mail.repairs == [[{"type": "attachment_register", "source_id": sid}]]
+    g7 = {g["gap"]: g for g in await gaps(env, r["id"], 7)}
+    assert "Anhangsdatei fehlt" in g7["attachment_file_missing"]["detail"]
+    assert {e["event"] for e in (await env.reg.get_source(sid))["events"]} >= {"reconcile_attachments"}
+
+
+async def test_level7_not_checked_makes_result_incomplete(env):
+    mail = FakeMail()
+    mail.result["attachments"] = {"missing": [], "notes": ["Ebene 7 nicht geprüft: Erkennungsliste nicht abrufbar"]}
+    env.reconciler.mail = mail
+    r = await reconcile(env)
+    assert r["state"] == "incomplete" and "Ebene 7" in r["reason"]
+    assert sorted(r["summary"]["levels"]) == ["1", "2", "3", "4", "5", "6", "7"]
