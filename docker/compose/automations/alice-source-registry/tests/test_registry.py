@@ -546,3 +546,24 @@ async def test_repo_unavailable_pauses(reg, repo_dir, caplog):  # AK-30, AK-31
     fm, _ = read_fm(repo_dir, path)
     assert fm["manual"] == ["type"]
     assert await claim_one(reg, "extract", sid)
+
+
+async def test_mail_location_with_folder_and_uid(reg, repo_dir):  # PROJ-123: mailbox + folder + UID
+    mid = "<self@example.invalid>"
+    r = await reg.register(kind="email", hash="mid:" + "s" * 16, title="An mich selbst", captured=NOV,
+                           location={"mailbox": "privat-0001", "folder": "INBOX", "uid": 7, "message_id": mid})
+    sid = r["id"]
+    # same mail in the sent folder: second location of the same source
+    await reg.add_location(sid, {"mailbox": "privat-0001", "folder": "Sent", "uid": 3, "message_id": mid})
+    fm, _ = read_fm(repo_dir, (await reg.get_source(sid))["path"])
+    assert fm["locations"] == [{"mailbox": "privat-0001", "folder": "INBOX", "uid": 7, "message_id": mid},
+                               {"mailbox": "privat-0001", "folder": "Sent", "uid": 3, "message_id": mid}]
+    # UIDVALIDITY changed: same folder, new UID → the location is updated, not added
+    await reg.add_location(sid, {"mailbox": "privat-0001", "folder": "INBOX", "uid": 70, "message_id": mid})
+    src = await reg.get_source(sid)
+    assert sorted((l["folder"], l["uid"]) for l in src["locations"]) == [("INBOX", 70), ("Sent", 3)]
+    # removing the INBOX location keeps the source (AK-34 of PROJ-123)
+    out = await reg.remove_location(sid, {"mailbox": "privat-0001", "folder": "INBOX", "message_id": mid})
+    assert not out["deleted"]
+    out = await reg.remove_location(sid, {"mailbox": "privat-0001", "folder": "Sent", "message_id": mid})
+    assert out["deleted"]

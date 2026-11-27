@@ -106,3 +106,14 @@ class DetectionClient(_Client):
 
     async def apply(self, paths: list[str], timeout: float) -> dict:
         return await self._call("POST", "/reconcile/apply", json={"paths": paths}, timeout=timeout)
+
+
+class MailImportClient(_Client):
+    """alice-mail-import (PROJ-123): levels 5 (IMAP <-> register) and 6 (register <-> mail archive)."""
+    name = "Mail-Import"
+
+    async def check(self, timeout: float) -> dict:
+        return await self._call("POST", "/reconcile/check", timeout=timeout)
+
+    async def repair(self, items: list[dict], timeout: float) -> dict:
+        return await self._call("POST", "/reconcile/repair", json={"items": items}, timeout=timeout)

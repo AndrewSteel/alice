@@ -59,7 +59,14 @@ def _iso(value: datetime | None) -> str | None:
 def _loc_fm(row) -> dict:
     if row["path"] is not None:
         return {"path": row["path"]}
-    return {"mailbox": row["mailbox"], "message_id": row["message_id"]}
+    loc = {"mailbox": row["mailbox"]}
+    # PROJ-123: folder + UID of a mail location (older mail locations have neither)
+    if row["folder"] is not None:
+        loc["folder"] = row["folder"]
+    if row["uid"] is not None:
+        loc["uid"] = row["uid"]
+    loc["message_id"] = row["message_id"]
+    return loc
 
 
 def _discarded(src: dict) -> dict:
@@ -144,7 +151,7 @@ class Registry:
 
     async def _present_locations(self, con, source_id: str) -> list[dict]:
         rows = await con.fetch(
-            "SELECT path, mailbox, message_id FROM alice.source_locations "
+            "SELECT path, mailbox, folder, uid, message_id FROM alice.source_locations "
             "WHERE source_id = $1 AND present ORDER BY first_seen, id", source_id)
         return [_loc_fm(r) for r in rows]
 
@@ -598,12 +605,15 @@ class Registry:
         """True if the location is new or came back."""
         row = await con.fetchrow(
             """
-            INSERT INTO alice.source_locations (source_id, path, mailbox, message_id)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (source_id, COALESCE(path, ''), COALESCE(mailbox, ''), COALESCE(message_id, ''))
-            DO UPDATE SET last_seen = NOW(), present = TRUE, gone_at = NULL
+            INSERT INTO alice.source_locations (source_id, path, mailbox, folder, uid, message_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (source_id, COALESCE(path, ''), COALESCE(mailbox, ''), COALESCE(folder, ''),
+                         COALESCE(message_id, ''))
+            DO UPDATE SET last_seen = NOW(), present = TRUE, gone_at = NULL,
+                          uid = COALESCE(EXCLUDED.uid, alice.source_locations.uid)
             RETURNING (xmax = 0) AS inserted
-            """, source_id, loc.get("path"), loc.get("mailbox"), loc.get("message_id"))
+            """, source_id, loc.get("path"), loc.get("mailbox"), loc.get("folder"), loc.get("uid"),
+            loc.get("message_id"))
         return bool(row["inserted"])
 
     async def _check_parents(self, con, parents: list[str], self_id: str | None = None) -> None:
@@ -749,8 +759,9 @@ class Registry:
                 hit = await con.fetchval(
                     "UPDATE alice.source_locations SET present = FALSE, gone_at = NOW() "
                     "WHERE source_id = $1 AND path IS NOT DISTINCT FROM $2 AND mailbox IS NOT DISTINCT FROM $3 "
-                    "AND message_id IS NOT DISTINCT FROM $4 AND present RETURNING id",
-                    source_id, location.get("path"), location.get("mailbox"), location.get("message_id"))
+                    "AND message_id IS NOT DISTINCT FROM $4 AND folder IS NOT DISTINCT FROM $5 AND present RETURNING id",
+                    source_id, location.get("path"), location.get("mailbox"), location.get("message_id"),
+                    location.get("folder"))
                 if hit is None:
                     raise NotFound("Fundort an dieser Quelle nicht (mehr) vorhanden")
                 remaining = await con.fetchval("SELECT count(*) FROM alice.source_locations "
@@ -794,7 +805,7 @@ class Registry:
     async def get_source(self, source_id: str) -> dict:
         async with self.pool.acquire() as con:
             src = await self._source(con, source_id)
-            locs = await con.fetch("SELECT path, mailbox, message_id, present, first_seen, last_seen, gone_at "
+            locs = await con.fetch("SELECT path, mailbox, folder, uid, message_id, present, first_seen, last_seen, gone_at "
                                    "FROM alice.source_locations WHERE source_id = $1 ORDER BY first_seen, id",
                                    source_id)
             parents = await self._parents(con, source_id)
