@@ -16,7 +16,7 @@ from app.config import Settings
 from app.service import Registry
 
 DSN = os.environ.get("TEST_POSTGRES_DSN")
-DEFAULT_STAGES = ("detect", "extract", "classify", "database", "rag", "wiki", "thumbnail")
+DEFAULT_STAGES = ("detect", "extract", "locate", "classify", "database", "rag", "wiki", "thumbnail")
 
 
 class FakeRedis:

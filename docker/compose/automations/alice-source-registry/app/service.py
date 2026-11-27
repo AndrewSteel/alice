@@ -213,14 +213,17 @@ class Registry:
         }
 
     async def _reset_after(self, con, source_id: str, stage: str) -> list[str]:
-        """All stages after `stage` (by position, not skipped) → pending (PROJ-116: original changed in place)."""
+        """All stages after `stage` (by position, not skipped) → pending (PROJ-116: original changed in place).
+        PROJ-125: a stage a worker finished as `skipped` (e.g. image without GPS) runs again as well;
+        stages skipped for the whole kind (skip_kinds) stay skipped."""
         rows = await con.fetch(
             """
             UPDATE alice.source_stages ss
                SET state = 'pending', attempts = 0, last_error = NULL, next_retry_at = NULL,
                    claim_token = NULL, started_at = NULL, rebuild_run = NULL
-              FROM alice.pipeline_stages ps
-             WHERE ps.name = ss.stage AND ss.source_id = $1 AND ss.state NOT IN ('skipped', 'pending')
+              FROM alice.pipeline_stages ps, alice.sources s
+             WHERE ps.name = ss.stage AND s.id = ss.source_id AND ss.source_id = $1 AND ss.state <> 'pending'
+               AND (ss.state <> 'skipped' OR NOT (s.kind = ANY(ps.skip_kinds)))
                AND ps.position > (SELECT position FROM alice.pipeline_stages WHERE name = $2)
             RETURNING ss.stage
             """, source_id, stage)
@@ -874,14 +877,19 @@ class Registry:
                      "s.kind, s.path, s.title, s.hash, s.deleted, ss.rebuild_run IS NOT NULL AS rebuild")
 
     async def claim(self, stage: str, limit: int = 1, kinds: list[str] | None = None,
-                    requires: list[str] | None = None, include_deleted: bool = False) -> dict:
+                    requires: list[str] | None = None, include_deleted: bool = False,
+                    registered_since: datetime | None = None, registered_before: datetime | None = None,
+                    source_ids: list[str] | None = None) -> dict:
         """Take over due work exclusively (AK-15). Paused while the repo is unavailable (AK-30).
         `kinds` restricts the work to these source kinds (PROJ-117); such claims are served from the
         register, so the Redis queue is never drained of sources of other kinds.
         `requires` (PROJ-118): only sources whose listed stages are done (or skipped), e.g. classify
         after extract; such claims are served from the register as well.
         `include_deleted` (PROJ-119): deleted sources are handed out as well (`deleted: true`), without
-        the `requires` check, so a stage can remove what it derived from them."""
+        the `requires` check, so a stage can remove what it derived from them.
+        `registered_since` / `registered_before` (PROJ-125): only sources registered at/after resp. before
+        this time (new images before the backlog); `source_ids`: only these sources (triggered one by one).
+        Such claims are served from the register as well."""
         async with self.pool.acquire() as con:
             await self._require_stage(con, stage)
             if not self.available:
@@ -889,7 +897,8 @@ class Registry:
             items = []
             for name in requires or []:
                 await self._require_stage(con, name)
-            plain = not kinds and not requires and not include_deleted
+            plain = (not kinds and not requires and not include_deleted and registered_since is None
+                     and registered_before is None and source_ids is None)
             ids = await self.queue.due(stage, limit * 5) if plain else None
             if ids is not None:
                 for sid in ids:
@@ -915,6 +924,9 @@ class Registry:
                                 SELECT 1 FROM alice.source_stages r WHERE r.source_id = ss.source_id
                                    AND r.stage = ANY($4::text[]) AND r.state NOT IN ('done', 'skipped')))
                            AND ($5::bool OR ss.rebuild_run IS NOT NULL)
+                           AND ($6::timestamptz IS NULL OR s.created_at >= $6)
+                           AND ($7::timestamptz IS NULL OR s.created_at < $7)
+                           AND ($8::text[] IS NULL OR ss.source_id = ANY($8::text[]))
                          ORDER BY ss.rebuild_run IS NOT NULL, COALESCE(ss.next_retry_at, ss.updated_at)
                          LIMIT $2 FOR UPDATE OF ss SKIP LOCKED)
                     UPDATE alice.source_stages ss SET {self._CLAIM_SET}
@@ -922,7 +934,8 @@ class Registry:
                      WHERE ss.stage = $1 AND ss.source_id = picked.source_id AND s.id = ss.source_id
                        AND {claimable}
                     RETURNING {self._CLAIM_RETURN}
-                    """, stage, limit - len(items), kinds or None, requires or None, ids is None)
+                    """, stage, limit - len(items), kinds or None, requires or None, ids is None,
+                    registered_since, registered_before, source_ids)
                 items.extend(sorted((dict(r) for r in rows), key=lambda r: r["rebuild"]))
             await self._mark_served(con, stage, {it["kind"] for it in items})
         return {"paused": False, "reason": None, "items": items}
@@ -945,11 +958,13 @@ class Registry:
             raise NotFound(f"Stufe {stage} der Quelle {source_id} nicht gefunden")
         raise Conflict(f"Stufe ist nicht (mehr) von diesem Worker übernommen (Zustand: {exists})")
 
-    async def complete(self, source_id: str, stage: str, token: str) -> dict:
+    async def complete(self, source_id: str, stage: str, token: str, skipped: bool = False) -> dict:
+        """`skipped` (PROJ-125): the stage has nothing to do for this source (e.g. image without GPS)."""
         return await self._finish(
-            "UPDATE alice.source_stages SET state = 'done', last_error = NULL, next_retry_at = NULL, "
+            "UPDATE alice.source_stages SET state = CASE WHEN $4 THEN 'skipped' ELSE 'done' END, "
+            "last_error = NULL, next_retry_at = NULL, "
             "claim_token = NULL, started_at = NULL WHERE source_id = $1 AND stage = $2 AND state = 'running' "
-            "AND claim_token = $3::uuid RETURNING state, attempts", source_id, stage, token)
+            "AND claim_token = $3::uuid RETURNING state, attempts", source_id, stage, token, skipped)
 
     async def fail(self, source_id: str, stage: str, token: str, error: str, permanent: bool = False) -> dict:
         """Failure → attempts +1 and next retry by backoff; the 5th failure is permanent (AK-16/17).

@@ -25,7 +25,7 @@ from app.registry import RegistryClient
 
 DSN = os.environ.get("TEST_POSTGRES_DSN")
 REGISTRY_DIR = Path(__file__).resolve().parents[2] / "alice-source-registry"
-DEFAULT_STAGES = ("detect", "extract", "classify", "database", "rag", "wiki", "thumbnail")
+DEFAULT_STAGES = ("detect", "extract", "locate", "classify", "database", "rag", "wiki", "thumbnail")
 
 
 def _load_registry():

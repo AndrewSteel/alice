@@ -77,7 +77,7 @@ async def test_register_writes_markdown(reg, repo_dir):  # AK-4, AK-7, AK-9, AK-
     assert src["kind"] == "document" and len(src["locations"]) == 1
     assert {s: v["state"] for s, v in src["stages"].items()} == {s: "pending" for s in
                                                                  ("detect", "extract", "classify", "database",
-                                                                  "rag", "wiki", "thumbnail")}
+                                                                  "rag", "wiki", "thumbnail")} | {"locate": "skipped"}
     assert git(repo_dir, "status", "--porcelain") == ""
 
 
@@ -109,7 +109,8 @@ async def test_location_change_only_touches_locations(reg, repo_dir):  # AK-6
     assert {k: v for k, v in before.items() if k != "locations"} == {k: v for k, v in after.items()
                                                                       if k != "locations"}
     assert content_after == content_before
-    assert all(s["state"] == "pending" for s in (await stages(reg, sid)).values())
+    # `locate` (PROJ-125) is skipped for documents
+    assert all(s["state"] == "pending" for n, s in (await stages(reg, sid)).items() if n != "locate")
     assert len(log(repo_dir, path)) == 3
 
 

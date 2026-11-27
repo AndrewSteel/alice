@@ -33,7 +33,7 @@ from app.upstream import Client
 
 DSN = os.environ.get("TEST_POSTGRES_DSN")
 AUTOMATIONS = pathlib.Path(__file__).resolve().parents[2]
-DEFAULT_STAGES = ("detect", "extract", "classify", "database", "rag", "wiki", "thumbnail")
+DEFAULT_STAGES = ("detect", "extract", "locate", "classify", "database", "rag", "wiki", "thumbnail")
 USERS = {
     "admin": ("a1220000-0000-0000-0000-00000000a001", "etl-admin", "admin"),
     "haushalt": ("a1220000-0000-0000-0000-00000000a002", "etl-haushalt", "haushalt"),

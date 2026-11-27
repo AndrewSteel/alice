@@ -21,6 +21,7 @@ Endpoints:
        (claim with "requires", document write with "token", stages with "resets_on_fields": PROJ-118)
        (claim with "include_deleted", resets_on_fields "locations"/"deleted": PROJ-119)
        (document write with "label" and "keep_stages"; `parents` resets no stage: PROJ-124)
+       (claim with "registered_since"/"registered_before"/"source_ids", done with "skipped": PROJ-125)
   POST /maintenance/scan|flush|resync-queue       run background jobs now
   PROJ-120 (rebuild + reconciliation, alice-etl-rebuild):
   POST /rebuild/release                           release a portion of a rebuild run (stages → pending, flagged)
@@ -253,6 +254,19 @@ class ClaimIn(BaseModel):
     requires: list[str] | None = Field(None, min_length=1, max_length=20)
     # PROJ-119: hand out deleted sources too (stage removes derived data)
     include_deleted: bool = False
+    # PROJ-125: only sources registered at/after resp. before this time, only these sources
+    registered_since: datetime | None = None
+    registered_before: datetime | None = None
+    source_ids: list[str] | None = Field(None, min_length=1, max_length=100)
+
+    @field_validator("source_ids")
+    @classmethod
+    def _source_ids(cls, v):
+        import re
+
+        if v is not None and any(not re.match(ID_PATTERN, s) for s in v):
+            raise ValueError("source_ids enthält ungültige IDs")
+        return v
 
     @field_validator("requires")
     @classmethod
@@ -273,6 +287,10 @@ class ClaimIn(BaseModel):
 
 class TokenIn(BaseModel):
     token: uuid.UUID
+
+
+class DoneIn(TokenIn):
+    skipped: bool = False  # nothing to do for this source → state skipped (PROJ-125)
 
 
 class FailIn(TokenIn):
@@ -399,12 +417,13 @@ async def add_stage(body: StageIn, request: Request):
 @app.post("/stages/{stage}/claim")
 async def claim(stage: str, request: Request, body: ClaimIn | None = None):
     body = body or ClaimIn()
-    return await _reg(request).claim(stage, body.limit, body.kinds, body.requires, body.include_deleted)
+    return await _reg(request).claim(stage, body.limit, body.kinds, body.requires, body.include_deleted,
+                                     body.registered_since, body.registered_before, body.source_ids)
 
 
 @app.post("/sources/{source_id}/stages/{stage}/done")
-async def done(source_id: str, stage: str, body: TokenIn, request: Request):
-    return await _reg(request).complete(source_id, stage, str(body.token))
+async def done(source_id: str, stage: str, body: DoneIn, request: Request):
+    return await _reg(request).complete(source_id, stage, str(body.token), body.skipped)
 
 
 @app.post("/sources/{source_id}/stages/{stage}/fail")

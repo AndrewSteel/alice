@@ -29,7 +29,7 @@ from app.reconcile import Reconciler
 
 DSN = os.environ.get("TEST_POSTGRES_DSN")
 AUTOMATIONS = pathlib.Path(__file__).resolve().parents[2]
-DEFAULT_STAGES = ("detect", "extract", "classify", "database", "rag", "wiki", "thumbnail")
+DEFAULT_STAGES = ("detect", "extract", "locate", "classify", "database", "rag", "wiki", "thumbnail")
 NOV = datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)
 REQUIRES = {"extract": None, "classify": ["extract"], "database": ["classify"]}
 
