@@ -115,3 +115,14 @@ Deploy-Schritte für den Menschen:
 | `keep_stages` beim Schreiben | Mail-Markdown mit Stufenname `classify` schreiben | sauberer: Commit-Text und Stufe stimmen, keine Täuschung des Registers |
 | Links per Pfadvergleich nachführen | Register benachrichtigt bei Umbenennung | Register bleibt generisch; Verzögerung höchstens ein Takt |
 | Ebene 7 im bestehenden Prüf-Aufruf | eigener Endpunkt | weniger Aufrufe, gleiche Fehlerbehandlung wie 5/6 |
+
+## Umsetzung (Bau, 2026-11-27)
+- Gebaut wie oben. Neue Schleife `docker/compose/automations/alice-mail-import/app/attachments.py` (Anhänge registrieren, Verweise schreiben, Links nachführen, Zusammenfassungen, Ebene 7), Schema Abschnitt 21 in `sql/init-schema.sql` + Migration `sql/migrations/2026-11-27_PROJ-124_mail_attachments.sql`.
+- `alice-mail-import`: neue Endpunkte `GET /attachments/runs`; `POST /reconcile/check` liefert zusätzlich `attachments` (Ebene 7), `POST /reconcile/repair` kennt den Typ `attachment_register`. Die Stufe extract übernimmt bekannte Anhangs-ids und Links in die neu gebaute Mail-Markdown. Health: Pause der Anhangs-Registrierung als Warnung, die Zählung nicht verarbeiteter Anhänge nie.
+- Registrierung der Anhänge einer Mail als Sammel-Commit, wenn ein Takt mehr als `MAIL_BATCH_THRESHOLD` (20) Mails bearbeitet; danach wird der Sammel-Commit des Registers sofort abgeschlossen (`POST /maintenance/flush`). Einzelne neue Mails: ein Commit je neuer Quelle und ein Commit `attachments: <id> <Betreff>` für die Mail.
+- Wird die Erkennungsliste um eine Endung erweitert, nimmt die Schleife auch bereits bearbeitete Mails mit Anhängen dieser Endung erneut auf (AK-4 gilt damit auch für den Bestand).
+- Eine nicht lesbare Anhangsdatei pausiert die ganze Mail für `MAIL_ATTACHMENT_PAUSE_SECONDS` (900 s), damit nie nur ein Teil ihrer Anhänge registriert ist; fehlt die Datei dauerhaft, meldet der Abgleich die Lücke.
+- Leere Anhänge werden in der Zusammenfassung unter ihrer Endung gezählt und zusätzlich als `empty` ausgewiesen.
+- Die Links stehen hinter dem Archiv-Link als `→ [Markdown](<relativer Pfad>)`.
+- `alice-source-registry`: `parents` gehört jetzt zu den Register-Feldern ohne Stufen-Reset (wie `locations`); `database` läuft für eine DMS-Quelle wegen des neuen Archiv-Fundorts trotzdem neu (die Fundorte stehen in der Datenbank, PROJ-119), alle übrigen Stufen bleiben `done`.
+- Abweichungen von der Spec: keine.
