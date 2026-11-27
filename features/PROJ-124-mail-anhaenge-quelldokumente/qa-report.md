@@ -7,7 +7,7 @@
 **Produktionsreif:** Ja (mit Live-Tests AK-45/46 nach dem Deploy)
 - Akzeptanzkriterien: 44 von 44 testbaren bestanden, AK-45/46 sind Live-Tests nach dem Deploy
 - Bugs: Critical 0 · High 0 · Medium 0 · Low 0
-- Hinweis zu AK-14 (siehe unten): Bei einer DMS-Quelle, die durch einen Anhang einen weiteren Fundort bekommt, bleiben `extract`, `classify`, `rag` und `wiki` `done`. Die Stufe `database` läuft wegen des neuen Fundorts nach der bestehenden Regel aus PROJ-119 neu (die Fundorte stehen in der Dokument-Tabelle). Das ist keine LLM-/OCR-Verarbeitung, nur ein Abgleich der Zeile.
+- Hinweis zu AK-14 (bewusste Ausnahme, vom Menschen im Issue #19 entschieden, Option a): Bei einer DMS-Quelle, die durch einen Anhang einen weiteren Fundort bekommt, bleiben `extract`, `classify`, `rag` und `wiki` `done`. Die Stufe `database` läuft wegen des neuen Fundorts nach der bestehenden Regel aus PROJ-119 neu (die Fundorte stehen in der Dokument-Tabelle). Das ist keine LLM-/OCR-Verarbeitung, nur ein Abgleich der Zeile.
 
 ## Automatische Prüfungen
 - `alice-mail-import`: 90 Tests (neu: 27 in `tests/test_attachments.py`). Echter Register-Code in-process, Wegwerf-Postgres, temporäres Git-Repo, temporärer Ordner als Mail-Archiv, Fake-IMAP-Server, Attrappe der Erkennungsliste
@@ -35,7 +35,7 @@
 | AK-11 keine Mindestgröße | ✅ | `test_kinds_sizes_and_stages` (3-KB-PNG und 5-MB-JPG registriert) |
 | AK-12 zip/ics/eml nicht registriert | ✅ | `test_not_recognised_and_empty_are_counted` (Archiv unverändert, kein `id`) |
 | AK-13 0 Byte nicht registriert, gezählt | ✅ | gleicher Test (`empty: 1`) |
-| AK-14 gleicher Hash wie DMS-Quelle | ⚠️ Abweichung (`database` → `pending`), Rückfrage offen | `test_same_hash_as_dms_source`, Register `test_new_parent_keeps_finished_stages` (siehe Hinweis zu `database`) |
+| AK-14 gleicher Hash wie DMS-Quelle | ✅ mit bewusster Ausnahme: `database` → `pending` (vom Menschen entschieden, Issue #19, Option a) | `test_same_hash_as_dms_source`, Register `test_new_parent_keeps_finished_stages` (siehe Hinweis zu `database`) |
 | AK-15 derselbe Anhang in zwei Mails | ✅ | `test_same_attachment_in_two_mails` |
 | AK-16 gleicher Inhalt zweimal in einer Mail | ✅ | `test_same_content_twice_in_one_mail` |
 | AK-17 später DMS-Datei mit gleichem Hash | ✅ | `test_later_dms_copy_keeps_parents` |
