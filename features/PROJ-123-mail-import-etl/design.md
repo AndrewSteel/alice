@@ -144,3 +144,21 @@ Deploy-Schritte für den Menschen:
 - **Gleiche Message-ID zweimal im selben Ordner** (z. B. direkt + über Mailingliste, B-1): Der Fundort behält eine UID, jede weitere UID derselben Mail im Ordner wird in der neuen Tabelle `alice.mail_import_extra_uids` gemerkt und gilt als bekannt. Der Takt holt sie nicht erneut und der Fundort springt nicht mehr hin und her (kein Commit). Im Nachtlauf: Verschwindet die Kopie des Fundorts, rückt eine noch vorhandene weitere UID nach (kein `deleted`); verschwundene weitere UIDs werden vergessen. UIDVALIDITY-Wechsel und gelöschtes Postfach leeren die Tabelle für Ordner bzw. Postfach.
 - **Abbruch zwischen Registrierung und Ablage** (B-2, AK-44/45): Jeder Takt sucht zuerst Quellen dieses Postfachs/Ordners ohne Archiv-Eintrag (zählt gegen die Paketgröße), holt die Mail über die UID des Fundorts und legt `.eml` und Anhänge ab (vorhandene Dateien bleiben).
 - **Weitergeleitete Mail** (B-3, AK-13): Die ausgelagerte `.eml` behält die Zeilenenden der Originalmail (CRLF), sie ist damit byte-gleich mit dem angehängten Original.
+
+## Deployment
+
+**Datum:** 2026-11-27, von `dev` (Phase 4, Merge PR #18). Kein Staging.
+
+**Schritte:**
+1. Migration `sql/migrations/2026-11-26_PROJ-123_mail_import.sql` (durch den Nutzer).
+2. Mail-Archiv `/mnt/nas/ai/mail` angelegt (NFS4, Besitzer auf das NAS-Konto aus `nas-volumes.yml` umgestellt).
+3. Gateway-Schlüssel `mail-import background` ergänzt, `alice-llm-gateway` neu gestartet (durch den Nutzer).
+4. `.env` für `alice-mail-import` lokal angelegt und per Sync übertragen (durch den Nutzer).
+5. n8n: `alice-mail-sync`, `alice-mail-attachment-processor`, `alice-mail-attachment-backfill`, `alice-mail-reconcile` deaktiviert. `alice-mail-api` und `alice-mail-tools` waren dabei versehentlich mit aus (Settings-Tab „E-Mail-Postfächer“ → 404) und wurden wieder aktiviert; beide laufen bis PROJ-140 bzw. PROJ-128.
+6. `./scripts/sync-compose.sh`, `make rebuild` + `health` für `alice-source-registry`, `alice-mail-import`, `alice-etl-rebuild`; alle `healthy`.
+
+**Live-Tests:**
+- AK-58 ✅ Testmail mit PDF-Anhang: Mail-Markdown mit Anhang-Link unter `emails/<JJJJ>/<MM>/`, PDF im Archiv unter `<id>.attachments/`, danach Kategorie und Zusammenfassung.
+- AK-57 ✅ Settings-Tab zeigt Status, letzte Synchronisierung und Anzahl importierter Mails. Stand bei der Abnahme (Erstimport lief noch): 3.925 Mails importiert, 0 Fehler, `extract` 3.920 `done`, `classify` 589 `done` / 3.335 `pending` (Hintergrundlast), `database` durchgehend `skipped`. Chat und Sprache währenddessen ohne spürbare Verzögerung.
+
+**Offen:** Ende des Erstimports und ersten Nachtlauf des Mail-Imports (`last_nightly` beim Deploy noch leer) sowie die Abgleich-Ebenen 5/6 im nächsten Vollständigkeitsabgleich ansehen.
