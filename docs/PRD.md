@@ -41,8 +41,8 @@ Ein vollständiger Neuaufbau aller Daten aus den Originalen ist ausdrücklich ak
 | P0 | Neuaufbau + Vollständigkeitsabgleich (PROJ-120) | 4.1 | Deployed |
 | P1 | ETL-Status-Ansicht (Admin, WebApp) (PROJ-122) | 4.1 | Deployed |
 | P1 | Mail-Import in den ETL — `.eml` ohne Anhänge + Links, Mail-Markdown, Kategorie (PROJ-123) | 4.2 | Planned |
-| P1 | Mail-Anhänge als Quelldokumente (PROJ-124) | 4.2 | Roadmap |
-| P1 | Bilder in der Quelle der Wahrheit — Übernahme bestehender Beschreibungen (PROJ-125) | 4.2 | Roadmap |
+| P1 | Mail-Anhänge als Quelldokumente (PROJ-124) | 4.2 | Planned |
+| P1 | Bilder in der Quelle der Wahrheit — Neubeschreibung aller Bilder, Ort aus Altbestand (PROJ-125) | 4.2 | Planned |
 | P1 | Vorschaubilder aus dem neuen ETL (PROJ-126) | 4.2 | Roadmap |
 | P1 | RAG-Index aus der Quell-Markdown (PROJ-127) | 4.3 | Roadmap |
 | P1 | Such-Tools als Service — Dokumente, Mails, Bilder (PROJ-128) | 4.3 | Roadmap |
@@ -67,7 +67,7 @@ Unterphasen: **4.1** ETL-Kern · **4.2** Mail und Bilder · **4.3** RAG und Wiki
 
 - **Quelle der Wahrheit:** eine Markdown-Datei je Quelldokument, Mail und Bild in einem eigenen, Git-versionierten NAS-Ordner; Originale bleiben unverändert an ihrem Ort. Der Mensch darf Quell-Markdowns von Hand korrigieren; die Pipeline übernimmt die Korrektur in DB, RAG und Wiki und überschreibt sie bei einem Neuaufbau nicht.
 - **Mails:** gespeichert als `*.eml` ohne Anhänge, stattdessen mit Links auf die separat gespeicherten Anhangsdateien; Mailtext als Markdown; Anhänge sind eigene Quelldokumente mit Verweis auf die Mail.
-- **Bilder:** Bild-Markdown mit Beschreibung, EXIF, Ort und Link aufs Original. Beim Neuaufbau werden die vorhandenen Beschreibungen übernommen; nur neue Bilder werden mit dem aktuellen Vision-Modell beschrieben (Neubeschreibung des Bestands = PROJ-114, zurückgestellt).
+- **Bilder:** Bild-Markdown mit Beschreibung, EXIF, Ort und Link aufs Original. Alle Bilder (auch der Bestand) werden mit dem aktuellen Vision-Modell neu beschrieben, das Modell steht im Frontmatter; aus dem Altbestand wird nur der Ort übernommen (PROJ-125, ersetzt PROJ-114; Entscheidung 2026-11-26).
 - **LLM-Wiki:** Seitentypen Personen, Organisationen, Verträge, Konten/Depots, Orte, Themen plus Index-Seiten. Jede neue Quell-Markdown löst einen Ingest im Hintergrund aus; ein nächtlicher Lint prüft Widersprüche, verwaiste Seiten und Links. Jede Aussage verlinkt auf ihre Quelle. Das Wiki ist reines LLM-Erzeugnis, in der WebApp nur lesbar; ein gemeinsames Wiki ohne gefilterte Sichten (Rollenmodell).
 - **Agent-Framework:** Entscheidung per Spike (PROJ-133) mit Go/No-Go. Favorit DeepSeek Harness (MIT, TypeScript/Node, Developer Preview); Alternativen u. a. Pydantic AI, LangGraph, OpenAI Agents SDK, smolagents. Ausgeschlossen: Lösungen auf Basis von n8n. Kriterien: mehrschrittige Planung, Sub-Agents, Tools über MCP oder Python, SSE-Streaming zur WebApp, Sessions/Gedächtnis, Modellwahl je Aufgabe, lokaler llama.cpp über OpenAI-kompatible API hinter `alice-llm-gateway`, i18n der Ausgaben.
 - **Multi-Model:** lokales LLM für alle ETL-Schritte und DMS-Analysen; Cloud-Modell nur für tiefergehende, internetgestützte Recherche. Cloud-Zugang austauschbar: Start mit dem unveränderten Claude Code CLI (`claude -p`) und dem Abo des Admins — nur für Anfragen des Admins; für weitere Haushaltsnutzer oder bei erreichten Limits per API mit Budget-Stopp (PROJ-137).
@@ -92,7 +92,7 @@ Unterphasen: **4.1** ETL-Kern · **4.2** Mail und Bilder · **4.3** RAG und Wiki
 - **Local-first, nicht local-only.** ETL, Wiki-Pflege und DMS-Analysen laufen ausschließlich lokal. Die Cloud sieht nur Recherche-Kontext (Frage, Web-Inhalte); DMS-, Mail- und Wiki-Inhalte gehen nur mit expliziter Freigabe pro Anfrage hinaus. Jeder Cloud-Aufruf wird protokolliert. Google-Agenten bleiben wie bisher (nur Live-Abfragen).
 - **Cloud-Zugang:** `claude -p` (unverändertes Claude Code CLI) mit dem Abo des Admins nur für dessen eigene Anfragen — Anfragen anderer Nutzer laufen nicht über dieses Abo (Anthropic-Nutzungsbedingungen). Das Abo teilt sich sein Kontingent mit der Software Factory.
 - **Hardware:** Ryzen 9 + RTX 3090 (`llama-3090`, ein Slot, teilt VRAM mit den Weaviate-Vektorisierern) + TITAN X (Speech). Chat und ETL konkurrieren um den Slot → `alice-llm-gateway` mit Prioritäten bleibt; Neuaufbau und Wiki-Pflege laufen als Hintergrundlast.
-- **Neustart:** keine Migration der alten Weaviate-/Redis-Bestände nötig (Ausnahme: Übernahme der Bildbeschreibungen). Das alte System läuft parallel, bis der Neuaufbau steht; Abschaltung in PROJ-142.
+- **Neustart:** keine Migration der alten Weaviate-/Redis-Bestände nötig (Ausnahme: Übernahme der Ortsangaben von Bildern). Das alte System läuft parallel, bis der Neuaufbau steht; Abschaltung in PROJ-142.
 - **Stack:** Python/FastAPI-Services, PostgreSQL, Redis, Weaviate, MQTT, Next.js (statischer Export), nginx bleiben. Neu: Git im Ordner der Quelle der Wahrheit; Claude Code CLI als Cloud-Zugang; ggf. Node/TypeScript-Runtime, falls der Spike das DeepSeek Harness wählt. n8n entfällt am Ende von 4.5. Keine neue Queue-/Event-Infrastruktur. Details: `docs/stack.md`.
 - **Software Factory:** testet ohne GPU und ohne Produktivsysteme — lokales LLM, Cloud-LLM (`claude`-CLI und API) und Vision-Modell werden gemockt. Messungen gegen das produktive LLM (Ausgangswert und Vergleich im Spike PROJ-133, DMS-Testkatalog) führt der Mensch aus. Factory-Parallelität: höchstens zwei Läufe. PROJ-133 startet erst nach PROJ-128 und PROJ-132 (Prototypen mit den produktiven Tools, Entscheidung 2026-11-24).
 - **Zugang:** nur über VPN.
@@ -101,11 +101,10 @@ Unterphasen: **4.1** ETL-Kern · **4.2** Mail und Bilder · **4.3** RAG und Wiki
 
 ## Non-Goals Phase 4
 
-- Alle offenen Roadmap-Einträge aus Phase 3 bleiben zurückgestellt: PROJ-81, 89, 101, 102, 103, 104, 105, 107, 108, 109, 110, 114. PROJ-90 (Websearch-Agent) ist verworfen, ersetzt durch PROJ-136
-- Keine Neubeschreibung des Bild-Bestands (PROJ-114)
+- Alle offenen Roadmap-Einträge aus Phase 3 bleiben zurückgestellt: PROJ-81, 89, 101, 102, 103, 104, 105, 107, 108, 109, 110. PROJ-114 (Neubeschreibung der Bilder) ist in PROJ-125 aufgegangen. PROJ-90 (Websearch-Agent) ist verworfen, ersetzt durch PROJ-136
 - Keine Bearbeitung des Wikis in der WebApp; keine nach Rolle gefilterten Wiki-Sichten
 - Keine Rechte je Dokumenttyp oder Postfach mehr; keine Rolle `child`
-- Keine Migration der alten Weaviate-/Redis-Daten (außer Bildbeschreibungen)
+- Keine Migration der alten Weaviate-/Redis-Daten (außer Ortsangaben von Bildern)
 - Keine neuen Funktionen für HA-Steuerung, Sprache, Kalender, Listen, Timer — nur Anbindung an das neue Agent-Framework
 - Kein PROJ-45 Display Registry, kein PROJ-59 Finanzanalyse, kein PROJ-58 Sprache-vs-TV-Trennung
 
