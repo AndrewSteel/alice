@@ -292,7 +292,7 @@ async def test_daily_limit_three_of_five(env, geoapify_mock):  # AK-14, EC-15
                           "AND state = 'pending'")
     await locate_all(env)
     assert len(geoapify_mock.requests) == 5
-    assert all((await stage(env, s, "locate"))["state"] == "done" for s in ids)
+    assert [(await stage(env, s, "locate"))["state"] for s in ids] == ["done"] * 5
 
 
 async def test_geoapify_error_leaves_description_alone(env, geoapify_mock, gateway):  # AK-16
@@ -443,7 +443,7 @@ async def test_new_before_backlog_when_released(env, gateway):  # AK-32
     assert (await stage(env, new))["state"] == "done"
     assert sorted([(await stage(env, b))["state"] for b in backlog]) == ["done", "pending", "pending"]
     await describe_all(env)
-    assert all((await stage(env, b))["state"] == "done" for b in backlog)
+    assert [(await stage(env, b))["state"] for b in backlog] == ["done"] * 3
 
 
 async def test_trigger_one_backlog_image(env, gateway):  # AK-33
@@ -478,7 +478,7 @@ async def test_concurrency_one(env, gateway):  # AK-34
     await env.describer.wait_idle()
     await describe_all(env)
     assert gateway.max_active == 1 and len(gateway.requests) == 4
-    assert all((await stage(env, s))["state"] == "done" for s in ids)
+    assert [(await stage(env, s))["state"] for s in ids] == ["done"] * 4
 
 
 async def test_changed_original_runs_again(env, gateway, geoapify_mock, nas):  # AK-36

@@ -171,7 +171,7 @@ async def test_only_documents_after_extract(env, gateway):  # AK-2, AK-3, AK-5, 
         gateway.push("classify", {"type": "Contract", "confidence": 0.9})
         await run(env)
         assert (await stage(env, waiting))["state"] == "pending"
-        assert (await stage(env, img))["state"] == "pending"
+        assert (await stage(env, img))["state"] == "skipped"  # classify does not apply to images (PROJ-125)
         assert (env.repo / (await env.reg.get_source(img))["path"]).read_text() == img_before
         assert len(gateway.calls("classify")) == 1  # the folder type is not used (AK-5)
         assert (await doc(env, folder))["frontmatter"]["type"] == "Contract"

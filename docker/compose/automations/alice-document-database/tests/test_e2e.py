@@ -87,8 +87,7 @@ async def test_only_classified_documents(env):  # AK-2, AK-3
     await env.extract(running)
     await env._claim("classify", running)  # running
     image = await env.register(kind="image")
-    await env.extract(image, kind="image")
-    await env.classify(image, "Document", {}, kind="image")
+    await env.extract(image, kind="image")  # classify and database are skipped for images (PROJ-125)
     await env.run()
     for sid in (waiting, extracted, failed, running, image):
         assert (await env.stage(sid))["state"] in ("pending", "skipped"), sid
