@@ -12,7 +12,7 @@ async def test_matrix_counts_kind_and_deleted(env):
     await env.source(5, kind="audio", states={s: "skipped" for s in ("extract", "classify", "database", "rag",
                                                                          "wiki", "thumbnail")})
     st = (await env.get("/etl/state")).json()
-    assert st["stages"] == ["detect", "extract", "classify", "database", "rag", "wiki", "thumbnail"]
+    assert st["stages"] == ["detect", "extract", "locate", "classify", "database", "rag", "wiki", "thumbnail"]
     m = st["matrix"]
     assert m["extract"] == {"pending": 1, "running": 0, "done": 1, "failed": 1, "failed_permanent": 0, "skipped": 1}
     assert m["classify"]["failed_permanent"] == 1 and m["detect"]["done"] == 4  # deleted not counted (AK-5)
@@ -27,10 +27,10 @@ async def test_matrix_counts_kind_and_deleted(env):
 async def test_new_stage_appears_in_position(env):
     """AK-7: a stage added to the register shows up as a row at its position."""
     await env.source(1)
-    await env.execute("INSERT INTO alice.pipeline_stages (name, position) VALUES ('ocrfix', 25)")
+    await env.execute("INSERT INTO alice.pipeline_stages (name, position) VALUES ('ocrfix', 27)")
     try:
         st = (await env.get("/etl/state")).json()
-        assert st["stages"][:4] == ["detect", "extract", "ocrfix", "classify"]
+        assert st["stages"][:5] == ["detect", "extract", "locate", "ocrfix", "classify"]  # locate: PROJ-125
         assert sum(st["matrix"]["ocrfix"].values()) == 0
     finally:
         await env.execute("DELETE FROM alice.pipeline_stages WHERE name = 'ocrfix'")
@@ -127,7 +127,7 @@ async def test_detail(env):
     assert d["path"] == f"documents/2026/11/{sid}.md"
     cl = next(s for s in d["stages"] if s["stage"] == "classify")
     assert cl["error"] == long_error and cl["attempts"] == 5 and cl["retryable"] is True
-    assert [s["stage"] for s in d["stages"]][:3] == ["detect", "extract", "classify"]
+    assert [s["stage"] for s in d["stages"]][:4] == ["detect", "extract", "locate", "classify"]
     assert not any(s["retryable"] for s in d["stages"] if s["stage"] != "classify")
     assert [(l["path"], l["present"]) for l in d["locations"]] == [("/nas/a.pdf", True), ("/nas/old/a.pdf", False)]
     assert [e["message"] for e in d["events"]] == ["zweites", "erstes"]

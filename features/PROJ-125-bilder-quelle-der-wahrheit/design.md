@@ -160,3 +160,21 @@ Deploy-Schritte (Mensch):
 | Bestand über Registrierungszeit vor dem ersten Start | Liste der IDs beim Start | eine Zahl statt 52.000 IDs, neue Bilder ergeben sich von selbst |
 | Tageslimit und Anstoß-Liste in PostgreSQL | Redis / Speicher | übersteht Neustarts, keine alten Redis-Schlüssel |
 | Titel-Ort nach dem eigenen Schreiben neu prüfen | zusätzliches Feld für den Kurztitel | kein neues Frontmatter-Feld, korrekt in jeder Reihenfolge |
+
+## Umsetzung (Bau, 2026-11-27)
+- Gebaut wie oben beschrieben: Dienst `docker/compose/automations/alice-image-processing/` (Port 8020, keine nginx-Route, Eintrag im `Makefile`), Migration `sql/migrations/2026-11-27_PROJ-125_images.sql` (= Abschnitt 22 in `init-schema.sql`), Register-Erweiterungen in `alice-source-registry`.
+- Register:
+  - `claim` mit `registered_since`/`registered_before` (Vergleich mit `sources.created_at`) und `source_ids`
+  - `done` mit `skipped`
+  - `_reset_after` setzt auch `skipped`-Stufen zurück, wenn die Art nicht in `skip_kinds` der Stufe steht
+  - neuer Index `idx_sources_kind_created`
+- `taken` ist die Kamerazeit wie gelesen (`YYYY-MM-DDThh:mm:ss`, mit Offset nur, wenn `OffsetTimeOriginal` gesetzt ist). Der Titel nimmt immer die Kamerazeit, auch bei Offset.
+- `location` ist ohne GPS `null` (nicht ein Objekt mit leeren Feldern). `gps.altitude` ist `null`, wenn das Bild keine Höhe hat.
+- Die Abschrift steht in einem Code-Block mit Sprache `text` und einem Zaun, der länger ist als jede Backtick-Folge der Abschrift.
+- Ein Gateway-Ausfall (nicht erreichbar, Zeitüberschreitung, 401/403/429/5xx) zählt als Fehlversuch mit Backoff. Danach pausiert die Beschreibung `IMAGE_LLM_RETRY_SECONDS`.
+- Angestoßene Einzelbilder: Der Eintrag in `image_describe_requests` wird bei der Übernahme gelöscht. Geht das Bild danach ohne Fehlversuch zurück (z. B. NAS weg), muss es neu angestoßen werden, wenn der Bestand gesperrt ist.
+- Bilder mit GPS, deren Ort am Tageslimit scheitert, gehen mit Wartezeit bis 00:00 Europe/Berlin (+5 s) zurück. Bilder mit Übernahme aus Weaviate laufen am selben Tag weiter.
+- HEIC: pillow-heif wendet die Drehung schon beim Lesen an und meldet danach Orientierung 1. `width`/`height` sind damit die angezeigten Maße wie bei JPEG.
+- Neuaufbau (PROJ-120) mit Art `image` ab `extract` umfasst `extract` und `locate`, sobald beide Stufen für Bilder einmal übernommen wurden (Register-Mechanismus „served“). Der Bestand bleibt auch im Neuaufbau bis zur Freigabe gesperrt.
+- Tests anderer Dienste: Die Testlisten der Standardstufen (`DEFAULT_STAGES`) und zwei Erwartungen in `alice-etl-status` kennen jetzt `locate`. Zwei Register-Tests erwarten `locate: skipped` bei Dokumenten.
+- Abweichungen von der Spec: keine.
