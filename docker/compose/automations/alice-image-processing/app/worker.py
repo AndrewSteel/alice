@@ -241,6 +241,7 @@ class Describer(Base):
         super().__init__(settings, registry, store)
         self.vision = vision
         self.cutoff: datetime | None = None
+        self.cutoff_lock = asyncio.Lock()  # both loops ask for it at start
         self.active: dict[str, dict] = {}
         self.llm_paused_until = 0.0
         self.llm_reason = ""
@@ -253,7 +254,9 @@ class Describer(Base):
 
     async def boundary(self) -> datetime | None:
         """Time of the first start (backlog boundary), loaded once."""
-        if self.cutoff is None:
+        async with self.cutoff_lock:
+            if self.cutoff is not None:
+                return self.cutoff
             try:
                 self.cutoff = await self.store.first_start()
                 self._db_up()
