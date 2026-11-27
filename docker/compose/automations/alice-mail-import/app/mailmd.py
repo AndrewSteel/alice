@@ -86,8 +86,51 @@ def _link(name: str, path: str) -> str:
     return f"[{label}](<{path}>)"
 
 
-def build(eml: bytes, entry: dict, archive_root: str, tz: ZoneInfo, received: datetime | None = None) -> tuple[dict, str]:
-    """(fields, content) for the source markdown. `entry` is the archive entry (eml_path, attachments)."""
+SECTION = "## Anhänge"
+
+
+def attachment_section(attachments: list[dict], links: dict | None = None) -> str:
+    """The section „Anhänge“: archive link per attachment; registered attachments (PROJ-124) also link
+    to their markdown. `links`: absolute archive path → relative path of the attachment markdown."""
+    links = links or {}
+    att = [SECTION, ""]
+    for a in attachments:
+        line = f"- {_link(a['filename'], a['path'])} ({a['mime_type']}, {_size(a['size'])})"
+        if links.get(a["path"]):
+            line += f" → [Markdown](<{links[a['path']]}>)"
+        att.append(line)
+    return "\n".join(att)
+
+
+def with_ids(attachments: list[dict], ids: dict) -> list[dict]:
+    """`attachments` with the source id of every registered attachment (PROJ-124); others without `id`."""
+    out = []
+    for a in attachments:
+        a = {k: v for k, v in a.items() if k != "id"}
+        if isinstance(a.get("path"), str) and ids.get(a["path"]):
+            a["id"] = ids[a["path"]]
+        out.append(a)
+    return out
+
+
+def replace_section(content: str, section: str) -> str:
+    """Content part with the section „Anhänge“ (always the last part) replaced or appended."""
+    text = (content or "").rstrip("\n")
+    marker = "\n" + SECTION + "\n"
+    if text == SECTION or text.startswith(SECTION + "\n"):
+        head = ""
+    elif marker in text + "\n":
+        head = (text + "\n").split(marker, 1)[0].rstrip("\n")
+    else:
+        head = text
+    return (head + "\n\n" if head else "") + section + "\n"
+
+
+def build(eml: bytes, entry: dict, archive_root: str, tz: ZoneInfo, received: datetime | None = None,
+          links: dict | None = None) -> tuple[dict, str]:
+    """(fields, content) for the source markdown. `entry` is the archive entry (eml_path, attachments).
+    `links` (PROJ-124): absolute archive path → (source id, relative markdown path) of registered
+    attachments, so a new extract (rebuild) keeps the references."""
     msg = mime.parse(eml)
     date = mime.mail_date(msg) or received
     sender = mime.addresses(msg, "From")
@@ -128,10 +171,9 @@ def build(eml: bytes, entry: dict, archive_root: str, tz: ZoneInfo, received: da
     if text.strip():
         parts.append(text)
     if fields["attachments"]:
-        att = ["## Anhänge", ""]
-        for a in fields["attachments"]:
-            att.append(f"- {_link(a['filename'], a['path'])} ({a['mime_type']}, {_size(a['size'])})")
-        parts.append("\n".join(att))
+        links = links or {}
+        fields["attachments"] = with_ids(fields["attachments"], {p: v[0] for p, v in links.items()})
+        parts.append(attachment_section(fields["attachments"], {p: v[1] for p, v in links.items()}))
     return fields, "\n\n".join(p for p in parts if p) + "\n"
 
 

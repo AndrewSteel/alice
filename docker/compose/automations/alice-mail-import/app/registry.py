@@ -74,6 +74,31 @@ class RegistryClient:
             "kind": "email", "hash": hash, "title": title, "location": location, "size": size,
             "captured": captured.isoformat(), "stage": "detect", "complete": True, "batch": batch})
 
+    async def register_attachment(self, *, kind: str, hash: str, title: str, path: str, size: int,
+                                  modified: datetime | None, captured: datetime, parent: str, batch: bool) -> dict:
+        """PROJ-124: a mail attachment as source (known hash: further location + parent)."""
+        body = {"kind": kind, "hash": hash, "title": title, "location": {"path": path}, "size": size,
+                "captured": captured.isoformat(), "parents": [parent], "stage": "detect", "complete": True,
+                "batch": batch}
+        if modified is not None:
+            body["modified"] = modified.isoformat()
+        return await self._call("POST", "/sources", json=body)
+
+    async def write_links(self, source_id: str, *, fields: dict, content: str | None, batch: bool) -> dict:
+        """PROJ-124: attachment ids + links in the mail markdown, own commit, classify of the mail stays."""
+        body = {"stage": "extract", "label": "attachments", "keep_stages": ["classify"], "fields": fields,
+                "batch": batch}
+        if content is not None:
+            body["content"] = content
+        return await self._call("PUT", f"/sources/{source_id}/document", json=body)
+
+    async def flush(self) -> dict:
+        return await self._call("POST", "/maintenance/flush")
+
+    async def event(self, source_id: str, level: str, event: str, message: str) -> dict:
+        return await self._call("POST", f"/sources/{source_id}/events",
+                                json={"level": level, "event": event, "message": message[:4000]})
+
     async def add_location(self, source_id: str, location: dict) -> dict:
         return await self._call("POST", f"/sources/{source_id}/locations", json=location)
 

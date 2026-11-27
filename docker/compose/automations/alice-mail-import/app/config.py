@@ -44,6 +44,14 @@ class Settings:
     llm_timeout_seconds: float = 900
     llm_retry_seconds: float = 60
     max_tokens: int = 1024
+    # attachments as sources (PROJ-124)
+    attachments_enabled: bool = True
+    detection_url: str = "http://alice-file-detection:8013"
+    attachment_poll_seconds: float = 30
+    attachment_batch_size: int = 50
+    attachment_pause_seconds: float = 900       # attachment file not readable: try the mail again after
+    attachment_summary_retention_days: int = 90  # at least 30 (MIN_SUMMARY_RETENTION_DAYS)
+    extensions_refresh_seconds: float = 300
 
     @property
     def tz(self) -> ZoneInfo:
@@ -90,6 +98,13 @@ class Settings:
             llm_timeout_seconds=num("MAIL_LLM_TIMEOUT_SECONDS", d.llm_timeout_seconds),
             llm_retry_seconds=num("MAIL_LLM_RETRY_SECONDS", d.llm_retry_seconds),
             max_tokens=num("MAIL_CLASSIFY_MAX_TOKENS", d.max_tokens, int),
+            attachments_enabled=not _bool(env.get("MAIL_ATTACHMENTS_DISABLED")),
+            detection_url=(env.get("DETECTION_URL") or d.detection_url).rstrip("/"),
+            attachment_poll_seconds=num("MAIL_ATTACHMENT_POLL_SECONDS", d.attachment_poll_seconds),
+            attachment_batch_size=max(1, num("MAIL_ATTACHMENT_BATCH_SIZE", d.attachment_batch_size, int)),
+            attachment_pause_seconds=num("MAIL_ATTACHMENT_PAUSE_SECONDS", d.attachment_pause_seconds),
+            attachment_summary_retention_days=num("MAIL_ATTACHMENT_SUMMARY_RETENTION_DAYS",
+                                                  d.attachment_summary_retention_days, int),
         )
         s.nightly  # validate early: "HH:MM"
         return s
