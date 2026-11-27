@@ -22,6 +22,7 @@ import pytest
 
 from app.config import Settings
 from app.crypto import encrypt_password
+from app.attachments import AttachmentWorker, Paused
 from app.importer import Importer
 from app.registry import RegistryClient
 from app.workers import ClassifyWorker, ExtractWorker
@@ -76,6 +77,30 @@ class FakeGateway:
         return httpx.AsyncClient(base_url="http://alice-llm-gateway:8011", transport=httpx.MockTransport(self.handler))
 
 
+DETECTION_LIST = {  # same defaults as alice-file-detection (the service reads them via GET /extensions)
+    "document": "pdf,txt,md,docx,doc,xlsx,xls,odt,ods,docm,dotx,ott,rtf,xlsm,ots,csv,pptx,pptm,ppt,ppsx,pps,odp,otp",
+    "image": "jpg,jpeg,png,webp,heic,tif,tiff",
+    "audio": "mp3,m4a,wav,flac,ogg,aac",
+    "video": "mp4,mov,mkv,avi,m4v,webm",
+}
+
+
+class FakeDetection:
+    """Stand-in for GET /extensions of alice-file-detection."""
+
+    def __init__(self):
+        self.exts = {e: k for k, v in DETECTION_LIST.items() for e in v.split(",")}
+        self.down = False
+
+    async def extensions(self):
+        if self.down:
+            raise Paused("Erkennungsliste der Datei-Erkennung nicht abrufbar (ConnectError)")
+        return dict(self.exts)
+
+    async def close(self):
+        pass
+
+
 class Env:
     pass
 
@@ -89,7 +114,8 @@ async def env(tmp_path):
     rmain, rconfig, rservice = _load_registry()
     pool = await asyncpg.create_pool(dsn=DSN, min_size=2, max_size=20)
     async with pool.acquire() as con:
-        await con.execute("TRUNCATE alice.sources, alice.mail_import_mailboxes, alice.mail_import_runs CASCADE")
+        await con.execute("TRUNCATE alice.sources, alice.mail_import_mailboxes, alice.mail_import_runs, "
+                          "alice.mail_attachment_runs CASCADE")
         await con.execute("DELETE FROM alice.imap_mailboxes")
         await con.execute("DELETE FROM alice.users WHERE username = 'mailtest'")
         owner = await con.fetchval("INSERT INTO alice.users (username, role) VALUES ('mailtest', 'admin') RETURNING id")
@@ -112,7 +138,9 @@ async def env(tmp_path):
     e.pool, e.reg, e.repo, e.archive, e.settings, e.imap, e.client = pool, reg, repo, archive, settings, imap, client
     e.owner = owner
     e.importer = Importer(settings, pool, client)
-    e.extract = ExtractWorker(settings, client, e.importer)
+    e.detection = FakeDetection()
+    e.attachments = AttachmentWorker(settings, pool, client, e.importer.archive, e.detection)
+    e.extract = ExtractWorker(settings, client, e.importer, e.attachments.known_links)
     e.gateway = FakeGateway()
     e.classify = ClassifyWorker(settings, client, http=e.gateway.client())
     e.servers = [imap]

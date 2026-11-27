@@ -45,5 +45,9 @@ assert call("POST", "/reconcile/lease", {"seconds": 60})[0] == 409
 status, check = call("POST", "/reconcile/check")
 assert status == 200 and check["unregistered"] == [] and check["missing"] == [], check
 assert call("DELETE", f"/reconcile/lease/{lease['token']}")[1] == {"released": True}
+# PROJ-124: the detection list for mail attachments
+exts = call("GET", "/extensions")[1]["extensions"]
+assert exts["pdf"] == "document" and exts["jpg"] == "image" and exts["mp3"] == "audio" and exts["mp4"] == "video", exts
+assert "zip" not in exts and "eml" not in exts, exts
 print("smoke ok: runs", night["id"])
 PY

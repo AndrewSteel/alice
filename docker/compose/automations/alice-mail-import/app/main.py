@@ -16,6 +16,10 @@ Endpoints:
   POST /reconcile/check       levels 5 (IMAP <-> register) and 6 (register <-> mail archive), read only
   POST /reconcile/repair      import missing mails / store missing archive files again
   POST /maintenance/nightly   run the nightly reconciliation now
+  PROJ-124 (mail attachments as sources):
+  GET  /attachments/runs      stored summaries of the attachments not processed (per extension / mailbox)
+  POST /reconcile/check       additionally level 7 (mail <-> attachment sources) under "attachments"
+  POST /reconcile/repair      additionally type "attachment_register" (source_id = mail)
 """
 from __future__ import annotations
 
@@ -25,11 +29,13 @@ import time
 from contextlib import asynccontextmanager
 
 import asyncpg
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .archive import Archive
+from .attachments import AttachmentWorker, DetectionClient
+from .attachments import Paused as AttachmentsPaused
 from .config import Settings
 from .importer import Importer, Paused
 from .registry import RegistryClient
@@ -48,7 +54,11 @@ class Service:
         self.pool = pool
         self.registry = registry
         self.importer = Importer(settings, pool, registry, Archive(settings.archive_path))
-        self.extract = ExtractWorker(settings, registry, self.importer) if settings.extract_enabled else None
+        self.detection = DetectionClient(settings.detection_url, settings.extensions_refresh_seconds)
+        self.attachments = (AttachmentWorker(settings, pool, registry, self.importer.archive, self.detection)
+                            if settings.attachments_enabled else None)
+        links = self.attachments.known_links if self.attachments else None
+        self.extract = ExtractWorker(settings, registry, self.importer, links) if settings.extract_enabled else None
         self.classify = ClassifyWorker(settings, registry) if settings.classify_enabled else None
         self.tasks: list[asyncio.Task] = []
 
@@ -58,6 +68,8 @@ class Service:
             self.tasks.append(asyncio.create_task(self.extract.run()))
         if self.classify:
             self.tasks.append(asyncio.create_task(self.classify.run()))
+        if self.attachments:
+            self.tasks.append(asyncio.create_task(self.attachments.run()))
 
     async def stop(self) -> None:
         for t in self.tasks:
@@ -66,6 +78,7 @@ class Service:
         await self.importer.stop()
         if self.classify:
             await self.classify.close()
+        await self.detection.close()
 
 
 @asynccontextmanager
@@ -107,7 +120,8 @@ async def health(request: Request):
     except Exception as exc:
         errors.append(f"Datenbank nicht erreichbar: {exc.__class__.__name__}")
     now = time.monotonic()
-    loops = [("Import", svc.importer)] + [(n, w) for n, w in (("extract", svc.extract), ("classify", svc.classify)) if w]
+    loops = [("Import", svc.importer)] + [(n, w) for n, w in (("extract", svc.extract), ("classify", svc.classify),
+                                                               ("Anhänge", svc.attachments)) if w]
     for name, loop in loops:
         if now - loop.last_tick > LOOP_STALE_SECONDS + getattr(loop, "poll", 0):
             errors.append(f"Schleife {name} läuft nicht")
@@ -116,6 +130,8 @@ async def health(request: Request):
     for name, w in (("extract", svc.extract), ("classify", svc.classify)):
         if w and w.paused_reason:
             warnings.append(f"Stufe {name} pausiert: {w.paused_reason}")
+    if svc.attachments and svc.attachments.paused_reason:
+        warnings.append(f"Anhangs-Registrierung pausiert: {svc.attachments.paused_reason}")
     if svc.classify and svc.classify.llm_paused_until > now:
         warnings.append(f"LLM nicht verfügbar: {svc.classify.llm_reason}")
     status = "unhealthy" if errors else ("warning" if warnings else "healthy")
@@ -140,12 +156,13 @@ async def status(request: Request):
         "import": svc.importer.stats,
         "extract": svc.extract.stats if svc.extract else None,
         "classify": svc.classify.stats if svc.classify else None,
+        "attachments": svc.attachments.stats if svc.attachments else None,
         "last_nightly": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in dict(run).items()} if run else None,
     }
 
 
 class RepairItem(BaseModel):
-    type: str = Field(..., pattern=r"^(mail_import|mail_rearchive)$")
+    type: str = Field(..., pattern=r"^(mail_import|mail_rearchive|attachment_register)$")
     mailbox: str | None = Field(None, max_length=200)
     folder: str | None = Field(None, max_length=1000)
     uid: int | None = Field(None, ge=1)
@@ -160,10 +177,14 @@ class RepairIn(BaseModel):
 
 @app.post("/reconcile/check")
 async def reconcile_check(request: Request):
+    svc = _svc(request)
     try:
-        return await _svc(request).importer.reconcile_check()
+        out = await svc.importer.reconcile_check()
     except Paused as exc:
         return JSONResponse(status_code=503, content={"error": "unavailable", "detail": str(exc)})
+    if svc.attachments:  # PROJ-124: level 7
+        out["attachments"] = await svc.attachments.reconcile_check()
+    return out
 
 
 @app.post("/reconcile/repair")
@@ -172,14 +193,33 @@ async def reconcile_repair(body: RepairIn, request: Request):
         if it.type == "mail_import" and not (it.mailbox and it.folder and it.uid):
             return JSONResponse(status_code=422, content={"error": "invalid",
                                                           "detail": "mail_import braucht mailbox, folder, uid"})
-        if it.type == "mail_rearchive" and not it.source_id:
+        if it.type in ("mail_rearchive", "attachment_register") and not it.source_id:
             return JSONResponse(status_code=422, content={"error": "invalid",
-                                                          "detail": "mail_rearchive braucht source_id"})
+                                                          "detail": f"{it.type} braucht source_id"})
+    svc = _svc(request)
+    mail_items = [i.model_dump() for i in body.items if i.type != "attachment_register"]
+    attachment_mails = [i.source_id for i in body.items if i.type == "attachment_register"]
+    if attachment_mails and not svc.attachments:
+        return JSONResponse(status_code=422, content={"error": "invalid",
+                                                      "detail": "Anhangs-Registrierung ist abgeschaltet"})
+    results = []
     try:
-        results = await _svc(request).importer.reconcile_repair([i.model_dump() for i in body.items])
-    except Paused as exc:
+        if mail_items:
+            results += await svc.importer.reconcile_repair(mail_items)
+        if attachment_mails:
+            results += await svc.attachments.reconcile_repair(attachment_mails)
+    except (Paused, AttachmentsPaused) as exc:
         return JSONResponse(status_code=503, content={"error": "unavailable", "detail": str(exc)})
     return {"results": results}
+
+
+@app.get("/attachments/runs")
+async def attachment_runs(request: Request, limit: int = Query(50, ge=1, le=500),
+                          kind: str | None = Query(None, pattern=r"^(tick|reconcile)$")):
+    svc = _svc(request)
+    if not svc.attachments:
+        return {"enabled": False, "runs": []}
+    return {"enabled": True, "runs": await svc.attachments.runs(limit, kind)}
 
 
 @app.post("/maintenance/nightly")

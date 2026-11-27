@@ -12,6 +12,8 @@ Endpoints:
   GET  /runs?kind=night&limit=   recent runs incl. the nightly summaries
   GET  /runs/{id}                one run
   GET  /problems?limit=          open detection problems
+  GET  /extensions               effective detection list (extension → kind); PROJ-124 uses it for
+                                 mail attachments, so the list is maintained only here
   PROJ-120 (level 1 of the reconciliation, called by alice-etl-rebuild):
   POST /reconcile/lease          take / renew the reconciliation lease (no nightly run meanwhile)
   DELETE /reconcile/lease/{token}
@@ -100,6 +102,13 @@ def _plain(row) -> dict:
             v = json.loads(v)
         out[k] = v
     return out
+
+
+@app.get("/extensions")
+async def extensions(request: Request):
+    """PROJ-124: the detection list as configured (defaults + DETECT_EXT_*), lower case, without dot."""
+    exts = _det(request).s.extensions
+    return {"extensions": dict(sorted(exts.items()))}
 
 
 @app.get("/health")

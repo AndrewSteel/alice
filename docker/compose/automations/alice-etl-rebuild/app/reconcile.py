@@ -6,6 +6,7 @@ Completeness reconciliation (PROJ-120): NAS <-> register <-> repo <-> stages <->
    level 1 NAS <-> register (detection), re-hash portion / full re-hash (detection),
    level 2 register <-> repo (register), level 3 stages and level 4 register <-> DB (own queries),
    PROJ-123: level 5 IMAP <-> register and level 6 register <-> mail archive (mail import).
+   PROJ-124: level 7 mail <-> attachment sources (mail import).
 3. Safeguard: more planned repairs than the limit (default 5 % of the sources) → repair nothing.
 4. Repair the unambiguous gaps (through the detection / the register; orphaned document rows
    directly), one event per repair at the source.
@@ -334,7 +335,20 @@ class Reconciler:
                 detail += " (Mail nicht mehr auf dem Server)"
             gaps.append(_gap(6, m["gap"], source_id=m["source_id"], path=m.get("path"), detail=detail,
                              repair="mail_rearchive" if m["on_server"] else None))
-        notes = out["imap"].get("notes") or []
+        notes = list(out["imap"].get("notes") or [])
+        att = out.get("attachments")  # PROJ-124: level 7, only from a mail import that knows it
+        if att is not None:
+            labels = {"attachment_unregistered": "Anhang ohne Quelle bzw. ohne Verweis auf die Mail",
+                      "attachment_reference_missing": "Quell-id des Anhangs fehlt in der Mail-Markdown",
+                      "attachment_file_missing": "Anhangsdatei fehlt im Mail-Archiv",
+                      "attachment_changed": "Anhangsdatei im Mail-Archiv geändert (anderer Hash)"}
+            for m in att.get("missing") or []:
+                g = _gap(7, m["gap"], source_id=m.get("source_id") or m["mail_id"], path=m.get("path"),
+                         detail=f"{m.get('title') or ''}: {labels.get(m['gap'], m['gap'])} ({m.get('filename') or ''})",
+                         repair=m.get("repair"))
+                g["mail_id"] = m["mail_id"]
+                gaps.append(g)
+            notes += att.get("notes") or []
         summary["notes"].extend(notes)
         return gaps, ("; ".join(notes) if notes else None)
 
@@ -354,6 +368,8 @@ class Reconciler:
                 await self._repair_level2(level2)
             if by.get("mail_import") or by.get("mail_rearchive"):
                 await self._repair_mail(by.get("mail_import", []), by.get("mail_rearchive", []))
+            if by.get("attachment_register"):
+                await self._repair_attachments(by["attachment_register"])
             for g in by.get("db_retry", []):
                 await self.registry.retry(g["source_id"], "database")
                 await self._event(g, "reconcile_db_retry",
@@ -441,6 +457,25 @@ class Reconciler:
             else:
                 g.update(action="repair_failed", detail=f"{g['detail']}; {r.get('detail', 'nicht abgelegt')}")
 
+    async def _repair_attachments(self, gaps: list[dict]) -> None:
+        """PROJ-124, level 7: register the attachments of these mails through the mail import."""
+        items = [{"type": "attachment_register", "source_id": mid} for mid in dict.fromkeys(g["mail_id"] for g in gaps)]
+        try:
+            out = await self.mail.repair(items, self.s.long_timeout_seconds)
+        except (Unavailable, Busy, CallError) as exc:
+            for g in gaps:
+                g.update(action="repair_failed", detail=f"{g['detail']}; {exc}")
+            return
+        by_mail = {r.get("source_id"): r for r in out["results"] if r.get("type") == "attachment_register"}
+        for g in gaps:
+            r = by_mail.get(g["mail_id"], {})
+            if r.get("repaired"):
+                g["source_id"] = g["mail_id"]
+                await self._event(g, "reconcile_attachments",
+                                  f"Abgleich: Anhänge der Mail als Quellen nachgeholt ({g['path']})")
+            else:
+                g.update(action="repair_failed", detail=f"{g['detail']}; {r.get('detail', 'nicht nachgeholt')}")
+
     async def _repair_level2(self, gaps: list[dict]) -> None:
         items = [{"id": g["source_id"], "action": g["repair"],
                   **({"found_at": g["found_at"]} if g.get("found_at") else {})} for g in gaps]
@@ -462,7 +497,7 @@ class Reconciler:
     # ================================================================ result
     @staticmethod
     def _level_summary(gaps: list[dict], mail: bool = False) -> dict:
-        levels = (1, 2, 3, 4, 5, 6) if mail else (1, 2, 3, 4)
+        levels = (1, 2, 3, 4, 5, 6, 7) if mail else (1, 2, 3, 4)
         out = {str(lv): {"gaps": 0, "repaired": 0, "reported": 0, "repair_failed": 0, "by_gap": {}} for lv in levels}
         for g in gaps:
             if g["gap"] == "folder_skipped":

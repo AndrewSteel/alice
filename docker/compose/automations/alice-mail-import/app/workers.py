@@ -84,9 +84,11 @@ class _Loop:
 class ExtractWorker(_Loop):
     stage = "extract"
 
-    def __init__(self, settings: Settings, registry: RegistryClient, importer):
+    def __init__(self, settings: Settings, registry: RegistryClient, importer, links=None):
         super().__init__(settings, registry)
         self.importer = importer
+        # PROJ-124: (mail id, mail markdown path) → known attachment ids/links, kept by a new extract
+        self.links = links
         self.archive: Archive = importer.archive
         self.poll = settings.extract_poll_seconds
 
@@ -117,7 +119,8 @@ class ExtractWorker(_Loop):
             return await self.release(sid, token, 60)
         try:
             doc = await self.registry.read_document(sid)
-            fields, content = mailmd.build(eml, entry, self.s.archive_path, self.s.tz)
+            links = await self.links(sid, doc["path"]) if self.links else None
+            fields, content = mailmd.build(eml, entry, self.s.archive_path, self.s.tz, links=links)
         except (RegistryUnavailable, RegistryConflict) as exc:
             logger.warning("Markdown of %s cannot be read now: %s", sid, exc)
             return await self.release(sid, token)

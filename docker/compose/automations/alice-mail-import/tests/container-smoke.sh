@@ -27,6 +27,12 @@ status, out = call("POST", "/reconcile/repair", {"items": [{"type": "mail_import
 assert status == 422, (status, out)
 status, out = call("POST", "/reconcile/repair", {"items": [{"type": "delete_everything"}]})
 assert status == 422, (status, out)
+# PROJ-124: attachment summaries, repair item needs the mail id
+status, out = call("GET", "/attachments/runs")
+assert status == 200 and out == {"enabled": True, "runs": []}, (status, out)
+status, out = call("POST", "/reconcile/repair", {"items": [{"type": "attachment_register"}]})
+assert status == 422, (status, out)
+assert "attachments" in st, st
 
 # the parts of the pipeline that need no other service
 from app import mailmd, mime
@@ -40,5 +46,7 @@ fields, content = mailmd.build(raw, {"eml_path": "k/x.eml", "attachments": []}, 
 assert prep.hash.startswith("mid:") and fields["from"]["name"] == "Jürgen", fields
 assert "[Link](https://example.invalid)" in content and "x.png" not in content, content
 assert decrypt_password(encrypt_password("pw", "k", b"0" * 16), "k") == "pw"
+from app.attachments import extension
+assert extension("Scan.PDF") == "pdf" and extension("ohne") == "" and extension(".hidden") == ""
 print("smoke ok")
 PY

@@ -246,3 +246,18 @@ async def test_many_new_files_in_day_scan_use_batch(make_detector, pool, nas, ad
     await run(det)
     await run(det)
     assert len(batches) == 25 and all(batches) and flushed
+
+
+async def test_extensions_endpoint_follows_configuration(monkeypatch):  # PROJ-124 AK-4
+    from types import SimpleNamespace
+
+    from app import main
+    from app.config import Settings
+
+    monkeypatch.setenv("DETECT_EXT_DOCUMENT", "pdf,TXT,.xyz")
+    main.app.state.det = SimpleNamespace(s=Settings.from_env())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://t") as c:
+        exts = (await c.get("/extensions")).json()["extensions"]
+    assert exts["pdf"] == "document" and exts["txt"] == "document" and exts["xyz"] == "document"
+    assert exts["jpg"] == "image" and exts["mp3"] == "audio" and exts["mp4"] == "video"
+    assert "docx" not in exts and "zip" not in exts
