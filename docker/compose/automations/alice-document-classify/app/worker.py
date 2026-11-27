@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from .classifier import Classifier, PermanentError
 from .config import Settings
@@ -16,6 +18,27 @@ from .llm import InvalidAnswer, LlmError, LlmUnavailable
 from .registry import RegistryClient, RegistryConflict, RegistryError, RegistryUnavailable
 
 logger = logging.getLogger("alice-document-classify")
+
+MAX_PARENTS_READ = 50  # parent mails read for the mail context (PROJ-124)
+
+
+def _parse_date(value) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _person(value) -> str:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, dict):
+        name, address = str(value.get("name") or "").strip(), str(value.get("address") or "").strip()
+        return f"{name} <{address}>" if name and address else (address or name)
+    return str(value).strip() if isinstance(value, str) else ""
 
 
 class Worker:
@@ -169,8 +192,9 @@ class Worker:
         def progress(text: str) -> None:
             entry["progress"] = text
 
+        mail = await self.mail_context(doc["frontmatter"].get("parents"))
         try:
-            fields = await self.classifier.run(doc["frontmatter"], doc["content"], progress)
+            fields = await self.classifier.run(doc["frontmatter"], doc["content"], progress, mail)
         except LlmUnavailable as exc:
             self.llm_reason, self.llm_key_rejected = str(exc), exc.key_rejected
             if self.llm_paused_until <= time.monotonic():
@@ -207,6 +231,27 @@ class Worker:
         self.stats["done"] += 1
         logger.info("Classified %s as %s", sid, fields.get("type", "(hand type)"))
         return "done"
+
+    async def mail_context(self, parents) -> dict | None:
+        """PROJ-124: subject, sender and date of the oldest readable parent mail; None without parents or
+        if no parent markdown can be read (classification then runs without the hint, AK-26)."""
+        if not isinstance(parents, list) or not parents:
+            return None
+        found = []
+        for pid in [p for p in parents if isinstance(p, str)][:MAX_PARENTS_READ]:
+            try:
+                fm = (await self.registry.read_document(pid)).get("frontmatter") or {}
+            except Exception as exc:
+                logger.info("Parent mail %s not readable, classification without its context: %s", pid,
+                            exc.__class__.__name__)
+                continue
+            when = _parse_date(fm.get("date")) or _parse_date(fm.get("captured"))
+            found.append((when or datetime.max.replace(tzinfo=timezone.utc), pid, fm, when))
+        if not found:
+            return None
+        _, _, fm, when = min(found, key=lambda f: (f[0], f[1]))
+        return {"subject": str(fm.get("title") or "").strip(), "sender": _person(fm.get("from")),
+                "date": when.astimezone(ZoneInfo(self.s.timezone)).strftime("%Y-%m-%d %H:%M") if when else ""}
 
     async def _failed(self, sid: str, token: str, error: str) -> str:
         logger.warning("Classification of %s failed (retry by backoff): %s", sid, error)

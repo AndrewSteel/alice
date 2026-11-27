@@ -131,10 +131,10 @@ class Classifier:
         except InvalidAnswer as exc:
             raise InvalidAnswer(f"Ungültige Antwort des LLM ({step}, auch im zweiten Versuch): {exc}") from None
 
-    async def classify(self, head: str, lang: str | None) -> tuple[str, float, bool]:
+    async def classify(self, head: str, lang: str | None, mail: dict | None = None) -> tuple[str, float, bool]:
         """Temperature 0 first; below the threshold a second try with higher temperature, the higher
         confidence wins (tie: the second) (AK-7–9)."""
-        system, user = prompts.classify(head, lang)
+        system, user = prompts.classify(head, lang, mail)
         best = await self._ask("Klassifizierung", system, user, 0.0, read_classification)
         if best[1] < self.s.confidence_threshold:
             try:
@@ -145,13 +145,14 @@ class Classifier:
                 best = second
         return best[0], best[1], best[1] < self.s.confidence_threshold
 
-    async def extract(self, doc_type: str, head: str, lang: str | None) -> tuple[dict, bool]:
+    async def extract(self, doc_type: str, head: str, lang: str | None,
+                      mail: dict | None = None) -> tuple[dict, bool]:
         """Fields, title, summary; German check with one stricter second try (AK-21–24)."""
-        system, user = prompts.extract(doc_type, head, lang)
+        system, user = prompts.extract(doc_type, head, lang, mail=mail)
         data = await self._ask("Felder", system, user, 0.0, read_extraction)
         if not language.suspicious(data["title"], data["summary"], self.s.language_threshold):
             return data, False
-        system, user = prompts.extract(doc_type, head, lang, strict_german=True)
+        system, user = prompts.extract(doc_type, head, lang, strict_german=True, mail=mail)
         data = await self._ask("Felder, Deutsch-Vorgabe", system, user, 0.0, read_extraction)
         return data, language.suspicious(data["title"], data["summary"], self.s.language_threshold)
 
@@ -167,7 +168,8 @@ class Classifier:
                                            system, user, 0.0, read_transactions))
         return normalize.merge_transactions(results)
 
-    async def run(self, fm: dict, content: str, progress=None) -> dict:
+    async def run(self, fm: dict, content: str, progress=None, mail: dict | None = None) -> dict:
+        """`mail` (PROJ-124): subject/sender/date of the oldest parent mail, a hint for the LLM."""
         def step(text):
             if progress:
                 progress(text)
@@ -190,12 +192,12 @@ class Classifier:
                                      f"({', '.join(TYPES)})")
         else:
             step("Klassifizierung")
-            doc_type, conf, uncertain = await self.classify(head, lang)
+            doc_type, conf, uncertain = await self.classify(head, lang, mail)
             out["type"] = doc_type
             out["classification"] = {"confidence": round(conf, 3), "uncertain": uncertain}
 
         step("Felder")
-        data, lang_uncertain = await self.extract(doc_type, head, lang)
+        data, lang_uncertain = await self.extract(doc_type, head, lang, mail)
         fields = normalize.normalize_fields(doc_type, data["fields"])
         if doc_type == "BankStatement":
             fields["transactions"] = await self.transactions(content, lang, progress)
