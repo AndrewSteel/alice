@@ -172,11 +172,13 @@ class Registry:
             raise NotFound(f"Stufe {stage} unbekannt")
 
     async def _reset_dependents(self, con, source_id: str, exclude: str | None, changed,
-                                meta=()) -> list[str]:
+                                meta=(), keep=()) -> list[str]:
         """The markdown changed: stages flagged resets_on_content_change (any change, AK-20) and stages
         whose resets_on_fields name a changed field or `content` (PROJ-118) → pending.
         `meta` (PROJ-119): changed register fields (`locations`, `deleted`) that only reset stages
-        naming them in resets_on_fields, not every resets_on_content_change stage."""
+        naming them in resets_on_fields, not every resets_on_content_change stage.
+        `keep` (PROJ-124): stages this write never resets (e.g. classify of a mail whose attachment links
+        were added)."""
         changed = sorted({str(c) for c in changed})
         meta = sorted({str(c) for c in meta})
         if not changed and not meta:
@@ -191,9 +193,9 @@ class Registry:
                AND ((ps.resets_on_content_change AND cardinality($3::text[]) > 0)
                     OR ps.resets_on_fields && ($3::text[] || $4::text[]))
                AND ss.source_id = $1 AND ss.state NOT IN ('skipped', 'pending')
-               AND ss.stage IS DISTINCT FROM $2
+               AND ss.stage IS DISTINCT FROM $2 AND NOT (ss.stage = ANY($5::text[]))
             RETURNING ss.stage
-            """, source_id, exclude, changed, meta)
+            """, source_id, exclude, changed, meta, list(keep))
         stages = [r["stage"] for r in rows]
         now = time.time()
         for stage in stages:
@@ -281,7 +283,7 @@ class Registry:
 
     async def _write_source(self, con, src: dict, *, label: str, stage: str | None = None,
                             fields: dict | None = None, content: str | None = None, batch: bool = False,
-                            token: str | None = None) -> dict:
+                            token: str | None = None, keep_stages=()) -> dict:
         """Write the source markdown from register + stage values, respecting `manual`.
         Caller holds self.lock and a transaction with the source row locked.
         With `token` the result is discarded (nothing written) if the claim of `stage` was taken back
@@ -357,7 +359,7 @@ class Registry:
         meta: set[str] = set()
         if src["blob"] and not fresh:
             changed = {k for k in set(old_fm) | set(new_fm)
-                       if k not in ("locations", "manual", "deleted") and old_fm.get(k) != new_fm.get(k)}
+                       if k not in (*md.META_FIELDS, "manual") and old_fm.get(k) != new_fm.get(k)}
             meta = {k for k in md.META_FIELDS if old_fm.get(k) != new_fm.get(k)}
             if md.normalize_content(old_content) != md.normalize_content(new_content):
                 changed.add(md.CONTENT)
@@ -378,7 +380,7 @@ class Registry:
         if batch:
             if self._add_to_batch(stage or label, sid, {src["path"], new_path}) >= self.s.batch_max_files:
                 await self._flush_stage(stage or label)
-        reset = await self._reset_dependents(con, sid, stage, changed, meta)
+        reset = await self._reset_dependents(con, sid, stage, changed, meta, keep_stages)
         if fresh:
             reset = await self._reset_after(con, sid, "detect")
         src.update(path=new_path, title=title, blob=blob)
@@ -692,8 +694,11 @@ class Registry:
                 "changed": True}
 
     async def write_document(self, source_id: str, *, stage: str, fields: dict | None = None,
-                             content: str | None = None, batch: bool = False, token: str | None = None) -> dict:
+                             content: str | None = None, batch: bool = False, token: str | None = None,
+                             label: str | None = None, keep_stages: list[str] | None = None) -> dict:
         """A stage writes fields and/or the content part (AK-5, AK-7, AK-25–27).
+        `label` (PROJ-124): commit text instead of the stage name; `keep_stages`: stages this write does
+        not reset.
         With `token` (PROJ-118) the write only happens while `stage` is still running under this claim
         and the source is not deleted; otherwise the result is discarded (`discarded: true`)."""
         fields = fields or {}
@@ -716,8 +721,9 @@ class Registry:
                     batch = bool(await con.fetchval(
                         "SELECT rebuild_run IS NOT NULL FROM alice.source_stages WHERE source_id = $1 AND stage = $2",
                         source_id, stage))
-                return await self._write_source(con, src, label=stage, stage=stage, fields=fields,
-                                                content=content, batch=batch, token=token)
+                return await self._write_source(con, src, label=label or stage, stage=stage, fields=fields,
+                                                content=content, batch=batch, token=token,
+                                                keep_stages=tuple(keep_stages or ()))
 
     async def read_document(self, source_id: str) -> dict:
         self.require_available()

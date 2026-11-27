@@ -18,7 +18,8 @@ REGISTER_FIELDS = ("id", "schema", "kind", "locations", "parents", "hash", "size
 # Register fields the pipeline always sets, even if a human listed them in `manual`.
 ALWAYS_REGISTER = ("id", "kind", "schema", "deleted")
 # Register fields that reset only stages naming them in resets_on_fields (PROJ-119).
-META_FIELDS = ("locations", "deleted")
+# `parents` (PROJ-124): a further mail of an attachment changes nothing about its content.
+META_FIELDS = ("locations", "deleted", "parents")
 # Markdowns of deleted sources live below this folder with the same sub-structure (PROJ-116).
 DELETED_DIR = "deleted"
 WATCH_DIRS = (*KIND_DIRS.values(), DELETED_DIR)

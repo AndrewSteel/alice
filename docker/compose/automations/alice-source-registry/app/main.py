@@ -20,6 +20,7 @@ Endpoints:
        (fail with "permanent": true, release with "delay_seconds", claim with "kinds": PROJ-117)
        (claim with "requires", document write with "token", stages with "resets_on_fields": PROJ-118)
        (claim with "include_deleted", resets_on_fields "locations"/"deleted": PROJ-119)
+       (document write with "label" and "keep_stages"; `parents` resets no stage: PROJ-124)
   POST /maintenance/scan|flush|resync-queue       run background jobs now
   PROJ-120 (rebuild + reconciliation, alice-etl-rebuild):
   POST /rebuild/release                           release a portion of a rebuild run (stages → pending, flagged)
@@ -208,6 +209,18 @@ class DocumentIn(BaseModel):
     batch: bool = False
     # PROJ-118: write only while this claim of `stage` is still valid, otherwise discard the result
     token: uuid.UUID | None = None
+    # PROJ-124: commit text instead of the stage name, stages this write does not reset
+    label: str | None = Field(None, pattern=STAGE_PATTERN)
+    keep_stages: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("keep_stages")
+    @classmethod
+    def _keep(cls, v):
+        import re
+
+        if any(not re.match(STAGE_PATTERN, s) for s in v):
+            raise ValueError("keep_stages enthält ungültige Stufennamen")
+        return v
 
 
 class OriginalIn(BaseModel):
@@ -351,7 +364,8 @@ async def read_document(source_id: str, request: Request):
 async def write_document(source_id: str, body: DocumentIn, request: Request):
     return await _reg(request).write_document(source_id, stage=body.stage, fields=body.fields,
                                               content=body.content, batch=body.batch,
-                                              token=str(body.token) if body.token else None)
+                                              token=str(body.token) if body.token else None,
+                                              label=body.label, keep_stages=body.keep_stages)
 
 
 @app.post("/sources/{source_id}/locations")
