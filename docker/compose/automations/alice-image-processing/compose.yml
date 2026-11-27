@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------
+# alice-image-processing — images in the source of truth (PROJ-125).
+#
+# Takes due work of kind `image` from the source register: stage `extract`
+# (EXIF from the original + German description, short title and text in the
+# image by the vision model) and stage `locate` (place from GPS: takeover from
+# the old Weaviate collection `Image`, read only, else Geoapify). Reads the
+# originals via the shared NAS shares (nas-volumes.yml, NAS account, no root;
+# only read, incl. the mail archive for attachments) and writes ONLY through
+# alice-source-registry. LLM calls only through alice-llm-gateway with an own
+# background key. No Redis, no MQTT: dms-extractor-image stays untouched.
+#
+# Internal interface on port 8020 (health, status, describe one image),
+# reachable only inside the Docker network: there is deliberately NO nginx route.
+# ---------------------------------------------------------------------------
+services:
+  alice-image-processing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alice-image-processing
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    extends:
+      file: ../nas-volumes.yml
+      service: nas-base
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; print(urllib.request.urlopen(''http://localhost:8020/health'', timeout=3).read().decode())" || exit 1',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      # alice-source-registry, alice-llm-gateway, postgres, weaviate (old collection `Image`, read only)
+      automation:
+        aliases: [alice-image-processing]
+      backend:
+        aliases: [alice-image-processing]
+
+networks:
+  backend:
+    external: true
+    name: backend
+  automation:
+    external: true
+    name: automation

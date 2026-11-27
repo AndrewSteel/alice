@@ -37,6 +37,7 @@ STACKS ?= \
   automations/alice-etl-rebuild \
   automations/alice-etl-status \
   automations/alice-mail-import \
+  automations/alice-image-processing \
   ai/ollama \
   ai/llama-3090 \
   ai/openwebui \
