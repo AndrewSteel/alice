@@ -423,6 +423,38 @@ async def test_rebuild_keeps_ids(env):  # AK-37
     assert {k["title"]: k["id"] for k in await _children(env)} == before
 
 
+async def test_rebuild_does_not_take_over_replaced_file(env):  # EC-4, AK-37
+    await _import(env, _mail(23, [pdf("a2.pdf"), pdf("b2.pdf")]))
+    await env.attachments.step()
+    (kid,) = await _children(env)
+    mid = await _mail_id(env, "Mail 23")
+    a_file = env.archive / next(f for f in env.files() if f.endswith("a2.pdf"))
+    a_file.write_bytes(bytes(b ^ 1 for b in a_file.read_bytes()))  # other content, same size
+    async with env.pool.acquire() as con:
+        run = await con.fetchval("INSERT INTO alice.rebuild_runs (start_stage, kind, state, started_by) "
+                                 "VALUES ('extract', 'email', 'running', 'test') RETURNING id")
+    await env.reg.release_rebuild(run, [{"id": mid, "stages": ["extract"]}])
+    await env.extract_all()
+    await env.attachments.step()
+    assert [k["id"] for k in await _children(env)] == [kid["id"]]  # no new source
+    fm, _ = env.doc(mid)
+    assert [a["id"] for a in fm["attachments"]] == [kid["id"], kid["id"]]
+    out = await env.attachments.reconcile_check()
+    assert [(g["gap"], g["filename"], g["repair"]) for g in out["missing"]] == [("attachment_changed", "a2.pdf", None)]
+
+
+async def test_manual_attachments_only_reported_in_level7(env):
+    await _import(env, _mail(24, [pdf("a.pdf")]))
+    mid = await _mail_id(env, "Mail 24")
+    path = env.repo / (await _src(env, mid))["path"]
+    path.write_text(path.read_text().replace("mime_type: application/pdf", "mime_type: application/x-pdf"))
+    await env.reg.scan()
+    await env.attachments.step()
+    out = await env.attachments.reconcile_check()
+    gaps = [(g["gap"], g["repair"]) for g in out["missing"] if g["mail_id"] == mid]
+    assert gaps == [("attachment_reference_missing", None)]
+
+
 # ---------------------------------------------------------------- errors and operation
 async def test_archive_unavailable_pauses(env):  # AK-39
     await _import(env, _mail(23, [pdf("a.pdf")]))

@@ -35,7 +35,7 @@
 | AK-11 keine Mindestgröße | ✅ | `test_kinds_sizes_and_stages` (3-KB-PNG und 5-MB-JPG registriert) |
 | AK-12 zip/ics/eml nicht registriert | ✅ | `test_not_recognised_and_empty_are_counted` (Archiv unverändert, kein `id`) |
 | AK-13 0 Byte nicht registriert, gezählt | ✅ | gleicher Test (`empty: 1`) |
-| AK-14 gleicher Hash wie DMS-Quelle | ✅ | `test_same_hash_as_dms_source`, Register `test_new_parent_keeps_finished_stages` (siehe Hinweis zu `database`) |
+| AK-14 gleicher Hash wie DMS-Quelle | ⚠️ Abweichung (`database` → `pending`), Rückfrage offen | `test_same_hash_as_dms_source`, Register `test_new_parent_keeps_finished_stages` (siehe Hinweis zu `database`) |
 | AK-15 derselbe Anhang in zwei Mails | ✅ | `test_same_attachment_in_two_mails` |
 | AK-16 gleicher Inhalt zweimal in einer Mail | ✅ | `test_same_content_twice_in_one_mail` |
 | AK-17 später DMS-Datei mit gleichem Hash | ✅ | `test_later_dms_copy_keeps_parents` |
@@ -72,7 +72,8 @@
 - ✅ EC-1 DMS-Datei und Anhang → eine Quelle, zwei Fundorte (`test_same_hash_as_dms_source`)
 - ✅ EC-2 eine Mail in zwei Postfächern → eine Mail-Quelle (PROJ-123), ein Archivpfad
 - ✅ EC-3 gleiche Datei mit neuem Namen in Antwort-Mail (`test_same_attachment_in_two_mails`)
-- ✅ EC-4 Archivdatei ersetzt → `attachment_changed` gemeldet, nicht übernommen (`test_level7_reports_and_repairs`)
+- ✅ EC-4 Archivdatei ersetzt → `attachment_changed` gemeldet, nicht übernommen (`test_level7_reports_and_repairs`); auch nicht bei einem Neuaufbau ab `extract` (`test_rebuild_does_not_take_over_replaced_file`, Befund B-1 der Abnahme Runde 1)
+- ✅ `attachments` in `manual` → Ebene 7 meldet nur, keine Reparatur (`test_manual_attachments_only_reported_in_level7`)
 - ✅ EC-5 Umbenennung → Link folgt der `id` (`test_link_follows_renamed_markdown`)
 - ✅ EC-6 alte Anhangsordner als überwachter Ordner → normale Hash-Dedup (`test_later_dms_copy_keeps_parents`)
 - ✅ EC-7 erzeugter Name ohne erkannte Endung → gezählt (Endung aus dem Namen)

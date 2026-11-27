@@ -36,6 +36,8 @@ HASH_CHUNK = 1024 * 1024
 LINK_BACKOFF_SECONDS = [60, 300, 1800, 7200, 43200]  # like the register (PROJ-115)
 LINK_FOLLOW_LIMIT = 100
 MIN_SUMMARY_RETENTION_DAYS = 30
+MANUAL_ATTACHMENTS_ERROR = ("Feld attachments ist von Hand geschützt (manual): Quell-ids der Anhänge "
+                            "nicht nachgetragen")
 
 
 class Paused(Exception):
@@ -227,7 +229,7 @@ class AttachmentWorker:
         readable (nothing registered for this mail then, AK-39)."""
         async with self.pool.acquire() as con:
             known = {r["position"]: dict(r) for r in await con.fetch(
-                "SELECT position, path, size, mtime_ns, hash FROM alice.mail_attachments WHERE mail_id = $1",
+                "SELECT position, path, size, mtime_ns, hash, source_id FROM alice.mail_attachments WHERE mail_id = $1",
                 mail["source_id"])}
         out = []
         for i, a in enumerate(_json(mail["attachments"])):
@@ -258,6 +260,13 @@ class AttachmentWorker:
                     raise MailPaused(f"Anhangsdatei nicht lesbar ({exc.strerror or exc.__class__.__name__}): "
                                      f"{a['path']}") from None
                 item["status"] = "registered"
+                if k and k["path"] == a["path"] and k["hash"] and item["hash"] != k["hash"]:
+                    # EC-4: the archive file was replaced. Not taken over silently: the known source, id and
+                    # file state stay, level 7 keeps reporting `attachment_changed` (AK-37: ids stay).
+                    logger.warning("Attachment %d of mail %s changed in the archive; not registered again",
+                                   i, mail["source_id"])
+                    item.update(size=k["size"], mtime_ns=k["mtime_ns"], hash=k["hash"],
+                                source_id=k["source_id"], changed=True)
             out.append(item)
         return out
 
@@ -273,7 +282,7 @@ class AttachmentWorker:
             return False
         captured = mail["captured"] or datetime.now(timezone.utc)
         for it in items:
-            if it["status"] != "registered":
+            if it["status"] != "registered" or it.get("changed"):
                 continue
             modified = datetime.fromtimestamp(it["mtime_ns"] / 1e9, timezone.utc) if it["mtime_ns"] else None
             try:
@@ -373,8 +382,7 @@ class AttachmentWorker:
         new_content = mailmd.replace_section(content, section) if section else content
         content_manual = "content" in manual
         if "attachments" in manual and wanted != current:
-            await self._link_failed(mid, "Feld attachments ist von Hand geschützt (manual): Quell-ids der "
-                                         "Anhänge nicht nachgetragen")
+            await self._link_failed(mid, MANUAL_ATTACHMENTS_ERROR)
             return False
         if wanted == current and (content_manual or new_content == content):
             await self._links_ok(mid, mail_path)
@@ -477,7 +485,7 @@ class AttachmentWorker:
         root = self.archive.root
         async with self.pool.acquire() as con:
             mails = await con.fetch(
-                "SELECT a.source_id, a.archive_key, a.attachments, s.title, m.processed_at, m.links_ok "
+                "SELECT a.source_id, a.archive_key, a.attachments, s.title, m.processed_at, m.links_ok, m.link_error "
                 "FROM alice.mail_archive a JOIN alice.sources s ON s.id = a.source_id "
                 "LEFT JOIN alice.mail_attachment_mails m ON m.mail_id = a.source_id "
                 "WHERE jsonb_array_length(a.attachments) > 0 ORDER BY a.source_id")
@@ -530,8 +538,10 @@ class AttachmentWorker:
                         gaps.append({**base, "gap": "attachment_changed", "source_id": k["source_id"], "repair": None})
                         continue
                 if not m["links_ok"]:
+                    # protected by hand (manual): only reported, a repair could not write either
+                    manual = m["link_error"] == MANUAL_ATTACHMENTS_ERROR
                     gaps.append({**base, "gap": "attachment_reference_missing", "source_id": k["source_id"],
-                                 "repair": "attachment_register"})
+                                 "repair": None if manual else "attachment_register"})
         await self._store_run("reconcile", started, {"mails": len(mails), **summary_of(counter, empty)})
         return {"checked": checked, "missing": gaps, "notes": []}
 

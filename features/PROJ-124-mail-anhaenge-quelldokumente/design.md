@@ -125,4 +125,6 @@ Deploy-Schritte für den Menschen:
 - Leere Anhänge werden in der Zusammenfassung unter ihrer Endung gezählt und zusätzlich als `empty` ausgewiesen.
 - Die Links stehen hinter dem Archiv-Link als `→ [Markdown](<relativer Pfad>)`.
 - `alice-source-registry`: `parents` gehört jetzt zu den Register-Feldern ohne Stufen-Reset (wie `locations`); `database` läuft für eine DMS-Quelle wegen des neuen Archiv-Fundorts trotzdem neu (die Fundorte stehen in der Datenbank, PROJ-119), alle übrigen Stufen bleiben `done`.
-- Abweichungen von der Spec: keine.
+- Abweichung von der Spec (offen, Entscheidung des Menschen): AK-14 verlangt, dass die erledigten Stufen der DMS-Quelle `done` bleiben. Die Stufe `database` geht durch den neuen Archiv-Fundort aber nach der PROJ-119-Regel auf `pending` (die Fundorte stehen in der Dokument-Tabelle). Rückfrage im Issue gestellt.
+- Nachbesserung nach Abnahme Runde 1 (EC-4/AK-37): Ist für eine Anhangsposition mit gleichem Archivpfad schon ein Hash gespeichert und liefert die Datei jetzt einen anderen Hash (Datei im Archiv ersetzt), wird nichts registriert. Die bisherige Quelle, ihre `id` in der Mail und der gespeicherte Dateistand bleiben; Ebene 7 meldet weiter `attachment_changed`. Vorher wurde die geänderte Datei bei einem Neuaufbau ab `extract` still als neue Quelle übernommen.
+- Ebene 7: Ist `attachments` der Mail von Hand geschützt (`manual`), wird `attachment_reference_missing` nur gemeldet (keine Reparatur, die ohnehin scheitern würde).
